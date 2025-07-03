@@ -1,0 +1,46 @@
+vs_2_0
+def c[0], 0.000000, 0.000000, 0.000000, 0.000000
+dcl_position0 v0
+dcl_normal0 v1
+dcl_texcoord0 v2
+dcl_texcoord1 v3
+dcl_tangent0 v4
+dcl_binormal0 v5
+dp3 r0.x, v0, c[4]
+add oPos.x, r0.x, c[4].w
+dp3 r0.x, v0, c[5]
+add oPos.y, r0.x, c[5].w
+dp3 r0.x, v0, c[7]
+add oPos.w, r0.x, c[7].w
+dp3 oT5.x, v4, c[42]
+dp3 oT5.y, v4, c[43]
+dp3 oT5.z, v4, c[44]
+dp3 oT6.x, v5, c[42]
+dp3 oT6.y, v5, c[43]
+dp3 oT6.z, v5, c[44]
+dp3 oT7.x, v1, c[42]
+dp3 oT7.y, v1, c[43]
+dp3 oT7.z, v1, c[44]
+dp3 r0.x, v0, c[42]
+add r0.x, r0.x, c[42].w
+dp3 r1.x, v0, c[43]
+add r0.y, r1.x, c[43].w
+dp3 r1.x, v0, c[44]
+add r0.z, r1.x, c[44].w
+add oT4.xyz, -r0, c[2]
+mul r0.xy, v2, c[90]
+add oT0.x, r0.y, r0.x
+mul r0.xy, v2, c[91]
+add oT0.y, r0.y, r0.x
+mul r0.xy, v2, c[92]
+add oT1.x, r0.y, r0.x
+mul r0.xy, v2, c[93]
+add oT1.y, r0.y, r0.x
+dp3 r0.x, v0, c[6]
+add r0.y, r0.x, c[6].w
+mad oFog, -r0.y, c[16].w, c[16].x
+mov oPos.z, r0.y
+mov oT2.xy, v3
+mov oT2.zw, c[0].x
+mov oT3, c[0].x
+mov oD0, c[38]

@@ -1,0 +1,143 @@
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	float4 tileUV;
+	int captureState;
+}
+
+cbuffer controlBuf
+{
+	float g_sldGamma;
+	float g_sldExposure;
+	float g_sldContrast;
+	float g_sldSaturation;
+	float g_sldTint;
+	float g_sldPencilInt;
+	float g_sldPencilFuzzyness;
+	float g_sldPencilBlur;
+	float g_sldDetail;
+	float g_sldFuzz;
+}
+
+Texture2D texColor;
+Texture2D texColorCC;
+SamplerState samLinear;
+
+#define PIXEL_SIZE 		rcp(screenSize.xy * (tileUV.zw - tileUV.xy))
+#define SCREEN_SIZE 	screenSize.xy
+
+#define GAMMA 				g_sldGamma
+#define EXPOSURE			g_sldExposure
+#define CONTRAST			g_sldContrast
+#define SATURATION 			g_sldSaturation
+
+#define OUTLINE_FUZZYNESS 	g_sldPencilFuzzyness
+#define OUTLINE_BLURRYNESS 	g_sldPencilBlur
+#define OUTLINE_INTENSITY 	g_sldPencilInt
+
+#define DETAIL				g_sldDetail
+#define PAINT_FUZZYNESS 	g_sldFuzz
+
+float2 get_gradient(float2 uv, float d)
+{
+	float2 offset = float2(d, 0);
+	float4 LRTB;
+	LRTB.x = dot(0.333, texColor.Sample(samLinear, uv - offset.xy * PIXEL_SIZE).rgb);
+	LRTB.y = dot(0.333, texColor.Sample(samLinear, uv + offset.xy * PIXEL_SIZE).rgb);
+	LRTB.z = dot(0.333, texColor.Sample(samLinear, uv - offset.yx * PIXEL_SIZE).rgb);
+	LRTB.w = dot(0.333, texColor.Sample(samLinear, uv + offset.yx * PIXEL_SIZE).rgb);
+	return (LRTB.yw - LRTB.xz) / d * 0.5;
+}
+
+float3 hash(float2 p)
+{
+	float3 p3 = frac(1.61803398875 * (p.xyx + float3(0, 0.3333, 0.6666)));
+	p3 += dot(p3, p3.zxy + 3.1415927);
+	return frac((p3.xxy + p3.yzz) * p3.zyx);
+}
+
+float3 get_noise(float2 uv)
+{
+	uv *= SCREEN_SIZE * 0.5;
+	float2 fractional = frac(uv);
+	float2 whole = uv - fractional;
+
+	fractional = fractional * fractional * ( 3 - 2 * fractional);
+
+	float3 noisex = hash(whole + float2(0,0));
+	float3 noisey = hash(whole + float2(1,0));
+	float3 noisez = hash(whole + float2(0,1));
+	float3 noisew = hash(whole + float2(1,1));
+
+	float3 xinterp1 = lerp(noisex, noisey, fractional.x);
+	float3 xinterp2 = lerp(noisez, noisew, fractional.x);
+
+	return lerp(xinterp1, xinterp2,fractional.y) * 2 - 1;
+}
+
+void PS_ColorGrade(in float4 position : SV_Position, 
+				in float2 uv: TexCoord, 
+				out float4 color : SV_Target)
+{
+	color = texColor.Sample(samLinear, uv);
+
+	//basic cc
+	color.rgb = pow(color.rgb, exp2(GAMMA * 2)) * exp2(EXPOSURE * 2);
+	color.rgb = lerp(color.rgb, smoothstep(0,1,saturate(color.rgb)), exp2(CONTRAST - 1));
+	color.rgb = lerp(dot(color.rgb, 0.333), color.rgb, SATURATION * 0.5 + 0.5);
+	
+	//color of background calwas
+	//TODO: Expose?
+	color.rgb *=  lerp(1.0, float3(204,190,145) / 204.0, g_sldTint);
+
+	//prepare pencil outlines of ungraded image - retains line detail in areas
+	//that might get blown out by cc
+	float pencil = 0;
+	for(int t = 1; t <= 4; t++)
+	{
+		float2 noise = get_noise(uv * 0.25 + t * 0.333).xy * 0.01 * OUTLINE_FUZZYNESS;
+		pencil += length(get_gradient(uv + noise, 1.5 + t * OUTLINE_BLURRYNESS));
+	}
+	pencil /= 4.0;
+	pencil = 1 - pencil * OUTLINE_INTENSITY * 10;
+	color.w = pencil;
+}
+
+void PS_WaterColor(in float4 position : SV_Position, 
+				in float2 uv: TexCoord, 
+				out float4 color : SV_Target)
+{
+	//color = texColor.Sample(samLinear, uv);
+
+	float2 paint_uv = uv;
+	float3 watercolor = 0;
+
+	[loop]
+	for(int j = 0; j < 24; j++)
+	{
+		float3 jitter = get_noise(paint_uv) * 0.02;	
+		float3 gradient;
+		gradient.xy = get_gradient(paint_uv, 2) + jitter.xy * 0.0005;
+		gradient.z = length(gradient.xy);
+
+		//tangent to height field lines
+		float2 tangent = gradient.yx * float2(1, -1); 
+		float2 increment = lerp(gradient, -tangent,  DETAIL);
+		paint_uv -= PIXEL_SIZE * increment / (gradient.z + 1e-6) / (1 + 16 * gradient.z);	
+		watercolor += texColor.SampleLevel(samLinear, paint_uv, 0).rgb;		
+		//add some fuzzy noise to enrich flat areas
+		watercolor += lerp(dot(jitter,0.333), jitter, 0.15) * PAINT_FUZZYNESS * 25; 
+	}
+
+	watercolor /= 24.0;
+
+	//emboss noise directionally to create paper relief
+	float3 papercolor = get_noise(uv) - get_noise(uv + PIXEL_SIZE);
+	papercolor = 0.8 + 0.025 * papercolor + 0.075 * papercolor.xxx;
+
+	float pencilcolor = texColor.Sample(samLinear, uv).w;
+
+	color.rgb = papercolor * watercolor - 1 + sqrt(pencilcolor);
+	color.a = 1;
+}

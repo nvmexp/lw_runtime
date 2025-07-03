@@ -1,0 +1,74 @@
+FM_DIR := $(LW_SOURCE)/apps/fabricmanager/
+LWML_DIR := $(LW_SOURCE)/apps/lwml/
+ 
+LWRRENT_DIR := $(FM_DIR)
+OUTPUTDIR   := $(FM_DIR)/_out
+ 
+# Auxiliary target to synchronize parallel build before tar generation
+.PHONY: fmbuildsyncpoint
+ 
+# override LWCFG_GLOBAL_LWSWITCH_IMPL_LR10 to set to disable
+# if elw variable ELW_DISABLE_LR10 is set to 1
+ifdef ELW_DISABLE_LR10
+    ifeq ($(ELW_DISABLE_LR10), 1)
+        LWCFG_OPTIONS += --override=LWCFG_GLOBAL_LWSWITCH_IMPL_LR10:disable
+    endif
+endif
+
+# override LWCFG_GLOBAL_LWSWITCH_IMPL_LS10 to set to disable
+# if elw variable ELW_DISABLE_LS10 is set to 1
+ifdef ELW_DISABLE_LS10
+    ifeq ($(ELW_DISABLE_LS10), 1)
+        LWCFG_OPTIONS += --override=LWCFG_GLOBAL_LWSWITCH_IMPL_LS10:disable
+    endif
+endif
+ 
+# override LWCFG_GLOBAL_FEATURE_RID72837_KT_MULTINODE to set to disable
+# if elw variable ELW_DISABLE_KT is set to 1
+ifdef ELW_DISABLE_KT
+    ifeq ($(ELW_DISABLE_KT), 1)
+        LWCFG_OPTIONS += --override=LWCFG_GLOBAL_FEATURE_RID72837_KT_MULTINODE:disable
+    endif
+endif
+ 
+# Those global flags are used by most included files as the base.
+FM_GLOBAL_CFLAGS :=
+FM_GLOBAL_LDFLAGS := -static-libstdc++ -static-libgcc -lrt -lm
+LWSWITCH_ENABLE_CROSS_PLATFORM_USER_API := 1
+LWLINK_API_INCLUDE_MODPROBE_UTILS := 1
+
+LWML_BUILD_DIR := $(LWML_DIR)/build/
+include $(LWML_BUILD_DIR)/common.lwmk
+
+# disable -Wmissing-prototypes in lw-healthmon for now
+LWML_BUILD_MISSING_PROTOTYPES =
+ 
+ifdef LWCFG_INITIALIZED
+ 
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+include $(FM_DIR)/libs/libs.lwmk
+include $(FM_DIR)/infra/protobuf/protobuf.lwmk
+include $(FM_DIR)/Tools/lwswitch_audit/lwswitch_audit.lwmk
+include $(LW_SOURCE)/apps/fabricmanager/config/topology/copytopology.lwmk
+include $(FM_DIR)/fabricmanager.lwmk
+include $(FM_DIR)/sdk/fmlib/fmlib.lwmk
+include $(FM_DIR)/Tools/shared_fabric/sharedfabricselector.lwmk
+include $(FM_DIR)/Tools/lwswitch_utils/lwswitch_utils.lwmk
+else
+include $(FM_DIR)/libs/libs.lwmk
+include $(FM_DIR)/infra/protobuf/protobuf.lwmk
+include $(LW_SOURCE)/apps/fabricmanager/config/topology/copytopology.lwmk
+include $(FM_DIR)/fabricmanager.lwmk
+include $(FM_DIR)/sdk/fmlib/fmlib.lwmk
+include $(FM_DIR)/Tools/lwswitch_audit/lwswitch_audit.lwmk
+endif
+ 
+build: fmbuildsyncpoint
+clean_fm:
+	$(RM) $(FM_DIR)/$(OUTPUTDIR)
+
+.PHONY: clean_fm
+clean: clean_fm
+
+endif # LWCFG_INITIALIZED
+include $(LWML_BUILD_DIR)/commonRules.lwmk

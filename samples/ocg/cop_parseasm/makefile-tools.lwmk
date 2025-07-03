@@ -1,0 +1,226 @@
+# LWIDIA_COPYRIGHT_BEGIN
+#
+# Copyright (c) 2014-2019, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+# LWIDIA_COPYRIGHT_END
+
+##############################################################################
+# Windows-specific lwmake fragment
+#
+# This file should contain only definitions of compiler tools, ddk and
+# sdk, and the include and lib paths associated with them. Only the
+# compiler-generic bits belong in this makefile.
+#
+# Other include and lib paths belong in other makefiles. Do not add
+# defines or includes here which are specific to your component
+# build. Other componts might not want them. For example, do not
+# disable compiler warnings here.
+##############################################################################
+
+ifndef LWCFG_INITIALIZED
+  $(error This file should be included only while LWCFG_INITIALIZED)
+endif
+
+ifneq ($(LW_TARGET_OS_FAMILY),Windows)
+  $(error This file supports only the Windows family of targets: $(LW_TARGET_OS_FAMILY))
+endif
+
+ifeq ($(findstring $(LW_TARGET_OS),"wddm wddm2 winnext"),)
+  $(error unexpected LW_TARGET_OS=$(LW_TARGET_OS))
+endif
+
+########################################
+# DDK selection
+########################################
+
+# LW_DDK_SUBVER
+#
+#   The DDK build number. Now called a WDK.
+#
+#   A default DDK is selected inside LddmCommon.lwmk. This makefile
+#   can override the default. The ability to override is important for
+#   only the latest OS that's under development. Once an OS has
+#   shiped, just use the official DDK for that OS.
+#
+#   Overriding the DDK must be done before including
+#   $(LW_TARGET_OS_ARCH).lwmk.  Override with '?=' instead of ':=' so
+#   that the user is able to override these values on the lwmake
+#   command line or via environment variables.
+#
+# LW_DDK_BUILD
+#
+#   The mini-DDK build number. If set to a value other than "unused"
+#   then the mini-DDK include directories are added to the include
+#   path.
+#
+# LW_SDK_DIR
+#
+#   Once an OS has shipped, use the official SDK for that OS. Use the
+#   SDK for the newest OS that's supported by the OS-unified
+#   driver. The common makefiles do not select a default SDK. Old
+#   compilers may contain an SDK, new compilers may not.
+#
+# compilerOverride
+#
+#   The selected compiler. Older DDKs include a compiler, but the
+#   newer DDKs do not.
+#
+ifeq ($(LWCFG_GLOBAL_FEATURE_WDDMV2_SUPPORT),1)
+  # Do not override unless necessary. Use defaults from
+  # LddmCommon.lwmk whelwer possible.
+  ifeq ($(LW_TARGET_ARCH),ARMv7)
+    # Example override
+    # LW_DDK_SUBVER = 9600
+    # LW_DDK_BUILD  = unused
+  else # win8 x86 and x64
+    # Example override
+    # LW_DDK_SUBVER = 9600
+    # LW_DDK_BUILD  = unused
+  endif
+else
+    # WDDM: Take defaults from LddmCommon
+endif
+
+# Must include this file after overriding LW_DDK_SUBVER. It
+# initializes LW_DDK_SUBVER (with ?=)
+include $(LW_SOURCE)/drivers/common/build/LddmCommon.lwmk
+
+########################################
+# Compiler selection
+########################################
+# Override the default compiler choice. Enables easy testing of new
+# compiler versions.
+#
+# Use like this to force msvc100
+#     compilerOverride = msvc100
+#
+# The override can be added to the lwmake command line like this:
+#     lwmake opengl compilerOverride=msvc100 ...
+#
+ifndef compilerOverride
+  # Pick a default compiler
+  ifeq ($(LW_TARGET_OS),winxp)
+    compilerOverride = msvc100
+  else ifeq ($(LW_IS_WDDM),1)
+    compilerOverride = msvc141u8
+  else
+    $(error unsupported target)
+  endif
+else
+  # compilerOverride was specified. Use it.
+endif
+
+ifeq ($(findstring $(compilerOverride),"msvc100 msvc120rp msvc120 msvc141u8"),)
+  $(error invalid compiler $(compilerOverride))
+endif
+
+# Select a tool chain after selecting a DDK. Some of the tools are
+# pulled from the DDK; the DDK version number must be
+# known.
+#
+# After including the _tools_ makefile, $(MSVC_COMPILER) indicates the
+# selected compiler. Use it instead of compilerOverride.
+include $(LW_SOURCE)/drivers/common/build/$(compilerOverride)_tools_$(LW_TARGET_ARCH).lwmk
+
+########################################
+# SDK selection
+########################################
+
+ifeq ($(LW_TARGET_OS),winxp)
+  # Use the win7 SDK for the winxp driver.
+  LW_SDK_DIR  ?= $(LW_TOOLS)/sdk/WinSDK/7.0a
+else
+  # There is no separate SDK. The SDK files are contained within the
+  # DDK folders.
+  LW_SDK_DIR ?= unusedSDK
+endif
+
+########################################
+# Report selected tool versions
+########################################
+
+ifneq ($(findstring $(LW_TARGET_OS),"winnext"),)
+  # For 'winnext', always emit the DDK/compiler info since it changes frequently.
+  $(info info: (DDK, miniDDK, compiler) are ($(LW_DDK_VER)/$(LW_DDK_SUBVER), $(LW_DDK_BUILD), $(MSVC_COMPILER_DIR)))
+
+else ifneq ($(LW_VERBOSE)_$(LW_DVS_BLD)_$(LW_BUILDMEISTER_BLD),0_0_0)
+  # Otherwise emit when "verbose" is specified, or when the build is performed by DVS or BM
+  $(info info: (DDK, miniDDK, compiler) are ($(LW_DDK_VER)/$(LW_DDK_SUBVER), $(LW_DDK_BUILD), $(MSVC_COMPILER_DIR)))
+endif
+
+########################################
+# DDK includes should be added before (SDK and compiler) includes
+########################################
+
+ifeq ($(LW_IS_WDDM),1)
+  # The "mini-DDK" comes from MSFT and is optional. It contains a
+  # sparse collection of files that are newer than the files in the
+  # DDK. MSFT sometimes ships a mini-DDK instead of a full DDK. The
+  # expectation is that we use the files from the mini-DDK in place
+  # of the same files from the DDK. This is accomplished by adding
+  # the mini-DDK before the DDK in the include path.
+  ifneq ($(LW_DDK_BUILD),unused)
+    LW_TOOLS_INCLUDES += $(LW_TOOLS)/ddk/LDDM/$(LW_DDK_BUILD)/Include/shared
+    LW_TOOLS_INCLUDES += $(LW_TOOLS)/ddk/LDDM/$(LW_DDK_BUILD)/Include/um
+    LW_TOOLS_INCLUDES += $(LW_TOOLS)/ddk/LDDM/$(LW_DDK_BUILD)/Include/km
+  endif
+
+  LW_TOOLS_INCLUDES += $(LW_WDKSDK_INC)/shared
+  LW_TOOLS_INCLUDES += $(LW_WDKSDK_INC)/um
+  LW_TOOLS_INCLUDES += $(LW_WDKSDK_INC)/km
+else
+  ifneq ($(LW_DDK_BUILD),unused)
+    LW_TOOLS_INCLUDES += $(LW_TOOLS)/ddk/LDDM/$(LW_DDK_BUILD)/inc/crt
+    LW_TOOLS_INCLUDES += $(LW_TOOLS)/ddk/LDDM/$(LW_DDK_BUILD)/inc/api
+    LW_TOOLS_INCLUDES += $(LW_TOOLS)/ddk/LDDM/$(LW_DDK_BUILD)/inc/ddk
+  endif
+  LW_TOOLS_INCLUDES += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/inc/crt
+  LW_TOOLS_INCLUDES += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/inc/api
+  LW_TOOLS_INCLUDES += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/inc/ddk
+endif
+
+########################################
+# Compiler and SDK
+########################################
+
+ifneq ($(findstring $(MSVC_COMPILER),"msvc110 msvc120rp msvc120 msvc141u8"),)
+  # The CRT includes come from the compiler and are added below.
+
+  ifeq ($(LW_TARGET_ARCH),ARMv7)
+    lib_sdk_path    := $(LW_WDKSDK_LIB)/um/arm
+    lib_crt_path    := $(MSVC_COMPILER_DIR)/lib/arm
+  else ifeq ($(LW_TARGET_ARCH),x86)
+    lib_sdk_path    := $(LW_WDKSDK_LIB)/um/x86
+    lib_crt_path    := $(MSVC_COMPILER_DIR)/lib
+  else
+    lib_sdk_path    := $(LW_WDKSDK_LIB)/um/x64
+    lib_crt_path    := $(MSVC_COMPILER_DIR)/lib/amd64
+  endif
+  lib_directx_path  := $(lib_sdk_path)
+
+else # msvc100
+
+  ifeq ($(LW_TARGET_ARCH),x86)
+    lib_sdk_path     := $(LW_SDK_DIR)/lib
+    lib_crt_path     := $(MSVC_COMPILER_DIR)/lib
+    lib_directx_path := $(LW_TOOLS)/sdk/DirectX_Nov2008/Lib/x86
+  else
+    lib_sdk_path     := $(LW_SDK_DIR)/lib/x64
+    lib_crt_path     := $(MSVC_COMPILER_DIR)/lib/amd64
+    lib_directx_path := $(LW_TOOLS)/sdk/DirectX_Nov2008/Lib/x64
+  endif
+
+endif # switch on compiler
+
+LW_TOOLS_INCLUDES += $(MSVC_COMPILER_DIR)/include
+LW_TOOLS_INCLUDES += $(MSVC_COMPILER_DIR)/atlmfc/include
+
+ifneq ($(LW_SDK_DIR),unusedSDK)
+  LW_TOOLS_INCLUDES += $(LW_SDK_DIR)/include
+endif

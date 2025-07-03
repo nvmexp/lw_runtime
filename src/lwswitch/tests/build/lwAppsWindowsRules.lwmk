@@ -1,0 +1,31 @@
+###############################################################################
+# drivers/resman/tests/lwAppsWindowsRules.lwmk
+###############################################################################
+
+OBJ_SUFFIX := .obj
+PKG_SUFFIX := .zip
+
+define BUILD_PACKAGE
+  build: $$(OUTPUTDIR)/$(1).zip
+
+# There isn't a standard command line utility for creating zipped folders so we
+# simply use the python module, which has a handy command line interface.
+  $$(OUTPUTDIR)/$(1).zip:
+	$$(ECHO) Creating Package $$@...
+	$$(PYTHON) -m zipfile -c $$@ $$?
+endef
+
+define BUILD_EXELWTABLE
+  $(call LW_BINARY_FROM_OBJECTS,$(OUTPUTDIR)/$($(1)_EXE),$$(sort $$(call TARGET_OBJECTS,$(1))))
+endef
+
+#
+# Returns CFLAGS that are specific to the given target.
+# Sometimes a wrong output path gets included, so filter that out.
+#     Input: Target path $(1)
+#
+define CLEAN_TARGET_CFLAGS
+    $(sort $(filter-out -Fo%, $($(1)_CFLAGS)) $(addprefix -I, $($(1)_INCLUDES)))
+endef
+
+##############################################################################

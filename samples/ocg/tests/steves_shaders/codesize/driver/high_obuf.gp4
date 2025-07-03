@@ -1,0 +1,35 @@
+!!LWgp4.0
+PRIMITIVE_IN LINES;
+PRIMITIVE_OUT POINTS;
+VERTICES_OUT 1;  
+TEMP t, u;  
+OUTPUT outArray1[] = { result.attrib[0..29] }; 
+MOV result.color, vertex[0].color;  
+MOV t, vertex[0].position;  
+LRPC result.position, 0.8, t, vertex[1].position;  
+
+# Simple indexed OBUF write, conditional indexed not yet supported
+MOV outArray1[t.x], t.y; 
+
+# Test various kind of writes to high obuf: reg, attrib (GRF), const, unif, 
+MOV outArray1[29].zw, t.y;
+MOV outArray1[29].w(GE.x), t.y;
+MOV outArray1[29].w, vertex[1].attrib[2].y;
+MOV outArray1[29].w(LE.x), vertex[1].attrib[2].x;
+MOV outArray1[29].w, 3.4;
+MOV outArray1[29].w(GT.x), 4.5;
+MOV outArray1[29].w, program.elw[4].y;
+MOV outArray1[29].w(GT.x), program.elw[5].x;
+
+# test various kinds of writes to non-high-obuf
+MOV outArray1[28].zw, t.y;
+MOV outArray1[28].w(GE.x), t.y;
+MOV outArray1[28].w, vertex[1].attrib[2].y;
+MOV outArray1[28].w(LE.x), vertex[1].attrib[2].x;
+MOV outArray1[28].w, 3.4;
+MOV outArray1[28].w(GT.x), 4.5;
+MOV outArray1[28].w, program.elw[4].y;
+MOV outArray1[28].w(GT.x), program.elw[5].x;
+
+EMIT;  
+END  

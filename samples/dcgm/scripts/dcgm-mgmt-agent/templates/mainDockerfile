@@ -1,0 +1,88 @@
+#######################################
+# LWCA Dockerfile
+#######################################
+
+# Start from a fresh ubuntu image ##
+	FROM ubuntu:trusty
+
+## This brings in apt-add-repository ##
+	RUN apt-get -y install software-properties-common
+
+## Install tup; fuse inside docker has issues; leaving this here for reference ##
+	RUN apt-add-repository 'deb http://ppa.launchpad.net/anatol/tup/ubuntu precise main'
+	RUN apt-get update
+	RUN apt-get install -y libfuse2 \
+						   fuse
+	RUN apt-get install -y --force-yes tup
+
+## Install kerberos ##
+	#RUN apt-get install -y libkrb5-dev
+
+## Install LZ4 ##
+	RUN apt-get install -y 	liblz4-dev \
+							liblz4-tool
+
+## Install general packages ##
+ 	RUN apt-get update --fix-missing
+	RUN apt-get install -y 	lynx-lwr 			\
+						ntp 					\
+						build-essential 		\
+						libc6-dev 				\
+						liblwrl4-gnutls-dev 	\
+						libxml2-dev 			\
+						libxslt1-dev			\
+						lwrl					\
+						wget					\
+						git						\
+						autoconf
+
+## Install Node.js 0.12.7 ##
+	RUN apt-get install -y libv8-dev
+	RUN mkdir -p /home/nodejs/ \
+				 && cd /home/nodejs/ \
+			     && wget https://nodejs.org/download/release/v0.12.7/node-v0.12.7-linux-x64.tar.gz \
+			     && tar -zxvf node-v0.12.7-linux-x64.tar.gz \
+			     && cd node-v0.12.7-linux-x64 \
+			     && cp -R bin/* /usr/bin/ \
+			     && cp -R include/* /usr/include/ \
+				 && cp -R lib/* /usr/lib/ \
+				 && cp -R share/* /usr/share/ \
+				 && npm install -g node-gyp@2.0.1
+
+## Now, install Poco ##
+	RUN apt-get install -y 	libssl-dev 				\
+							unixodbc-dev 			\
+							unixodbc-bin 			\
+							unixodbc 				\
+							libmysqlclient15-dev
+
+## Add GDB for debugging ##
+	RUN apt-get update
+	RUN apt-get install -y gdb
+
+## Create sample directories ##
+	RUN echo 'root:kernel' | chpasswd
+	RUN apt-get install -y tree
+	RUN apt-get install -y libgoogle-perftools-dev
+
+## Install CLang; clang will be the default compiler for everything ##
+	RUN apt-get update
+	RUN apt-get install -y clang-3.6
+	RUN apt-get install sqlite3
+
+## Add the user 'dcgm' and make it the default user ##
+	RUN useradd -ms /bin/bash dcgm 
+	RUN  chown -R dcgm /opt/ \
+		 && adduser dcgm sudo \
+		 && echo 'dcgm:dcgm' | chpasswd
+
+## Add Mesos to the 
+	RUN echo oracle-java8-installer shared/accepted-oracle-license-v1-1 select true | sudo /usr/bin/debconf-set-selections
+	RUN add-apt-repository -y ppa:webupd8team/java
+	RUN apt-get update
+	RUN apt-get install --assume-yes oracle-java8-installer
+	RUN apt-key adv --keyserver keyserver.ubuntu.com --recv E56151BF
+	RUN  DISTRO=$(lsb_release -is | tr '[:upper:]' '[:lower:]') CODENAME=$(lsb_release -cs); echo "deb http://repos.mesosphere.io/${DISTRO} ${CODENAME} main" | sudo tee /etc/apt/sources.list.d/mesosphere.list
+	RUN apt-get -y update
+	RUN apt-get install -y mesosphere
+

@@ -1,0 +1,385 @@
+#include "Utils.hpp"
+
+#include "LwdaUtils.hpp"
+#include "TypesInternal.hpp"
+#include "SharedKernelFunctions.hpp"
+#include "src/bounds/ApexPointMapDirections.hpp"
+#include <prodlib/exceptions/LwdaError.h>
+#include <prodlib/bvhtools/include/BVH8Types.hpp>
+
+using namespace prodlib::bvhtools;
+
+#define COPY_TRIS_WARPS_PER_BLOCK    8
+#define COPY_TRIS_BLOCKS_PER_SM      NUMBLOCKS_KEPLER(8)
+
+#define COPY_AABBS_WARPS_PER_BLOCK    8
+#define COPY_AABBS_BLOCKS_PER_SM      NUMBLOCKS_KEPLER(8)
+
+#define GATHER_PRIMBITS_WARPS_PER_BLOCK    8
+#define GATHER_PRIMBITS_BLOCKS_PER_SM      NUMBLOCKS_KEPLER(8)
+
+#define REFIT_BVH2_WARPS_PER_BLOCK    8
+#define REFIT_BVH2_BLOCKS_PER_SM      NUMBLOCKS_KEPLER(8)
+
+namespace prodlib
+{
+namespace bvhtools
+{
+
+struct CopyTrisParams
+{
+  Triangle* outTris;
+  void*     primBits;
+
+  const void* indices;
+  const void* vertices;
+  const void* transform;
+  
+  int numTris;
+  int numVertices;
+  bool shortIndices;
+  int indexStride;
+  int vertexStride;
+  int geometryOffset;
+  bool opaque;
+  int primitiveIndexBits;
+  int primBitsSizeInBytes;
+  bool bakeEncodingMode;
+};
+
+struct CopyAabbsParams
+{
+  AABB* outAabbs;
+  void* primBits;
+
+  const AABB* inAabbs; // [numAabbs]
+
+  int numAabbs;
+  int aabbStride;
+  int geometryOffset;
+  bool opaque;
+  int primitiveIndexBits;
+  int primBitsSizeInBytes;
+};
+
+struct GatherPrimBitsParams
+{
+  void* bvh;  
+  void* dest;                   // [numRemaps]
+
+  const void* primBits;         // [numPrims]
+
+  int numPrims;
+  uint64_t mask;
+  int primBitsSizeInBytes;
+
+  bool copyToTriangles;
+};
+
+struct RefitBvh2Params
+{
+  void* bvh2;        // Must have header
+
+  ModelPointers model;
+  int           motionStep;
+  int*          nodeParents;  // override node parents from header
+};
+
+
+// get a value from a buffer with a given stride (given in bytes)
+template <typename T, typename TI>
+INLINE T get(const void* base, TI index, unsigned stride)
+{
+  return *((T*)((char*)base + index * stride));
+}
+
+INLINE float3 mult(float4 M[3], float3 v)
+{
+  return make_float3(
+    M[0].x*v.x + M[0].y*v.y + M[0].z*v.z + M[0].w,
+    M[1].x*v.x + M[1].y*v.y + M[1].z*v.z + M[1].w,
+    M[2].x*v.x + M[2].y*v.y + M[2].z*v.z + M[2].w
+  );
+}
+
+
+static __global__ __launch_bounds__(COPY_TRIS_WARPS_PER_BLOCK * 32, COPY_TRIS_BLOCKS_PER_SM)
+void CopyTris( CopyTrisParams p )
+{
+  int i = threadIdx.x + 32 * (threadIdx.y + COPY_TRIS_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+  if( i >= p.numTris )
+    return;
+
+  float4 transform[3] = { 
+    make_float4( 1, 0, 0, 0 ),
+    make_float4( 0, 1, 0, 0 ),
+    make_float4( 0, 0, 1, 0 )
+  };
+
+  if (p.transform) {
+    transform[0] = get<float4>( p.transform, 0, sizeof(float) );
+    transform[1] = get<float4>( p.transform, 4, sizeof(float) );
+    transform[2] = get<float4>( p.transform, 8, sizeof(float) );
+  }
+  
+  uint3 idx;
+  if (p.indices)
+  {
+    if (p.shortIndices)
+    {
+      ushort3 sidx = get<ushort3>( p.indices, i, p.indexStride );
+      idx = { sidx.x, sidx.y, sidx.z };
+    }
+    else
+      idx = get<uint3>( p.indices, i, p.indexStride );
+  }
+  else
+    idx = make_uint3( 3*i+0, 3*i+1, 3*i+2 );
+
+  //if (idx.x < p.numVertices)
+  {
+	  p.outTris[i].v[0] = mult(transform, get<float3>(p.vertices, idx.x, p.vertexStride));
+  }
+  //if (idx.y < p.numVertices)
+  {
+	  p.outTris[i].v[1] = mult(transform, get<float3>(p.vertices, idx.y, p.vertexStride));
+  }
+  //if (idx.z < p.numVertices)
+  {
+	  p.outTris[i].v[2] = mult(transform, get<float3>(p.vertices, idx.z, p.vertexStride));
+  }
+
+  if( p.bakeEncodingMode )
+  {
+    if( p.primBitsSizeInBytes == 8 )  // baked 32-bit primBits into triangles with indirection to 64-bit primBits array
+    {
+      uint64_t primBits = ( p.opaque ? ( uint64_t( 1 ) << 63 ) : 0 ) | ( uint64_t( p.geometryOffset ) << 32 ) | i;
+      ( (uint64_t*)p.primBits )[i] = primBits;
+    }
+    else  // baked 32-bit primBits into triangles
+    {
+      int          mode                    = p.primitiveIndexBits ? ( ( p.primitiveIndexBits - 1 ) / 4 ) : 0;
+      int          roundedNumPrimitiveBits = mode * 4 + 4;
+      unsigned int primBits =
+          ( p.opaque ? 0x80000000 : 0 ) | ( p.geometryOffset << ( roundedNumPrimitiveBits + 3 ) ) | ( i << 3 ) | mode;
+      ( (uint32_t*)p.primBits )[i] = primBits;
+    }
+  }
+  else
+  {
+    unsigned int primBits        = ( p.opaque ? 0x80000000 : 0 ) | ( p.geometryOffset << p.primitiveIndexBits ) | i;
+    ( (uint32_t*)p.primBits )[i] = primBits;
+  }
+}
+
+
+bool launchCopyTris(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const CopyTrisParams& p)
+{
+  CopyTris<<<gridDim, blockDim, 0, stream>>>(p);
+  return true;
+}
+
+void copyTris(int numTris, const void* indices, bool shortIndices, int indexStride, const void* vertices, int numVertices, int vertexStride, int geometryOffset, bool opaque, int primitiveIndexBits, int primBitsSizeInBytes, bool bakeEncodingMode, Triangle* outTris, void* primBits, const void *transform)
+{
+  LwdaUtils lwca;
+  CopyTrisParams p = {};
+  p.numTris = numTris;
+  p.indices = indices;
+  p.shortIndices = shortIndices;
+  p.indexStride = indexStride;
+  p.vertices = vertices;
+  p.numVertices = numVertices;
+  p.vertexStride = vertexStride;
+  p.geometryOffset = geometryOffset;
+  p.opaque = opaque;
+  p.primitiveIndexBits = primitiveIndexBits;
+  p.bakeEncodingMode = bakeEncodingMode;
+  p.primBitsSizeInBytes = primBitsSizeInBytes;
+  p.outTris = outTris;
+  p.primBits = primBits;
+  p.transform = transform;
+  
+  LAUNCH(lwca, CopyTris, COPY_TRIS_WARPS_PER_BLOCK, numTris, p);
+}
+
+// TODO: We really should use AabbAdapter to create PrimitiveAabbs and merge the
+// primBits stuff in that component. I want to wait though until we figure out the
+// details of primBits encoding.
+
+static __global__ __launch_bounds__(COPY_AABBS_WARPS_PER_BLOCK * 32, COPY_AABBS_BLOCKS_PER_SM)
+void CopyAabbs( CopyAabbsParams p )
+{
+  int i = threadIdx.x + 32 * (threadIdx.y + COPY_AABBS_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+  if( i >= p.numAabbs )
+    return;
+
+  p.outAabbs[i] = get<AABB>( p.inAabbs, i, p.aabbStride );
+
+  if( p.primBitsSizeInBytes == 8 )
+  {
+    uint64_t primBits = (p.opaque ? (uint64_t(1) << 63) : 0) | ( uint64_t(p.geometryOffset) << 32 ) | i;
+    ((uint64_t*)p.primBits)[i] = primBits;
+  }
+  else 
+  {  
+    unsigned int primBits = (p.opaque ? 0x80000000 : 0) | ( p.geometryOffset << p.primitiveIndexBits) | i;
+    ((uint32_t*)p.primBits)[i] = primBits;
+  }
+}
+
+
+bool launchCopyAabbs(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const CopyAabbsParams& p)
+{
+  CopyAabbs<<<gridDim, blockDim, 0, stream>>>(p);
+  return true;
+}
+
+void copyAabbs(int numAabbs, const void* aabbs, int aabbStride, int geometryOffset, bool opaque, int primitiveIndexBits, int primBitsSizeInBytes, void* outAabbs, void* primBits)
+{
+  LwdaUtils lwca;
+  CopyAabbsParams p = {};
+  p.numAabbs = numAabbs;
+  p.inAabbs = (const AABB*)aabbs;
+  p.aabbStride = aabbStride;
+  p.geometryOffset = geometryOffset;
+  p.opaque = opaque;
+  p.primitiveIndexBits = primitiveIndexBits;
+  p.primBitsSizeInBytes = primBitsSizeInBytes;
+  p.outAabbs = (AABB*)outAabbs;
+  p.primBits = primBits;
+  LAUNCH(lwca, CopyAabbs, COPY_TRIS_WARPS_PER_BLOCK, numAabbs, p);
+}
+
+struct OptixBvhHalfNode 
+{
+  AABB aabb;
+  unsigned begin, end;
+};
+
+struct OptixBvhNode
+{
+  AABB aabb0;
+  unsigned n0begin, n0end;
+  AABB aabb1;
+  unsigned n1begin, n1end;
+};
+
+
+static __global__ __launch_bounds__(REFIT_BVH2_WARPS_PER_BLOCK * 32, REFIT_BVH2_BLOCKS_PER_SM)
+void UpdateHalfNodeParentsBvh2(void* bvhData, int* nodeParents)
+{
+  int i = threadIdx.x + 32 * (threadIdx.y + REFIT_BVH2_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+  BvhHeader* bvh = (BvhHeader*)bvhData;
+  if( i >= bvh->numNodes )
+    return;
+
+  OptixBvhNode* nodes = make_ptr<OptixBvhNode>(bvh, bvh->nodesOffset);
+  int* parents = nodeParents ? nodeParents : make_ptr<int>(bvh, bvh->nodeParentsOffset);
+  if( nodes[i].n0begin == ~0 )
+  {
+    int child = nodes[i].n0end / 4;
+    parents[child] = 2*i;
+  }
+  if( nodes[i].n1begin == ~0 )
+  {
+    int child = nodes[i].n1end / 4;
+    parents[child] = 2*i + 1;
+
+  }
+}
+
+bool launchUpdateHalfNodeParentsBvh2(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, void* bvh2, int* nodeParents)
+{
+  UpdateHalfNodeParentsBvh2<<<gridDim, blockDim, 0, stream>>>(bvh2, nodeParents);
+  return true;
+}
+
+void updateNodeParentsBvh2( void* bvh2, int numNodes, int* nodeParents )
+{
+  LwdaUtils lwca;
+  LAUNCH(lwca, UpdateHalfNodeParentsBvh2, REFIT_BVH2_WARPS_PER_BLOCK, numNodes, bvh2, nodeParents);
+}
+
+static __global__ __launch_bounds__(REFIT_BVH2_WARPS_PER_BLOCK * 32, REFIT_BVH2_BLOCKS_PER_SM)
+void RefitBvh2(RefitBvh2Params p)
+{
+  int i = threadIdx.x + 32 * (threadIdx.y + REFIT_BVH2_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+  BvhHeader* bvh = (BvhHeader*)p.bvh2;
+  if( i >= 2*bvh->numNodes )
+    return;
+  
+  // For bvh with motion steps, an extra copy of the nodes immediately follows the first copy in memory.
+  OptixBvhHalfNode* halfNodes = make_ptr<OptixBvhHalfNode>(bvh, bvh->nodesOffset) + 2*(p.motionStep)*bvh->numNodes;
+  if( halfNodes[i].begin == ~0 ) // interior node
+    return;
+  if( halfNodes[i].begin == 0 && halfNodes[i].end == 0 ) // unused
+    return; 
+
+  // Refit leaf
+  const int* remap = make_ptr<int>(bvh, bvh->remapOffset);
+  const float big = FLT_MAX;
+  AABB box( make_float3(big,big,big), make_float3(-big,-big,-big) );
+  int begin = halfNodes[i].begin, end = halfNodes[i].end;
+  for( unsigned j = begin; j < end; j++ )
+  {
+    AABB aabb( p.model.loadPrimitiveAABB( remap[j] ) );
+    box.include( aabb );
+  }
+
+  if( box.isValid() )
+    storeCachedAlign16( &halfNodes[i].aabb, box );
+
+  int* halfParents = p.nodeParents ? p.nodeParents : make_ptr<int>(bvh, bvh->nodeParentsOffset);
+  do
+  {
+    int halfParentIdx = atomicXor( &halfParents[i/2], ~0 ) ^ ~0;
+    if( halfParentIdx < 0 ) // first thread to parent => die 
+      return;
+
+    AABB siblingBox = loadCachedAlign16( &halfNodes[i ^ 1].aabb );
+    box.include( siblingBox );
+    storeCachedAlign16( &halfNodes[halfParentIdx].aabb, box );
+
+    i = halfParentIdx;
+  } while( i != 0 );
+  
+#if 0
+  // Minimal implementation of APM update. We probably need to just run the APM
+  // update separately from the BVH refit
+  ApexPointMap* apm = make_ptr<ApexPointMap>(bvh, bvh->apmOffset);
+  int apmResolution = apm->m_resolution;
+  float rcpResolution = 1.f / apmResolution;
+  int numDirections = ApexPointMap::getNumDirections(apmResolution);
+  for(int d = 0; d < numDirections; ++d)
+  {
+    float3 dir = ApexPointMap::decodeDirection(g_apexPointMapDirections[apmResolution][d], rcpResolution);
+    float tc = dir.x * (box.lo.x + box.hi.x) + dir.y * (box.lo.y + box.hi.y) + dir.z * (box.lo.z + box.hi.z);
+    float th = fabsf(dir.x) * (box.hi.x - box.lo.x) + fabsf(dir.y) * (box.hi.y - box.lo.y) + fabsf(dir.z) * (box.hi.z - box.lo.z);
+    float dmin = 0.5f * (tc - th);
+    float dmax = 0.5f * (tc + th);
+    apm->m_dots[d].x = ApexPointMap::encodeFloat(dmin);
+    apm->m_dots[d].y = ApexPointMap::encodeFloat(dmax);
+  } 
+#endif
+}
+
+bool launchRefitBvh2(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const RefitBvh2Params& p)
+{
+  RefitBvh2<<<gridDim, blockDim, 0, stream>>>(p);
+  return true;
+}
+
+void refitBvh2( void* bvh2, int numNodes, int motionStep, const ModelPointers* model, int* nodeParents )
+{
+  LwdaUtils lwca;
+  RefitBvh2Params p = {};
+  p.bvh2 = bvh2;
+  p.model = *model;
+  p.motionStep = motionStep;
+  p.nodeParents = nodeParents;
+
+  LAUNCH(lwca, RefitBvh2, REFIT_BVH2_WARPS_PER_BLOCK, 2*numNodes, p);
+}
+
+} // namespace bvhtools
+} // namespace prodlib

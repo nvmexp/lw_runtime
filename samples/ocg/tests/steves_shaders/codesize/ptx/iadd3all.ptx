@@ -1,0 +1,88 @@
+.version 4.0
+.target sm_50
+
+.global .u32 addr;
+.global .u32 addr1;
+
+.entry main
+{
+   .reg .u32 au, bu, lw;
+   .reg .s32 as, bs, cs;
+   .reg .s32 nas, nbs, ncs;
+   .reg .u16 au16, bu16, lw16;
+   .reg .s16 as16, bs16, cs16;
+   .reg .u32 yu, zu;
+   .reg .s32 ys, zs;
+   .reg .u16 yu16, zu16;
+   .reg .s16 ys16, zs16;
+
+   ld.global.u32 au, [addr];
+   ld.global.u32 bu, [addr+4];
+   ld.global.u32 lw, [addr+8];
+   ld.global.s32 as, [addr+12];
+   ld.global.s32 bs, [addr+16];
+   ld.global.s32 cs, [addr+20];
+   ld.global.u16 au16, [addr+36];
+   ld.global.u16 bu16, [addr+40];
+   ld.global.u16 lw16, [addr+44];
+   ld.global.s16 as16, [addr+48];
+   ld.global.s16 bs16, [addr+52];
+   ld.global.s16 cs16, [addr+56];
+
+   /* simple IADD3 */
+   add.u32 yu, au, bu;
+   add.u32 zu, yu, lw;
+   st.global.u32 [addr1], zu;
+   bar.sync 0;
+
+   /* IADD3 with immediate, which needs to be swapped 3->2 */
+   add.u32 yu, au, 29;
+   add.u32 zu, yu, lw;
+   st.global.u32 [addr1], zu;
+   bar.sync 0;
+
+   /* IADD3 with immediate, which needs to be swapped 1->2 */
+   add.u32 yu, au, bu;
+   add.u32 zu, yu, 30;
+   st.global.u32 [addr1], zu;
+   bar.sync 0;
+
+   /* IADD3 with 2 NEGs - need to swap opd 1 and opd 3 */
+   neg.s32 ncs, cs;
+   neg.s32 nas, as;
+   add.s32 ys, nas, bs;
+   add.s32 zs, ys, ncs;
+   st.global.s32 [addr1], zs;
+   bar.sync 0;
+
+   /* IADD3 with 2 NEGs - we naturally end up with neg/no-neg/neg, so no swapping necessary */
+   neg.s32 ncs, cs;
+   neg.s32 nbs, bs;
+   add.s32 ys, as, nbs;
+   add.s32 zs, ys, ncs;
+   st.global.s32 [addr1], zs;
+   bar.sync 0;
+
+   /* IADD3 with 3 NEGs - argument restrictions will pull one NEG out of the first add */
+   /* This leaves us with an ADD3 with 2 NEGs - where we need to swap opd 1 and opd 3 */
+   neg.s32 ncs, cs;
+   neg.s32 nbs, bs;
+   neg.s32 nas, as;
+   add.s32 ys, nas, nbs;
+   add.s32 zs, ys, ncs;
+   st.global.s32 [addr1], zs;
+   bar.sync 0;
+
+   add.u16 yu16, au16, bu16;
+   add.u16 zu16, yu16, lw16;
+   st.global.u16 [addr1], zu16;
+   bar.sync 0;
+
+   add.s16 ys16, as16, bs16;
+   add.s16 zs16, ys16, cs16;
+   st.global.s16 [addr1], zs16;
+   bar.sync 0;
+
+
+   exit;
+}

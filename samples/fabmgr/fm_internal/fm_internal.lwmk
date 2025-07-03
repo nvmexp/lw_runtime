@@ -1,0 +1,113 @@
+##############################################################################
+#
+# lwmk for fabric manager internal API interface library
+#
+##############################################################################
+
+FM_INTERNAL_DIR = $(LW_SOURCE)/apps/fabricmanager/fm_internal
+FM_PROTOC_OPTIONS := 1
+
+include $(FM_INTERNAL_DIR)/fm_internal_protobuf.lwmk
+include $(FM_INTERNAL_DIR)/fm_internal_sources.lwmk
+
+#all the main source code
+LOCAL_SOURCES :=
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_SOURCES += $(FM_INTERNAL_SOURCES)
+endif
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+	LOCAL_SOURCES += $(LWMLCOMMON_DIR)/Linux/lwosLinux.c
+	LOCAL_SOURCES += $(LWMLCOMMON_DIR)/lwos_common_posix.c
+endif
+ 
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+	LOCAL_SOURCES += $(LWMLCOMMON_DIR)/win32/lwoswin32.c
+	LOCAL_SOURCES += $(LW_SOURCE)/drivers/common/src/lwSelwreLoadLibrary.c
+endif
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/timelib.c
+LOCAL_SOURCES += $(LWDEBUG_DIR)/lib/lwdcommon.c
+
+#lw implementation of protobuf
+# Contains all of the protobuf decoding support
+PRB_SOURCES := $(LW_SOURCE)/drivers/common/lwdebug/lib/prbdec.c
+PRB_SOURCES += $(LW_SOURCE)/drivers/common/lwdebug/lib/prblib.c
+LOCAL_SOURCES += $(PRB_SOURCES)
+
+# Files that need protobuf defines
+NEEDS_PRB_DEFINES = $(FM_INTERNAL_PB_CFILES) $(PRB_SOURCES) $(FM_INTERNAL_SOURCES)
+
+# These are needed by protocol buffer files for decoding
+PRB_DEFINES += PRB_ENUM_NAMES=1
+PRB_DEFINES += PRB_FIELD_DEFAULTS=1
+PRB_DEFINES += PRB_METHOD_NAMES=0
+PRB_DEFINES += PRB_SERVICE_NAMES=0
+
+# Can only enable the printing of fields and messages in debug build
+# of protocol buffer decoder because of guardword restrictions.
+ifeq ($(LW_BUILD_TYPE),debug)
+  PRB_DEFINES += PRB_FIELD_NAMES=1
+  PRB_DEFINES += PRB_MESSAGE_NAMES=1
+else
+  PRB_DEFINES += PRB_FIELD_NAMES=0
+  PRB_DEFINES += PRB_MESSAGE_NAMES=0
+endif
+
+$(call BUILD_OBJECT_LIST, $(NEEDS_PRB_DEFINES)): LW_DEFINES += $(PRB_DEFINES)
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+ 
+##############################################################################
+## define LOCAL_CFLAGS
+###############################################################################
+ 
+LOCAL_INCLUDES += $(FM_INTERNAL_INCLUDES)
+ 
+# Do not modify CFLAGS because it will be global
+LOCAL_CFLAGS := $(FM_GLOBAL_CFLAGS)
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_CFLAGS += -fPIC -Wno-write-strings
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+LOCAL_CFLAGS += /EHsc /w /c /D_WINSOCKAPI_
+endif
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+    LOCAL_CFLAGS += -fPIC
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+    FM_INTERNAL_LIBRARY_NAME:=liblwfm_internal.a
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+    FM_INTERNAL_LIBRARY_NAME:=liblwfm_internal.dll
+endif
+ 
+##############################################################################
+## define LOCAL_LDFLAGS
+###############################################################################
+LOCAL_LDFLAGS += $(FM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+  	LOCAL_LDFLAGS += gdi32.lib
+	LOCAL_LDFLAGS += /DEBUG
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_LDFLAGS += -rdynamic 
+LOCAL_LDFLAGS += -L $(OUTPUTDIR) -lc
+endif
+ 
+lwfm_internal_TARGET  := $(OUTPUTDIR)/$(FM_INTERNAL_LIBRARY_NAME)
+lwfm_internal_OBJECTS := $(LOCAL_OBJECTS)
+lwfm_internal_CFLAGS  := $(LOCAL_CFLAGS)
+lwfm_internal_LDFLAGS := $(LOCAL_LDFLAGS)
+
+build: $(lwfm_internal_TARGET)
+ 
+fminternalbuildsyncpoint:: $(lwfm_internal_TARGET)
+$(eval $(call MAKE_STATIC_LIBRARY,lwfm_internal))
+build: $(lwfm_internal_TARGET).guardwords
+ 
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

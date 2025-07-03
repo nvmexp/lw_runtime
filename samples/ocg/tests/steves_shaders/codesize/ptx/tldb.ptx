@@ -1,0 +1,40 @@
+.version 3.1
+.target sm_20
+.global .texref texFloat;
+
+.entry main (
+    .param .s32 param_gaddr,
+    .param .u32 param_auindex)
+{
+    .reg   .s32 addr;
+    .reg   .u32  x, y, z, w;
+    .reg   .u32  a, b, c, d;
+    .reg   .u32  ui;
+    .reg   .u64	 texFloat_handle;
+   
+    ld.param.s32  addr, [param_gaddr];
+    ld.global.u32 x, [addr];
+    ld.global.u32 y, [addr + 4];
+    ld.global.u32 z, [addr + 8];
+    ld.param.u32  ui, [param_auindex];
+
+    mov.u64 texFloat_handle, texFloat;
+
+    tex.1d.v4.u32.s32  {a, b, c, d}, [texFloat_handle, x];
+    st.global.v4.u32 [addr], {a, b, c, d};
+
+    tex.2d.v4.u32.s32  {a, b, c, d}, [texFloat_handle, {x, y}];
+    st.global.v4.u32 [addr], {a, b, c, d};
+
+    tex.3d.v4.u32.s32  {a, b, c, d}, [texFloat_handle, {x, y, z, w}];
+    st.global.v4.u32 [addr], {a, b, c, d};
+    
+    tex.a1d.v4.u32.s32 {a, b, c, d}, [texFloat_handle, {ui, x}];
+    st.global.v4.u32  [addr], {a, b, c, d};
+
+    tex.a2d.v4.u32.s32 {a, b, c, d}, [texFloat_handle, {ui, x, y, y}];
+    st.global.v4.u32  [addr], {a, b, c, d};
+
+    exit;
+}
+

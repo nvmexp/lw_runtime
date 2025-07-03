@@ -1,0 +1,31 @@
+FM_DIR := $(LW_SOURCE)/apps/fabricmanager/
+LWML_DIR := $(LW_SOURCE)/apps/lwml/
+ 
+LWRRENT_DIR := $(FM_DIR)/fm_internal
+OUTPUTDIR   := $(LWRRENT_DIR)/_out
+ 
+# Auxiliary target to synchronize parallel build before tar generation
+.PHONY: fminternalbuildsyncpoint
+
+# Those global flags are used by most included files as the base.
+FM_GLOBAL_CFLAGS :=
+FM_GLOBAL_LDFLAGS := -lrt -lm
+
+LWML_BUILD_DIR := $(LWML_DIR)/build/
+include $(LWML_BUILD_DIR)/common.lwmk
+LWML_BUILD_MISSING_PROTOTYPES =
+ 
+ifdef LWCFG_INITIALIZED
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+	include $(FM_DIR)/fm_internal/fm_internal.lwmk
+endif
+ 
+build: fminternalbuildsyncpoint
+clean_fm:
+	$(RM) $(FM_DIR)/$(OUTPUTDIR)
+
+.PHONY: clean_fm
+clean: clean_fm
+
+endif # LWCFG_INITIALIZED
+include $(LWML_BUILD_DIR)/commonRules.lwmk

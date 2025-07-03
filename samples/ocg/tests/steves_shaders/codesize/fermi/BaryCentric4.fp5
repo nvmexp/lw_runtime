@@ -1,0 +1,28 @@
+!!LWfp5.0
+OPTION LW_internal;
+# cgc version 3.4.0001, build date May 19 2017
+# command line args: -profile gp5fp -oglsl -internal
+# source file: 4.glsl
+#vendor LWPU Corporation
+#version 3.4.0.1 COP Build Date May 19 2017
+#profile gp5fp
+#program main
+#semantic vtxidx
+#semantic oidx
+#var float4 v[0].arr[0] : $vin.ATTR0 : ATTR0 : -1 : 1
+#var float4 v[0].arr2[0] : $vin.ATTR4 : ATTR4 : -1 : 1
+#var uint vtxidx :  : c[0] : -1 : 1
+#var uint oidx :  : c[1] : -1 : 1
+#var float4 Color : $vout.COL00 : COL0[0] : -1 : 1
+PARAM c[2] = { program.local[0..1] };
+PERVERTEX ATTRIB vertex_attrib[] = { vertex.attrib[0..7] };
+TEMP R0, R1;
+OUTPUT result_color0 = result.color;
+MOV.U R1.y, c[1].x;
+MOV.U R1.x, c[0];
+MOV.U R0.x, {2, 0, 0, 0};
+ADD.F R0, vertex_attrib[R1.x][R1.y], vertex_attrib[R1.x][R0.x + 4];
+MOV.U R1.z, {1, 0, 0, 0}.x;
+MAD.F result_color0, vertex_attrib[R1.x][R1.z + 4], vertex_attrib[R1.x][R1.y], R0;
+END
+# 6 instructions, 2 R-regs

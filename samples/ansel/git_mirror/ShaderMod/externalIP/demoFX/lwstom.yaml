@@ -1,0 +1,126 @@
+﻿pass_template: 
+    samplerstates:
+        colorLinearSampler:
+            filter: MIN_MAG_LINEAR_MIP_POINT
+            addressU: CLAMP
+            addressV: CLAMP
+        colorLinearSamplerWrap:
+            filter: MIN_MAG_LINEAR_MIP_POINT
+            addressU: WRAP
+            addressV: WRAP
+    type: match-color-input
+    constant-buffers: 
+        globalParams: {screenSize: SCREEN_SIZE, elapsedTime: ELAPSED_TIME, captureState: CAPTURE_STATE, tileUV: TILE_UV_RANGE}
+        controlBuf: {g_sldFilmGrain: filmGrainSlider, g_sldVignette: vignetteSlider, g_sldLUT: LUTSlider, g_sldContrast: contrastSlider, g_sldBrightness: brightnessSlider} 
+
+typical_slider:
+      type: float
+      minimum-value: 0.0
+      maximum-value: 1.0
+      default-value: 0.5
+      ui-sticky-region: 0.01
+      ui-value-step: 0.1
+    
+user-constants:
+    - name: brightnessSlider 
+      ui-hint: "Use this to set brightness offset: 0 is -100%, 1 is +100%"
+      ui-label: "Brightness"
+      ui-label-localized:
+          ru-RU: "Яркость"
+          fr-FR: "Luminosité"
+          it-IT: "Luminosità"
+          de-DE: "Helligkeit"
+          es-ES: "Brillo"
+          es-MX: "Brillo"
+          zh-CHS: "亮度"
+          zh-CHT: "亮度"
+          ja-JP: "ブライトネス"
+      default-value: 0.5
+      ui-center-mapping: 0.5
+      ui-sticky-value: 0.5
+      import: [typical_slider]
+    - name: contrastSlider 
+      ui-hint: "Use this to scale contrast of all channels: 0 is 20%, 1 is 500%"
+      ui-label: "Contrast"
+      ui-label-localized:
+          ru-RU: "Контраст"
+          fr-FR: "Contraste"
+          it-IT: "Contrasto"
+          de-DE: "Kontrast"
+          es-ES: "Contraste"
+          es-MX: "Contraste"
+          zh-CHS: "对比度"
+          zh-CHT: "對比度"
+          ja-JP: "コントラスト"
+      default-value: 0.5
+      ui-center-mapping: 0.5
+      ui-sticky-value: 0.5
+      import: [typical_slider]
+    - name: vignetteSlider 
+      ui-hint: "Use this to scale Vignette effect: 0 is 0%, 1 is 100%"
+      ui-label: "Vignette"
+      ui-label-localized:
+          ru-RU: "Виньетка"
+          fr-FR: "Vignettage"
+          it-IT: "Vignettatura"
+          de-DE: "Vignette"
+          es-ES: "Viñeta"
+          es-MX: "Viñeta"
+          zh-CHS: "花饰图案"
+          zh-CHT: "暈影"
+          ja-JP: "ビネット"
+      default-value: 0.3
+      ui-center-mapping: 0.0
+      ui-sticky-value: 0.3
+      import: [typical_slider]
+    - name: filmGrainSlider
+      ui-hint: "Use this to scale Grain effect: 0 is 0%, 1 is 100%"
+      ui-label: "Sketch"
+      ui-label-localized:
+          ru-RU: "Набросок"
+          fr-FR: "Dessin"
+          it-IT: "Definizione"
+          de-DE: "Bleistiftskizze"
+          es-ES: "Bosquejo"
+          es-MX: "Boceto"
+          zh-CHS: "素描"
+          zh-CHT: "草圖"
+          ja-JP: "スケッチ"
+      default-value: 0.0
+      ui-center-mapping: 0.0
+      ui-sticky-value: 0.0
+      import: [typical_slider]
+    - name: LUTSlider
+      ui-hint: "Use this to scale LUT effect: 0 is 0%, 1 is 100%"
+      ui-label: "Color enhancer"
+      ui-label-localized:
+          ru-RU: "Изменение цвета"
+          fr-FR: "Amélioration des couleurs"
+          it-IT: "Migliorare il colore"
+          de-DE: "Farbverbesserung"
+          es-ES: "Potenciador de color"
+          es-MX: "Optimizador de color"
+          zh-CHS: "颜色优化器"
+          zh-CHT: "色彩增强器"
+          ja-JP: "色の強調"
+      default-value: 0.2
+      ui-center-mapping: 0.0
+      ui-sticky-value: 0.2
+      import: [typical_slider]
+
+# Tonemapping pass
+main:
+    import: [pass_template]
+    shader: PS_Colors@custom.yfx
+    textures:
+        SamplerLDR:
+            import: [overlay]
+  
+# Overlay pass
+overlay:
+    import: [pass_template]
+    shader: PS_Overlay@custom.yfx
+    textures:
+        SamplerLDR:
+            channel: PIPE_INPUTS_COLOR
+            

@@ -1,0 +1,164 @@
+#
+# Copyright (c) 2019-2020, LWPU CORPORATION. All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+
+LW_MODULE_BUILD_TYPE_ALIASES = test_lwscicommon_api
+LW_MODULE_LOGGING_NAME = "test_lwscicommon_api"
+
+include $(LW_SOURCE)/drivers/lwsci/lwsci.lwmk
+include $(LW_SOURCE)/drivers/lwsci/tests/gtest/gtest.lwmk
+
+#tests now include lwsci.lwmk. However, since lwsci.lwmk is being included for
+#sources as well, it is very stringent and colwerts warnings to errors.
+#For test-cases, it is fine to suppress warnings for now.
+#TODO: fix all warnings are remove this flag.
+#fixing warnings for now.
+CFLAGS += -w
+
+##############################################################################
+# Path shorthands
+##############################################################################
+
+LWSCI_PATH              = $(LW_SOURCE)/drivers/lwsci
+LWSCI_TESTS_PATH        = $(LWSCI_PATH)/tests
+LWSCICOMMON_TESTS_PATH  = $(LWSCI_TESTS_PATH)/lwscicommon/unit
+
+##############################################################################
+# define SOURCES
+##############################################################################
+
+LWSCICOMMON_TEST_SOURCES += src/lwscicommon_tests.cpp
+LWSCICOMMON_TEST_SOURCES += src/lwscicommon_test_reference.cpp
+ifeq ($(LW_BACKEND_RESMAN), 1)
+LWSCICOMMON_TEST_SOURCES += src/lwscicommon_test_errorcolwersion.cpp
+endif
+LWSCICOMMON_TEST_SOURCES += src/lwscicommon_test_libc.cpp
+LWSCICOMMON_TEST_SOURCES += src/lwscicommon_test_os.cpp
+LWSCICOMMON_TEST_SOURCES += src/lwscicommon_test_transportutils.cpp
+
+SOURCES += $(addprefix $(LWSCICOMMON_TESTS_PATH)/,$(LWSCICOMMON_TEST_SOURCES))
+
+##############################################################################
+# define LW_INCLUDES
+##############################################################################
+
+#include cheetah headers
+ifeq ($(LW_TEGRA_MIRROR_INCLUDES), 1)
+#get lwrm headers from sdk/inc and RMAPI_TEGRA_MIRROR if we are building
+#perforce tree.
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+else
+ifeq ($(LW_TEGRA_DIRECT_INCLUDES), 1)
+#get lwrm headers directly from core/include
+  LW_INCLUDES += $(TEGRA_TOP)/core/include
+  LW_INCLUDES += $(TEGRA_TOP)/core-private/include
+endif
+endif
+
+# Coverity specific includes
+ifeq ($(LW_BUILD_CONFIGURATION_IS_COVERITY),1)
+  LW_INCLUDES += $(LWSCI_PATH)/lwscicommon/inc/covanalysis_enable
+else
+  LW_INCLUDES += $(LWSCI_PATH)/lwscicommon/inc/covanalysis_disable
+endif
+
+
+#include x86 headers
+ifeq ($(LW_BACKEND_RESMAN), 1)
+  include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+endif
+
+LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc
+LW_INCLUDES += $(LWSCI_PATH)/inc/public
+LW_INCLUDES += $(LWSCI_PATH)/inc/internal
+LW_INCLUDES += $(LW_SOURCE)/drivers/lwsci/lwscicommon/inc
+LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc/class
+LW_INCLUDES += $(LW_SOURCE)/drivers/lwsci/inc
+LW_INCLUDES += $(LW_SOURCE)/drivers/lwsci/inc/public
+LW_INCLUDES += $(LWSCICOMMON_TESTS_PATH)/inc
+
+LW_INCLUDES += $(OUTPUTDIR)
+
+#############################################################################
+# define DSO_STUBS
+#############################################################################
+include $(LWSCI_PATH)/lwscicommon/lwscicommon-dso-stub.lwmk
+
+STUB_DSO_DEPENDS += $(LWSCICOMMON_DSO_STUB)
+
+STUB_LDFLAGS += -llwscicommon-stub
+
+ifeq ($(LW_BACKEND_RESMAN), 0)
+	include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwrm_gpu.lwmk
+
+	STUB_DSO_DEPENDS += $(LWRM_GPU_DSO_STUB)
+
+	STUB_LDFLAGS += -llwrm_gpu-stub
+endif
+
+##############################################################################
+# define LW_DEFINES
+##############################################################################
+
+# For lwmake builds, lwcfg feature flags are available to LWSCI.
+ifdef LWCFG_INITIALIZED
+  LW_DEFINES += LWCFG_ENABLED
+endif
+
+# Embedded defines this on the command line for their builds.
+LW_BUILD_EMBEDDED ?= 0
+LW_DEFINES += LW_BUILD_EMBEDDED=1
+LW_NEEDS_UNSTRIPPED = 1
+LW_SUPPORTS_SEPARATE_DEBUG_INFO = 1
+
+##############################################################################
+# library flags
+##############################################################################
+
+# Link in libpthread
+LDFLAGS += $(PTHREAD_LDFLAGS)
+
+LDFLAGS += -lm
+ifneq ($(LW_TARGET_OS), QNX)
+  # Link in Linux
+  LDFLAGS += -lrt
+  LDFLAGS += -lstdc++
+else
+  LDFLAGS += -lc++
+endif
+
+LDFLAGS += -L $(OUTPUTDIR) $(STUB_LDFLAGS)
+LDFLAGS += $(BIN_LDFLAGS)
+
+##############################################################################
+# link the binary
+##############################################################################
+
+TESTAPP_BIN := test_lwscicommon_api
+TESTAPP := $(OUTPUTDIR)/$(TESTAPP_BIN)
+TESTAPP_LD_TARGET = $(TESTAPP).unstripped
+TESTAPP_DEBUG_INFO = $(TESTAPP).debug
+$(eval $(call LW_DEBUG_INFO_CMD, \
+  $(TESTAPP_LD_TARGET), \
+  $(TESTAPP), \
+  $(TESTAPP_DEBUG_INFO)))
+
+build: $(TESTAPP)
+
+$(TESTAPP_LD_TARGET): $(OBJECTS) $(STUB_DSO_DEPENDS)
+	$(call quiet_cmd,LINK) $(OBJECTS) -o $(TESTAPP_LD_TARGET) $(LDFLAGS)
+
+##############################################################################
+# include definitions of tools and build rules
+##############################################################################
+
+include $(LW_COMMON)/build/lwCommonRules.lwmk

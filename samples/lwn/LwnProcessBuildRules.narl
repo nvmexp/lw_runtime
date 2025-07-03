@@ -1,0 +1,155 @@
+LwnRootInfo = Constants
+{
+    RootPath = f"".GetFullPath();
+    Path = f"";
+}
+
+LwnProcessDynamicLinkRule : SdkProgramRule
+{
+    DescFile ?= ProgramBuildSettings.ApplicationDescFilePath;
+    MetaFile ?= ProgramBuildSettings.ApplicationMetaFilePath;
+
+    checkExistenceAndReturn = path =>
+        if DirectoryExists(path) then
+            path
+        else
+            BuildSystemError("${path} does not exist.")
+        end;
+
+    TegraTop = Switch(
+        Environment.IsDefined("TEGRA_TOP"),
+            checkExistenceAndReturn(FormatString("{0}", Environment.GetValue("TEGRA_TOP"))),
+            BuildSystemError(UIMessage(
+                "TEGRA_TOP directory not defined. Define environment variable TEGRA_TOP to '%TEGRA_TOP%'."
+            )
+        )
+    );
+
+    HosRoot = Switch(
+        Environment.IsDefined("TEGRA_TOP"),
+        f"." / Environment.GetValue("TEGRA_TOP"),
+        f"${rootPath}/Externals/odin2"
+   );
+
+    LwnBaseDynamicLinkLibraryNames = List(
+        "glslc",
+    );
+
+    LwnBasicLibraryNames = List(
+            "libnn_init",
+             "libnn_gfx",
+             "libnn_diag_abort_observer",
+             "libnn_fatal",
+             "liblwn_test_framework",
+    );
+
+    LwnBasePreprocessorMacros = List(
+        "__hos__",
+        "LW_HOS",
+        "LW_TEGRA",
+        ConfigurationSpecificValue
+        {
+            Condition = config => Equal(config.GetBuildType(), "Debug");
+            Value = "DEBUG";
+        }
+    );
+
+    LwnBaseIncludePaths = List(
+        LwnRootInfo.Path.Combine("./common"),
+        LwnRootInfo.Path.Combine("./samples/common"),
+        HosRoot.Combine("core/include"),
+        HosRoot.Combine("core-hos/include"),
+        HosRoot.Combine("graphics/2d/include"),
+        HosRoot.Combine("gpu/drv/drivers/lwn/public"),
+        HosRoot.Combine("gpu/drv/drivers/lwn/interface"),
+        HosRoot.Combine("gpu/drv/drivers/khronos/interface/apps-mirror"),
+        HosRoot.Combine("gpu/drv_lwda-9.0_odin/drivers/gpgpu/lwca/inc")
+    );
+
+    IsNnLogEnabled = true;
+}
+
+PrebuiltHos = Constants
+{
+    GetPrebuiltFileLocation = (config, fileName) =>
+        if FileExists(getIrisFilePath(config, fileName)) then
+            getIrisFilePath(config, fileName)
+        else
+            getPrebuiltFilePath(config, fileName)
+        end;
+
+    @private checkExistenceAndReturn = path =>
+        if DirectoryExists(path) then
+            path
+        else
+            BuildSystemError("${path} does not exist.")
+        end;
+
+    @private TegraTop = Switch(
+        Environment.IsDefined("TEGRA_TOP"),
+            checkExistenceAndReturn(FormatString("{0}", Environment.GetValue("TEGRA_TOP"))),
+            BuildSystemError(UIMessage(
+                "TEGRA_TOP directory not defined. Define environment variable TEGRA_TOP to '%TEGRA_TOP%'."
+            )
+        )
+    );
+
+    @private getIrisFilePath = (config, fileName) =>
+        ToFilePath(Concat(Environment.GetValue("HOS_DDK_ROOT"), "/", getIrisDirectoryName(config), "/", fileName));
+
+    @private getPrebuiltFilePath = (config, fileName) =>
+        ToFilePath(Concat(${TegraTop}, "/", getPrebuiltDirectoryName(config), "/", fileName));
+
+    @private getIrisDirectoryName = config =>
+        irisDirectoryNameMap.GetValueOrUndefined(FormatString("{0}/{1}", CommonBuildSettings.GetOdin2PrebuiltKind(config), config.BuildType))
+        ?? Error(FormatString("Prebuilt hos-abca2 files are not available for this target/buildtype: {0}/{1}", config.TargetName, config.BuildType));
+
+    @private getPrebuiltDirectoryName = config =>
+        prebuiltDirectoryNameMap.GetValueOrUndefined(FormatString("{0}/{1}", CommonBuildSettings.GetOdin2PrebuiltKind(config), config.BuildType))
+        ?? Error(FormatString("Prebuilt hos-abca2 files are not available for this target/buildtype: {0}/{1}", config.TargetName, config.BuildType));
+
+    @private irisDirectoryNameMap = Map(
+        "hos-a32/Debug",       "Programs/Iris/Libraries/NX-NXFP2-a32/Debug",
+        "hos-a32/Develop",     "Programs/Iris/Libraries/NX-NXFP2-a32/Develop",
+        "hos-a32/Release",     "Programs/Iris/Libraries/NX-NXFP2-a32/Release",
+        "hos-a64/Debug",       "Programs/Iris/Libraries/NX-NXFP2-a64/Debug",
+        "hos-a64/Develop",     "Programs/Iris/Libraries/NX-NXFP2-a64/Develop",
+        "hos-a64/Release",     "Programs/Iris/Libraries/NX-NXFP2-a64/Release",
+        "hos-a64-cfi/Debug",   "Programs/Iris/Libraries/NX-NXFP2-a64-cfi/Debug",
+        "hos-a64-cfi/Develop", "Programs/Iris/Libraries/NX-NXFP2-a64-cfi/Develop",
+        "hos-a64-cfi/Release", "Programs/Iris/Libraries/NX-NXFP2-a64-cfi/Release",
+    );
+
+    @private prebuiltDirectoryNameMap = Map(
+        "hos-a32/Debug",       "prebuilts-hos-abca2-develop",
+        "hos-a32/Develop",     "prebuilts-hos-abca2-develop",
+        "hos-a32/Release",     "prebuilts-hos-abca2",
+        "hos-a64/Debug",       "prebuilts-hos-abca2-aarch64-develop",
+        "hos-a64/Develop",     "prebuilts-hos-abca2-aarch64-develop",
+        "hos-a64/Release",     "prebuilts-hos-abca2-aarch64",
+        "hos-a64-cfi/Debug",   "prebuilts-hos-abca2-aarch64-secure-develop",
+        "hos-a64-cfi/Develop", "prebuilts-hos-abca2-aarch64-secure-develop",
+        "hos-a64-cfi/Release", "prebuilts-hos-abca2-aarch64-secure",
+    );
+}
+
+PrebuiltHosDynamicLinkLibraryRule : ExternalLibraryRule
+{
+    // .nss file name (without the extension)
+    FileName;
+
+    // Library module name
+    Name ?= FileName;
+
+    IsSupported <= config => config.IsOsHorizon;
+
+    SdkDynamicLinkLibraryFiles <= config => [
+        PrebuiltHos.GetPrebuiltFileLocation(config, "${FileName}.nss"),
+    ];
+}
+
+// Integrate prebuilt libraries into the module system.
+PrebuiltHosDynamicLinkLibraryRule
+{
+    FileName <= "lwca";
+}

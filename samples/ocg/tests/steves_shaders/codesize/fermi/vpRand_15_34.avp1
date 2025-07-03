@@ -1,0 +1,57 @@
+!!ARBvp1.0
+OPTION LW_vertex_program3;
+PARAM pgmElw[256] = { program.elw[0..255] };
+TEMP tmpR0;
+TEMP tmpR5;
+TEMP tmpR8;
+TEMP tmpR11;
+TEMP tmpR13;
+TEMP tmpR14;
+TEMP tmpR15;
+ADDRESS addr0;
+sub_always:
+SGE tmpR0, -vertex.color.primary.ywzx, vertex.color.primary.yzxz;
+SUBC1 result.texcoord[3], |vertex.texcoord[4].yxwy|, pgmElw[72].xxwx;
+FRCC tmpR5.xy, tmpR0.wwxw;
+MULC1 tmpR14, vertex.texcoord[3].zzzz, |pgmElw[106].xyzw|;
+ARRC1 addr0, |pgmElw[12].xyyy|;
+SLEC1 result.color.secondary, -vertex.position.zwwz, tmpR14.xyzw;
+ABS result.pointsize.x, vertex.normal.zwwz;
+MAX tmpR13, |vertex.color.primary.yzwz|, tmpR5.xyzw;
+MAD result.texcoord[7], pgmElw[addr0.z + 0].yxzx, -vertex.texcoord[4].xyzw, tmpR5.wxzy;
+ADDC result.texcoord[addr0.y + 1], vertex.normal.yzyw, -tmpR0.xwzy;
+MADC tmpR15.yw, vertex.position.xyzw, tmpR0.wyxz, -pgmElw[100].xyzw;
+TEXC result.texcoord[4], pgmElw[addr0.w + 4].wzxy, texture[0], 2D;
+COSC tmpR13 (TR.x), vertex.normal.x;
+ADD result.texcoord[2], vertex.position.wyzx, tmpR5.xyzw;
+SLTC tmpR8, tmpR15.xyzw, -vertex.texcoord[6].yyxw;
+TXPC tmpR11.z, -vertex.texcoord[1].wzwy, texture[0], 2D;
+FRC result.texcoord[6], -tmpR0.zyxw;
+TXLC1 result.texcoord[5], vertex.color.primary.wyxz, texture[0], 2D;
+LITC result.texcoord[0], vertex.color.primary.ywxy;
+ADDC1 result.color.primary, -vertex.position.wxyz, tmpR0.xzwy;
+ADDC result.color.back.secondary, vertex.texcoord[addr0.x + 2].xyzw, pgmElw[159].xyzw;
+FLR result.color.back.primary, tmpR8.yxwz;
+ARL addr0 (LE.xyzw), pgmElw[12].ywxz;
+RET;
+sub_maybe:
+RET;
+main:
+MOV tmpR0, 0;
+MOV tmpR5, 0;
+MOV tmpR8, 0;
+MOV tmpR11, 0;
+MOV tmpR13, 0;
+MOV tmpR14, 0;
+MOV tmpR15, 0;
+ARL addr0, 0;
+DP4 result.position.x, pgmElw[0], vertex.position;
+DP4 result.position.y, pgmElw[1], vertex.position;
+DP4 result.position.z, pgmElw[2], vertex.position;
+DP4 result.position.w, pgmElw[3], vertex.position;
+CAL sub_always;
+CAL sub_maybe  (LT0.w);
+MADC1 result.texcoord[1], |vertex.normal.xyzw|, tmpR8.xyzw, -|tmpR11.xyzw|;
+FLRC result.fogcoord.x, pgmElw[addr0.x + 2].xyzw;
+END
+

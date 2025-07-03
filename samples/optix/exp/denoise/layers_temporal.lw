@@ -1,0 +1,270 @@
+//
+// Copyright 2019 LWPU Corporation. All rights reserved.
+//
+
+#include <typeinfo>
+
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+#include "layerdata_load.h"
+#include "layers.h"
+#include "layers_inline.h"
+
+namespace optix_exp {
+
+static inline __device__ void CatmullRomWeights( float res[4], const float t )
+{
+    const float t2 = t * t;
+    const float t3 = t * t2;
+
+    res[0] = 0.5f * ( -t + 2.f*t2 - t3 );
+    res[1] = 0.5f * ( 2.f - 5.f*t2 + 3.f*t3 );
+    //res[2] = 0.5f * ( t + 4.f*t2 - 3.f*t3 );
+    res[3] = 0.5f * ( -t2 + t3 );
+    res[2] = 1.f - res[0] - res[1] - res[3];
+}
+
+// rgb, hiddenchannel
+template <typename out_type, int ndim>
+static __global__ void k_addMotion( out_type* out, floatRdAccess in, floatRdAccess motion,
+                                    int nc, int N, int start, int w, int h,
+                                    int op, float c_logmul, const float* intensity, const float* hdrx )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if( x < w && y < h )
+    {
+        if( x < in.image.width && y < in.image.height )
+        {
+            float dst_x = float( x ) - motion( x, y, 0 );
+            float dst_y = float( y ) - motion( x, y, 1 );
+
+            float x0 = dst_x - 1.f;
+            float y0 = dst_y - 1.f;
+
+            float tx = dst_x <= 0.f ? 0.f : dst_x - floorf( dst_x );
+            float ty = dst_y <= 0.f ? 0.f : dst_y - floorf( dst_y );
+
+            float cx[4], cy[4];
+            CatmullRomWeights( cx, tx );
+            CatmullRomWeights( cy, ty );
+
+            float R[ndim] = { 0 };
+            #pragma unroll
+            for (int j=0; j < 4; j++)
+            {
+                float r[ndim] = { 0 };
+                #pragma unroll
+                for (int k=0; k < 4; k++)
+                {
+                    int tx = x0 + k;
+                    if( tx < 0 )
+                        tx = 0;
+                    else if( tx >= in.image.width )
+                        tx = in.image.width - 1;
+
+                    int ty = y0 + j;
+                    if( ty < 0 )
+                        ty = 0;
+                    else if( ty >= in.image.height )
+                        ty = in.image.height - 1;
+
+                    #pragma unroll
+                    for( int c=0; c < ndim; c++ )
+                        r[c] += cx[k] * in( tx, ty, c );
+                }
+                #pragma unroll
+                for( int c=0; c < ndim; c++ )
+                    R[c] += cy[j] * r[c];
+            }
+
+            if( op == IMPORT_XYZ )
+            {
+                #pragma unroll
+                for( int c=0; c < ndim; c++ )
+                    out[( y * w + x ) * nc + ( start + c ) * N] = R[c];
+            }
+            else
+            {
+                for( int c=0; c < ndim; c++ )
+                {
+                    float V = __clamp0( R[c] );
+                    if( op == IMPORT_LOG || op == IMPORT_LOG_SQRT )
+                    {
+                        V *= *intensity;
+                        if( op == IMPORT_LOG_SQRT )
+                            V = __fsqrt_rn( V );
+                        V = __logf( V + 1.f ) * c_logmul;
+                    }
+                    else if( op == IMPORT_PRELOG )
+                    {
+                        float fr = __clamp( V, 2.980233e-8 );
+                        V = fr == 0.f ? 0 : hdrx[3+c] * (__logf( fr ) - hdrx[0+c]) + hdrx[6+c];
+                    }
+                    else if( op == IMPORT_PQ )
+                    {
+                        V = pq_encode( V * *intensity );
+                    }
+                    out[( y * w + x ) * nc + ( start + c ) * N] = V;
+                }
+            }
+        }
+        else
+        {
+            for(int c=0; c < ndim; c++)
+                out[( y * w + x ) * nc + ( start + c ) * N] = 0;
+        }
+    }
+}
+
+// alpha
+template <typename out_type>
+static __global__ void k_addMotionA( out_type* out, floatRdAccess in, floatRdAccess motion,
+                                     int nc, int N, int start, int w, int h,
+                                     int op, float c_logmul, const float* intensity, const float* hdrx )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if( x < w && y < h )
+    {
+        if( x < in.image.width && y < in.image.height )
+        {
+            float dst_x = float( x ) - motion( x, y, 0 );
+            float dst_y = float( y ) - motion( x, y, 1 );
+
+            float x0 = dst_x - 1.f;
+            float y0 = dst_y - 1.f;
+
+            float tx = dst_x <= 0.f ? 0.f : dst_x - floorf( dst_x );
+            float ty = dst_y <= 0.f ? 0.f : dst_y - floorf( dst_y );
+
+            float cx[4], cy[4];
+            CatmullRomWeights( cx, tx );
+            CatmullRomWeights( cy, ty );
+
+            float R = 0;
+            for (int j=0; j < 4; j++)
+            {
+                float r = 0;
+                for (int k=0; k < 4; k++)
+                {
+                    int tx = x0 + k;
+                    if( tx < 0 )
+                        tx = 0;
+                    else if( tx >= in.image.width )
+                        tx = in.image.width - 1;
+
+                    int ty = y0 + j;
+                    if( ty < 0 )
+                        ty = 0;
+                    else if( ty >= in.image.height )
+                        ty = in.image.height - 1;
+
+                    r += cx[k] * in( tx, ty, 3 );
+                }
+                R += cy[j] * r;
+            }
+
+            for( int c=0; c < 3; c++ )
+            {
+                float V = __clamp0( R );
+
+                if( op == IMPORT_A_LOG || op == IMPORT_A_LOG_SQRT )
+                {
+                    V *= *intensity;
+                    if( op == IMPORT_A_LOG_SQRT )
+                        V = __fsqrt_rn( V );
+                    V = __logf( V + 1.f ) * c_logmul;
+                }
+                else if( op == IMPORT_A_PRELOG )
+                {
+                    float fa = __clamp( V, 2.980233e-8 );
+                    if( fa == 0.f )
+                        V = 0;
+                    else
+                    {
+                        fa = __logf( fa ) - 0.5f;           // subtract estimated average
+                        V = hdrx[3+c] * fa + hdrx[6+c];
+                    }
+                }
+                out[( y * w + x ) * nc + ( start + c ) * N] = V;
+            }
+        }
+        else
+        {
+            for(int c=0; c < 3; c++)
+                out[( y * w + x ) * nc + ( start + c ) * N] = 0;
+        }
+    }
+}
+
+// prevDenoised is the denoised result of the previous inference run (after exp transform).
+// the motion buffer is given for each frame, it has the same resolution as the input layer, it represents
+// the motion from the previous frame to the current frame.
+// for each pixel p(x,y) in the input layer the denoised buffer is looked up at the position d(x-mx, y-my)
+// applying the motion vector m, and using bilinear interpolation. the interpolated result from the denoised
+// buffer is stored in the input layer buffer at position p(x,y).
+
+void AEInputLayer::setChannelMotion( const OptixImage2D* prevDenoised, const OptixImage2D* motion, int start, int nChannels, int op, void* smem, lwdaStream_t stream )
+{
+    beginTiming();
+
+    dim3 dimBlock( 64, 2 );
+    dim3 blockGrid = dim3( roundUp( m_outWidth, dimBlock.x ), roundUp( m_outHeight, dimBlock.y ), 1 );
+
+    int nc = m_tensorFormat == TENSOR_NHWC ? m_outChannels : 1;
+    int N  = m_tensorFormat == TENSOR_NHWC ? 1 : m_outWidth * m_outHeight;
+
+    const float* iMem = (const float*)( (char*)smem + m_intensityIndex );
+    const float* tMem = (const float*)( (char*)smem + m_hdrTransformIndex );
+
+    if( op == IMPORT_A || op == IMPORT_A_LOG || op == IMPORT_A_LOG_SQRT || op == IMPORT_A_PRELOG )
+    {
+        if( m_dtype == DATA_HALF )
+        {
+            k_addMotionA<__half><<<blockGrid, dimBlock, 0, stream>>>( (__half*)( (char*)smem + m_outDataIndex ),
+                                                                      floatRdAccess( *prevDenoised ), floatRdAccess( *motion ),
+                                                                      nc, N, start, m_outWidth, m_outHeight, op, m_logmul, iMem, tMem );
+        }
+        else
+            k_addMotionA<float><<<blockGrid, dimBlock, 0, stream>>>( (float*)( (char*)smem + m_outDataIndex ),
+                                                                     floatRdAccess( *prevDenoised ), floatRdAccess( *motion ),
+                                                                     nc, N, start, m_outWidth, m_outHeight, op, m_logmul, iMem, tMem );
+    }
+    else
+    {
+        if( nChannels == 3 )
+        {
+            if( m_dtype == DATA_HALF )
+            {
+                k_addMotion<__half,3><<<blockGrid, dimBlock, 0, stream>>>( (__half*)( (char*)smem + m_outDataIndex ),
+                                                                           floatRdAccess( *prevDenoised ), floatRdAccess( *motion ),
+                                                                           nc, N, start, m_outWidth, m_outHeight, op, m_logmul, iMem, tMem );
+            }
+            else
+                k_addMotion<float,3><<<blockGrid, dimBlock, 0, stream>>>( (float*)( (char*)smem + m_outDataIndex ),
+                                                                          floatRdAccess( *prevDenoised ), floatRdAccess( *motion ),
+                                                                          nc, N, start, m_outWidth, m_outHeight, op, m_logmul, iMem, tMem );
+        }
+        else if( nChannels == 8 )
+        {
+            if( m_dtype == DATA_HALF )
+            {
+                k_addMotion<__half,8><<<blockGrid, dimBlock, 0, stream>>>( (__half*)( (char*)smem + m_outDataIndex ),
+                                                                           floatRdAccess( *prevDenoised ), floatRdAccess( *motion ),
+                                                                           nc, N, start, m_outWidth, m_outHeight, op, m_logmul, iMem, tMem );
+            }
+            else
+                k_addMotion<float,8><<<blockGrid, dimBlock, 0, stream>>>( (float*)( (char*)smem + m_outDataIndex ),
+                                                                          floatRdAccess( *prevDenoised ), floatRdAccess( *motion ),
+                                                                          nc, N, start, m_outWidth, m_outHeight, op, m_logmul, iMem, tMem );
+        }
+    }
+
+    endTiming();
+}
+
+};  // namespace optix_exp

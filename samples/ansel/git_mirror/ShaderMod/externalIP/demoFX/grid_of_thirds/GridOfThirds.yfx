@@ -1,0 +1,73 @@
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 texcoord: TexCoord;
+};
+
+cbuffer globalParams
+{
+	float2 screenSize;
+	int captureState;
+	float4 tileUV;
+}
+
+cbuffer controlBuf
+{
+	bool g_chkThirds;
+}
+
+Texture2D txDiffuse;
+SamplerState samLinear;
+
+// This should move to a centralized file but not appropriate to make that change now.
+#ifndef LW_COMMON
+#define LW_COMMON
+
+#define CAPTURE_STATE_NOT_STARTED		0
+#define CAPTURE_STATE_REGULAR			1
+#define CAPTURE_STATE_REGULARSTEREO		2
+#define CAPTURE_STATE_HIGHRES			3
+#define CAPTURE_STATE_360				4
+#define CAPTURE_STATE_360STEREO			5
+
+#endif 
+
+float4 PS( VSOut frag ): SV_Target
+{
+	float4 color = txDiffuse.Sample(samLinear, frag.texcoord);
+	
+	// Render Grid of Thirds
+	if (!g_chkThirds || (captureState != CAPTURE_STATE_NOT_STARTED))
+	{
+		// Either grid of thirds is disabled, or we are in capture mode
+		// we don't want this grid to be present on output images
+	}
+	else
+	{
+		const float2 onePixelSize = float2(1.0 / screenSize.x, 1.0 / screenSize.y);
+		const float2 whiteGridWidth = 2.0*onePixelSize;
+		const float2 ilwGridWidth = 1.0*onePixelSize;
+		const float2 distTo1stBar = frag.texcoord - float2(1.0 / 3.0, 1.0 / 3.0);
+		const float2 distTo2ndBar = frag.texcoord - float2(2.0 / 3.0, 2.0 / 3.0);
+		
+		float3 gridColorRGB = color.rgb;
+		
+		if ((distTo1stBar.x > -ilwGridWidth.x && distTo1stBar.x < ilwGridWidth.x) ||
+			(distTo2ndBar.x > -ilwGridWidth.x && distTo2ndBar.x < ilwGridWidth.x) ||
+			(distTo1stBar.y > -ilwGridWidth.y && distTo1stBar.y < ilwGridWidth.y) ||
+			(distTo2ndBar.y > -ilwGridWidth.y && distTo2ndBar.y < ilwGridWidth.y))
+		{
+			gridColorRGB = 1.0 - color.rgb;
+		} else
+		if ((distTo1stBar.x > -whiteGridWidth.x && distTo1stBar.x < whiteGridWidth.x) ||
+			(distTo2ndBar.x > -whiteGridWidth.x && distTo2ndBar.x < whiteGridWidth.x) ||
+			(distTo1stBar.y > -whiteGridWidth.y && distTo1stBar.y < whiteGridWidth.y) ||
+			(distTo2ndBar.y > -whiteGridWidth.y && distTo2ndBar.y < whiteGridWidth.y))
+		{
+			gridColorRGB = float3(1.0, 1.0, 1.0);
+		}
+		color.rgb = lerp(color.rgb, gridColorRGB, g_chkThirds);
+	}
+
+	return color;
+}

@@ -1,0 +1,607 @@
+//
+// Copyright 2020 LWPU Corporation. All rights reserved.
+//
+
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+#include "layers.h"
+#include "layers_inline.h"
+#ifndef IRAY_BUILD
+#include <corelib/system/LwdaDriver.h>
+#endif
+
+namespace optix_exp {
+
+// --------------- weighted filter forward ---------------
+
+template <typename dtype, typename intype>
+__global__ void k_WeightedFilterForward_combined_RGB(
+    dtype* output,
+    const intype* input,
+    const dtype*  weight,
+    const intype* pDenoised,
+    const int32_t width,
+    const int32_t height,
+    const int32_t onc,
+    const int32_t oN,
+    const int32_t filterWidth,
+    const int32_t filterHeight,
+    const int32_t filterZeroChannels,
+    const int32_t inc,
+    const int32_t iN,
+    const int32_t wnc,
+    const int32_t wN,
+    const int32_t pnc,
+    const int32_t pN,
+    const int32_t ac,
+    const bool    saveAlpha,
+    const bool    wclamp )
+{
+    const int px = blockIdx.x * blockDim.x + threadIdx.x;
+    const int py = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if( px >= width || py >= height )
+        return;
+
+    const int32_t fSize2 = filterWidth * filterHeight / 2;
+
+    const dtype* wp = &weight[(py * width + px) * wnc];
+
+    float result[3]  = {0, 0, 0};
+    float wsum = 0;
+#pragma unroll 5
+    for( int32_t fy = 0; fy < 5; ++fy )          // filterWidth
+    {
+#pragma unroll 5
+        for( int32_t fx = 0; fx < 5; ++fx )      // filterHeight
+        {
+            // Compute tap coordinates, used for input activations and bilateral guides
+            const int32_t y = py + fy - (filterHeight - 1) / 2;
+            const int32_t x = px + fx - (filterWidth  - 1) / 2;
+
+            if( y < 0 || x < 0 || y >= height || x >= width )
+                continue;
+            const int32_t fo = fy * filterWidth + fx;
+
+            if( fo >= filterZeroChannels && fo < fSize2 )
+            {
+                float w = wp[(fo - filterZeroChannels) * wN];
+                wsum += w;
+                if( wclamp )
+                    w = __clamp0( w );
+                result[0] += float( input[(y * width + x) * inc + 0 * iN] ) * w;
+                result[1] += float( input[(y * width + x) * inc + 1 * iN] ) * w;
+                result[2] += float( input[(y * width + x) * inc + 2 * iN] ) * w;
+            }
+            else if( fo > fSize2 )
+            {
+                float w = wp[(fo - filterZeroChannels - 1) * wN];
+                wsum += w;
+                if( wclamp )
+                    w = __clamp0( w );
+                result[0] += float( input[(y * width + x) * inc + 0 * iN] ) * w;
+                result[1] += float( input[(y * width + x) * inc + 1 * iN] ) * w;
+                result[2] += float( input[(y * width + x) * inc + 2 * iN] ) * w;
+            }
+        }
+    }
+
+    if( pDenoised )
+    {
+#pragma unroll 5
+        for( int32_t fy = 0; fy < 5; ++fy )          // filterWidth
+        {
+#pragma unroll 5
+            for( int32_t fx = 0; fx < 5; ++fx )      // filterHeight
+            {
+                // Compute tap coordinates, used for input activations and bilateral guides
+                const int32_t y = py + fy - (filterHeight - 1) / 2;
+                const int32_t x = px + fx - (filterWidth  - 1) / 2;
+
+                if( y < 0 || x < 0 || y >= height || x >= width )
+                    continue;
+                const int32_t fo = fy * filterWidth + fx;
+
+                if( fo > 0 )             // last 1/2 res layer, skip [0], use weights [24..47]
+                {
+                    float w = wp[(24 + fo - 1) * wN];
+                    wsum += w;
+                    if( wclamp )
+                        w = __clamp0( w );
+                    result[0] += float( pDenoised[(y * width + x) * pnc + 0 * pN] ) * w;
+                    result[1] += float( pDenoised[(y * width + x) * pnc + 1 * pN] ) * w;
+                    result[2] += float( pDenoised[(y * width + x) * pnc + 2 * pN] ) * w;
+                }
+            }
+        }
+    }
+
+    // add central pixel with 1-wsum weight
+    wsum = 1.f - wsum;
+    if( wclamp )
+        wsum = __clamp0( wsum );
+    for( int c=0; c < 3; c++ )
+    {
+        result[c] += float( input[(py * width + px) * inc + c * iN] ) * wsum;
+
+        if( result[c] > 65504.f )
+            result[c] = 65504.f;
+    }
+
+    if( saveAlpha )     // i.e. NHWC, fp16
+    {
+        __align__ (8) __half r16[4] = { result[0], result[1], result[2], wp[ac * wN] };
+        *(int2*)&output[(py * width + px) * onc] = *(int2*)r16;
+    }
+    else
+    {
+        output[(py * width + px) * onc + 0 * oN] = result[0];
+        output[(py * width + px) * onc + 1 * oN] = result[1];
+        output[(py * width + px) * onc + 2 * oN] = result[2];
+    }
+}
+
+AEWeightedFilterForward::AEWeightedFilterForward( const char* name, const deviceInfo& info )
+    : AELayer( name, info )
+{
+}
+
+OptixResult AEWeightedFilterForward::init(
+    const AELayer* input,
+    const AEKernelpredictionReformat * wl,
+    const AELayer * pDenoised,
+    const unsigned int kernelSize,
+    ErrorDetails& errDetails )
+{
+    OptixResult result = AELayer::init( errDetails );
+
+    if( result )
+        return result;
+
+    if( input == 0 || wl == 0 )
+        return errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "kpn filter: input or weight layer null" );
+
+    if( input->m_outWidth != wl->m_outWidth || input->m_outHeight != wl->m_outHeight )
+        return errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "kpn filter: input and weight layer resolution does not match" );
+
+    m_wl          = wl;
+    m_input       = input;              // inputs are downsampled layers (they have 3c in this version)
+    m_outWidth    = input->m_outWidth;
+    m_outHeight   = input->m_outHeight;
+    m_outChannels = 4;                  // RGB and alpha for upsampling (taken from wl)
+    m_kernelSize  = kernelSize;
+    m_pDenoised   = pDenoised;
+
+    m_outsize = getBufferTypeSize() * 1 * m_outChannels * m_outHeight * m_outWidth;
+
+    return result;
+}
+
+AEWeightedFilterForward::~AEWeightedFilterForward()
+{
+}
+
+OptixResult AEWeightedFilterForward::destroy( ErrorDetails& errDetails )
+{
+    return AELayer::destroy( errDetails );
+}
+
+OptixResult AEWeightedFilterForward::fwdEval( void* smem, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    beginTiming();
+
+    int inc = m_tensorFormat == TENSOR_NHWC ? m_input->m_outChannels : 1;
+    int iN  = m_tensorFormat == TENSOR_NHWC ? 1 : m_input->m_outWidth * m_input->m_outHeight;
+
+    int onc = m_tensorFormat == TENSOR_NHWC ? m_outChannels : 1;
+    int oN  = m_tensorFormat == TENSOR_NHWC ? 1 : m_outWidth * m_outHeight;
+
+    int wnc = m_tensorFormat == TENSOR_NHWC ? m_wl->m_outChannels : 1;
+    int wN  = m_tensorFormat == TENSOR_NHWC ? 1 : m_wl->m_outWidth * m_wl->m_outHeight;
+
+    int pnc, pN;
+    if( m_pDenoised )
+    {
+        pnc = m_tensorFormat == TENSOR_NHWC ? m_pDenoised->m_outChannels : 1;
+        pN  = m_tensorFormat == TENSOR_NHWC ? 1 : m_pDenoised->m_outWidth * m_pDenoised->m_outHeight;
+    }
+
+    if( m_dtype == DATA_HALF )
+    {
+#if( __LWDA_ARCH__ >= 530 || !defined( __LWDA_ARCH__ ) )
+        dim3 dimBlock( 256, 4, 1 );
+        dim3 blockGrid = dim3( roundUp( m_outWidth, dimBlock.x ), roundUp( m_outHeight, dimBlock.y ), 1 );
+        if( m_input->getBufferTypeSize() == sizeof( __half ) )
+            k_WeightedFilterForward_combined_RGB<__half, __half>
+                <<<blockGrid, dimBlock, 0, stream>>>(
+                            (__half*)( (char*)smem + m_outDataIndex ),
+                            (__half*)( (char*)smem + m_input->m_outDataIndex ),
+                            (__half*)( (char*)smem + m_wl->m_outDataIndex ),
+                            m_pDenoised ? (__half*)( (char*)smem + m_pDenoised->m_outDataIndex ) : 0,
+                            (int32_t)m_outWidth, (int32_t)m_outHeight, (int32_t)onc, (int32_t)oN,
+                            (int32_t)m_kernelSize, (int32_t)m_kernelSize, m_wl->m_filterZeroChannels,
+                            (int32_t)inc, iN, (int32_t)wnc, (int32_t)wN, (int32_t)pnc, pN,
+                            m_wl->m_aChannel,
+                            m_tensorFormat == TENSOR_NHWC,
+                            m_wl->m_clipWeights );
+        else
+            k_WeightedFilterForward_combined_RGB<__half, float>
+                <<<blockGrid, dimBlock, 0, stream>>>(
+                            (__half*)( (char*)smem + m_outDataIndex ),
+                            (float*) ( (char*)smem + m_input->m_outDataIndex ),
+                            (__half*)( (char*)smem + m_wl->m_outDataIndex ),
+                            m_pDenoised ? (float*)( (char*)smem + m_pDenoised->m_outDataIndex ) : 0,
+                            (int32_t)m_outWidth, (int32_t)m_outHeight, (int32_t)onc, (int32_t)oN,
+                            (int32_t)m_kernelSize, (int32_t)m_kernelSize, m_wl->m_filterZeroChannels,
+                            (int32_t)inc, iN, (int32_t)wnc, (int32_t)wN, (int32_t)pnc, pN,
+                            m_wl->m_aChannel,
+                            m_tensorFormat == TENSOR_NHWC,
+                            m_wl->m_clipWeights );
+#endif
+    }
+    else
+    {
+        dim3 dimBlock( LWDA_BLOCK, LWDA_BLOCK, 1 );
+        dim3 blockGrid = dim3( roundUp( m_outWidth, dimBlock.x ), roundUp( m_outHeight, dimBlock.y ), 1 );
+        k_WeightedFilterForward_combined_RGB<float, float>
+            <<<blockGrid, dimBlock, 0, stream>>>( (float*)(
+                        (char*)smem + m_outDataIndex ),
+                        (float*)( (char*)smem + m_input->m_outDataIndex ),
+                        (float*)( (char*)smem + m_wl->m_outDataIndex ),
+                        m_pDenoised ? (float*)( (char*)smem + m_pDenoised->m_outDataIndex ) : 0,
+                        (int32_t)m_outWidth, (int32_t)m_outHeight, (int32_t)onc, (int32_t)oN,
+                        (int32_t)m_kernelSize, (int32_t)m_kernelSize, m_wl->m_filterZeroChannels,
+                        (int32_t)inc, iN, (int32_t)wnc, (int32_t)wN, (int32_t)pnc, pN,
+                        m_wl->m_aChannel,
+                        m_tensorFormat == TENSOR_NHWC,
+                        m_wl->m_clipWeights );
+    }
+
+    endTiming();
+
+    return OPTIX_SUCCESS;
+}
+
+// --------------- bilinear upsampling ---------------
+
+__global__ void k_Upsample2x_combined(
+    __half * out,
+    const __half* input,
+    const __half* lwrFiltered,
+    const int width, const int height, const int channels,
+    const int nc, const int iN, const int oN )
+{
+#if( __LWDA_ARCH__ >= 530 || !defined( __LWDA_ARCH__ ) )
+    const int oh = height * 2;
+    const int ow = width  * 2;
+
+    const int x  = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y  = blockIdx.y * blockDim.y + threadIdx.y;
+    const int c  = blockIdx.z * blockDim.z + threadIdx.z;
+
+    if( c >= channels )
+        return;
+
+    // Read the image pixels
+    __half img_fetch[3][3];
+    for( int hi = 0; hi < 3; ++hi )
+    {
+        for( int wi = 0; wi < 3; ++wi )
+        {
+            // The coordinates. Use CLAMP accessing.
+            int h = clamp( y + hi - 1, 0, height-1 );
+            int w = clamp( x + wi - 1, 0, width-1 );
+            img_fetch[hi][wi] = input[(h * width + w) * nc + c * iN];
+        }
+    }
+
+    // Compute the horizontal linear interp. 0x3400 == 0.25 and 0x3a00 == 0.75.
+    __half tmp[3][2];
+    for( int jj = 0; jj < 3; ++jj )
+    {
+        tmp[jj][0] = __float2half(0.25f) * img_fetch[jj][0] + __float2half(0.75f) * img_fetch[jj][1];
+        tmp[jj][1] = __float2half(0.25f) * img_fetch[jj][2] + __float2half(0.75f) * img_fetch[jj][1];
+    }
+
+    // Compute the vertical linear interp. 0x3400 == 0.25 and 0x3a00 == 0.75.
+    __half upsampled[2][2];
+    for( int jj = 0; jj < 2; ++jj )
+    {
+        upsampled[0][jj] = __float2half(0.25f) * tmp[0][jj] + __float2half(0.75f) * tmp[1][jj];
+        upsampled[1][jj] = __float2half(0.25f) * tmp[2][jj] + __float2half(0.75f) * tmp[1][jj];
+    }
+
+    int x2 = x * 2;
+    int y2 = y * 2;
+
+    // Store the result.
+    for( int pi = 0; pi < 2; ++pi )
+    {
+        for( int qi = 0; qi < 2; ++qi )
+        {
+            if( x2 + qi < ow && y2 + pi < oh )
+            {
+                const float a = lwrFiltered[((y2 + pi) * ow + x2 + qi) * nc + 3 * oN];
+                const float b = 1.f - a;
+                float f = float( upsampled[pi][qi] ) * a + float( lwrFiltered[((y2 + pi) * ow + x2 + qi) * nc + c * oN] ) * b;
+                if( f > 65504.f )
+                    f = 65504.f;
+                out[((y2 + pi) * ow + x2 + qi) * nc + c * oN] = f;
+            }
+        }
+    }
+#endif
+}
+
+template <typename dtype>
+__global__ void k_Upsample2x_combined_RGB(
+    dtype* out,
+    const dtype* input,
+    const dtype* lwrFiltered,
+    const dtype* alpha, const int aChannels, const int aChannel,
+    const int width, const int height, const int channels,
+    const int nc, const int iN, const int oN )
+{
+    const int oh = height * 2;
+    const int ow = width  * 2;
+
+    const int x  = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y  = blockIdx.y * blockDim.y + threadIdx.y;
+
+    // Read the image pixels
+    float img_fetch[3][3][3];
+    for( int hi = 0; hi < 3; ++hi )
+    {
+        for( int wi = 0; wi < 3; ++wi )
+        {
+            // The coordinates. Use CLAMP accessing.
+            int h = clamp( y + hi - 1, 0, height-1 );
+            int w = clamp( x + wi - 1, 0, width-1 );
+            for( int c=0; c < 3; c++ )
+                img_fetch[hi][wi][c] = input[(h * width + w) * nc + c * iN];
+        }
+    }
+
+    // Compute the horizontal linear interp. 0x3400 == 0.25 and 0x3a00 == 0.75.
+    float tmp[3][2][3];
+    for( int jj = 0; jj < 3; ++jj )
+    {
+        for( int c=0; c < 3; c++ )
+        {
+            tmp[jj][0][c] = 0.25f * img_fetch[jj][0][c] + 0.75f * img_fetch[jj][1][c];
+            tmp[jj][1][c] = 0.25f * img_fetch[jj][2][c] + 0.75f * img_fetch[jj][1][c];
+        }
+    }
+
+    // Compute the vertical linear interp. 0x3400 == 0.25 and 0x3a00 == 0.75.
+    float upsampled[2][2][3];
+    for( int jj = 0; jj < 2; ++jj )
+    {
+        for( int c=0; c < 3; c++ )
+        {
+            upsampled[0][jj][c] = 0.25f * tmp[0][jj][c] + 0.75f * tmp[1][jj][c];
+            upsampled[1][jj][c] = 0.25f * tmp[2][jj][c] + 0.75f * tmp[1][jj][c];
+        }
+    }
+
+    int x2 = x * 2;
+    int y2 = y * 2;
+
+    // Store the result.
+    for( int pi = 0; pi < 2; ++pi )
+    {
+        for( int qi = 0; qi < 2; ++qi )
+        {
+            if( x2 + qi < ow && y2 + pi < oh )
+            {
+                const float a = alpha[((y2 + pi) * ow + x2 + qi) * aChannels + aChannel];
+                const float b = 1.f - a;
+                for( int c=0; c < 3; c++ )
+                    out[((y2 + pi) * ow + x2 + qi) * nc + c * oN] = 
+                        upsampled[pi][qi][c] * a + (float)lwrFiltered[((y2 + pi) * ow + x2 + qi) * nc + c * oN] * b;
+            }
+        }
+    }
+}
+
+AEKernelpredictionUpsample::AEKernelpredictionUpsample( const char* name, const deviceInfo& info )
+    : AELayer( name, info )
+{
+}
+
+OptixResult AEKernelpredictionUpsample::init( const AELayer* input, const AELayer* lwrFiltered, const AEKernelpredictionReformat * alpha, ErrorDetails& errDetails )
+{
+    OptixResult result = AELayer::init( errDetails );
+
+    if( result )
+        return result;
+
+    if( input->m_outWidth*2 != lwrFiltered->m_outWidth || input->m_outHeight*2 != lwrFiltered->m_outHeight )
+        return errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "upsampling: input and current filtered resolution does not match" );
+
+    if( input->m_outWidth*2 != alpha->m_outWidth || input->m_outHeight*2 != alpha->m_outHeight )
+        return errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "upsampling: input and alpha resolution does not match" );
+
+    m_input       = input;
+    m_lwrFiltered = lwrFiltered;
+    m_alpha       = alpha;
+
+    m_outWidth    = 2 * m_input->m_outWidth;
+    m_outHeight   = 2 * m_input->m_outHeight;
+    m_outChannels = m_input->m_outChannels;
+
+    m_outsize = getBufferTypeSize() * 1 * m_outChannels * m_outHeight * m_outWidth;
+
+    return result;
+}
+
+AEKernelpredictionUpsample::~AEKernelpredictionUpsample()
+{
+}
+
+OptixResult AEKernelpredictionUpsample::destroy( ErrorDetails& errDetails )
+{
+    return AELayer::destroy( errDetails );
+}
+
+OptixResult AEKernelpredictionUpsample::fwdEval( void* smem, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    beginTiming();
+
+    int nc = m_tensorFormat == TENSOR_NHWC ? m_outChannels : 1;
+    int iN = m_tensorFormat == TENSOR_NHWC ? 1 : m_input->m_outWidth * m_input->m_outHeight;
+    int oN = m_tensorFormat == TENSOR_NHWC ? 1 : m_outWidth * m_outHeight;
+
+    if( m_tensorFormat == TENSOR_NHWC )
+    {
+        dim3 block;
+        block.x = 64;
+        block.y = 4;
+        block.z = 3; /// m_outChannels is always 4 for allocation including alpha
+
+        dim3 grid = dim3( roundUp( m_input->m_outWidth, block.x ), roundUp( m_input->m_outHeight, block.y ), 1 );
+
+        k_Upsample2x_combined <<<grid, block, 0, stream>>>(
+            (__half*)( (char*)smem + m_outDataIndex ),
+            (__half*)( (char*)smem + m_input->m_outDataIndex ),
+            (__half*)( (char*)smem + m_lwrFiltered->m_outDataIndex ),
+            m_input->m_outWidth, m_input->m_outHeight, m_input->m_outChannels, nc, iN, oN );
+    }
+    else
+    {
+        int anc = m_tensorFormat == TENSOR_NHWC ? m_alpha->m_outChannels : 1;
+        int aN  = m_tensorFormat == TENSOR_NHWC ? m_alpha->m_aChannel : m_alpha->m_aChannel * m_alpha->m_outWidth * m_alpha->m_outHeight;
+
+        dim3 block;
+        block.x = LWDA_BLOCK;
+        block.y = LWDA_BLOCK;
+        block.z = 1;
+
+        dim3 grid = dim3( roundUp( m_input->m_outWidth, block.x ), roundUp( m_input->m_outHeight, block.y ), 1 );
+    
+        if( m_dtype == DATA_HALF )
+        {
+            k_Upsample2x_combined_RGB<__half> <<<grid, block, 0, stream>>>(
+                (__half*)( (char*)smem + m_outDataIndex ),
+                (__half*)( (char*)smem + m_input->m_outDataIndex ),
+                (__half*)( (char*)smem + m_lwrFiltered->m_outDataIndex ),
+                (__half*)( (char*)smem + m_alpha->m_outDataIndex ),
+                anc, aN,
+                m_input->m_outWidth, m_input->m_outHeight, m_input->m_outChannels, nc, iN, oN );
+        }
+        else
+        {
+            k_Upsample2x_combined_RGB<float> <<<grid, block, 0, stream>>>(
+                (float*)( (char*)smem + m_outDataIndex ),
+                (float*)( (char*)smem + m_input->m_outDataIndex ),
+                (float*)( (char*)smem + m_lwrFiltered->m_outDataIndex ),
+                (float*)( (char*)smem + m_alpha->m_outDataIndex ),
+                anc, aN,
+                m_input->m_outWidth, m_input->m_outHeight, m_input->m_outChannels, nc, iN, oN );
+        }
+    }
+
+    endTiming();
+
+    return OPTIX_SUCCESS;
+}
+
+// --------------- reformat kpn weights ---------------
+
+AEKernelpredictionReformat::AEKernelpredictionReformat( const char* name, const deviceInfo& info )
+    : AELayer( name, info )
+{
+}
+
+OptixResult AEKernelpredictionReformat::init( const AELayer* input, bool clipWeights, ErrorDetails& errDetails  )
+{
+    OptixResult result = AELayer::init( errDetails );
+
+    if( result )
+        return result;
+
+    m_input       = input;
+    m_outWidth    = input->m_outWidth;
+    m_outHeight   = input->m_outHeight;
+    if( std::string( m_input->name() ) == "d2s" )
+    {
+        m_outChannels        = input->m_outChannels;
+        m_filterZeroChannels = 1;   // d2s has only 24 (48) out channels, use 0 as first filter value
+        m_aChannel           = 23;  // d2s provides 23 filter and one alpha value (total 24)
+    }
+    else
+    {
+        m_outChannels        = 32;
+        m_filterZeroChannels = 0;   // layer has 24 filter values and one alpha value
+        m_aChannel           = 24;
+    }
+    m_clipWeights = clipWeights;
+    m_outsize = getBufferTypeSize() * 1 * m_outChannels * m_outHeight * m_outWidth;
+
+    return OPTIX_SUCCESS;
+}
+
+AEKernelpredictionReformat::~AEKernelpredictionReformat()
+{
+}
+
+OptixResult AEKernelpredictionReformat::destroy( ErrorDetails& errDetails )
+{
+    return AELayer::destroy( errDetails );
+}
+
+static __global__ void k_reformat_NHWC(
+    __half* output,
+    const __half* input,
+    const int32_t width,
+    const int32_t height,
+    const int32_t nc )
+{
+#if( __LWDA_ARCH__ >= 530 || !defined( __LWDA_ARCH__ ) )
+    int img_h = ( blockIdx.z * blockDim.z + threadIdx.z );
+    int img_w = ( blockIdx.y * blockDim.y + threadIdx.y );
+    int img_c = ( blockIdx.x * blockDim.x + threadIdx.x ) * 8;
+
+    if( img_h < height && img_w < width )
+    {
+        const int4 * src = (const int4*)&input[img_h * width * nc + img_w * nc + img_c];
+        int4 * result = (int4*)&output[img_h * width * 32 + img_w * 32 + img_c];
+        *result = *src;
+    }
+#endif
+}
+
+OptixResult AEKernelpredictionReformat::fwdEval( void* smem, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    beginTiming();
+
+    if( m_tensorFormat == TENSOR_NHWC )
+    {
+        dim3 block;
+        block.x = 32 / 8;
+        block.y = 4;
+        block.z = 256 / block.x / block.y;
+        dim3 grid = dim3( 1, roundUp( m_outWidth, block.y ), roundUp( m_outHeight, block.z ) );
+
+        k_reformat_NHWC<<<grid, block, 0, stream>>>(
+                (__half*)( (char*)smem + m_outDataIndex ),
+                (__half*)( (char*)smem + m_input->m_outDataIndex ),
+                (int32_t)m_outWidth, (int32_t)m_outHeight, (int32_t)m_input->m_outChannels );
+    }
+    else
+    {
+        LWresult lwret;
+        if ( lwret = corelib::lwdaDriver().LwMemcpyDtoDAsync(
+            ( LWdeviceptr )( (char*)smem + m_outDataIndex ),
+            ( LWdeviceptr )( (char*)smem + m_input->m_outDataIndex ),
+            m_outsize, stream ) )
+            return errDetails.logDetails( lwret, "tensor reformat failed in KPN" );
+    }
+
+    endTiming();
+
+    return OPTIX_SUCCESS;
+}
+
+};  // namespace optix_exp

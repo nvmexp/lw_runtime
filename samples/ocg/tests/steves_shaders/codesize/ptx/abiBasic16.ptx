@@ -1,0 +1,48 @@
+.version 3.1
+.target sm_20
+
+.func (.param .align 4 .b8 out[4]) myadd (.param .align 4 .b8 in[8])
+{
+    .reg .u16 r, s, a, b, c, d;
+
+    ld.param.u16   a, [in+0];
+    ld.param.u16   b, [in+2];
+    add.u16       r, a, b;
+    ld.param.u16   c, [in+4];
+    ld.param.u16   d, [in+6];
+    add.u16       s, c, d;
+    st.param.u16   [out+0], r;
+    st.param.u16   [out+2], s;
+    ret;
+}
+
+.entry main(.param .u32 output, .param .u32 output1)
+{
+    .param .align 4 .b8 in[8];
+    .param .align 4 .b8 out[4];
+    .reg .u16 r, s;
+    .reg .u32 o;
+
+    st.param.u16   [in+0], 2;
+    st.param.u16   [in+2], 4;
+    st.param.u16   [in+4], 6;
+    st.param.u16   [in+6], 8;
+    call (out), myadd, (in);
+    ld.param.u16   r, [out+0];
+    ld.param.u16   s, [out+2];
+    ld.param.u32   o, [output];
+    st.v2.b16      [o], {r, s};
+
+    st.param.u16   [in+0], r;
+    st.param.u16   [in+2], s;
+    st.param.u16   [in+4], r;
+    st.param.u16   [in+6], s;
+    call (out), myadd, (in);
+    ld.param.u16   r, [out+0];
+    ld.param.u16   s, [out+2];
+    ld.param.u32   o, [output1];
+    st.v2.b16      [o], {r, s};
+
+    exit;
+}
+ 

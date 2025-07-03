@@ -1,0 +1,489 @@
+# LWIDIA_COPYRIGHT_BEGIN
+#
+# Copyright (c) 2005-2021, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+# LWIDIA_COPYRIGHT_END
+
+##############################################################################
+# apps/ocg/cop_parseasm/makefile.lwmk
+##############################################################################
+
+# default is to optimize all builds (including DEBUG).  This can be overridden
+# for local debug builds by setting LW_OPTIMIZER=0 in the build command.
+LW_OPTIMIZE ?= 1
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+ifneq (,$(findstring $(LW_TARGET_OS), "wddm wddm2 winnext"))
+  PARSEASM_USE_LEGACY_TOOLS = 0
+else ifneq (,$(findstring $(LW_TARGET_OS), "winlh win7"))
+  PARSEASM_USE_LEGACY_TOOLS = 1
+else ifeq ($(LW_TARGET_OS),winxp)
+  # Not really supported. But this allows "lwmake sweep" without
+  # adding an OS to the command line.
+  PARSEASM_USE_LEGACY_TOOLS = 1
+else
+  $(error Unsupported LW_TARGET_OS $(LW_TARGET_OS))
+endif
+
+ifeq ($(PARSEASM_USE_LEGACY_TOOLS), 1)
+  # Ugly hack
+  override LW_TARGET_OS:=winlh
+endif
+
+LW_LATCH_NEW_LWCONFIG ?= 0
+# Enable asserts on compiler code
+COMPILER_ENABLE_ASSERT ?= 0
+
+ifeq ($(LW_LATCH_NEW_LWCONFIG),1)
+  # We add CheetAh GPUs so this tool is compiled to work across as many devices as possible
+  override LWCFG_OPTIONS+="--override=EnableIf:HasTag(TegraGpu)"
+else
+  override LWCFG_OPTIONS+="--override=LWCFG_GLOBAL_CHIP_T124:enable"
+  override LWCFG_OPTIONS+="--override=LWCFG_GLOBAL_ARCH_TEGRA:enable"
+endif
+
+ifeq ($(PARSEASM_USE_LEGACY_TOOLS), 1)
+  # This makefile is too non-standard.
+  # Hack WAR for its broken behavior.
+  override LWCFG_OPTIONS += "--override=LWCFG_GLOBAL_FEATURE_WINBLUE_SUPPORT:disable"
+endif
+
+# This generates and includes LWCFG_* makefile vars and C #defines in g_lwconfig.h
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+LW_INCLUDES += $(OUTPUTDIR) # To pick up generated headers
+
+# Define early to not hit warnings when lwconfig is not initialized
+PASM_OBJECTS :=
+PASM_MAIN_OBJECT :=
+PASM_COMPILER_OBJECTS :=
+
+# Some included makefile fragments use LWCFG. But copfiles.inc declares LWCFG_INITIALIZED
+# as a hack for Cg builds, so fragments included after that can't do this check themselves.
+ifdef LWCFG_INITIALIZED
+
+  ifeq ($(PARSEASM_USE_LEGACY_TOOLS), 0)
+    include $(LW_SOURCE)/apps/ocg/cop_parseasm/makefile-tools.lwmk
+  else
+
+    ifneq ($(LW_TARGET_OS),winxp)
+      ifneq ($(LW_TARGET_OS),winlh)
+        $(error Only winxp and winlh builds supported)
+      endif
+    endif
+
+    # Override the defaults from LddmCommon.lwmk. Moving to a newer DDK
+    # requires also moving to a newer compiler. This makefile's compiler
+    # setup is too non-standard. Consider mimicking how lwapi selects a
+    # compiler and DDK. (See drivers/lwapi/gpu/makefile-tools.lwmk)
+    LW_DDK_VER    = nt8
+    LW_DDK_SUBVER = 9200
+    LW_DDK_BUILD  = unused
+    LW_NEW_DDK    = 1
+
+    # Skip this belwase it does not work with modern
+    # LddmCommon.lwmk. It's OK to skip this include because we don't
+    # need anything from LddmCommon that is still uninitialized.
+    ifeq (0,1)
+      # Must include this after overriding the DDK version.
+      #include $(LW_SOURCE)/drivers/common/build/LddmCommon.lwmk
+    endif
+
+    # Bullseye Code COverage. Eanbled only if BULLSEYECOVERAGE is defined
+
+    BULLSEYECOVERAGE ?= 
+
+    ifneq ($(BULLSEYECOVERAGE),)
+      BULLSEYEPATH   ?= C:\Progra~1\BullseyeCoverage
+      BULLSEYECC     := $(BULLSEYEPATH)\bin\covc.exe
+      BULLSEYELINK   := $(BULLSEYEPATH)\bin\covlink.exe
+      ifeq ($(LW_TARGET_ARCH),x86)
+        # This needs to be quoted
+        CC       := "$(BULLSEYECC)  $(LW_TOOLS)/win32/msvc100/bin/cl"
+        # This needs to be un-quoted
+        LINK     := $(BULLSEYELINK) $(LW_TOOLS)/win32/msvc100/bin/link
+        LIBEXE   :=                 $(LW_TOOLS)/win32/msvc100/bin/lib -nologo
+      endif
+      ifeq ($(LW_TARGET_ARCH),amd64)
+        # This needs to be quoted
+        CC       := "$(BULLSEYECC)  $(LW_TOOLS)/win32/msvc100/bin/amd64/cl"
+        # This needs to be un-quoted
+        LINK     := $(BULLSEYELINK) $(LW_TOOLS)/win32/msvc100/bin/amd64/link
+        LIBEXE   :=                 $(LW_TOOLS)/win32/msvc100/bin/amd64/lib -nologo
+      endif
+    else
+      BULLSEYECOVERAGE :=
+      ifeq ($(LW_TARGET_ARCH),x86)
+        CC      := $(LW_TOOLS)/win32/msvc100/bin/cl
+        LINK    := $(LW_TOOLS)/win32/msvc100/bin/link
+        LIBEXE  := $(LW_TOOLS)/win32/msvc100/bin/lib -nologo
+      endif
+      ifeq ($(LW_TARGET_ARCH),amd64)
+        CC      := $(LW_TOOLS)/win32/msvc100/bin/amd64/cl
+        LINK    := $(LW_TOOLS)/win32/msvc100/bin/amd64/link
+        LIBEXE  := $(LW_TOOLS)/win32/msvc100/bin/amd64/lib -nologo
+      endif
+    endif
+
+    FGREP    := $(LW_TOOLS)/win32/MiscBuildTools/fgrep
+    NMSYM    := $(LW_TOOLS)/win32/MiscBuildTools/nmsym
+    BSCMAKE  := $(LW_TOOLS)/win32/msvc100/bin/bscmake
+
+  endif # PARSEASM_USE_LEGACY_TOOLS
+
+  # This macro is required by CG *.inc files
+  CG_SRC := $(COP_SOURCE)
+
+  # includes internal-only "lwonly" profile
+  LWSTOM_PROFILE=lwonly
+  include $(CG_SRC)/common/cop/copfiles.inc
+
+  LW_INCLUDES += $(CG_COP_INCLUDES_PARSEASM)
+  PASM_COMPILER_SOURCES := $(CG_COP_FILES_PARSEASM)
+
+  include $(CG_SRC)/common/dwarf/dwarffiles.inc
+  LW_INCLUDES += $(CG_DWARF_INCLUDES_PARSEASM)
+  PASM_COMPILER_SOURCES += $(CG_DWARF_FILES_PARSEASM)
+
+  include $(CG_SRC)/common/lwi/lwifiles.inc
+  LW_INCLUDES += $(CG_LWI_INCLUDES_PARSEASM)
+  PASM_SOURCES += $(CG_LWI_FILES_PARSEASM)
+
+  PASM_COMPILER_SOURCES += parseasmutils.cpp
+  PASM_COMPILER_SOURCES += parseasmlib.cpp
+  PASM_COMPILER_SOURCES += parseasm_profileoption.cpp
+
+  include $(LW_SOURCE)/drivers/ddraw/compiler/parseasm/parseasmd3d.lwmk
+  PASM_SOURCES += $(D3D_SOURCES)
+
+  ifneq ($(LW_TARGET_OS),winxp)
+    include $(LW_SOURCE)/drivers/wgf2um/tools/compiler/parseasm/parseasmdx10.lwmk
+    PASM_SOURCES += $(DX10_SOURCES)
+  endif
+
+  include $(LW_SOURCE)/drivers/OpenGL/tools/parseasm/parseasmogl.lwmk
+  PASM_SOURCES += $(OGL_SOURCES)
+
+  LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc
+  LW_INCLUDES += $(LW_SOURCE)/drivers/common/src
+  ifeq ($(LWCFG_GLOBAL_FEATURE_RID68358_DXRT),1)
+  LW_INCLUDES += $(LW_SOURCE)/drivers/rtcore
+  endif
+
+  PASM_COMPILER_SOURCES += lwFragmentProgramOptimize_link.cpp
+
+  PASM_SOURCES += common/SharedBetweenD3DAndPSComp_link.cpp
+  PASM_SOURCES += common/lwShaderDump_link.cpp
+  PASM_SOURCES += common/lwTypecastCheckUtils_link.cpp
+  PASM_SOURCES += common/lwDbg_link.cpp
+
+  PASM_SOURCES += $(PASM_COMPILER_SOURCES)
+  # Add new PASM_SOURCES here
+
+  SOURCES += $(PASM_SOURCES)
+  PASM_OBJECTS := $(call BUILD_OBJECT_LIST, $(PASM_SOURCES))
+
+  $(PASM_OBJECTS): LW_COMPILE_AS_CXX = 1
+
+  # parseasm.cpp defines main() and is only included in $(PASMEXE)
+  PASM_MAIN_SOURCE := parseasm.cpp
+  PASM_MAIN_OBJECT := $(call BUILD_OBJECT_LIST,$(PASM_MAIN_SOURCE))
+
+  SOURCES += $(PASM_MAIN_SOURCE)
+  PASM_COMPILER_SOURCES += $(PASM_MAIN_SOURCE)
+  # CG_LWI_FILES_PARSEASM has some files from common/cop as well
+  PASM_COMPILER_SOURCES += $(foreach f,$(CG_LWI_FILES_PARSEASM),$(if $(findstring cop_,$f),$f))
+  PASM_COMPILER_SOURCES += $(foreach f,$(CG_LWI_FILES_PARSEASM),$(if $(findstring copi_,$f),$f))
+  PASM_COMPILER_OBJECTS := $(call BUILD_OBJECT_LIST,$(PASM_COMPILER_SOURCES))
+
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+
+  LW_INCLUDES += $(LW_SOURCE)/drivers  # TBD - should eliminate things like #include "Opengl/include/xxxxx.h"
+
+  OGL_ROOT = $(LW_SOURCE)/drivers/OpenGL
+  LW_INCLUDES += $(OGL_ROOT)/interface
+
+  LW_INCLUDES += $(LW_SOURCE)/drivers/common/VPE
+
+  ifeq ($(PARSEASM_USE_LEGACY_TOOLS), 0)
+    LW_INCLUDES += $(LW_TOOLS_INCLUDES)
+  else
+    #make sure that NTx includes come *after* OpenGL includes since there are filename collisions
+    ifeq ($(LW_TARGET_OS),winlh)
+      ifeq ($(LWCFG_GLOBAL_FEATURE_WIN8_SUPPORT), 1)
+        ifneq ($(LW_DDK_BUILD),unused)
+          LW_INCLUDES += $(LW_TOOLS)/ddk/LDDM/$(LW_DDK_BUILD)/Include/shared
+          LW_INCLUDES += $(LW_TOOLS)/ddk/LDDM/$(LW_DDK_BUILD)/Include/um
+          LW_INCLUDES += $(LW_TOOLS)/ddk/LDDM/$(LW_DDK_BUILD)/Include/km
+        endif
+        LW_INCLUDES += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/Include/shared
+        LW_INCLUDES += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/Include/um
+        LW_INCLUDES += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/Include/km
+      else 
+        ifneq ($(LW_DDK_BUILD),unused)
+          LW_INCLUDES += $(LW_TOOLS)/ddk/LDDM/$(LW_DDK_BUILD)/inc/crt
+          LW_INCLUDES += $(LW_TOOLS)/ddk/LDDM/$(LW_DDK_BUILD)/inc/api
+          LW_INCLUDES += $(LW_TOOLS)/ddk/LDDM/$(LW_DDK_BUILD)/inc/ddk
+        endif
+        LW_INCLUDES += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/inc/crt
+        LW_INCLUDES += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/inc/api
+        LW_INCLUDES += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/inc/ddk
+      endif
+    endif
+  endif # PARSEASM_USE_LEGACY_TOOLS
+
+  LW_INCLUDES += $(LW_SOURCE)/apps/ocg/cop_parseasm
+  ifeq ($(PARSEASM_USE_LEGACY_TOOLS), 1)
+    LW_INCLUDES += $(LW_TOOLS)/win32/msvc100/include
+    LW_INCLUDES += $(LW_TOOLS)/win32/msvc100/PlatformSDK/Include
+    LW_INCLUDES += $(LW_TOOLS)/ddk/DirectX9/inc
+  endif
+
+  LW_INCLUDES += $(LW_TOOLS)/sdk/DirectX9c/Include
+
+  ifeq ($(LW_TARGET_OS),winxp)
+    LW_TARGET_DEFINES += _WIN32_IE=0x0603 _WIN32_WINNT=0x0502 WILWER=0x0502
+  else
+    LW_DEFINES += LW_LDDM=$(LW_DDK_SUBVER)
+    LW_TARGET_DEFINES += _WIN32_IE=0x0605 _WIN32_WINNT=0x0602 WILWER=0x0600
+  endif
+
+  # Default to no exception handling
+  LW_EXCEPTIONS ?= 0
+
+  LW_DEFINES += WIN32
+  LW_DEFINES += _CONSOLE
+  LW_DEFINES += LW_PARSEASM
+  LW_DEFINES += ALLOW_D3D_BUILD
+  LW_DEFINES += DEVELOP
+  LW_DEFINES += _VM_NO_CGFX
+  LW_DEFINES += _CRT_SELWRE_NO_WARNINGS
+
+  ifeq ($(LW_VERBOSE),0)
+    LFLAGS   += -nologo
+    CFLAGS   += -nologo
+  endif
+
+  ifeq ($(LW_VERBOSE),1)    # With just level-1 verbose on, don't show program logo's
+    LFLAGS   += -nologo
+    CFLAGS   += -nologo
+  endif
+
+  ifeq ($(LW_VERBOSE),2)
+    LFLAGS   += -verbose
+    CFLAGS   += -showIncludes
+  endif
+
+  CFLAGS += -c
+
+  LFLAGS += -NODEFAULTLIB:"libc"
+  LFLAGS += -INCREMENTAL:NO
+  LFLAGS += -SUBSYSTEM:CONSOLE
+  LFLAGS += -out:$@
+  LFLAGS += $(PCH_OBJECTS)
+  ifeq ($(PARSEASM_USE_LEGACY_TOOLS), 0)
+    LFLAGS += -libpath:$(lib_sdk_path)
+    LFLAGS += -libpath:$(lib_crt_path)
+    ifneq ($(lib_sdk_path),$(lib_directx_path))
+      LFLAGS += -libpath:$(lib_directx_path)
+    endif
+  else
+    ifeq ($(LW_TARGET_ARCH),ARMv7)
+      LFLAGS += -libpath:$(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/Lib/win8/um/arm
+    else ifeq ($(LW_TARGET_ARCH),x86)
+      LFLAGS += -libpath:$(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/Lib/win8/um/x86
+    else
+      LFLAgs += -libpath:$(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/Lib/win8/um/x64
+    endif
+  endif
+  ifeq ($(LW_TARGET_ARCH),x86)
+    LW_DEFINES += _X86_
+    LFLAGS += /SAFESEH  # only valid for 32-bit
+    LFLAGS += -MACHINE:X86
+    ifeq ($(PARSEASM_USE_LEGACY_TOOLS), 1)
+      LFLAGS += -libpath:$(LW_TOOLS)/win32/msvc100/lib
+      LFLAGS += -libpath:$(LW_TOOLS)/win32/msvc100/PlatformSDK/Lib
+      LFLAGS += -libpath:$(LW_TOOLS)/sdk/winxp/lib
+    endif
+    LFLAGS += -libpath:$(LW_TOOLS)/sdk/DirectX9c/lib
+    LFLAGS += $(LW_TOOLS)/sdk/DirectX9c/Lib/d3dx9.lib
+  endif
+  ifeq ($(LW_TARGET_ARCH),amd64)
+    LW_DEFINES += AMD64 _AMD64_ _M_AMD64 _WIN64 IS_WIN64=1 
+    LFLAGS += -MACHINE:X64
+    ifeq ($(PARSEASM_USE_LEGACY_TOOLS), 1)
+      LFLAGS += -libpath:$(LW_TOOLS)/win32/msvc100/lib/amd64
+      LFLAGS += -libpath:$(LW_TOOLS)/win32/msvc100/PlatformSDK/Lib/x64
+      LFLAGS += -libpath:$(LW_TOOLS)/sdk/winxp/lib
+    endif
+    LFLAGS += -libpath:$(LW_TOOLS)/sdk/DirectX9c/lib/x64
+    LFLAGS += $(LW_TOOLS)/sdk/DirectX9c/Lib/x64/d3dx9.lib
+  endif
+  LFLAGS += kernel32.lib 
+  LFLAGS += user32.lib 
+  LFLAGS += gdi32.lib 
+  LFLAGS += winspool.lib 
+  LFLAGS += comdlg32.lib 
+  LFLAGS += advapi32.lib 
+  LFLAGS += shell32.lib 
+  LFLAGS += ole32.lib 
+  LFLAGS += oleaut32.lib 
+  LFLAGS += uuid.lib 
+  LFLAGS += dbghelp.lib
+
+  ifeq (1,$(LW_GEN_PDB))
+    CFLAGS += -Fd"$(OUTPUTDIR)/"
+    LFLAGS += -pdb:$(PASMPDB)
+  endif
+
+  ifeq ($(LW_BUILD_TYPE),debug)
+    LW_DEFINES += DEBUG 
+    LW_DEFINES += _DEBUG
+    CFLAGS += -MTd
+    CFLAGS += -GS
+    LFLAGS += -debug
+
+    LFLAGS += libcmtd.lib
+    LFLAGS += libcpmtd.lib
+  else
+    CFLAGS += -MT
+    LW_DEFINES += NDEBUG  # turns off assert in CRT
+    LFLAGS += -release
+
+    LFLAGS += libcmt.lib
+    LFLAGS += libcpmt.lib
+  endif
+
+  
+  ifneq ($(LW_BUILD_TYPE),release)
+    LW_DEFINES += ENABLE_TRACE_CODE  # enable trace code for all build types other than 'release'
+  endif
+
+  LW_COPT_WARN ?= -W3      # Set warning level to 3 (only level 4 is more picky)
+
+  ifeq ($(LW_WARNINGS_AS_ERRORS),1)
+  #  CFLAGS   += -WX       # treat all warnings as errors
+  endif
+
+  CFLAGS += $(LW_COPT_WARN) 
+  CFLAGS += -X            # Ignore standard include directories
+  CFLAGS += -Gm-          # turn off minimal rebuild
+  CFLAGS += -GR-          # disable run-time type information
+  CFLAGS += -Zp8          # Pack structures on 8 byte boundaries
+  CFLAGS += -Oi           # use intrinsic funcs
+  CFLAGS += -wd4838 -wd4091 -wd4595 -wd4244 -wd4334 # disable warnings
+
+  ifeq ($(LW_EXCEPTIONS),1)
+    CFLAGS += -EHsc       # enable exception handling 
+  else
+    CFLAGS += -EHs-c-     # disable exception handling
+    LW_DEFINES += _HAS_EXCEPTIONS=0
+  endif
+
+  ifeq ($(LW_OPTIMIZE),1)
+    CFLAGS += -O2
+    ifneq ($(LW_LTCG),0)
+      CFGLAGS += -GL
+      LFLAGS += -LTCG:NOSTATUS
+      LIBFLAGS += -LTCG
+    endif
+  else
+    CFLAGS += -Od       # Disable all optimizations
+  endif
+
+  ifeq ($(LW_SYMBOLS),1)
+    CFLAGS += -Z7         # include MSVC 7.1 full debug info in objs
+    CFLAGS += -Zm1000
+    LFLAGS += -debug      # generate PDB file during link (also needed to generate nms files)
+  endif
+
+  ifeq ($(LW_GEN_COD),1)
+    CFLAGS += -FAcs -Fa$(OUTPUTDIR)/   # generate source + asm listing and put it in the output dir
+  endif
+
+  ifdef LW_CHECK_STACK
+    CFLAGS += -Gs256  # force stack overflow checks when entering any function with >256B of local vars.
+  endif 
+
+  # Inhibit "warning LNK4221: This object file does not define any previously
+  # undefined public symbols..."; many COP files generate this warning in
+  # parseasm.
+  LIBFLAGS += -ignore:4221
+
+endif # LWCFG_INITIALIZED
+
+ifdef LW_USE_CG_BRANCH
+  PASMEXE := $(OUTPUTDIR)/cop_parseasm_cg.exe
+  PASMPDB := $(OUTPUTDIR)/cop_parseasm_cg.pdb
+  PASMBSC := $(OUTPUTDIR)/cop_parseasm_cg.bsc
+  PASMLIB := $(OUTPUTDIR)/cop_parseasmlib_cg.lib
+else
+  PASMEXE := $(OUTPUTDIR)/cop_parseasm.exe
+  PASMPDB := $(OUTPUTDIR)/cop_parseasm.pdb
+  PASMBSC := $(OUTPUTDIR)/cop_parseasm.bsc
+  PASMLIB := $(OUTPUTDIR)/cop_parseasmlib.lib
+endif
+
+#####################
+# start of make rules
+#####################
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk
+
+build: $(PASMEXE)
+
+ifeq ($(LW_GEN_BSC),1)
+
+  SBR_DIR := $(OUTPUTDIR)
+  LW_BSC_FILE := $(PASMBSC)
+
+build: $(SBR_DIR) $(LW_BSC_FILE)
+
+$(SBR_DIR):
+	$(MKDIR) $(SBR_DIR)
+
+  CFLAGS += -FR$(SBR_DIR)/
+  ASMFLAGS += -FR$(SBR_DIR)/
+
+$(LW_BSC_FILE): $(PASMEXE) $(wildcard $(SBR_DIR)/*.sbr)
+	@$(ECHO) "  --===* Generating $@ *===--"
+	$(BSCMAKE) -o$(LW_BSC_FILE) $(SBR_DIR)/*.sbr
+
+endif
+
+# "-DNDEBUG" turns off assertions, so if COMPILER_ENABLE_ASSERT=1
+# don't add (remove) "-DNDEBUG" (What else does -DNDEBUG control?) 
+ifeq ($(COMPILER_ENABLE_ASSERT),1)
+  $(PASM_COMPILER_OBJECTS):$(eval LW_DEFINES = $(subst NDEBUG,,$(value LW_DEFINES)))
+  $(PASM_COMPILER_OBJECTS): LW_DEFINES += ENABLE_ASSERT
+endif
+
+$(PASMEXE): $(PASM_MAIN_OBJECT) $(PASMLIB)
+	@$(ECHO) Linking $@...
+	@$(FILEECHO) $(OUTPUTDIR)/linkParameters.txt $(PASM_MAIN_OBJECT) $(PASMLIB) $(strip $(LFLAGS))
+	$(LINK) @$(OUTPUTDIR)/linkParameters.txt
+	$(call LW_CHECK_GUARDWORDS_CMD,$@)
+
+$(PASMLIB): $(PASM_OBJECTS)
+	@$(ECHO) Building Parseasm Library $@...
+	@$(FILEECHO) $(OUTPUTDIR)/libobjs.txt $(PASM_OBJECTS)
+	@$(FILEECHO) $(OUTPUTDIR)/libParameters.txt $(strip $(LIBFLAGS)) $(PASM_OBJECTS) $(PCH_OBJECTS) -out:$@
+	$(LIBEXE) @$(OUTPUTDIR)/libParameters.txt
+
+clean_cop:
+	-$(RM) $(OUTPUTDIR)/*
+
+.PHONY: clean_cop
+clean: clean_cop
+
+clobber_cop:
+	-$(RM) $(OUTPUTDIR)/*
+
+.PHONY: clobber_cop
+clobber: clobber_cop

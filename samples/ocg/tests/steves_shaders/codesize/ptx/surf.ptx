@@ -1,0 +1,90 @@
+        
+	.version 3.1
+	.target sm_20
+
+        .global .surfref surf0;
+        .global .surfref surf1;
+        .global .surfref surf2;
+        .global .surfref surf3;
+        .global .surfref surf4;
+        .global .surfref surf5;
+        .global .surfref surf6;
+        .global .surfref surf7;
+        .global .surfref surf8;
+        .global .surfref surf9;
+        .global .surfref surf10;
+        .global .surfref surf11;
+        .global .u32 fmt;
+
+        .entry main0
+        {
+          .reg .s32 a, b, c;
+          .reg .f32 p, q, r, s;
+          .reg .s64 l;
+          .reg .u32 f;
+
+          mov.u32   a, 14;
+          mov.u32   b, 33;
+
+          suld.b.2d.v2.b32.clamp  {p, q}, [surf0, {a, b}];
+          add.f32   p, p, 1.04;
+          mul.f32   p, q, p;
+          sust.b.2d.v2.b32.trap  [surf1, {a, b}], { p, q};
+
+          suld.b.2d.b64.clamp  {l}, [surf2, {a, b}];
+          sust.b.2d.b64.clamp  [surf3, {a, b}], { l};
+
+          suld.b.2d.v2.b32.trap  {p, q}, [surf4, {a, b}];
+          add.f32   p, p, 1.04;
+          mul.f32   p, q, p;
+          sust.b.2d.v2.b32.trap  [surf5, {a, b}], { p, q};
+
+          suld.b.2d.v2.b32.zero  {p, q}, [surf6, {a, b}];
+          add.f32   p, p, 1.04;
+          mul.f32   p, q, p;
+          sust.b.2d.v2.b32.zero  [surf7, {a, b}], { p, q};
+
+          _suq.pixfmt f, [surf3];
+          st.global.u32 [fmt], f;
+
+          _suq.smplsz f, [surf5];
+          st.global.u32 [fmt], f;
+
+          mov.f32 r, 0.0;
+          mov.f32 s, 3.45;
+
+          sust.p.2d.v4.b32.trap  [surf7, {a,b}], {p, q, r, s};
+          sust.b.2d.v4.b32.trap  [surf7, {a,b}], {p, q, r, s};
+          sust.p.1d.v2.b32.trap  [surf6, {a,b}], {p, q};
+          sust.p.2d.b32.trap     [surf5, {a,b}], {p};
+
+          _sulea.p.2d.clamp l, [surf3, {a, b}];
+          sust.b.2d.b64.trap     [surf3, {a, b}], { l};
+
+          _sulea.p.2d.clamp l, [surf5, {a, b}];
+
+         _suld.b.v4.b32     {p,q,r,s},    [surf3, l];
+         _sust.b.v4.b32     [surf4, l], {p, q, r, s};
+          
+          exit;
+        }
+
+
+        .entry main1
+        {
+          .reg .s32 a, b, c;
+          .reg .f32 p, q, r, s;
+          .reg .u64 l0, l1;
+
+          mov.u32   a, 14;
+          mov.u32   b, 33;
+
+          suld.b.2d.v2.b32.zero  {p, q}, [surf7, {a, b}];
+          add.f32   p, p, 1.04;
+          mul.f32   p, q, p;
+          sust.b.2d.v2.b32.trap  [surf8, {a, b}], { p, q};
+
+          suld.b.2d.v2.b64.trap  {l0, l1}, [surf6, {a,b}];
+          sust.b.1d.v2.b64.trap  [surf6, {a}], {l0, l1};
+       }
+

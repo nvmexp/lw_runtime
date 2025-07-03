@@ -1,0 +1,74 @@
+// Copyright (c) 2017, LWPU CORPORATION.
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include <iostream>
+
+__device__ __forceinline__ float clamp_value( float v )
+{
+    return fminf( v, 1.0f );
+}
+
+__device__ __forceinline__ float tonemap_value( float v, float ilw_gamma )
+{
+    const float t = powf( v, ilw_gamma );
+    return fminf( 1.0f, t );
+}
+
+// Note: extern "C" to demangle the function name for loading with the driver API.
+extern "C" __global__ void aclwmulateKernel( const float*   src,
+                                             float*         dst,
+                                             unsigned char* output,
+                                             const int      npixels,
+                                             const int      nSrcChannels,
+                                             const int      nOutputChannels,
+                                             const float    weight_src,
+                                             const float    weight_dst,
+                                             const float    gamma )
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if( idx >= npixels )
+        return;
+
+    // Accumulate
+    {
+        const int index = idx * nSrcChannels;
+        for( int i = 0; i < nSrcChannels; ++i )
+        {
+            dst[index + i] = dst[index + i] * weight_dst + src[index + i] * weight_src;
+        }
+    }
+
+    // Tonemap and cast to 8-bit
+    // Note: Assuming nSrcChannels <= nOutputChannels
+    if( gamma != 1.0f )
+    {
+        const float ilw_gamma = 1.0f / gamma;
+        for( int i = 0; i < nSrcChannels; ++i )
+        {
+            output[idx * nOutputChannels + i] = (unsigned char)( tonemap_value( dst[idx * nSrcChannels + i], ilw_gamma ) * 255.99f );
+        }
+    }
+    else
+    {
+        for( int i = 0; i < nSrcChannels; ++i )
+        {
+            output[idx * nOutputChannels + i] = (unsigned char)( clamp_value( dst[idx * nSrcChannels + i] ) * 255.99f );
+        }
+    }
+    // Fill any remaining output channels with black
+    for( int i = nSrcChannels; i < nOutputChannels; ++i )
+    {
+        output[idx * nOutputChannels + i] = (unsigned char)( 0 );
+    }
+}
+
+
+// Note: no host function.  We launch this through the driver API.

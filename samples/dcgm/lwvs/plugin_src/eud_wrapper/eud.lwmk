@@ -1,0 +1,60 @@
+##############################################################################
+# define LOCAL_SOURCES
+##############################################################################
+
+LW_CXX_EXCEPTIONS := 0
+LW_CXX_RTTI := 0
+LW_BUILD_PIC := 1
+
+LWRRENT_DIR := $(LWVS_DIR)/plugin_src/eud_wrapper
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += wrapper.cpp
+#LOCAL_SOURCES += eud_data.cpp
+LOCAL_SOURCES += ../Plugin_common.cpp
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+##############################################################################
+## define LOCAL_CFLAGS
+###############################################################################
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(LWVS_PLUGIN_INCLUDES)
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+ifeq ($(LW_BUILD_TYPE), debug)
+LOCAL_CFLAGS += -g -ggdb
+endif
+
+LWVS_EUD_LIBRARY_NAME = libDiagnostic.so
+
+##############################################################################
+## define LOCAL_LDFLAGS
+###############################################################################
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+ifndef VULCAN
+LOCAL_LDFLAGS := -L $(LWML_DIR)/$(OUTPUTDIR) -lstdc++ -lz -L $(LWVS_DIR)/$(OUTPUTDIR) -ltar
+else
+LOCAL_LDFLAGS += -L $(LWML_INTERNAL_DIR) -lstdc++ -lz -L $(LWVS_DIR)/$(OUTPUTDIR) -ltar
+endif
+
+eud_TARGET  := $(OUTPUTDIR)/$(LWVS_EUD_LIBRARY_NAME)
+eud_OBJECTS := $(LOCAL_OBJECTS)
+eud_CFLAGS  := $(LOCAL_CFLAGS)
+eud_LDFLAGS := $(LOCAL_LDFLAGS)
+eud_DEPENDS ?=
+
+build: $(eud_TARGET)
+$(eval $(call MAKE_SHARED_LIBRARY,eud))
+build: $(eud_TARGET).guardwords
+
+#################################################################################
+## End of nested lwmk
+##################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

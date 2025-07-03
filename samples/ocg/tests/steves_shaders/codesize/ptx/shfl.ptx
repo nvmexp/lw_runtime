@@ -1,0 +1,49 @@
+        .version 3.1
+        .target sm_30
+
+        .reg .u32 %ibuf, %obuf;
+
+        .entry ptxtest
+        {
+        .global .u32    g0, g1, g2, g3, g4, g5, g6, g7, g8, g9, g10, g11;
+        .reg .b32       r<6>;
+        .reg .f32       f<4>;
+        .reg .pred      p0, p1;
+
+        ld.global.u32   r1,[g0]; 
+        mov.u32         r2, 31;
+        mov.u32         r3, 8191;
+        ld.global.u32   r4,[g1]; 
+        ld.global.u32   r5,[g2]; 
+        shfl.up.b32     r1|p0, r1, r2, r3;
+@p0     st.global.u32   [g1], r1;
+        mov.u32         r2, 32;
+        mov.u32         r3, 8192;
+@p0     shfl.up.b32     r1|p1, r1, r2, r3;
+@p1     st.global.u32   [g2], r1;
+        mov.u32         r3, 8192;
+@p1     shfl.up.b32     r1|p1, r1, 31, r3;
+@p1     st.global.u32   [g3], r1;
+        mov.u32         r2, 33;
+@p1     shfl.up.b32     r1|p1, r1, r2, 8190;
+@p1     st.global.u32   [g4], r1;
+@p1     shfl.up.b32     r1|p1, r1, 5, 8;
+@p1     st.global.u32   [g5], r1;
+@p1     shfl.up.b32     r1|p1, r1, r2, r3;
+@p1     st.global.u32   [g6], r1;
+@p1     shfl.up.b32     r1|p0, r1, r4, r5;
+@p0     st.global.u32   [g7], r1;
+@p0     shfl.down.b32   r1|p1, r1, r2, r3;
+@p1     st.global.u32   [g8], r1;
+@p1     shfl.idx.b32    r1|p0, r1, r4, r5;
+@p0     st.global.u32   [g9], r1;
+@p0     shfl.bfly.b32   r0|p1, r1, r4, r5;
+@p1     st.global.u32   [g10], r0;
+        ld.global.f32   f1,[g1]; 
+        ld.global.f32   f2,[g2]; 
+@p1     shfl.bfly.b32   f0|p0, f1, r3, r4;
+@p0     add.f32         f1, f0, f2;
+@p0     st.global.f32   [g11], f1;
+        ret;
+        }
+

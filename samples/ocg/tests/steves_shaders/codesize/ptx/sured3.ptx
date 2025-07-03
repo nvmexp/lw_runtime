@@ -1,0 +1,53 @@
+        
+	.version 3.1
+	.target sm_20
+
+        .global .surfref surf0;
+        .global .surfref surf1;
+        .global .surfref surf2;
+        .global .surfref surf3;
+        .global .surfref surf4;
+        .global .surfref surf5;
+        .global .surfref surf6;
+        .global .surfref surf7;
+        .global .surfref surf8;
+        .global .surfref surf9;
+        .global .surfref surf10;
+        .global .surfref surf11;
+        .global .u32 fmt;
+
+        .entry main
+        {
+          .reg .s32 a, b, c;
+          .reg .s64 l, m;
+          .reg .u32 f;
+          .reg .pred p;
+
+          mov.u32   a, 14;
+          mov.u32   b, 33;
+          mov.u32   c, 5;
+
+          // first test sured.p
+          sured.p.add.2d.b32.trap     [surf0, {a,b}], c;
+          sured.p.min.1d.b32.clamp    [surf0, {b}], c;
+          sured.p.or.1d.b32.zero      [surf0, {b}], b;
+
+          .pragma "noPointerTrunc";
+      @!p red.global.add.u32         [l], c;  
+
+          bar.sync 0;
+
+          sured.b.or.2d.b32.trap     [surf0, {a,b}], c;
+          sured.b.min.1d.s32.clamp   [surf0, {a}], b;
+          sured.b.add.1d.u32.zero    [surf0, {a}], b;
+
+          bar.sync 0;
+
+          mov.u64  l,44;
+          sured.b.add.2d.u64.trap     [surf0, {a,b}], l;
+
+      @!p sured.b.or.2d.b32.trap     [surf0, {a,b}], c;
+     
+          exit;
+        }
+

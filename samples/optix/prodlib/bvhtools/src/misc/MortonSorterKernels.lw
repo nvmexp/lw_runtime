@@ -1,0 +1,103 @@
+// Copyright LWPU Corporation 2015
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "MortonSorterKernels.hpp"
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+template <class MortonCode>
+static __global__ __launch_bounds__(MORTON_CALC_WARPS_PER_BLOCK * 32, MORTON_CALC_BLOCKS_PER_SM)
+void MortonCalc(MortonCalcParams p)
+{
+    Range primRange = (p.inPrimRange) ? *p.inPrimRange : Range(0, p.maxPrims);
+
+    // Pick an output primitive index.
+    // First thread => write outPrimRange.
+
+    int outputIdx = threadIdx.x + 32 * (threadIdx.y + MORTON_CALC_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+
+    if (outputIdx == 0)
+        *p.outPrimRange = Range(0, primRange.span());
+
+    if (outputIdx >= p.maxPrims)
+        return;
+
+    // Unused slot => output dummy Morton code for the radix sort.
+
+    if (outputIdx >= primRange.span())
+    {
+        ((MortonCode*)p.outMortonCodes)[outputIdx] = ~(MortonCode)0u;
+        return;
+    }
+
+    // Determine input primitive index.
+
+    int primIdx = outputIdx + primRange.start;
+    if (p.inPrimOrder)
+        primIdx = loadCachedAlign4(&p.inPrimOrder[primIdx]);
+
+    // Callwlate primitive centroid relative to the model AABB.
+
+    AABB modelAABB = p.inApexPointMap->getAABB();
+    AABB primAABB = p.inModel.loadPrimitiveAABB(primIdx);
+    float3 pos = modelAABB.transformRelative(primAABB.getCenter());
+
+    // Form 60-bit Morton code based on the 20 most significant bits.
+
+    unsigned int mortonLo = 0u;
+    unsigned int mortonHi = 0u;
+
+#pragma unroll
+    for (int c = 0; c < 3; c++)
+    {
+        unsigned int v  = min((unsigned int)(chooseComponent(pos, c) * (float)(1u << 20)), (1u << 20) - 1u);
+        unsigned int lo = v & 0x3FFu;
+        unsigned int hi = v >> 10;
+
+        lo += lo << 16, lo &= 0xFF0000FFu, hi += hi << 16, hi &= 0xFF0000FFu;
+        lo += lo << 8,  lo &= 0x0F00F00Fu, hi += hi << 8,  hi &= 0x0F00F00Fu;
+        lo += lo << 4,  lo &= 0xC30C30C3u, hi += hi << 4,  hi &= 0xC30C30C3u;
+        lo += lo << 2,  lo &= 0x49249249u, hi += hi << 2,  hi &= 0x49249249u;
+
+        mortonLo = mortonLo * 2 + lo;
+        mortonHi = mortonHi * 2 + hi;
+    }
+
+    // Output as 32-bit or 64-bit integer.
+
+    ((MortonCode*)p.outMortonCodes)[outputIdx] =
+        (sizeof(MortonCode) < 8) ?
+            (MortonCode)mortonHi :
+            (MortonCode)(((unsigned long long)mortonHi << 32) | mortonLo);
+
+    p.outPrimOrder[outputIdx] = primIdx;
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchMortonCalc(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const MortonCalcParams& p, int bytesPerMortonCode)
+{
+    void (*kernel)(MortonCalcParams);
+    switch (bytesPerMortonCode)
+    {
+    case 4:     kernel = MortonCalc<unsigned int>; break;
+    case 8:     kernel = MortonCalc<unsigned long long>; break;
+    default:    return false;
+    }
+
+    if (lwdaFuncSetCacheConfig(kernel, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    kernel<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

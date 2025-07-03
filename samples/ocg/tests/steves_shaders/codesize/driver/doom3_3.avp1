@@ -1,0 +1,108 @@
+!!ARBvp1.0
+# OPTION ARB_position_ilwariant ;
+
+# VPROG_INTERACTION
+# 
+# input:
+# 
+# attrib[8] TEX0	texture coordinates
+# attrib[9] TEX1	normal
+# attrib[10] TEX2	tangent[0]
+# attrib[11] TEX3	tangent[1]
+# COL			vertex color
+#
+# c[4]	localLightOrigin
+# c[5]	localViewOrigin
+# c[6]	lightProjection S
+# c[7]	lightProjection T
+# c[8]	lightProjection Q
+# c[9]	lightFalloff S
+# c[10]	bumpMatrix S
+# c[11]	bumpMatrix T
+# c[12]	diffuseMatrix S
+# c[13]	diffuseMatrix T
+# c[14]	spelwlarMatrix S
+# c[15]	spelwlarMatrix T
+# c[16]	vertex color modulate
+# c[17]	vertex color add
+# 
+# output:
+# 
+# texture 0 is the lwbe map
+# texture 1 is the per-surface bump map
+# texture 2 is the light falloff texture
+# texture 3 is the light projection texture
+# texture 4 is the per-surface diffuse map
+# texture 5 is the per-surface spelwlar map
+# texture 6 is the spelwlar lookup table
+
+TEMP	R0, R1, R2;
+
+PARAM	defaultTexCoord = { 0, 0.5, 0, 1 };
+
+# callwlate vector to light in R0
+SUB		R0, program.elw[4], vertex.position;
+
+# put into texture space for TEX0
+DP3		result.texcoord[0].x, vertex.attrib[9], R0;
+DP3		result.texcoord[0].y, vertex.attrib[10], R0;
+DP3		result.texcoord[0].z, vertex.attrib[11], R0;
+
+# textures 1 takes the base coordinates by the texture matrix
+MOV		result.texcoord[1], defaultTexCoord;
+DP4		result.texcoord[1].x, vertex.attrib[8], program.elw[10];
+DP4		result.texcoord[1].y, vertex.attrib[8], program.elw[11];
+
+# texture 2 has one texgen
+MOV		result.texcoord[2], defaultTexCoord;
+DP4		result.texcoord[2].x, vertex.position, program.elw[9];
+
+# texture 3 has three texgens
+DP4		result.texcoord[3].x, vertex.position, program.elw[6];
+DP4		result.texcoord[3].y, vertex.position, program.elw[7];
+DP4		result.texcoord[3].w, vertex.position, program.elw[8];
+
+# textures 4 takes the base coordinates by the texture matrix
+MOV		result.texcoord[4], defaultTexCoord;
+DP4		result.texcoord[4].x, vertex.attrib[8], program.elw[12];
+DP4		result.texcoord[4].y, vertex.attrib[8], program.elw[13];
+
+# textures 5 takes the base coordinates by the texture matrix
+MOV		result.texcoord[5], defaultTexCoord;
+DP4		result.texcoord[5].x, vertex.attrib[8], program.elw[14];
+DP4		result.texcoord[5].y, vertex.attrib[8], program.elw[15];
+
+# texture 6's texcoords will be the halfangle in texture space
+
+# callwlate normalized vector to light in R0
+SUB		R0, program.elw[4], vertex.position;
+DP3		R1, R0, R0;
+RSQ		R1, R1.x;
+MUL		R0, R0, R1.x;
+
+# callwlate normalized vector to viewer in R1
+SUB		R1, program.elw[5], vertex.position;
+DP3		R2, R1, R1;
+RSQ		R2, R2.x;
+MUL		R1, R1, R2.x;
+
+# add together to become the half angle vector in object space (non-normalized)
+ADD		R0, R0, R1;
+
+# put into texture space
+DP3		result.texcoord[6].x, vertex.attrib[9], R0;
+DP3		result.texcoord[6].y, vertex.attrib[10], R0;
+DP3		result.texcoord[6].z, vertex.attrib[11], R0;
+
+# generate the vertex color, which can be 1.0, color, or 1.0 - color
+# for 1.0 : elw[16] = 0, elw[17] = 1
+# for color : elw[16] = 1, elw[17] = 0
+# for 1.0-color : elw[16] = -1, elw[17] = 1
+MAD		result.color, vertex.color, program.elw[16], program.elw[17];
+
+DP4             result.position.x, vertex.position, state.matrix.mvp.row[0];
+DP4             result.position.y, vertex.position, state.matrix.mvp.row[1];
+DP4             result.position.z, vertex.position, state.matrix.mvp.row[2];
+DP4             result.position.w, vertex.position, state.matrix.mvp.row[3];
+
+END

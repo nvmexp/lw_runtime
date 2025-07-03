@@ -1,0 +1,45 @@
+/* 
+ * Tests the OptLopSet transformation in lwir_idioms.cpp
+ *
+ */
+
+.version 3.1
+.target sm_50
+.address_size 64
+
+.visible .entry foo(.param .u32 src_addr)
+{
+    .reg .pred      %p<1>;
+    .reg .s32       %r<10>;
+
+BB:
+    ld.param.u32    %r0, [src_addr];
+    ld.param.u32    %r1, [src_addr+8];
+
+    and.b32         %r2, %r0, %r1;
+    setp.eq.s32     %p0, %r2, 0;
+    @%p0 bra        BB;
+
+    and.b32         %r2, %r0, %r1;
+    setp.ne.s32     %p0, %r2, 0;
+    @%p0 bra        BB;
+
+    or.b32          %r2, %r0, %r1;
+    setp.eq.s32     %p0, %r2, 0;
+    @%p0 bra        BB;
+
+    or.b32          %r2, %r0, %r1;
+    setp.ne.s32     %p0, %r2, 0;
+    @%p0 bra        BB;
+
+    xor.b32         %r2, %r0, %r1;
+    setp.eq.s32     %p0, %r2, 0;
+    @%p0 bra        BB;
+
+    xor.b32         %r2, %r0, %r1;
+    setp.ne.s32     %p0, %r2, 0;
+    @%p0 bra        BB;
+
+    st.volatile.shared.u32  [%r1], %r0;
+    ret;
+}

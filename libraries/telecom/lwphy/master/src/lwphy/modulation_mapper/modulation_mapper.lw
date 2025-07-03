@@ -1,0 +1,371 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include "lwphy.h"
+#include "lwphy_internal.h"
+#include <vector>
+#include <iostream>
+#include "tensor_desc.hpp"
+
+
+__device__ __constant__ float rev_qam_16[4] = {
+    0.316227766,
+    -0.316227766,
+    0.948683298,
+    -0.948683298,
+};
+
+__device__ __constant__ float rev_qam_16_long[8] = {
+    0.316227766,
+    -0.316227766,
+    0.316227766,
+    -0.316227766,
+    0.948683298,
+    -0.948683298,
+    0.948683298,
+    -0.94868329
+};
+
+/* Indexed as {bit 4, bit 2, bit 0}, thus the reverse in the name. */
+__device__ __constant__ float rev_qam_64[8] = {
+    0.462910049886276,
+    -0.462910049886276,
+    0.77151674981046,
+    -0.77151674981046,
+    0.154303349962092,
+    -0.154303349962092,
+    1.08012344973464,
+    -1.08012344973464
+};
+
+__device__ __constant__ float rev_qam_256[16] = {
+    0.383482494,
+    -0.383482494,
+    0.843661488,
+    -0.843661488,
+    0.230089497,
+    -0.230089497,
+    0.997054486,
+    -0.997054486,
+    0.536875492,
+    -0.536875492,
+    0.69026849,
+    -0.69026849,
+    0.076696499,
+    -0.076696499,
+    1.150447483,
+    -1.150447483
+};
+
+__device__ __inline__ uint32_t map_index_8bits(uint32_t index) {
+    uint32_t masked_index = (index & 0x1) | ((index & 0x4) >> 1) |
+                   ((index & 0x10) >> 2)  | ((index & 0x40) >> 3);
+    return masked_index;
+}
+
+__device__ __inline__ uint32_t map_index_6bits(uint32_t index) {
+    uint32_t masked_index = (index & 0x1) | ((index & 0x4) >> 1) |
+                   ((index & 0x10) >> 2);
+    return masked_index;
+}
+
+//blockIdx.y is TB_id; a TB can map to multiple layers.
+__device__ __inline__ uint32_t output_index_calc(int allocated_Rbs, int start_data_symbol,
+                                            int start_Rb, int data_symbols_per_layer,
+                                            const PdschDmrsParams * __restrict__ params) {
+
+    int tid = blockIdx.x * blockDim.x + threadIdx.x; //symbols within a TB
+    int Rbs_per_symbol = allocated_Rbs * LWPHY_N_TONES_PER_PRB;
+
+    int symbol_id = tid / Rbs_per_symbol; // This is the symbol # within all the layer(s) TB blockIdx.y maps to.
+    int layer_cnt = symbol_id / data_symbols_per_layer;
+    int layer_id = (params[blockIdx.y].port_ids[layer_cnt] - 1000) + 8 * params[blockIdx.y].n_scid;
+    int per_layer_symbol_id = symbol_id % data_symbols_per_layer;
+
+    int all_Rbs_symbols = 273 * LWPHY_N_TONES_PER_PRB;
+    uint32_t output_index = all_Rbs_symbols * (layer_id * OFDM_SYMBOLS_PER_SLOT + start_data_symbol + per_layer_symbol_id) \
+                            + (start_Rb * LWPHY_N_TONES_PER_PRB) + (tid % Rbs_per_symbol);
+    return output_index;
+}
+
+
+template<uint32_t Tqam>
+__device__ uint32_t input_index_calc(int allocated_Rbs, int data_symbols_per_layer,
+                                     const PdschDmrsParams * __restrict__ params,
+                                     const uint32_t* __restrict__ modulation_input,
+                                     const struct PerTbParams * workspace) {
+
+    int tid = blockIdx.x * blockDim.x + threadIdx.x; // symbol within a TB
+    int num_symbols_per_layer_per_TB = (workspace[blockIdx.y].G / params[blockIdx.y].num_layers) / Tqam;
+
+    int num_TBs = gridDim.y;
+    int rounded_num_elements_per_layer = 0;
+    for (int tmp_tb_id = 0; tmp_tb_id < num_TBs; tmp_tb_id++) { //TODO compute once
+        int tmp_elements = workspace[tmp_tb_id].G/ params[tmp_tb_id].num_layers;
+        if (tmp_elements > rounded_num_elements_per_layer) {
+            rounded_num_elements_per_layer = tmp_elements;
+        }
+    }
+    rounded_num_elements_per_layer = div_round_up<uint32_t>(rounded_num_elements_per_layer, 32);
+
+    int layer_cnt = tid / num_symbols_per_layer_per_TB; //check layer cnt is valid
+    int symbol_id_within_layer = tid % num_symbols_per_layer_per_TB;
+    int layer_id = (params[blockIdx.y].port_ids[layer_cnt] - 1000) + 8 * params[blockIdx.y].n_scid;
+
+    uint32_t input_index = layer_id * rounded_num_elements_per_layer;
+    input_index += (symbol_id_within_layer * Tqam / 32);
+
+    int symbol_start_bit = (symbol_id_within_layer * Tqam) % 32;
+    uint32_t bit_values = (modulation_input[input_index] >> symbol_start_bit);
+
+    if (Tqam == LWPHY_QAM_64) {
+        if (symbol_start_bit == 28) { // Read 2 bits from next element. Symbol 10 (every 16)
+            bit_values &= 0x0FU;
+            bit_values |= ((modulation_input[input_index + 1] & 0x03U) << 4);
+
+        } else if (symbol_start_bit == 30) { // Read 4 bits from next element. Symbol 5 (every 16)
+            bit_values &= 0x03U;
+            bit_values |= ((modulation_input[input_index + 1] & 0x0FU) << 2);
+        }
+    }
+    return bit_values;
+}
+
+__device__ uint32_t flat_input_index_calc_256QAM(const uint32_t* __restrict__ modulation_input) {
+
+    int input_index = (blockIdx.x << 6) + (threadIdx.x >> 2);
+    int symbol_start_bit = ((threadIdx.x & 0x3) << 3);
+    uint32_t bit_values = (modulation_input[input_index] >> symbol_start_bit);
+    return bit_values;
+}
+
+__device__ uint32_t flat_input_index_calc_64QAM(const uint32_t* __restrict__ modulation_input) {
+
+    const int element_size = sizeof(uint32_t) * 8;
+    int  input_index = blockIdx.x * blockDim.x * LWPHY_QAM_64 / element_size +  threadIdx.x * LWPHY_QAM_64 / element_size;
+    int symbol_start_bit = (threadIdx.x * LWPHY_QAM_64) % element_size;
+    uint32_t bit_values = 0;
+
+    bit_values = (modulation_input[input_index] >> symbol_start_bit);
+    // Handle 2 misaligned cases. Every 3 32-bit elements, i.e., every 16 symbols,
+    // the 5th and 10th symbols (0-based indexing) are crossing 32-bit element boundaries.
+    if (symbol_start_bit == 28) { // Read 2 bits from next element. Symbol 10 (every 16)
+        bit_values &= 0x0FU;
+        bit_values |= ((modulation_input[input_index + 1] & 0x03U) << 4);
+    } else if (symbol_start_bit == 30) { // Read 4 bits from next element. Symbol 5 (every 16)
+        bit_values &= 0x03U;
+        bit_values |= ((modulation_input[input_index + 1] & 0x0FU) << 2);
+    }
+    return bit_values;
+}
+
+__device__ uint32_t flat_input_index_calc_16QAM(const uint32_t* __restrict__ modulation_input) {
+
+    int input_index = (blockIdx.x << 5) + (threadIdx.x >> 3); // Hardcoded for blockDim.x of 256
+    int symbol_start_bit = ((threadIdx.x & 0x7) << 2); // multiply by 4 within a block; modulation order
+    uint32_t bit_values = (modulation_input[input_index] >> symbol_start_bit);
+    return bit_values;
+}
+
+__device__ uint32_t flat_input_index_calc_4QAM(const uint32_t* __restrict__ modulation_input) {
+
+    // Some values are hardcoded based on blockDim.x
+    // threadIdx.x >> 4 is divided by (sizeof(uint32_t)*8 / modulation_order) => only influenced by modulation order
+    // blockIdx.x << 4 is multiplied by (blockDim.x * modulation_order) / (sizeof(uint32_t)*8)
+    int input_index = (blockIdx.x << 4) + (threadIdx.x >> 4); // Hardcoded for blockDim.x of 256
+    int symbol_start_bit = ((threadIdx.x & 0xF) << 1); // multiply by 2 within a block, the modulation order
+    uint32_t bit_values = (modulation_input[input_index] >> symbol_start_bit);
+    return bit_values;
+}
+
+__device__ void modulation_256QAM(const PdschDmrsParams * __restrict__ params,
+                                  const uint32_t* __restrict__ modulation_input,
+                                  __half2 * __restrict__ modulation_output,
+                                  const struct PerTbParams * workspace) {
+
+
+    __shared__ __half  shmem_qam_256[16];
+    if (threadIdx.x < 16) {
+        shmem_qam_256[threadIdx.x] = (__half) rev_qam_256[threadIdx.x];
+    }
+    __syncthreads();
+
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int num_symbols = (workspace[blockIdx.y].G >> 3); // divide by LWPHY_QAM_256
+    if (tid >= num_symbols) {
+        return;
+    }
+
+    int output_index = tid;
+    uint32_t bit_values;
+    if (params != nullptr) {
+        output_index = output_index_calc(params[blockIdx.y].num_Rbs, params[blockIdx.y].symbol_number + params[blockIdx.y].num_dmrs_symbols,
+                       params[blockIdx.y].start_Rb, params[blockIdx.y].num_data_symbols, params);
+        bit_values = input_index_calc<LWPHY_QAM_256>(params[blockIdx.y].num_Rbs, params[blockIdx.y].num_data_symbols, params, modulation_input, workspace);
+    } else {
+        bit_values = flat_input_index_calc_256QAM(modulation_input);
+    }
+
+    int x_index = map_index_8bits(bit_values);
+    int y_index = map_index_8bits(bit_values >> 1);
+
+    modulation_output[output_index] = make_complex<__half2>::create(shmem_qam_256[x_index],
+                                                                    shmem_qam_256[y_index]);
+}
+
+__device__ void modulation_64QAM(const PdschDmrsParams * __restrict__ params, const uint32_t* __restrict__ modulation_input,
+                                 __half2 * __restrict__ modulation_output,
+                                  const struct PerTbParams * workspace) {
+
+
+    __shared__ __half shmem_qam_64[8];
+    if (threadIdx.x < 8) {
+        shmem_qam_64[threadIdx.x] = (__half) rev_qam_64[threadIdx.x];
+    }
+    __syncthreads();
+
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int num_symbols = (workspace[blockIdx.y].G / LWPHY_QAM_64);
+    if (tid >= num_symbols) {
+        return;
+    }
+
+    int output_index = tid;
+    uint32_t bit_values;
+    if (params != nullptr) {
+        output_index = output_index_calc(params[blockIdx.y].num_Rbs, params[blockIdx.y].symbol_number + params[blockIdx.y].num_dmrs_symbols,
+                       params[blockIdx.y].start_Rb, params[blockIdx.y].num_data_symbols, params);
+        bit_values = input_index_calc<LWPHY_QAM_64>(params[blockIdx.y].num_Rbs, params[blockIdx.y].num_data_symbols, params, modulation_input, workspace);
+    } else {
+        bit_values = flat_input_index_calc_64QAM(modulation_input);
+    }
+
+    int x_index = map_index_6bits(bit_values);
+    int y_index = map_index_6bits(bit_values >> 1);
+
+    modulation_output[output_index] = make_complex<__half2>::create(shmem_qam_64[x_index],
+                                                                    shmem_qam_64[y_index]);
+
+}
+
+
+__device__ void modulation_16QAM(const PdschDmrsParams * __restrict__ params,
+                                 const uint32_t* __restrict__ modulation_input,
+                                 __half2 * __restrict__ modulation_output,
+                                  const struct PerTbParams * workspace) {
+
+    __shared__ __half shmem_qam_16[8];
+    if (threadIdx.x < 8) {
+        shmem_qam_16[threadIdx.x] = (__half) rev_qam_16_long[threadIdx.x];
+    }
+    __syncthreads();
+
+    int tid = blockIdx.x * blockDim.x + threadIdx.x; //symbols within a TB
+    int num_symbols = (workspace[blockIdx.y].G >> 2); // divide by LWPHY_QAM_16
+    if (tid >= num_symbols) {
+        return;
+    }
+
+    int output_index = tid;
+    uint32_t bit_values;
+    if (params != nullptr) {
+        output_index = output_index_calc(params[blockIdx.y].num_Rbs, params[blockIdx.y].symbol_number + params[blockIdx.y].num_dmrs_symbols,
+                                         params[blockIdx.y].start_Rb, params[blockIdx.y].num_data_symbols, params);
+        bit_values = input_index_calc<LWPHY_QAM_16>(params[blockIdx.y].num_Rbs, params[blockIdx.y].num_data_symbols, params, modulation_input, workspace);
+    } else {
+        bit_values = flat_input_index_calc_16QAM(modulation_input);
+    }
+
+    modulation_output[output_index] = make_complex<__half2>::create(shmem_qam_16[bit_values & 0x05],
+                                                                    shmem_qam_16[(bit_values >> 1) & 0x05]);
+}
+
+__device__ void modulation_QPSK(const PdschDmrsParams * __restrict__ params,
+                                const uint32_t* __restrict__ modulation_input,
+                                __half2 * __restrict__ modulation_output,
+                                const struct PerTbParams * workspace) {
+
+    __half reciprocal_sqrt2 = hrsqrt(2); //0.707106781186547;
+
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int num_symbols = (workspace[blockIdx.y].G >> 1); // divide by LWPHY_QAM_4
+    if (tid >= num_symbols) {
+        return;
+    }
+
+    int output_index = tid;
+    uint32_t bit_values;
+    if (params != nullptr) {
+        output_index = output_index_calc(params[blockIdx.y].num_Rbs, params[blockIdx.y].symbol_number + params[blockIdx.y].num_dmrs_symbols,
+                       params[blockIdx.y].start_Rb, params[blockIdx.y].num_data_symbols, params);
+        bit_values = input_index_calc<LWPHY_QAM_4>(params[blockIdx.y].num_Rbs, params[blockIdx.y].num_data_symbols, params, modulation_input, workspace);
+    } else {
+        bit_values = flat_input_index_calc_4QAM(modulation_input);
+    }
+
+    __half2 tmp_val;
+    tmp_val.x = ((bit_values & 0x1) == 0) ? reciprocal_sqrt2 : -reciprocal_sqrt2;
+    tmp_val.y = ((bit_values & 0x2) == 0) ? reciprocal_sqrt2 : -reciprocal_sqrt2;
+    modulation_output[output_index] = tmp_val;
+}
+
+__global__ void modulation_mapper(const PdschDmrsParams * __restrict__ params,
+                                  const uint32_t* __restrict__ modulation_input,
+                                  const struct PerTbParams * workspace,
+                                  __half2 * __restrict__ modulation_output) {
+
+    if (modulation_input == nullptr) return;
+
+    int TB_id = blockIdx.y;
+    int modulation_order = workspace[TB_id].Qm;
+
+    if (modulation_order == LWPHY_QAM_4) {
+	modulation_QPSK(params, modulation_input, modulation_output, workspace);
+    } else if (modulation_order == LWPHY_QAM_16) {
+	modulation_16QAM(params, modulation_input, modulation_output, workspace);
+    } else if (modulation_order == LWPHY_QAM_64) {
+	modulation_64QAM(params, modulation_input, modulation_output, workspace);
+    } else if (modulation_order == LWPHY_QAM_256) {
+	modulation_256QAM(params, modulation_input, modulation_output, workspace);
+    } else {
+        if ((threadIdx.x == 0) && (blockIdx.x == 0)) {
+            printf("Error! TB %d has invalid modulation_order %d\n", TB_id, modulation_order);
+        }
+    }
+}
+
+
+/* For now, when d_params is nullptr, QAM symbols are allocated contiguously in the modulation_output buffer,
+   assuming (i.e., 1 TB) w/ num_bits bits, where num_bits % modulation_order = 0.
+
+   If d_params is non nullptr, then modulation_output is the {273*12, 14, 16} tensor and
+   the data symbols are allocated in the appropriate location (i.e., correct data symbol, startRb, etc.
+   for the allocated Rbs.
+*/
+lwphyStatus_t lwphyModulation(PdschDmrsParams * d_params,
+                              const lwphyTensorDescriptor_t input_desc, /* not used */
+                              const void* modulation_input,
+                              int max_num_symbols,
+                              int num_TBs,
+                              PerTbParams* workspace, /* num_TBs entries; the only fields used are G (# rate matched bits) and Qm (modulation_order) */
+                              lwphyTensorDescriptor_t output_desc, /* not used */
+                              void* modulation_output,
+                              lwdaStream_t strm) {
+
+    // Have a thread per symbol. NB: some values in the kernels are hardcoded for 256 threads per block.
+    int num_threads = (max_num_symbols >= 256) ? 256 : max_num_symbols;
+    dim3 num_thread_blocks(div_round_up(max_num_symbols, num_threads), num_TBs);
+
+    modulation_mapper<<<num_thread_blocks, num_threads, 0, strm>>>(d_params, (const uint32_t*)modulation_input,
+			                                           workspace, (__half2*)modulation_output);
+
+    return LWPHY_STATUS_SUCCESS;
+}
+

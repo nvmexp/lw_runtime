@@ -1,0 +1,54 @@
+	.version 3.1
+	.target sm_20
+
+        .global .surfref surf0;
+        .global .surfref surf1;
+        .global .surfref surf2;
+        .global .surfref surf3;
+        .global .surfref surf4;
+        .global .surfref surf5;
+
+        .entry main0
+        {
+          .reg .s32 a, b, c;
+          .reg .s8  p, q, r, s;
+          .reg .s16 x, y, z, w;
+          .reg .u64 l;
+
+          mov.u32   a, 14;
+          mov.u32   b, 33;
+
+          suld.b.1d.v2.b8.clamp  {p, q}, [surf0, {a}];
+          cvt.s16.s8 x, p;
+          cvt.s16.s8 y, q;
+          and.b16  x, x, y;
+          sust.b.2d.v2.b16.trap  [surf1, {a, b}], {x, y};
+
+          suld.b.1d.v4.b16.trap  {x,y,z,w}, [surf2, {a}];
+          and.b16  x, x, y;
+          and.b16  x, x, z;
+          and.b16  x, x, w;
+          cvt.s8.s16  p, x;
+          sust.b.2d.b8.clamp  [surf3, {a, b}], {p};
+
+          _sulea.p.2d.clamp l, [surf5, {a, b}];
+          _suld.b.v2.b8     {p,q},    [surf3, l];
+          cvt.s16.s8 x, p;
+          cvt.s16.s8 y, q;
+          and.b16  x, x, y;
+          _sust.b.v2.b16     [surf4, l], {x, y};
+
+          _suld.b.v4.b16  {x,y,z,w}, [surf2, l];
+          and.b16  x, x, y;
+          and.b16  x, x, z;
+          and.b16  x, x, w;
+          cvt.s8.s16  p, x;
+          _sust.b.b8      [surf3, l], {p};
+
+          suld.b.1d.v2.b8.trap {x, y}, [surf2, {a}];
+          sust.b.1d.v2.b8.clamp [surf2, {a}], {y,x};
+          exit;
+        }
+
+
+

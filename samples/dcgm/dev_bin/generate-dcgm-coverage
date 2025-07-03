@@ -1,0 +1,40 @@
+#!/bin/sh
+
+# Usage: generate-dcgm-coverage [<base-dir>]
+#        <base-dir> defaults to $DCGM_DEV
+
+# This script generates a coverage report for DCGM. Before running this script,
+# DCGM needs to be built with coverage reporting enabled. That can be done by
+# running `unix-build lwmake <options> develop`. After building DCGM with
+# coverage reporting, run the DCGM tests and then execute this script from the
+# output directory ($DCGM_DEV/_out/<target>/). The coverage report will be
+# stored in ./coverage-report-dcgm/
+
+# Note: To generate a coverage report for lwvs, CWD needs to be
+# $DCGM_DEV/lwvs/_out/<target>, and this script should be called with
+# $DCGM_DEV/lwvs as an argument
+
+# gcov version needs to match gcc
+export PATH="$P4_ROOT/sw/tools/unix/hosts/Linux-x86/targets/Linux-x86/gcc-4.1.1as2/bin":$PATH
+
+basedir=${1-"$DCGM_DEV"}
+pass1target=$(mktemp)
+pass2target=$(mktemp)
+pass3target=$(mktemp)
+pass4target=$(mktemp)
+destination=./coverage-report-dcgm
+
+# Generage coverage report (info file)
+lcov -o "$pass1target" -b "$basedir" -d . --capture
+
+# Remove files in _out from coverage
+lcov -o "$pass2target" -r "$pass1target" '*/_out/*'
+
+# Remove files in libs from coverage
+lcov -o "$pass3target" -r "$pass2target" '*/libs/*'
+
+# Only keep dcgm coverage information (otherwise coverage will include many
+# files outside our project)
+lcov -o "$pass4target" -e "$pass3target" '*/dcgm/*'
+
+genhtml -o "$destination" "$pass4target"

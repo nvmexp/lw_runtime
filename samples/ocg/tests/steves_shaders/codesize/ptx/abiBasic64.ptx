@@ -1,0 +1,35 @@
+.version 3.1
+.target sm_20
+
+.global .u64 x;
+
+.func (.param .u64 out) myadd (.reg .u64 a, .reg .u64 b, .reg .u64 c, .reg .u64 d,
+                               .reg .u64 e, .reg .u64 f)
+{
+    .reg .u64 cc, r;
+
+    add.u64       r, a, b;
+    add.u64       r, r, c;
+    add.u64       r, r, d;
+    add.u64       r, r, e;
+    add.u64       r, r, f;
+    st.param.u64  [out], r;
+    ret;
+}
+
+.entry main(.param .u32 output, .param .u32 output1)
+{
+    .reg .u64 t;
+    .reg .u32 o;
+
+    call (t), myadd, (4, 6, 8, 12, 14, 16);
+    ld.param.u32  o, [output];
+    st.b32        [o], t;
+
+    call (t), myadd, (t, t, t, 12, 14, 16);
+    ld.param.u32  o, [output1];
+    st.b32        [o], t;
+
+    exit;
+}
+ 

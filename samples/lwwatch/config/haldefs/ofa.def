@@ -1,0 +1,310 @@
+# -*- mode: perl; -*-
+
+# OFA Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $ofaHal = [
+
+    # per-GPU defaults for OFA engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, pre_TURING, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+        IS_SUPPORTED => [
+            DESCRIPTION   => "Determine if OFA is supported on this GPU",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_FALSE,
+
+            _v01_00          => [ AMPERE_and_later, ], 
+            _STUB            => [ ALL, -AMPERE_and_later, ],
+        ],
+
+        MASTER_RESET  => [
+            DESCRIPTION   => "Resets OFA",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_OK,
+
+            _STUB        => [ ALL, ], #Not yet used
+        ],
+
+        FILL_SYM_PATH  => [
+            DESCRIPTION   => "Returns symbol path",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "OBJFLCN *",
+            STUB_RETURNS  => LW_OK,
+
+            LIKE_INTERFACE => IS_SUPPORTED,
+        ],
+
+        GET_ENGINE_NAME   => [
+            DESCRIPTION   => "Returns engine name",
+            RETURN_TYPE   => "const char*",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => NULL,
+
+            LIKE_INTERFACE => IS_SUPPORTED,
+        ],
+
+        IS_DEBUG_MODE => [
+            DESCRIPTION   => "Check if OFA is in DEBUG mode or not",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_FALSE,
+
+            _STUB         => [ ALL, ], #Not yet used
+         ],
+
+        GET_FALCON_CORE_IFACE => [
+            DESCRIPTION     => "Return the falcon core interface",
+            RETURN_TYPE     => "const FLCN_CORE_IFACES *",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => NULL,
+            INTERFACE_TAG   => "ofaGetFalconCoreIFace",  #IFace instead of Iface
+
+            LIKE_INTERFACE => IS_SUPPORTED,
+        ],
+
+        GET_FALCON_ENGINE_IFACE => [
+            DESCRIPTION    => "Return the falcon engine interface",
+            RETURN_TYPE    => "const FLCN_ENGINE_IFACES *",
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => NULL,
+            INTERFACE_TAG  => "ofaGetFalconEngineIFace",  #IFace instead of Iface
+
+            LIKE_INTERFACE => IS_SUPPORTED,
+        ],
+
+        GET_FALCON_BASE => [
+            DESCRIPTION    => "Return the Falcon base",
+            RETURN_TYPE    => "LwU32",
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            _v01_00          => [ AMPERE_and_later, -T234 ],
+            _v01_02          => [ T234 ],
+            _STUB            => [ ALL, -AMPERE_and_later, ],
+        ],
+
+        UCODE_NAME => [
+            DESCRIPTION  => "returns ucode file name, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE  => "const char *",
+            ARGUMENTS    => "",
+            STUB_RETURNS => "NULL",
+
+            _STUB        => [ ALL, ], #Not yet used
+        ],
+
+        QUEUE_GET_NUM  => [
+            DESCRIPTION    => "OfaQueueGetNum, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE    =>  LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            _STUB        => [ ALL, ], #Not yet used
+        ],
+
+        QUEUE_READ  => [
+            DESCRIPTION    => "OfaQueueRead, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE    =>  LwBool,
+            ARGUMENTS      => "LwU32 queueId, PFLCN_QUEUE pQueue",
+            STUB_RETURNS   => LW_FALSE,
+
+            _STUB          => [ ALL, ], #Not yet used
+        ],
+
+        IS_DMEM_RANGE_ACCESSIBLE => [
+            DESCRIPTION    => "Check if the DMEM range is accessible",
+            RETURN_TYPE    => "LwBool",
+            ARGUMENTS      => "LwU32 blkLo, LwU32 blkHi",
+            STUB_RETURNS   => LW_TRUE, # All of DMEM is readable in pre-carveouts land
+
+            _STUB          => [ ALL, ], #Not yet used
+        ],
+
+        GET_DMEM_NUM_PRIV_RANGES => [
+            DESCRIPTION    => "Get the number of DMEM priv ranges (carveouts)",
+            RETURN_TYPE    =>  LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            _STUB          => [ ALL, ], #Not yet used
+        ],
+
+        EMEM_GET_SIZE => [
+            DESCRIPTION    => "Get the size of EMEM",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            _STUB          => [ ALL, ], #Not yet used
+        ],
+
+        EMEM_GET_OFFSET_IN_DMEM_VA_SPACE => [
+            DESCRIPTION    => "Get the offset off EMEM in DMEM VA space",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            _STUB          => [ ALL, ], #Not yet used
+        ],
+
+        EMEM_GET_NUM_PORTS => [
+            DESCRIPTION    => "Get the number of EMEM ports",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            _STUB          => [ ALL, ], #Not yet used
+        ],
+
+        EMEM_READ => [
+            DESCRIPTION    => "Read the EMEM carveout",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "LwU32 offset, LwU32 length, LwU32 port, LwU32 *pBuf",
+            STUB_RETURNS   => ZERO,
+
+            _STUB          => [ ALL, ], #Not yet used
+        ],
+
+        EMEM_WRITE => [
+            DESCRIPTION    => "Write to the EMEM carveout",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "LwU32 offset, LwU32 val, LwU32 width, LwU32 length, LwU32 port",
+            STUB_RETURNS   => ZERO,
+
+            _STUB          => [ ALL, ], #Not yet used
+        ],
+
+        DUMP_PRIV => [
+
+            DESCRIPTION   => "Dump OFA priv space",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => IS_SUPPORTED,
+        ],
+
+        DUMP_FUSE => [
+
+            DESCRIPTION   => "Dump OFA related fuse registers",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v01_03       =>  [ GH100_and_later, ],
+            _STUB         =>  [ pre_dHOPPER, ],
+        ],
+
+        IS_GPU_SUPPORTED => [
+            DESCRIPTION   => "Determine if OFA is supported on this GPU",
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _v01_00          => [ GA100, ],
+            _v01_01          => [ AMPERE, -GA100, -T234],
+            _v01_02          => [ T234, ],
+            _v01_03          => [ GH100, ],
+            _v01_05          => [ ADA_and_later, -GH100],
+            _STUB            => [ pre_dAMPERE, ],
+        ],
+
+        DUMP_IMEM => [
+
+            DESCRIPTION   => "Dump OFA instruction memory",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v01_00          => [ AMPERE_and_later, -T234 ],
+            _v01_02          => [ T234 ],
+            _STUB            => [ ALL, -AMPERE_and_later, ],
+        ],
+
+        DUMP_DMEM => [
+
+            DESCRIPTION   => "Dump OFA Data memory",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32, LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v01_00          => [ AMPERE_and_later, -T234 ],
+            _v01_02          => [ T234 ],
+            _STUB            => [ ALL, -AMPERE_and_later, ],
+        ],  
+
+        PRINT_PRIV => [
+
+            DESCRIPTION   => "Print OFA priv space",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LwU32, char*, LwU32",
+
+            _v01_00          => [ AMPERE_and_later, -T234 ],
+            _v01_02          => [ T234 ],
+            _STUB            => [ ALL, -AMPERE_and_later, ],
+        ],
+
+        TEST_STATE => [
+
+            DESCRIPTION   => "Test if OFA engine is in a valid state",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v01_00          => [ AMPERE_and_later, -T234 ],
+            _v01_02          => [ T234 ],
+            _STUB            => [ ALL, -AMPERE_and_later, ],
+        ],
+
+        DISPLAY_HWCFG => [
+
+            DESCRIPTION   => "Display OFA hardware configuration",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v01_00          => [ AMPERE_and_later, -T234 ],
+            _v01_02          => [ T234 ],
+            _STUB            => [ ALL, -AMPERE_and_later, ],
+        ],
+
+        DISPLAY_FLCN_SPR => [
+
+            DESCRIPTION   => "Dump OFA Special Purpose Registers",
+            INTERFACE_TAG => "ofaDisplayFlcnSPR",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v01_00          => [ AMPERE_and_later, -T234 ],
+            _v01_02          => [ T234 ],
+            _STUB            => [ ALL, -AMPERE_and_later, ],
+        ],
+
+        GET_CLASS_ID => [
+            DESCRIPTION   => "Retuns class ID",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _v01_00          => [ AMPERE_and_later, -T234 ],
+            _v01_02          => [ T234 ],
+            _STUB            => [ ALL, -AMPERE_and_later, ],
+        ],
+
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $ofaHal;

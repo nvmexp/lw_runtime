@@ -1,0 +1,191 @@
+.version 3.1
+.target sm_20
+
+.func (.param .align 16 .b8 r[48]) myadd2 (.param .align 16 .b8 i1[16],
+                                           .param .align 16 .b8 i2[200])
+{
+    .reg .u64 inu<2>;
+    .reg .s64 ins<2>;
+    .reg .b64 inb<2>;
+    .reg .f64 inf<2>;
+    .reg .b64 res<2>;
+
+    ld.param.v2.u64 {inu0, inu1}, [i1+0];
+    ld.param.v2.s64 {ins0, ins1}, [i1+0];
+    ld.param.v2.b64 {inb0, inb1}, [i1+0];
+    ld.param.v2.f64 {inf0, inf1}, [i1+0];
+    add.u64 res0, inu0, inu1;
+    add.s64 res1, ins0, ins1;
+    st.param.v2.b64 [r+0], {res0, res1};
+    add.u64 res0, inb0, inb1;
+    add.f64 res1, inf0, inf1;
+    st.param.v2.b64 [r+16], {res0, res1};
+
+    ld.param.v2.u64 {inu0, inu1}, [i2+40];
+    ld.param.v2.s64 {ins0, ins1}, [i2+80];
+    ld.param.v2.b64 {inb0, inb1}, [i2+120];
+    ld.param.v2.f64 {inf0, inf1}, [i2+160];
+    add.u64 res0, inu0, inu1;
+    add.s64 res0, res0, ins0;
+    add.s64 res0, res0, ins1;
+    add.u64 res0, res0, inb0;
+    add.u64 res0, res0, inb1;
+    add.f64 res1, inf0, inf1;
+    st.param.v2.b64 [r+32], {res0, res1};
+
+    ret;
+}
+
+.func (.param .align 16 .b8 r[64]) myadd2a (.param .align 16 .b8 i1[16],
+                                            .param .align 16 .b8 i2[200])
+{
+    .reg .u64 inu<2>;
+    .reg .s64 ins<2>;
+    .reg .b64 inb<2>;
+    .reg .f64 inf<2>;
+    .reg .b64 res<2>;
+    .reg .u32 addr;
+
+    ld.param.v2.u64 {inu0, inu1}, [i1+0];
+    ld.param.v2.s64 {ins0, ins1}, [i1+0];
+    ld.param.v2.b64 {inb0, inb1}, [i1+0];
+    mov.u32 addr, i1;
+    ld.local.v2.f64 {inf0, inf1}, [addr];
+    add.u64 res0, inu0, inu1;
+    add.s64 res1, ins0, ins1;
+    st.param.v2.b64 [r+0], {res0, res1};
+    add.u64 res0, inb0, inb1;
+    add.f64 res1, inf0, inf1;
+    st.param.v2.b64 [r+16], {res0, res1};
+
+    ld.param.v2.u64 {inu0, inu1}, [i2+40];
+    ld.param.v2.s64 {ins0, ins1}, [i2+80];
+    ld.param.v2.b64 {inb0, inb1}, [i2+120];
+    ld.param.v2.f64 {inf0, inf1}, [i2+160];
+    add.u64 res0, inu0, inu1;
+    add.s64 res1, ins0, ins1;
+    st.param.v2.b64 [r+32], {res0, res1};
+    add.u64 res0, inb0, inb1;
+    add.f64 res1, inf0, inf1;
+    st.param.v2.b64 [r+48], {res0, res1};
+
+    ret;
+}
+
+.func (.param .align 16 .b8 r[64]) myadd2b (.param .align 16 .b8 i1[16],
+                                            .param .align 16 .b8 i2[200])
+{
+    .reg .u64 inu<2>;
+    .reg .s64 ins<2>;
+    .reg .b64 inb<2>;
+    .reg .f64 inf<2>;
+    .reg .b64 local<2>;
+    .reg .b64 res<2>;
+    .local .align 16 .b8 l[64];
+
+    ld.param.v2.u64 {inu0, inu1}, [i1+0];
+    ld.param.v2.s64 {ins0, ins1}, [i1+0];
+    ld.param.v2.b64 {inb0, inb1}, [i1+0];
+    ld.param.v2.f64 {inf0, inf1}, [i1+0];
+    st.local.v2.b64 [l+32], {inb0, inb1};
+    add.u64 res0, inu0, inu1;
+    add.s64 res1, ins0, ins1;
+    st.param.v2.b64 [r+0], {res0, res1};
+    add.u64 res0, inb0, inb1;
+    add.f64 res1, inf0, inf1;
+    st.param.v2.b64 [r+16], {res0, res1};
+
+    ld.param.v2.u64 {inu0, inu1}, [i2+40];
+    ld.param.v2.s64 {ins0, ins1}, [i2+80];
+    ld.param.v2.b64 {inb0, inb1}, [i2+120];
+    ld.param.v2.f64 {inf0, inf1}, [i2+160];
+    add.u64 res0, inu0, inu1;
+    add.s64 res1, ins0, ins1;
+    st.param.v2.b64 [r+32], {res0, res1};
+    ld.local.v2.b64 {local0, local1}, [l+32];
+    add.u64 res0, inb0, inb1;
+    add.u64 res0, res0, local0;
+    add.u64 res0, res0, local1;
+    add.f64 res1, inf0, inf1;
+    st.param.v2.b64 [r+48], {res0, res1};
+
+    ret;
+}
+
+.entry main(.param .u32 output, .param .u32 output2, .param .u32 output4)
+{
+    .param .align 16 .b8 result2a[48];
+    .param .align 16 .b8 result2[64];
+    .param .align 16 .b8 insmall2[16];
+    .param .align 16 .b8 inbig2[200];
+    .reg .b64 in<4>, out<8>, realout;
+    .reg .u32 o;
+
+    mov.b64 in0, 0;
+    mov.b64 in1, 1;
+    mov.b64 in2, 2;
+    mov.b64 in3, 3;
+
+    st.param.v2.b64 [insmall2], {in0, in1};
+    st.param.v2.b64 [inbig2+40], {in2, in3};
+    st.param.v2.b64 [inbig2+80], {in1, in3};
+    st.param.v2.b64 [inbig2+120], {in0, in3};
+    st.param.v2.b64 [inbig2+160], {in2, in1};
+    call (result2a), myadd2, (insmall2, inbig2);
+    ld.param.v2.b64 {out0, out1}, [result2a+0];
+    ld.param.v2.b64 {out2, out3}, [result2a+8];
+    ld.param.v2.b64 {out4, out5}, [result2a+16];
+    ld.param.v2.b64 {out6, out7}, [result2a+24];
+
+    add.u64 realout, out0, out1;
+    add.u64 realout, realout, out2;
+    add.u64 realout, realout, out3;
+    add.u64 realout, realout, out4;
+    add.u64 realout, realout, out5;
+    add.u64 realout, realout, out6;
+    add.u64 realout, realout, out7;
+    ld.param.u32 o, [output];
+    st.b64 [o], realout;
+
+    st.param.v2.b64 [insmall2], {in0, in1};
+    st.param.v2.b64 [inbig2+40], {in2, in3};
+    st.param.v2.b64 [inbig2+80], {in1, in3};
+    st.param.v2.b64 [inbig2+120], {in0, in3};
+    st.param.v2.b64 [inbig2+160], {in2, in1};
+    call (result2), myadd2a, (insmall2, inbig2);
+    ld.param.v2.b64 {out0, out1}, [result2+0];
+    ld.param.v2.b64 {out2, out3}, [result2+8];
+    ld.param.v2.b64 {out4, out5}, [result2+16];
+    ld.param.v2.b64 {out6, out7}, [result2+24];
+
+    add.u64 realout, out0, out1;
+    add.u64 realout, realout, out2;
+    add.u64 realout, realout, out3;
+    add.u64 realout, realout, out4;
+    add.u64 realout, realout, out5;
+    add.u64 realout, realout, out6;
+    add.u64 realout, realout, out7;
+    ld.param.u32 o, [output2];
+    st.b64 [o], realout;
+
+    st.param.v2.b64 [insmall2], {in0, in1};
+    st.param.v2.b64 [inbig2+40], {in2, in3};
+    st.param.v2.b64 [inbig2+80], {in1, in3};
+    st.param.v2.b64 [inbig2+120], {in0, in3};
+    st.param.v2.b64 [inbig2+160], {in2, in1};
+    call (result2), myadd2b, (insmall2, inbig2);
+    ld.param.v2.b64 {out0, out1}, [result2+0];
+    ld.param.v2.b64 {out2, out3}, [result2+8];
+    ld.param.v2.b64 {out4, out5}, [result2+16];
+    ld.param.v2.b64 {out6, out7}, [result2+24];
+
+    add.u64 realout, out0, out1;
+    add.u64 realout, realout, out2;
+    add.u64 realout, realout, out3;
+    add.u64 realout, realout, out4;
+    add.u64 realout, realout, out5;
+    add.u64 realout, realout, out6;
+    add.u64 realout, realout, out7;
+    ld.param.u32 o, [output4];
+    st.b64 [o], realout;
+}

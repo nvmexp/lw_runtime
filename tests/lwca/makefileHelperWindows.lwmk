@@ -1,0 +1,26 @@
+LW_COMPILER := msvc141u8
+include $(LW_SOURCE)/drivers/common/build/$(LW_COMPILER)_tools_$(LW_TARGET_ARCH).lwmk
+LW_DDK_VER := wddmv2/official
+LW_DDK_SUBVER := 18362
+include $(LW_SOURCE)/drivers/common/build/lwWindowsWdkVersion.lwmk
+LW_TOOLS_INCLUDES += $(MSVC_COMPILER_DIR)/include
+LW_TOOLS_INCLUDES += $(LW_WDKSDK_INC)/shared
+LW_TOOLS_INCLUDES += $(LW_WDKSDK_INC)/km
+LW_TOOLS_INCLUDES += $(LW_WDKSDK_INC)/um
+LW_INCLUDES += $(LW_TOOLS_INCLUDES)
+CFLAGS += /EHsc
+
+libraryDirs = $(LW_WDKSDK_LIB)/um/$(LW_WDKSDK_LIB_CPU)
+ifeq ($(LW_TARGET_ARCH),x86)
+libraryDirs += $(MSVC_COMPILER_DIR)/lib
+else ifeq ($(LW_TARGET_ARCH),amd64)
+libraryDirs += $(MSVC_COMPILER_DIR)/lib/amd64
+else
+libraryDirs += $(MSVC_COMPILER_DIR)/lib/arm
+endif
+BIN_LDFLAGS += $(addprefix -libpath:,$(libraryDirs))
+# gtest depends on shlwapi on windows, so include that here
+BIN_LDFLAGS += shlwapi.lib
+
+doxygenForParseDb := $(LW_TOOLS)/win32/doxygen/1.5.8/bin/doxygen.exe
+LWOS_TARGET_OS := win32

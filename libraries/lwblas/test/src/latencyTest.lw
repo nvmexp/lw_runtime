@@ -1,0 +1,574 @@
+/*  
+ * Copyright (c) 2019, LWPU CORPORATION.  All rights reserved.
+ * 
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
+ *  - Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  - Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  - Neither the name(s) of the copyright holder(s) nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */  
+
+#include <stdlib.h>
+#include <stdio.h>
+
+#include <unordered_map>
+#include <vector>
+#include <chrono>
+#include <string>
+
+#include <lwda_runtime.h>
+#include <lwtensor.h>
+
+#define HANDLE_ERROR(x)                                               \
+{ const auto err = x;                                                 \
+  if( err != LWTENSOR_STATUS_SUCCESS )                                \
+  { printf("Error: %s\n", lwtensorGetErrorString(err)); return err; } \
+};
+
+#define HANDLE_LWDA_ERROR(x)                                      \
+{ const auto err = x;                                             \
+  if( err != lwdaSuccess )                                        \
+  { printf("Error: %s\n", lwdaGetErrorString(err)); return err; } \
+};
+
+class CPUTimer
+{
+ public:
+    void record()
+    {
+        start_ = std::chrono::steady_clock::now();
+    }
+
+    void stop()
+    {
+        end_ = std::chrono::steady_clock::now();
+    }
+
+    double duration()
+    {
+        elapsed_ = end_-start_;
+        //return in ms
+        return elapsed_.count()*1000;
+    }
+
+    void print_result(std::string name, size_t numRepetitions_)
+    {
+        printf("&&&& PERF %s %e -ms\n", name.c_str(), duration()/numRepetitions_);
+    }
+
+ private:
+    typedef std::chrono::steady_clock::time_point tp;
+    tp start_;
+    tp end_;
+    std::chrono::duration<double> elapsed_;
+};
+
+struct GPUTimer
+{
+    GPUTimer() 
+    {
+        lwdaEventCreate(&start_);
+        lwdaEventCreate(&stop_);
+        lwdaEventRecord(start_, 0);
+    }
+
+    ~GPUTimer() 
+    {
+        lwdaEventDestroy(start_);
+        lwdaEventDestroy(stop_);
+    }
+
+    void start() 
+    {
+        lwdaEventRecord(start_, 0);
+    }
+
+    float seconds() 
+    {
+        lwdaEventRecord(stop_, 0);
+        lwdaEventSynchronize(stop_);
+        float time;
+        lwdaEventElapsedTime(&time, start_, stop_);
+        //return in ms
+        return time;
+    }
+    private:
+    lwdaEvent_t start_, stop_;
+};
+
+int main()
+{
+    typedef float floatTypeA;
+    typedef float floatTypeB;
+    typedef float floatTypeC;
+    typedef float floatTypeD;
+    typedef float floatTypeE;
+    typedef float floatTypeF;
+    typedef float floatTypeG;
+    typedef float floatTypeCompute;
+
+    lwdaDataType_t typeA = LWDA_R_32F;
+    lwdaDataType_t typeB = LWDA_R_32F;
+    lwdaDataType_t typeC = LWDA_R_32F;
+    lwdaDataType_t typeD = LWDA_R_32F;
+    lwdaDataType_t typeE = LWDA_R_32F;
+    lwdaDataType_t typeF = LWDA_R_32F;
+    lwdaDataType_t typeG = LWDA_R_32F;
+    lwdaDataType_t scalarType = LWDA_R_32F;
+    lwtensorComputeType_t typeCompute = LWTENSOR_COMPUTE_32F;
+
+    floatTypeCompute alpha = (floatTypeCompute)1.1f;
+    floatTypeCompute beta  = (floatTypeCompute)0.1f;
+    floatTypeCompute gamma  = (floatTypeCompute)1.2f;
+
+    int reps = 10000000;
+    CPUTimer cputimer;
+    /**********************
+     * Computing: C_{m,u,n,v} = alpha * A_{m,h,k,n} B_{u,k,v,h} + beta * C_{m,u,n,v}
+     *
+     * Elementwise: F_{v,n,u,m} = alpha * D_{m,u,n,v} + beta * E_{u,v,m,n} + gamma * F_{v,n,u,m}
+     *
+     * Reduction: G_{m, n} = alpha * D_{m,u,n,v} + beta * G_{m, n}
+     **********************/
+    std::vector<int> modeA{'m','h','k','n'};
+    std::vector<int> modeB{'u','k','v','h'};
+    std::vector<int> modeC{'m','u','n','v'};
+    std::vector<int> modeD{'m','u','n','v'};
+    std::vector<int> modeE{'u','v','m','n'};
+    std::vector<int> modeF{'v','n','u','m'};
+    std::vector<int> modeG{'m','n'};
+
+    int nmodeA = modeA.size();
+    int nmodeB = modeB.size();
+    int nmodeC = modeC.size();
+    int nmodeD = modeD.size();
+    int nmodeE = modeE.size();
+    int nmodeF = modeF.size();
+    int nmodeG = modeG.size();
+
+    std::unordered_map<int, int64_t> extent;
+    extent['m'] = 2;
+    extent['n'] = 2;
+    extent['u'] = 2;
+    extent['v'] = 2;
+    extent['h'] = 2;
+    extent['k'] = 2;
+
+    std::vector<int64_t> extentA;
+    for (auto mode : modeA)
+        extentA.push_back(extent[mode]);
+    std::vector<int64_t> extentB;
+    for (auto mode : modeB)
+        extentB.push_back(extent[mode]);
+    std::vector<int64_t> extentC;
+    for (auto mode : modeC)
+        extentC.push_back(extent[mode]);
+    std::vector<int64_t> extentD;
+    for (auto mode : modeD)
+        extentD.push_back(extent[mode]);
+    std::vector<int64_t> extentE;
+    for (auto mode : modeE)
+        extentE.push_back(extent[mode]);
+    std::vector<int64_t> extentF;
+    for (auto mode : modeF)
+        extentF.push_back(extent[mode]);
+    std::vector<int64_t> extentG;
+    for (auto mode : modeG)
+        extentG.push_back(extent[mode]);
+
+
+    /**********************
+     * Allocating data
+     **********************/
+
+    size_t elementsA = 1;
+    for (auto mode : modeA)
+        elementsA *= extent[mode];
+    size_t elementsB = 1;
+    for (auto mode : modeB)
+        elementsB *= extent[mode];
+    size_t elementsC = 1;
+    for (auto mode : modeC)
+        elementsC *= extent[mode];
+    size_t elementsD = 1;
+    for (auto mode : modeD)
+        elementsD *= extent[mode];
+    size_t elementsE = 1;
+    for (auto mode : modeE)
+        elementsE *= extent[mode];
+    size_t elementsF = 1;
+    for (auto mode : modeF)
+        elementsF *= extent[mode];
+    size_t elementsG = 1;
+    for (auto mode : modeG)
+        elementsG *= extent[mode];
+
+    size_t sizeA = sizeof(floatTypeA) * elementsA;
+    size_t sizeB = sizeof(floatTypeB) * elementsB;
+    size_t sizeC = sizeof(floatTypeC) * elementsC;
+    size_t sizeD = sizeof(floatTypeD) * elementsD;
+    size_t sizeE = sizeof(floatTypeE) * elementsE;
+    size_t sizeF = sizeof(floatTypeF) * elementsF;
+    size_t sizeG = sizeof(floatTypeG) * elementsG;
+
+
+    void *A_d, *B_d, *C_d;
+    void *D_d, *E_d, *F_d, *G_d;
+    HANDLE_LWDA_ERROR(lwdaMalloc((void**) &A_d, sizeA));
+    HANDLE_LWDA_ERROR(lwdaMalloc((void**) &B_d, sizeB));
+    HANDLE_LWDA_ERROR(lwdaMalloc((void**) &C_d, sizeC));
+    HANDLE_LWDA_ERROR(lwdaMalloc((void**) &D_d, sizeD));
+    HANDLE_LWDA_ERROR(lwdaMalloc((void**) &E_d, sizeE));
+    HANDLE_LWDA_ERROR(lwdaMalloc((void**) &F_d, sizeF));
+    HANDLE_LWDA_ERROR(lwdaMalloc((void**) &G_d, sizeG));
+
+
+    floatTypeA *A = (floatTypeA*) malloc(sizeof(floatTypeA) * elementsA);
+    floatTypeB *B = (floatTypeB*) malloc(sizeof(floatTypeB) * elementsB);
+    floatTypeC *C = (floatTypeC*) malloc(sizeof(floatTypeC) * elementsC);
+    floatTypeD *D = (floatTypeD*) malloc(sizeof(floatTypeD) * elementsD);
+    floatTypeE *E = (floatTypeE*) malloc(sizeof(floatTypeE) * elementsE);
+    floatTypeF *F = (floatTypeF*) malloc(sizeof(floatTypeF) * elementsF);
+    floatTypeG *G = (floatTypeG*) malloc(sizeof(floatTypeG) * elementsG);
+
+    if (A == NULL || B == NULL || C == NULL ||
+        D == NULL || E == NULL || F == NULL || G == NULL)
+    {
+        printf("Error: Host allocation.\n");
+        return -1;
+    }
+
+    /*******************
+     * Initialize data
+     *******************/
+
+    for (int64_t i = 0; i < elementsA; i++)
+        A[i] = (((float) rand())/RAND_MAX - 0.5)*100;
+    for (int64_t i = 0; i < elementsB; i++)
+        B[i] = (((float) rand())/RAND_MAX - 0.5)*100;
+    for (int64_t i = 0; i < elementsC; i++)
+        C[i] = (((float) rand())/RAND_MAX - 0.5)*100;
+    for (int64_t i = 0; i < elementsD; i++)
+        D[i] = (((float) rand())/RAND_MAX - 0.5)*100;
+    for (int64_t i = 0; i < elementsE; i++)
+        E[i] = (((float) rand())/RAND_MAX - 0.5)*100;
+    for (int64_t i = 0; i < elementsF; i++)
+        F[i] = (((float) rand())/RAND_MAX - 0.5)*100;
+    for (int64_t i = 0; i < elementsG; i++)
+        G[i] = (((float) rand())/RAND_MAX - 0.5)*100;
+
+    HANDLE_LWDA_ERROR(lwdaMemcpy(A_d, A, sizeA, lwdaMemcpyHostToDevice));
+    HANDLE_LWDA_ERROR(lwdaMemcpy(B_d, B, sizeB, lwdaMemcpyHostToDevice));
+    HANDLE_LWDA_ERROR(lwdaMemcpy(C_d, C, sizeC, lwdaMemcpyHostToDevice));
+    HANDLE_LWDA_ERROR(lwdaMemcpy(D_d, D, sizeD, lwdaMemcpyHostToDevice));
+    HANDLE_LWDA_ERROR(lwdaMemcpy(E_d, E, sizeE, lwdaMemcpyHostToDevice));
+    HANDLE_LWDA_ERROR(lwdaMemcpy(F_d, F, sizeF, lwdaMemcpyHostToDevice));
+    HANDLE_LWDA_ERROR(lwdaMemcpy(G_d, G, sizeG, lwdaMemcpyHostToDevice));
+
+
+    /*************************
+     * lwTENSOR
+     *************************/ 
+
+    lwtensorHandle_t handle;
+    cputimer.record();
+    //lwtensorInit is much overhead, we run 10000 times
+    for(int i = 0; i < reps/1000; i++) {
+        HANDLE_ERROR(lwtensorInit(&handle));
+    }
+    cputimer.stop();
+    cputimer.print_result("lwtensorInit", reps/1000);
+
+    /**********************
+     * Create Tensor Descriptors
+     **********************/
+
+    lwtensorTensorDescriptor_t descA;
+    cputimer.record();
+    //RSD: 3.1893%, increase to 10s roughly
+    for(int i = 0; i < reps*10; i++) {
+        HANDLE_ERROR(lwtensorInitTensorDescriptor(&handle,
+                     &descA,
+                     nmodeA,
+                     extentA.data(),
+                     NULL,/*stride*/
+                     typeA, LWTENSOR_OP_IDENTITY));
+    }
+    cputimer.stop();
+    cputimer.print_result("lwtensorInitTensorDescriptor", reps*10);
+
+    lwtensorTensorDescriptor_t descB;
+    HANDLE_ERROR(lwtensorInitTensorDescriptor(&handle,
+                 &descB,
+                 nmodeB,
+                 extentB.data(),
+                 NULL,/*stride*/
+                 typeB, LWTENSOR_OP_IDENTITY));
+
+    lwtensorTensorDescriptor_t descC;
+    HANDLE_ERROR(lwtensorInitTensorDescriptor( &handle,
+                 &descC,
+                 nmodeC,
+                 extentC.data(),
+                 NULL,/*stride*/
+                 typeC, LWTENSOR_OP_IDENTITY));
+
+    lwtensorTensorDescriptor_t descD;
+    HANDLE_ERROR(lwtensorInitTensorDescriptor( &handle,
+                 &descD,
+                 nmodeD,
+                 extentD.data(),
+                 NULL,/*stride*/
+                 typeD, LWTENSOR_OP_IDENTITY));
+
+    lwtensorTensorDescriptor_t descE;
+    HANDLE_ERROR(lwtensorInitTensorDescriptor( &handle,
+                 &descE,
+                 nmodeE,
+                 extentE.data(),
+                 NULL,/*stride*/
+                 typeE, LWTENSOR_OP_IDENTITY));
+
+    lwtensorTensorDescriptor_t descF;
+    HANDLE_ERROR(lwtensorInitTensorDescriptor( &handle,
+                 &descF,
+                 nmodeF,
+                 extentF.data(),
+                 NULL,/*stride*/
+                 typeF, LWTENSOR_OP_IDENTITY));
+
+    lwtensorTensorDescriptor_t descG;
+    HANDLE_ERROR(lwtensorInitTensorDescriptor( &handle,
+                 &descG,
+                 nmodeG,
+                 extentG.data(),
+                 NULL,/*stride*/
+                 typeG, LWTENSOR_OP_IDENTITY));
+
+    // measure reduction API
+    //Reduction: G_{m, n} = alpha * D_{m,u,n,v} + beta * G_{m, n}
+    GPUTimer timer;
+
+    uint64_t worksizeReduction = 0;
+    cputimer.record();
+    for(int i = 0; i < reps*10; i++) {
+        HANDLE_ERROR(lwtensorReductionGetWorkspace(&handle,
+                     D_d, &descD, modeD.data(),
+                     G_d, &descG, modeG.data(),
+                     G_d, &descG, modeG.data(),
+                     LWTENSOR_OP_ADD, typeCompute, &worksizeReduction));
+    }
+    cputimer.stop();
+    cputimer.print_result("lwtensorReductionGetWorkspace", reps*10);
+
+    void *workReduction = nullptr;
+    if (worksizeReduction > 0)
+    {
+        if (lwdaSuccess != lwdaMalloc(&workReduction, worksizeReduction))
+        {
+            workReduction = nullptr;
+            worksizeReduction = 0;
+        }
+    }
+
+    lwtensorStatus_t err;
+    timer.start();
+    for(int i = 0; i < reps/10; i++) {
+        err = lwtensorReduction(&handle,
+                        (const void*)&alpha, D_d, &descD, modeD.data(),
+                        (const void*)&beta,  G_d, &descG, modeG.data(),
+                                             G_d, &descG, modeG.data(),
+                         LWTENSOR_OP_ADD, typeCompute, workReduction, worksizeReduction, 0 /* stream */);
+        if (err != LWTENSOR_STATUS_SUCCESS)
+        {
+            printf("ERROR: %s in line %d\n", lwtensorGetErrorString(err), __LINE__);
+        }
+    }
+    auto timeReduction = timer.seconds();
+
+    printf("&&&& PERF lwtensorReduction %e -ms\n", timeReduction/(reps/10));
+
+    //measure elementwisetrinary API
+    //Elementwise: F_{v,n,u,m} = alpha * D_{m,u,n,v} + beta * E_{u,v,m,n} + gamma * F_{v,n,u,m}
+    timer.start();
+    for(int i = 0; i < reps/10; i++) {
+            err = lwtensorElementwiseTrinary(&handle,
+                    (void*)&alpha, D_d, &descD, modeD.data(),
+                    (void*)&beta , E_d, &descE, modeE.data(),
+                    (void*)&gamma, F_d, &descF, modeF.data(),
+                                   F_d, &descF, modeF.data(),
+                    LWTENSOR_OP_ADD, LWTENSOR_OP_ADD, scalarType, 0);
+            if (err != LWTENSOR_STATUS_SUCCESS)
+            {
+                printf("ERROR: %s in line %d\n", lwtensorGetErrorString(err), __LINE__);
+            }
+        }
+    auto timeElementwise = timer.seconds();
+    printf("&&&& PERF lwtensorElementwiseTrinary %e -ms\n", timeElementwise/(reps/10));
+
+    /**********************************************
+     * Retrieve the memory alignment for each tensor
+     **********************************************/ 
+
+     uint32_t alignmentRequirementA;
+     cputimer.record();
+     //RSD: 12.4%, increase to 10s roughly
+     for(int i = 0; i < reps*100; i++) {
+         HANDLE_ERROR(lwtensorGetAlignmentRequirement(&handle,
+                      A_d,
+                      &descA,
+                      &alignmentRequirementA));
+     }
+     cputimer.stop();
+     cputimer.print_result("lwtensorGetAlignmentRequirement", reps*100);
+
+     uint32_t alignmentRequirementB;
+     HANDLE_ERROR(lwtensorGetAlignmentRequirement(&handle,
+                  B_d,
+                  &descB,
+                  &alignmentRequirementB));
+
+     uint32_t alignmentRequirementC;
+     HANDLE_ERROR(lwtensorGetAlignmentRequirement(&handle,
+                  C_d,
+                  &descC, 
+                  &alignmentRequirementC));
+
+    /*******************************
+     * Create Contraction Descriptor
+     *******************************/
+
+    lwtensorContractionDescriptor_t desc;
+    cputimer.record();
+    for(int i = 0; i < reps; i++) {
+        HANDLE_ERROR(lwtensorInitContractionDescriptor(&handle,
+                     &desc,
+                     &descA, modeA.data(), alignmentRequirementA,
+                     &descB, modeB.data(), alignmentRequirementB,
+                     &descC, modeC.data(), alignmentRequirementC,
+                     &descC, modeC.data(), alignmentRequirementC,
+                     typeCompute));
+    }
+    cputimer.stop();
+    cputimer.print_result("lwtensorInitContractionDescriptor", reps);
+
+    /**************************
+    * Set the algorithm to use
+    ***************************/
+
+    lwtensorContractionFind_t find;
+    cputimer.record();
+    //increase to second level
+    for(int i = 0; i < reps*100; i++) {
+        HANDLE_ERROR(lwtensorInitContractionFind(
+                     &handle, &find,
+                     LWTENSOR_ALGO_DEFAULT));
+    }
+    cputimer.stop();
+    cputimer.print_result("lwtensorInitContractionFind", reps*100);
+
+    /**********************
+     * Query workspace
+     **********************/
+
+    uint64_t worksize = 0;
+    cputimer.record();
+    for(int i = 0; i < reps; i++) {
+        HANDLE_ERROR(lwtensorContractionGetWorkspace(&handle,
+                     &desc,
+                     &find,
+                     LWTENSOR_WORKSPACE_RECOMMENDED, &worksize));
+    }
+    cputimer.stop();
+    cputimer.print_result("lwtensorContractionGetWorkspace", reps);
+
+    void *work = nullptr;
+    if (worksize > 0)
+    {
+        if (lwdaSuccess != lwdaMalloc(&work, worksize))
+        {
+            work = nullptr;
+            worksize = 0;
+        }
+    } 
+
+    /**************************
+     * Create Contraction Plan
+     **************************/
+
+    lwtensorContractionPlan_t plan;
+    cputimer.record();
+    for(int i = 0; i < reps; i++) {
+        HANDLE_ERROR(lwtensorInitContractionPlan(&handle,
+                     &plan,
+                     &desc,
+                     &find,
+                     worksize));
+    }
+    cputimer.stop();
+    cputimer.print_result("lwtensorInitContractionPlan", reps);
+
+
+    /**********************
+     * Run
+     **********************/
+
+    // Set up timing
+    timer.start();
+    //increase to second level
+    for (int i=0; i < reps/10; ++i)
+    {
+        err = lwtensorContraction(&handle,
+                                  &plan,
+                                  (void*) &alpha, A_d, B_d,
+                                  (void*) &beta,  C_d, C_d, 
+                                  work, worksize, 0 /* stream */);
+
+        if (err != LWTENSOR_STATUS_SUCCESS)
+        {
+            printf("ERROR: %s in line %d\n", lwtensorGetErrorString(err), __LINE__);
+        }
+    }
+    auto time = timer.seconds();
+
+    /*************************/
+    printf("&&&& PERF lwtensorContraction %e -ms\n", time/(reps/10));
+
+    if (A) free(A);
+    if (B) free(B);
+    if (C) free(C);
+    if (D) free(D);
+    if (E) free(E);
+    if (F) free(F);
+    if (G) free(G);
+    if (A_d) lwdaFree(A_d);
+    if (B_d) lwdaFree(B_d);
+    if (C_d) lwdaFree(C_d);
+    if (D_d) lwdaFree(D_d);
+    if (E_d) lwdaFree(E_d);
+    if (F_d) lwdaFree(F_d);
+    if (G_d) lwdaFree(G_d);
+    if (work) lwdaFree(work);
+    if (workReduction) lwdaFree(workReduction);
+
+    return 0;
+}

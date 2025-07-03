@@ -1,0 +1,93 @@
+################################### tell Emacs this is a -*- makefile-gmake -*-
+#
+# Copyright (c) 2012-2020, LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+# tmake for SW Mobile
+#
+# Repository umbrella makefile fragment for LWN tests and samples.
+#
+###############################################################################
+#
+# Build tools in this repository
+#
+#LW_REPOSITORY_BUILD_TOOLS :=
+
+#
+# Components in this repository
+#
+
+# Optional user parameter to redirect to another umbrella makefile.
+# Usage: export LW_LWN_APPS_PATH=/path/to/umbrella/directory
+# If set, the Makefile.umbrella.tmk there is included instead.
+# This block avoids infinite relwrsion if it already points to this file.
+LWN_APPS_UMBRELLA_PATH := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+ifneq ($(LW_LWN_APPS_PATH),)
+  LWN_APPS_UMBRELLA_REDIRECT := $(filter-out $(LWN_APPS_UMBRELLA_PATH),$(abspath $(LW_LWN_APPS_PATH)))
+endif
+
+ifeq ($(LWN_APPS_UMBRELLA_REDIRECT),)
+
+  ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_HOS),1)
+    LW_REPOSITORY_COMPONENTS := \
+      lwntest \
+      microbench \
+      aftermath-tests/aftermath-api-test \
+      aftermath-tests/aftermath-automatic-resource-tracking-test \
+      aftermath-tests/aftermath-checkpoints-test \
+      aftermath-tests/aftermath-findshader-test \
+      aftermath-tests/aftermath-unit-test \
+      llgd-test \
+      samples/blobcache \
+      samples/dyn_viewport \
+      samples/gltri \
+      samples/lwn_basic \
+      samples/textured-triangle \
+      samples/sk-benchmark/src \
+      samples/simple-triangle/src
+    ifeq ($(LW_BUILD_CONFIGURATION_IS_EXTERNAL),1)
+      LW_REPOSITORY_COMPONENTS += \
+        samples/lwn_lwda_buffer_interop \
+        samples/lwn_lwda_texture_interop
+    endif
+    ifeq ($(LW_BUILD_CONFIGURATION_UMBRELLA_IS_64BIT),1)
+      LW_REPOSITORY_COMPONENTS += \
+        llgd-replay
+    endif
+  endif
+
+  # LWN36: Only lwntest supported right now.
+  ifeq ($(LW_BUILD_CONFIGURATION_LINUX_USERSPACE_IS_L4T),1)
+    ifeq ($(LW_BUILD_CONFIGURATION_IS_EXTERNAL),0)
+      LW_REPOSITORY_COMPONENTS := \
+        lwntest \
+        microbench \
+        llgd-test \
+        samples/textured-triangle \
+        samples/wayland-lwn-example \
+        samples/wayland-lwn-present \
+        samples/simple-triangle/src \
+        samples/sk-benchmark/src
+    endif
+  endif
+
+else
+
+  # Redirect to user defined path
+  include $(LW_LWN_APPS_PATH)/Makefile.umbrella.tmk
+
+  # Translate all the paths defined in the other makefile
+  LW_REPOSITORY_COMPONENTS := $(foreach DIR,$(LW_REPOSITORY_COMPONENTS),$(shell realpath --relative-to $(LWN_APPS_UMBRELLA_PATH) $(LWN_APPS_UMBRELLA_REDIRECT)/$(DIR)))
+
+endif
+
+# Local Variables:
+# indent-tabs-mode: t
+# tab-width: 8
+# End:
+# vi: set tabstop=8 noexpandtab:

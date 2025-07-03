@@ -1,0 +1,49 @@
+FROM lwpu/lwca:10.0-devel-ubuntu16.04
+
+RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends \
+  libfile-find-object-perl \
+  lsb-release \
+  axel \
+  wget \
+  libhdf5-dev \
+  autoconf debhelper chrpath pkg-config autotools-dev dpatch lsof m4 graphviz ethtool swig python-libxml2 libnl-route-3-200 libltdl-dev kmod pciutils automake libglib2.0-0 linux-headers-4.4.0-141-generic libnuma1 libnl-3-200 \
+  libnuma-dev \
+  linux-headers-generic \
+  lwpu-410-dev \
+&& rm -rf /var/lib/apt/lists/*
+
+RUN axel -q -n 10 http://content.mellanox.com/ofed/MLNX_OFED-4.4-2.0.7.0/MLNX_OFED_LINUX-4.4-2.0.7.0-ubuntu16.04-x86_64.tgz \
+&& tar xf MLNX_OFED_LINUX-4.4-2.0.7.0-ubuntu16.04-x86_64.tgz \
+&& rm MLNX_OFED_LINUX-4.4-2.0.7.0-ubuntu16.04-x86_64.tgz \
+&& ./MLNX_OFED_LINUX-4.4-2.0.7.0-ubuntu16.04-x86_64/mlnxofedinstall --dpdk --upstream-libs --user-space-only --force --without-fw-update \
+&& rm -rf MLNX_OFED_LINUX-4.4-2.0.7.0-ubuntu16.04-x86_64
+
+RUN cd /usr/local \
+&& wget -q https://github.com/Kitware/CMake/releases/download/v3.14.0-rc4/cmake-3.14.0-rc4-Linux-x86_64.tar.gz \
+&& tar xf cmake-3.14.0-rc4-Linux-x86_64.tar.gz --strip-components=1 \
+&& rm cmake-3.14.0-rc4-Linux-x86_64.tar.gz
+
+COPY . /LWRAN/
+
+RUN ls /LWRAN/h5/*.h5 > /LWRAN/h5/input_list.txt
+
+RUN mkdir -p /LWRAN/lwPHY/build/ \
+&& cd /LWRAN/lwPHY/build/ \
+&& rm -rf * \
+&& cmake .. \
+&& make \
+&& make DESTDIR=/LWRAN/lwPHY/install install \
+&& mv /LWRAN/lwPHY/install/usr/local/* /LWRAN/lwPHY/install/ \
+&& rm -rf /LWRAN/lwPHY/install/usr
+
+ELW LD_LIBRARY_PATH /LWRAN/lwPHY/install/lib/:$LD_LIBRARY_PATH
+
+RUN cd /LWRAN/DPDK && export RTE_TARGET=x86_64-hsw-linuxapp-gcc \
+&& make config T=$RTE_TARGET O=$RTE_TARGET \
+&& make -j $(nproc --all) T=$RTE_TARGET O=$RTE_TARGET
+
+RUN cd /LWRAN/lwPHYTools \
+&& RTE_TARGET=x86_64-hsw-linuxapp-gcc RTE_SDK=/LWRAN/DPDK make -f Makefile.gen \
+&& RTE_TARGET=x86_64-hsw-linuxapp-gcc RTE_SDK=/LWRAN/DPDK make -f Makefile.recv
+
+RUN rm /usr/bin/lwpu-*

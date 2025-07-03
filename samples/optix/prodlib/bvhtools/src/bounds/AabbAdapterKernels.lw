@@ -1,0 +1,77 @@
+// Copyright LWPU Corporation 2017
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "AabbAdapterKernels.hpp"
+#include <prodlib/bvhtools/src/common/SharedKernelFunctions.hpp>
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(AABB_ADAPTER_EXEC_WARPS_PER_BLOCK * 32, AABB_ADAPTER_EXEC_BLOCKS_PER_SM)
+void AabbAdapterExec(AabbAdapterExecParams p)
+{
+    int globalPrimitiveIndex = threadIdx.x + 32 * (threadIdx.y + AABB_ADAPTER_EXEC_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+    if (globalPrimitiveIndex >= p.numPrimitives)
+        return;
+
+    int arrayIndex = p.inArrayIndexing.getArrayIndex(globalPrimitiveIndex);
+    int localPrimitiveIndex = p.inArrayIndexing.getLocalPrimitiveIndex(globalPrimitiveIndex, arrayIndex);
+
+    InputAABBs inputAabbs = loadCachedAlign16(&p.aabbsArray[arrayIndex]);
+
+    AABB aabb = loadCachedAlign4( make_ptr<AABB>( inputAabbs.aabbs, localPrimitiveIndex * inputAabbs.strideInBytes * p.motionSteps ) );
+
+    PrimitiveAABB primAabb;
+    primAabb.lox = aabb.lo.x;
+    primAabb.loy = aabb.lo.y;
+    primAabb.loz = aabb.lo.z;
+    primAabb.hix = aabb.hi.x;
+    primAabb.hiy = aabb.hi.y;
+    primAabb.hiz = aabb.hi.z;
+    primAabb.primitiveIdx = globalPrimitiveIndex;
+    primAabb.pad = 0;
+
+    storeUncachedAlign16(&p.outPrimAabbs[globalPrimitiveIndex].f4[0], primAabb.f4[0]);
+    storeUncachedAlign16(&p.outPrimAabbs[globalPrimitiveIndex].f4[1], primAabb.f4[1]);
+
+    // TODO: This can be moved to GatherPrimBits. Don't need to keep primBits around for the duration of the build.
+    if (p.outPrimBits)
+    {
+        int geometryIndex = p.inArrayIndexing.getGeometryIndex(arrayIndex);
+
+        if( p.primBitsFormat == PRIMBITS_DIRECT_64 )
+        {
+            // TODO: This may become the only valid format for AABBs
+            uint64_t bits = (inputAabbs.isOpaque() ? ( uint64_t( 1 ) << 63 ) : 0) | ( uint64_t( geometryIndex ) << 32) | localPrimitiveIndex;
+            ((uint64_t *) p.outPrimBits)[globalPrimitiveIndex] = bits;
+        }
+        else if( p.primBitsFormat == PRIMBITS_LEGACY_DIRECT_32 )
+        {
+            // TODO: This will be removed
+            uint32_t bits = (inputAabbs.isOpaque() ? 0x80000000 : 0) | (geometryIndex << p.primitiveIndexBits) | localPrimitiveIndex;
+            ((uint32_t *) p.outPrimBits)[globalPrimitiveIndex] = bits;
+        }
+        // else { Error! }
+    }
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchAabbAdapterExec(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const AabbAdapterExecParams& p)
+{
+    if (lwdaFuncSetCacheConfig(AabbAdapterExec, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    AabbAdapterExec<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------
+

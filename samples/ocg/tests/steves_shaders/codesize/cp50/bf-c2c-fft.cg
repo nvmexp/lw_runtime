@@ -1,0 +1,56 @@
+// Brute force, O(N^2) complex DFT using Compute 
+// Nolan Goodnight 9-27-05
+
+// CTA information
+struct ctaData {
+    unsigned short flags;  // CTA flags
+    unsigned short ctaxs;  // CTA size in X
+    unsigned short ctays;  // CTA size in Y
+    unsigned short ctazs;  // CTA size in Z
+    unsigned short gridw;  // Grid width
+    unsigned short gridh;  // Grid height
+    unsigned short ctaxp;  // CTA X position
+    unsigned short ctayp;  // CTA Y position
+};
+
+// FFT information
+struct paramData {
+    float pic;   // grf[4]
+    int size;    // grf[5]  
+    int threads; // grf[6]
+};
+
+#define SIZE (100)
+#define BARSIZE (((SIZE>>5)+1)<<4)
+
+float2 gmem[1] : global[0][0]; // Input signal memory
+float  cgrf[1] : shared[64];   // Global register file
+
+void main(uniform struct ctaData cdata   : shared[0],    
+          uniform struct paramData pdata : shared[16],    
+          varying unsigned int thid      : thread_id) 
+{    
+    float2 term = gmem[thid];
+    int addr = thid + pdata.size;
+  
+    cgrf[thid] = term.x;
+    cgrf[addr] = term.y;
+    barrier_wait(0, BARSIZE);
+
+    int tr = thid + (pdata.size << 1);
+    int ti = tr + pdata.size;
+
+    for (int k = 0; k < pdata.size; k++) {
+	float theta = pdata.pic * thid * k;
+	float re = cos(theta);
+	float im = sin(theta);
+	int kr = k;
+        int ki = kr + pdata.size;
+	cgrf[tr] += re * cgrf[kr] - im * cgrf[ki];
+	cgrf[ti] += im * cgrf[kr] + re * cgrf[ki];
+    }
+
+    term.x = cgrf[tr];
+    term.y = cgrf[ti];
+    gmem[thid] = term;
+}

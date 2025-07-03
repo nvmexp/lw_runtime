@@ -1,0 +1,1977 @@
+/*
+ * LWIDIA_COPYRIGHT_BEGIN
+ *
+ * Copyright (c) 2006-2021, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ *
+ * LWIDIA_COPYRIGHT_END
+ */
+
+/*
+ * This file defines properties of ptx instructions.
+ *
+ * INSTRUCTION TYPE STRING
+ * 
+ * Every instruction has one or more instruction types, which is one
+ * of F (float), I (integer), B (untyped bits), H(f16x2), P (predicate), or O(opaque)
+ *
+ * Instructions also have a size, which is the data width being operated on.
+ * Instruction types F, I, and B may be 8, 16, 32, or 64 bits wide.
+ * Instruction type H is 32 bits wide.
+ * Instruction type B may also be 128 bits wide.
+ * Instruction type P is always a single bit.
+ * Instruction type O is always zero size.
+ *
+ * An instruction type is then written as a letter indicated the base
+ * type, followed by the allowed size in bits.  For example: F32, B32I16.
+ * When multiple size values on same type are needed to specify they are
+ * specified in square brackets separated by '|'
+ * For example, Integer addition applies to 16, 32, and 64 bits registers, so the
+ * instruction type is "I[16|32|64]".
+ *
+ * Most instructions operate on registers of the following sizes:
+ *   Float:            32  or 64 bits registers, ie. F[32|64]
+ *   PackedHalfFloat:  32  bits registers, ie. H16
+ *   Integer:          16, 32, or 64 bits registers, ie. I[16|32|64]
+ *   Bits:             16, 32, or 64 bits registers, ie. B[16|32|64]
+ *   Custom Float (Float with exponent 8)    : 16, 32 ie. E[16|32] -> .b16, .bf16x2 respectively
+ *   Custom Float (Float with e = 8, m = 10) : 32     ie. T[32]    -> .tf32
+ *   Custom Float (8 bit float .e4m3/.e5m2)  :  8, 16 ie. Q[8|16]  -> .e4m3/.e5m2, .e4m3x2/.e5m2x2 respectively
+ *
+ * If no sizes are given, these defaults are used.
+ *
+ *
+ * OPERAND TYPE SIGNATURE
+ *
+ *   The operand type signature is a string that describes the number and
+ *   type of each operand.  Generally, operands follow the instruction
+ *   type.  Since an instruction may have more than one instruction
+ *   type, a single digit is used in each operand position to indicate
+ *   which instruction type each operand follows.  The number is a
+ *   zero-based index into the instruction type string.
+ *
+ *   In addition to indices, the operand type signature may contain
+ *   the following characters to indicate that the corresponding
+ *   operand is of the specified type:
+ *
+ *   Please note that, the following nomenclature is not strict
+ *   as it matches bit-sized types (bXX) of appropriate size too.
+ *   e.g. 's' would match registers of type .b32 as well.
+ *
+ *     'x'  - operand is type .u16 or vector of .u16
+ *     'u'  - operand is type .u32
+ *     'U'  - operand is type .u64
+ *     's'  - operand is type .s32 or vector of .s32
+ *     'b'  - operand is type .b8 or vector of  .b8  (Not implemented)
+ *     'c'  - operand is type .b16 or vector of .b16 (Not implemented)
+ *     'd'  - operand is type .b32 or vector of .b32 (Note, this is intended to match any type of size 32 bits)
+ *     'e'  - operand is type .b64 or vector of .b64 (Not implemented)
+ *     'f'  - operand is type .f32 or vector of .f32 (Note, this is intended to match against scalar/vector of floats)
+ *     'l'  - operand is of type scalar .f32         (Note, this is intended to match with only scalar float type)
+ *     'i'  - operand is of image type               (Note, this is intended to match with texture, sampler, surface, .u64,.s64 and .b64; 
+ *                                                    this is meant to be used only for texture and surface instructions)
+ *     'h'  - operand is type f16x2 or vector of f16x2
+ *     'C'  - operand is a integer immediate
+ *     'D'  - operand is a float immediate
+ *     'P'  - operand is a predicate
+ *     'Q'  - operand is a predicate or vector of predicates
+ *     'M'  - operand is a memory address expression
+ *     'S'  - operand is a symbol (label or variable)
+ *     'T'  - operand is a target (label or b32/b64 register)
+ *     'A'  - operand is a function argument/parameter
+ *     'V'  - operand is void (ie. wildcard).  Any type-checking is instruction-specific
+ *     'L'  - operand is a label symbol
+ *
+ *
+ *   GENINSTR FLAGS
+ *
+ *   The last field in the DEFINE record is a set of flags controls
+ *   how the record is processed by the geninstr tool. These flags are NOT
+ *   mutually exclusive.
+ *
+ *   STANDARD - The instruction is available in an external release.
+ *              It may not be available to the user if it is only allowed
+ *              in a macro.
+ *
+ *   EXTENDED - The instruction is available in an external release build,
+ *              only if the descriptor text file is supplied.
+ */
+
+#include "g_lwconfig.h"
+
+//----------------- Arithmetic Instructions -------------------------------------------------------------
+DEFINE(  F[32|64]  ,  testp,              P0,    RESULT|TESTP                                           , STANDARD)
+DEFINE(  F[32|64]  ,  copysign,           000,   RESULT                                                 , STANDARD)
+
+DEFINE(  F16       ,  add|sub,            000,   RESULT|ROUNDF|FTZ|SAT                                  , STANDARD)
+DEFINE(  H32       ,  add|sub,            000,   RESULT|ROUNDF|FTZ|SAT                                  , STANDARD)
+DEFINE(  F32       ,  add|sub,            000,   RESULT|ROUNDF|FTZ|SAT                                  , STANDARD)
+DEFINE(  F64       ,  add|sub,            000,   RESULT|ROUNDF                                          , STANDARD)
+DEFINE(  I         ,  add|addc|sub|subc,  000,   RESULT|SAT|CC                                          , STANDARD)
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_FUTURE)
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16       ,  add|sub,            000,   RESULT|ROUNDF                                          , STANDARD)
+DEFINE(  A32       ,  add|sub,            000,   RESULT|ROUNDF                                          , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(  E16       ,  add|sub,            xxx,   RESULT|ROUNDF                                          , STANDARD)
+DEFINE(  E32       ,  add|sub,            ddd,   RESULT|ROUNDF                                          , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif // HOPPER && FUTURE
+
+DEFINE(  F16       ,  mul,                000,   RESULT|ROUNDF|FTZ|SAT                                  , STANDARD)
+DEFINE(  H32       ,  mul,                000,   RESULT|ROUNDF|FTZ|SAT                                  , STANDARD)
+DEFINE(  F32       ,  mul,                000,   RESULT|ROUNDF|FTZ|SAT                                  , STANDARD)
+DEFINE(  F64       ,  mul,                000,   RESULT|ROUNDF                                          , STANDARD)
+DEFINE(  I[16|32]  ,  mul.wide,           000,   RESULT|          DOUBLERES                             , STANDARD)
+DEFINE(  I         ,  mul.lo|mul.hi,      000,   RESULT                                                 , STANDARD)
+DEFINE(  I32       ,  mul24.lo|mul24.hi,  000,   RESULT                                                 , STANDARD)
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_FUTURE)
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16       ,  mul,                000,   RESULT|ROUNDF                                          , STANDARD)
+DEFINE(  A32       ,  mul,                000,   RESULT|ROUNDF                                          , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(  E16       ,  mul,                xxx,   RESULT|ROUNDF                                          , STANDARD)
+DEFINE(  E32       ,  mul,                ddd,   RESULT|ROUNDF                                          , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif // HOPPER && FUTURE
+
+DEFINE(  F32       ,  mad,                0000,  RESULT|ROUNDF|FTZ|SAT                                  , STANDARD)
+DEFINE(  F64       ,  mad,                0000,  RESULT|ROUNDF                                          , STANDARD)
+DEFINE(  I[16|32]  ,  mad.wide,           0000,  RESULT|          DOUBLERES                             , STANDARD)
+DEFINE(  I         ,  mad.lo|madc.lo,     0000,  RESULT    |CC                                          , STANDARD)
+DEFINE(  I         ,  mad.hi|madc.hi,     0000,  RESULT|SAT|CC                                          , STANDARD)
+DEFINE(  I32       ,  mad24.lo,           0000,  RESULT                                                 , STANDARD)
+DEFINE(  I32       ,  mad24.hi,           0000,  RESULT|SAT                                             , STANDARD)
+
+#if (LWCFG(GLOBAL_CHIP_T194) || LWCFG(GLOBAL_GPU_IMPL_GV11B)) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_65)
+DEFINE(  I32       ,  mad.fused.hi,       000U,  RESULT|    CC                                          , EXTENDED)
+DEFINE(  I32       ,  madc.fused.hi,      000U,  RESULT|    CC                                          , EXTENDED)
+#endif
+#if (LWCFG(GLOBAL_CHIP_T194) || LWCFG(GLOBAL_GPU_IMPL_GV11B)) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  I32       ,  mad.fused.lo,       000U,  RESULT|    CC                                          , STANDARD)
+DEFINE(  I32       ,  madc.fused.lo,      000U,  RESULT|    CC                                          , STANDARD)
+#endif
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  I64       ,  clmad.lo|clmad.hi,  UUUU,  RESULT                                                 , STANDARD)
+#endif
+
+DEFINE(  F16       ,  fma,                0000,  RESULT|ROUNDF|FTZ|OOB|SAT|RELU                         , STANDARD)
+DEFINE(  H32       ,  fma,                0000,  RESULT|ROUNDF|FTZ|OOB|SAT|RELU                         , STANDARD)
+DEFINE(  F32       ,  fma,                0000,  RESULT|ROUNDF|FTZ|SAT                                  , STANDARD)
+DEFINE(  F64       ,  fma,                0000,  RESULT|ROUNDF                                          , STANDARD)
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+// The below templates for fma with empty instruction type are for supporting bf16/bf16x2.
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16       ,  fma,                0000,  RESULT|ROUNDF|OOB|RELU                                     , STANDARD)
+DEFINE(  A32       ,  fma,                0000,  RESULT|ROUNDF|OOB|RELU                                     , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(            ,  fma,                xxxx,  RESULT|ROUNDF|OOB|RELU                                     , STANDARD)
+DEFINE(            ,  fma,                dddd,  RESULT|ROUNDF|OOB|RELU                                     , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif
+
+DEFINE(  I         ,  sad,                0000,  RESULT                                                 , STANDARD)
+
+DEFINE(  F32       ,  div,                000,   RESULT|APRX|ROUNDF|FTZ                                 , STANDARD)
+DEFINE(  F64       ,  div,                000,   RESULT|ROUNDF                                          , STANDARD)
+DEFINE(  I         ,  div|rem,            000,   RESULT                                                 , STANDARD)
+DEFINE(  F32       ,  div.full,           000,   RESULT|       FTZ                                      , STANDARD)
+
+DEFINE(  F32       ,  rcp|sqrt      ,     00,    RESULT|APRX|ROUNDF|FTZ                                 , STANDARD)
+DEFINE(  F64       ,  rcp           ,     00,    RESULT|APRX|ROUNDF|FTZ                                 , STANDARD)
+
+DEFINE(  F64       ,      sqrt      ,     00,    RESULT|ROUNDF                                          , STANDARD)
+DEFINE(  F32       ,           rsqrt,     00,    RESULT|APRX|  FTZ                                      , STANDARD)
+DEFINE(  F64       ,           rsqrt,     00,    RESULT|APRX|  FTZ                                      , STANDARD)
+DEFINE(  F32       ,     sin|cos|lg2,     00,    RESULT|APRX|  FTZ                                      , STANDARD)
+
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  F16       ,  rcp|sqrt|rsqrt,     00,    RESULT|APRX                                            , STANDARD)
+DEFINE(  F16       ,     sin|cos|lg2,     00,    RESULT|APRX                                            , STANDARD)
+DEFINE(  H32       ,  rcp|sqrt|rsqrt,     00,    RESULT|APRX                                            , STANDARD)
+DEFINE(  H32       ,     sin|cos|lg2,     00,    RESULT|APRX                                            , STANDARD)
+#endif // TURING && INTERNAL
+
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16       ,  rcp|sqrt|rsqrt,     00,    RESULT|APRX                                            , STANDARD)
+DEFINE(  A16       ,     sin|cos|lg2,     00,    RESULT|APRX                                            , STANDARD)
+DEFINE(  A32       ,  rcp|sqrt|rsqrt,     00,    RESULT|APRX                                            , STANDARD)
+DEFINE(  A32       ,     sin|cos|lg2,     00,    RESULT|APRX                                            , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(  E16       ,  rcp|sqrt|rsqrt,     xx,    RESULT|APRX                                            , STANDARD)
+DEFINE(  E16       ,     sin|cos|lg2,     xx,    RESULT|APRX                                            , STANDARD)
+DEFINE(  E32       ,  rcp|sqrt|rsqrt,     dd,    RESULT|APRX                                            , STANDARD)
+DEFINE(  E32       ,     sin|cos|lg2,     dd,    RESULT|APRX                                            , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif // HOPPER && INTERNAL
+
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_65)
+// ROUND is only supported in old version which is INTERNAL only
+DEFINE(  F16       ,  tanh,               00,    RESULT|APRX|ROUNDF                                     , STANDARD|EXTENDED)
+DEFINE(  F32       ,  tanh,               00,    RESULT|APRX                                            , STANDARD|EXTENDED)
+DEFINE(  H32       ,  tanh,               00,    RESULT|APRX|ROUNDF                                     , STANDARD|EXTENDED)
+#endif 
+
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_FUTURE)
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16       ,  tanh,               00,    RESULT|APRX                                            , STANDARD)
+DEFINE(  A32       ,  tanh,               00,    RESULT|APRX                                            , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(  E16       ,  tanh,               xx,    RESULT|APRX                                            , STANDARD)
+DEFINE(  E32       ,  tanh,               dd,    RESULT|APRX                                            , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif // HOPPER && FUTURE
+
+// For ex2 instruction all type and modifier checks are done in ptx.y
+DEFINE(  F32       ,  ex2,                00,    RESULT|APRX|FTZ                                        , STANDARD)
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_65)
+DEFINE(  F16       ,  ex2,                00,    RESULT|APRX|ROUNDF|FTZ                                 , STANDARD|EXTENDED)
+DEFINE(  H32       ,  ex2,                00,    RESULT|APRX|ROUNDF|FTZ                                 , STANDARD|EXTENDED)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_FUTURE)
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16       ,  ex2,                00,    RESULT|APRX                                            , STANDARD)
+DEFINE(  A32       ,  ex2,                00,    RESULT|APRX                                            , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(  E16       ,  ex2,                xx,    RESULT|APRX                                            , STANDARD)
+DEFINE(  E32       ,  ex2,                dd,    RESULT|APRX                                            , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif // HOPPER && FUTURE
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_65)
+DEFINE(  F16       ,  abs,                00,    RESULT|       FTZ                                      , STANDARD)
+DEFINE(  H32       ,  abs,                00,    RESULT|       FTZ                                      , STANDARD)
+#endif
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+// The below template for abs with empty instruction type is for supporting bf16/bf16x2.
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16       ,  abs,                00,    RESULT                                                 , STANDARD)
+DEFINE(  A32       ,  abs,                00,    RESULT                                                 , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(            ,  abs,                xx,    RESULT                                                 , STANDARD)
+DEFINE(            ,  abs,                dd,    RESULT                                                 , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif
+DEFINE(  F32       ,  abs,                00,    RESULT|       FTZ                                      , STANDARD)
+DEFINE(  F64       ,  abs,                00,    RESULT                                                 , STANDARD)
+DEFINE(  I         ,  abs,                00,    RESULT|SIGNED                                          , STANDARD)
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_60)
+DEFINE(  F16       ,  neg,                00,    RESULT|       FTZ                                      , STANDARD)
+DEFINE(  H32       ,  neg,                00,    RESULT|       FTZ                                      , STANDARD)
+#endif
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+// The below template for neg with empty instruction type is for supporting bf16/bf16x2.
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16       ,  neg,                00,    RESULT                                                 , STANDARD)
+DEFINE(  A32       ,  neg,                00,    RESULT                                                 , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(            ,  neg,                xx,    RESULT                                                 , STANDARD)
+DEFINE(            ,  neg,                dd,    RESULT                                                 , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif
+DEFINE(  F32       ,  neg,                00,    RESULT|       FTZ                                      , STANDARD)
+DEFINE(  F64       ,  neg,                00,    RESULT                                                 , STANDARD)
+DEFINE(  I         ,  neg,                00,    RESULT|SIGNED                                          , STANDARD)
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+DEFINE(  F16       ,  min|max,            000,   RESULT|NANMODE|FTZ|XORSIGN|ABS                         , STANDARD)
+DEFINE(  H32       ,  min|max,            000,   RESULT|NANMODE|FTZ|XORSIGN|ABS                         , STANDARD)
+// The below templates for min/max with empty instruction type are for supporting bf16/bf16x2.
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16       ,  min|max,            000,   RESULT|NANMODE|XORSIGN|ABS                             , STANDARD)
+DEFINE(  A32       ,  min|max,            000,   RESULT|NANMODE|XORSIGN|ABS                             , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(            ,  min|max,            xxx,   RESULT|NANMODE|XORSIGN|ABS                             , STANDARD)
+DEFINE(            ,  min|max,            ddd,   RESULT|NANMODE|XORSIGN|ABS                             , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif // ampere && version 70
+DEFINE(  F32       ,  min|max,            000,   RESULT|NANMODE|FTZ|XORSIGN|ABS                         , STANDARD)
+DEFINE(  F64       ,  min|max,            000,   RESULT                                                 , STANDARD)
+DEFINE(  I         ,  min|max,            000,   RESULT                                                 , STANDARD)
+
+DEFINE(  B[32|64]  ,  popc,               u0,    RESULT                                                 , STANDARD)
+DEFINE(  B[32|64]  ,  clz,                u0,    RESULT                                                 , STANDARD)
+
+DEFINE(  I[32|64]  ,  bfind,              u0,    RESULT|SHAMT                                           , STANDARD)
+DEFINE(  B[32|64]  ,  brev,               00,    RESULT                                                 , STANDARD)
+DEFINE(  I[32|64]  ,  bfe,                00uu,  RESULT                                                 , STANDARD)
+DEFINE(  B[32|64]  ,  bfi,                000uu, RESULT                                                 , STANDARD)
+DEFINE(  B32       ,  prmt,               0000,  RESULT|PRMT                                            , STANDARD)
+
+DEFINE(  B32       ,  shfl,               0000,  RESULT|RESULTP|SHFL                                    , STANDARD)
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_60)
+DEFINE(  B32       ,  shfl,               0000u, RESULT|RESULTP|SHFL|SYNC|ALIGN                         , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_VOLTA)
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL) || LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_76)
+DEFINE(  B32       ,  bmsk,               uuu,   RESULT|CLAMP                                           , STANDARD)
+#endif // Internal || ISA_76
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  I32       ,  sgxt,               00u,   RESULT|CLAMP                                           , STANDARD)
+#endif // Internal 
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_76)
+DEFINE(  I32       ,  szext,              00u,   RESULT|CLAMP                                           , STANDARD)
+#endif // ISA_76
+#endif // volta
+
+DEFINE(  F16F16    ,  set,                011,   RESULT|CMP|   FTZ                                      , STANDARD)
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_65)
+DEFINE(  I16F16    ,  set,                011,   RESULT|CMP|   FTZ                                      , STANDARD)
+DEFINE(  I32F16    ,  set,                011,   RESULT|CMP|   FTZ                                      , STANDARD)
+DEFINE(  I32H32    ,  set,                011,   RESULT|CMP|   FTZ                                      , STANDARD)
+DEFINE(  I16F16    ,  set,                011P,  RESULT|CMP|BOP|FTZ                                     , STANDARD)
+DEFINE(  I32F16    ,  set,                011P,  RESULT|CMP|BOP|FTZ                                     , STANDARD)
+DEFINE(  I32H32    ,  set,                011P,  RESULT|CMP|BOP|FTZ                                     , STANDARD)
+#endif
+DEFINE(  F16F32    ,  set,                011,   RESULT|CMP|   FTZ                                      , STANDARD)
+DEFINE(  F16F64    ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  F16I      ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  F16B      ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  H32H32    ,  set,                011,   RESULT|CMP|   FTZ                                      , STANDARD)
+DEFINE(  F32F32    ,  set,                011,   RESULT|CMP|   FTZ                                      , STANDARD)
+DEFINE(  F32F64    ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  F32I      ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  F32B      ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  I32F32    ,  set,                011,   RESULT|CMP|   FTZ                                      , STANDARD)
+DEFINE(  I32F64    ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  I32I      ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  I32B      ,  set,                011,   RESULT|CMP                                             , STANDARD)
+
+DEFINE(  F16F16    ,  set,                011P,  RESULT|CMP|BOP|FTZ                                     , STANDARD)
+DEFINE(  F16F32    ,  set,                011P,  RESULT|CMP|BOP|FTZ                                     , STANDARD)
+DEFINE(  F16F64    ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  F16I      ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  F16B      ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  H32H32    ,  set,                011P,  RESULT|CMP|BOP|FTZ                                     , STANDARD)
+DEFINE(  F32F32    ,  set,                011P,  RESULT|CMP|BOP|FTZ                                     , STANDARD)
+DEFINE(  F32F64    ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  F32I      ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  F32B      ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  I32F32    ,  set,                011P,  RESULT|CMP|BOP|FTZ                                     , STANDARD)
+DEFINE(  I32F64    ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  I32I      ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  I32B      ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_FUTURE)
+// The below templates for set supports bf16/bf16x2 as source/dest types.
+// set.bf16.bf16
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16A16    ,  set,                000,   RESULT|CMP|                                            , STANDARD)
+DEFINE(  A16A16    ,  set,                000P,  RESULT|CMP|BOP                                         , STANDARD)
+
+// set.bf16.{B/I/F}{16/32/64}
+DEFINE(  A16F16    ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  A16F16    ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  A16F32    ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  A16F32    ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  A16F64    ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  A16F64    ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  A16I      ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  A16I      ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  A16B      ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  A16B      ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+
+// set.I{16/32}.bf16
+DEFINE(  I16A16    ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  I16A16    ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  I32A16    ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  I32A16    ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+
+// set.{I32/bf16x2}.bf16x2
+DEFINE(  I32A32    ,  set,                011,   RESULT|CMP                                             , STANDARD)
+DEFINE(  I32A32    ,  set,                011P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  A32A32    ,  set,                000,   RESULT|CMP                                             , STANDARD)
+DEFINE(  A32A32    ,  set,                000P,  RESULT|CMP|BOP                                         , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(  E16E16    ,  set,                xxx,   RESULT|CMP|                                            , STANDARD)
+DEFINE(  E16E16    ,  set,                xxxP,  RESULT|CMP|BOP                                         , STANDARD)
+
+// set.bf16.{B/I/F}{16/32/64}
+DEFINE(  E16F16    ,  set,                x11,   RESULT|CMP                                             , STANDARD)
+DEFINE(  E16F16    ,  set,                x11P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  E16F32    ,  set,                x11,   RESULT|CMP                                             , STANDARD)
+DEFINE(  E16F32    ,  set,                x11P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  E16F64    ,  set,                x11,   RESULT|CMP                                             , STANDARD)
+DEFINE(  E16F64    ,  set,                x11P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  E16I      ,  set,                x11,   RESULT|CMP                                             , STANDARD)
+DEFINE(  E16I      ,  set,                x11P,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  E16B      ,  set,                x11,   RESULT|CMP                                             , STANDARD)
+DEFINE(  E16B      ,  set,                x11P,  RESULT|CMP|BOP                                         , STANDARD)
+
+// set.I{16/32}.bf16
+DEFINE(  I16E16    ,  set,                0xx,   RESULT|CMP                                             , STANDARD)
+DEFINE(  I16E16    ,  set,                0xxP,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  I32E16    ,  set,                0xx,   RESULT|CMP                                             , STANDARD)
+DEFINE(  I32E16    ,  set,                0xxP,  RESULT|CMP|BOP                                         , STANDARD)
+
+// set.{I32/bf16x2}.bf16x2
+DEFINE(  I32E32    ,  set,                0dd,   RESULT|CMP                                             , STANDARD)
+DEFINE(  I32E32    ,  set,                0ddP,  RESULT|CMP|BOP                                         , STANDARD)
+DEFINE(  E32E32    ,  set,                ddd,   RESULT|CMP                                             , STANDARD)
+DEFINE(  E32E32    ,  set,                dddP,  RESULT|CMP|BOP                                         , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif // HOPPER && FUTURE
+
+DEFINE(  F16       ,  setp,               P00,   RESULT|        CMP|    FTZ                             , STANDARD)
+DEFINE(  H32       ,  setp,               P00,   RESULT|RESULTP|CMP|    FTZ                             , STANDARD)
+DEFINE(  F32       ,  setp,               P00,   RESULT|RESULTP|CMP|    FTZ                             , STANDARD)
+DEFINE(  F64       ,  setp,               P00,   RESULT|RESULTP|CMP                                     , STANDARD)
+DEFINE(  I         ,  setp,               P00,   RESULT|RESULTP|CMP                                     , STANDARD)
+DEFINE(  B         ,  setp,               P00,   RESULT|RESULTP|CMP                                     , STANDARD)
+DEFINE(  F16       ,  setp,               P00P,  RESULT|        CMP|BOP|FTZ                             , STANDARD)
+DEFINE(  H32       ,  setp,               P00P,  RESULT|RESULTP|CMP|BOP|FTZ                             , STANDARD)
+DEFINE(  F32       ,  setp,               P00P,  RESULT|RESULTP|CMP|BOP|FTZ                             , STANDARD)
+DEFINE(  F64       ,  setp,               P00P,  RESULT|RESULTP|CMP|BOP                                 , STANDARD)
+DEFINE(  I         ,  setp,               P00P,  RESULT|RESULTP|CMP|BOP                                 , STANDARD)
+DEFINE(  B         ,  setp,               P00P,  RESULT|RESULTP|CMP|BOP                                 , STANDARD)
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_FUTURE)
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16       ,  setp,               P00,   RESULT|       |CMP                                     , STANDARD)
+DEFINE(  A16       ,  setp,               P00P,  RESULT|       |CMP|BOP                                 , STANDARD)
+DEFINE(  A32       ,  setp,               P00,   RESULT|RESULTP|CMP                                     , STANDARD)
+DEFINE(  A32       ,  setp,               P00P,  RESULT|RESULTP|CMP|BOP                                 , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(  E16       ,  setp,               Pxx,   RESULT|       |CMP                                     , STANDARD)
+DEFINE(  E16       ,  setp,               PxxP,  RESULT|       |CMP|BOP                                 , STANDARD)
+DEFINE(  E32       ,  setp,               Pdd,   RESULT|RESULTP|CMP                                     , STANDARD)
+DEFINE(  E32       ,  setp,               PddP,  RESULT|RESULTP|CMP|BOP                                 , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif // HOPPER && FUTURE
+
+DEFINE(  F         ,  selp,               000P,  RESULT                                                 , STANDARD)
+DEFINE(  I         ,  selp,               000P,  RESULT                                                 , STANDARD)
+DEFINE(  B         ,  selp,               000P,  RESULT                                                 , STANDARD)
+
+DEFINE(  FF32      ,  slct,               0001,  RESULT|       FTZ                                      , STANDARD)
+DEFINE(  IF32      ,  slct,               0001,  RESULT|       FTZ                                      , STANDARD)
+DEFINE(  BF32      ,  slct,               0001,  RESULT|       FTZ                                      , STANDARD)
+DEFINE(  FI32      ,  slct,               0001,  RESULT|SIGNED                                          , STANDARD)
+DEFINE(  II32      ,  slct,               0001,  RESULT|SIGNED                                          , STANDARD)
+DEFINE(  BI32      ,  slct,               0001,  RESULT|SIGNED                                          , STANDARD)
+
+//----------------- Logic Instructions ------------------------------------------------------------------
+DEFINE(  B         ,  and|or|xor,         000,   RESULT                                                 , STANDARD)
+DEFINE(  P         ,  and|or|xor,         000,   RESULT                                                 , STANDARD)
+
+DEFINE(  B         ,  not|cnot,           00,    RESULT                                                 , STANDARD)
+DEFINE(  P         ,  not,                00,    RESULT                                                 , STANDARD)
+
+DEFINE(  I         ,      shr,            00u,   RESULT                                                 , STANDARD)
+DEFINE(  B         ,  shl|shr,            00u,   RESULT                                                 , STANDARD)
+
+DEFINE(  B32       ,  shf.l|shf.r,        000u,  RESULT|CLAMP                                           , STANDARD)
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_62)
+DEFINE(  B32       ,  p2r,               uQC,   RESULT                                                  , EXTENDED)
+DEFINE(  B32       ,  p2r,               uQLw,  RESULT                                                  , EXTENDED)
+DEFINE(  B32       ,  r2p,               QuC,   RESULT                                                  , EXTENDED)
+#endif
+
+DEFINE(  B32       ,  lop3,               0000C, RESULT                                                 , STANDARD)
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_60)
+DEFINE(  B32       ,  fns,               0000,  RESULT                                                  , STANDARD)
+#endif
+
+DEFINE(  I32I32    ,  dp4a,               u01u,  RESULT                                                 , STANDARD)
+// Unadorned "dp2a" is provided just to catch a missing hi/lo qualifier.
+DEFINE(  I32I32    ,  dp2a,               u01u,  RESULT                                                 , STANDARD)
+DEFINE(  I32I32    ,  dp2a.hi|dp2a.lo,    u01u,  RESULT                                                 , STANDARD)
+
+//----------------- Data Movement and Colwersion Instructions -------------------------------------------
+DEFINE(  F         ,  mov,                00,    RESULT|VECTORIZABLE                                    , STANDARD)
+DEFINE(  I         ,  mov,                00,    RESULT|VECTORIZABLE|SREGARG                            , STANDARD)
+DEFINE(  B         ,  mov,                00,    RESULT|VECTORIZABLE|SREGARG                            , STANDARD)
+DEFINE(  P         ,  mov,                00,    RESULT             |SREGARG                            , STANDARD)
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+#if defined( OPTIX_HAND_EDIT )
+// The mov instruction that takes a label needs to be handled by the front end.
+#else // OPTIX_HAND_EDIT
+DEFINE(  B32       ,  mov,                0L,    RESULT|ADDRTYPE                                        , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif
+
+DEFINE(  F         ,  ld,                 0M,    RESULT|VECTORIZABLE|LARG|     MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE|LEVEL|PREFETCHSIZE , STANDARD)
+DEFINE(  I[8|16|32|64]     ,  ld,         0M,    RESULT|VECTORIZABLE|LARG|     MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE|LEVEL|PREFETCHSIZE , STANDARD)
+DEFINE(  B[8|16|32|64]     ,  ld,         0M,    RESULT|VECTORIZABLE|LARG|     MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE|LEVEL|PREFETCHSIZE , STANDARD)
+
+// TODO: The following template allows CACHEPREFETCH modifier. Once internal builds of compiler supports the new syntax, we can remove this redundancy.
+#if !defined( OPTIX_HAND_EDIT )
+DEFINE(  F         ,  ld,                 0M,    RESULT|VECTORIZABLE|LARG|     MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE|CACHEPREFETCH , STANDARD)
+DEFINE(  I[8|16|32|64]     ,  ld,         0M,    RESULT|VECTORIZABLE|LARG|     MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE|CACHEPREFETCH , STANDARD)
+DEFINE(  B[8|16|32|64]     ,  ld,         0M,    RESULT|VECTORIZABLE|LARG|     MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE|CACHEPREFETCH , STANDARD)
+#endif // OPTIX_HAND_EDIT
+
+// The memory descriptor variants :
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_71)
+DEFINE(  F                 ,  ld,         0MU,   RESULT|VECTORIZABLE|LARG|DESC|MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE|LEVEL|PREFETCHSIZE , EXTENDED)
+DEFINE(  I[8|16|32|64]     ,  ld,         0MU,   RESULT|VECTORIZABLE|LARG|DESC|MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE|LEVEL|PREFETCHSIZE , EXTENDED)
+DEFINE(  B[8|16|32|64]     ,  ld,         0MU,   RESULT|VECTORIZABLE|LARG|DESC|MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE|LEVEL|PREFETCHSIZE , EXTENDED)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_74)
+#if !defined( OPTIX_HAND_EDIT )
+DEFINE(  F                 ,  ld,         0MU,   RESULT|VECTORIZABLE|LARG|CACHEHINT|MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE|CACHEPREFETCH , STANDARD)
+DEFINE(  I[8|16|32|64]     ,  ld,         0MU,   RESULT|VECTORIZABLE|LARG|CACHEHINT|MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE|CACHEPREFETCH , STANDARD)
+DEFINE(  B[8|16|32|64]     ,  ld,         0MU,   RESULT|VECTORIZABLE|LARG|CACHEHINT|MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE|CACHEPREFETCH , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif
+
+DEFINE(  F         ,  ldu,                0M,    RESULT|VECTORIZABLE|LARG|     MEMSPACE                 , STANDARD)
+DEFINE(  I[8|16|32|64]     ,  ldu,        0M,    RESULT|VECTORIZABLE|LARG|     MEMSPACE                 , STANDARD)
+DEFINE(  B[8|16|32|64]     ,  ldu,        0M,    RESULT|VECTORIZABLE|LARG|     MEMSPACE                 , STANDARD)
+
+DEFINE(  B[8|16|32|64|128]B[8|16|32|64|128],_ldldu,             01MM,  RESULT|VECTORIZABLE|LARG|     MEMSPACE                 , STANDARD)
+
+DEFINE(  F         ,  st,                 M0,           VECTORIZABLE|LARG|     MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE , STANDARD)
+DEFINE(  I[8|16|32|64]     ,  st,         M0,           VECTORIZABLE|LARG|     MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE , STANDARD)
+DEFINE(  B[8|16|32|64]     ,  st,         M0,           VECTORIZABLE|LARG|     MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE , STANDARD)
+
+// The memory descriptor variants :
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_71)
+DEFINE(  F                 ,  st,         M0U,          VECTORIZABLE|LARG|DESC|MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE , EXTENDED)
+DEFINE(  I[8|16|32|64]     ,  st,         M0U,          VECTORIZABLE|LARG|DESC|MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE , EXTENDED)
+DEFINE(  B[8|16|32|64]     ,  st,         M0U,          VECTORIZABLE|LARG|DESC|MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE , EXTENDED)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_74)
+#if !defined( OPTIX_HAND_EDIT )
+DEFINE(  F                 ,  st,         M0U,          VECTORIZABLE|LARG|CACHEHINT|MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE , STANDARD)
+DEFINE(  I[8|16|32|64]     ,  st,         M0U,          VECTORIZABLE|LARG|CACHEHINT|MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE , STANDARD)
+DEFINE(  B[8|16|32|64]     ,  st,         M0U,          VECTORIZABLE|LARG|CACHEHINT|MEMSPACE|EVICTPRIORITY|CACHEOP|ORDER|SCOPE , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif
+
+#if LWCFG(GLOBAL_ARCH_ADA) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL) 
+DEFINE(            ,  prefetch,           PM,                           RESULT|MEMSPACE|LEVEL|EVICTPRIORITY  , STANDARD)
+#endif
+DEFINE(            ,  prefetch,           M,                                   MEMSPACE|LEVEL|EVICTPRIORITY  , STANDARD)
+DEFINE(            ,  prefetchu,          M,                                   MEMSPACE|LEVEL                , STANDARD)
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_74)
+DEFINE(            ,  applypriority,      MC,                                  MEMSPACE|LEVEL|EVICTPRIORITY  , STANDARD)
+
+DEFINE(  B64       ,  createpolicy.fractional,       U,                                 LEVEL|EVICTPRIORITY  , STANDARD)
+DEFINE(  B64       ,  createpolicy.fractional,       Uf,                                LEVEL|EVICTPRIORITY  , STANDARD)
+DEFINE(  B64       ,  createpolicy.range,            UMuu,                     MEMSPACE|LEVEL|EVICTPRIORITY  , STANDARD)
+DEFINE(  B64       ,  createpolicy.cvt,              UU,                                LEVEL                , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_AMPERE)
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL) || LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_71)
+DEFINE(            ,  cachepolicy,        M,                                   MEMSPACE|LEVEL|EVICTPRIORITY  , EXTENDED)
+#endif // internal || ISA_71
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_74)
+DEFINE(            ,  discard,            MC,                                  MEMSPACE|LEVEL                , STANDARD)
+#endif // ISA_74
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(            ,  destroy,            MC,                                  MEMSPACE                      , STANDARD)
+#endif // internal
+#endif // ampere
+
+DEFINE(            ,  isspacep,           Pu,    RESULT|                       MEMSPACE|SHAREDSCOPE     , STANDARD)
+DEFINE(            ,  isspacep,           PU,    RESULT|                       MEMSPACE|SHAREDSCOPE     , STANDARD)
+DEFINE(  I[32|64]  ,  cvta|cvta.to,       00,    RESULT|                       MEMSPACE|SHAREDSCOPE     , STANDARD)
+
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  I[32|64]  ,  setctarank,         00u,   RESULT|                       MEMSPACE|SHAREDSCOPE     , STANDARD)
+#endif
+
+DEFINE(            ,  cctl|cctlu,         M,                                   MEMSPACE|CACHEOP         , STANDARD)
+DEFINE(            ,  cctl|cctlu,         ,                                    MEMSPACE|CACHEOP         , STANDARD)
+
+DEFINE(  F[16|32|64]F[16|32|64]    , cvt, 01,    RESULT|FTZ|SAT|ROUNDF|ROUNDI|LARG                      , STANDARD)
+DEFINE(  F[16|32|64]I[8|16|32|64]  , cvt, 01,    RESULT|FTZ|SAT|ROUNDF       |LARG                      , STANDARD)
+DEFINE(  I[8|16|32|64]F[16|32|64]  , cvt, 01,    RESULT|FTZ|SAT       |ROUNDI|LARG                      , STANDARD)
+DEFINE(  I[8|16|32|64]I[8|16|32|64], cvt, 01,    RESULT|   |SAT              |LARG|SREGARG              , STANDARD)
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_65)
+DEFINE(  F16F32    ,  cvt,                01,    RESULT|RELU|ROUNDF|LARG                                , STANDARD|EXTENDED)
+DEFINE(  H32F32    ,  cvt,                011,   RESULT|RELU|ROUNDF|LARG                                , STANDARD|EXTENDED)
+// The below templates for cvt with empty 1st instruction type are for supporting bf16/bf16x2 dest. Note: LARG is not supported.
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16F32    ,  cvt,                01,    RESULT|RELU|ROUNDF                                     , STANDARD|EXTENDED)
+DEFINE(  A32F32    ,  cvt,                011,   RESULT|RELU|ROUNDF                                     , STANDARD|EXTENDED)
+#else // OPTIX_HAND_EDIT
+DEFINE(    F32     ,  cvt,                x0,    RESULT|RELU|ROUNDF                                     , STANDARD|EXTENDED)
+DEFINE(    F32     ,  cvt,                d00,   RESULT|RELU|ROUNDF                                     , STANDARD|EXTENDED)
+#endif // OPTIX_HAND_EDIT
+#endif
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  Q16F32    ,  cvt,                x11,   RESULT|RELU|ROUNDF                                     , STANDARD)
+DEFINE(  Q16H32    ,  cvt,                x1,    RESULT|RELU|ROUNDF                                     , STANDARD)
+DEFINE(  H32Q16    ,  cvt,                0x,    RESULT|RELU|ROUNDF                                     , STANDARD)
+#endif
+// The below template for cvt with empty 1st instruction type is for supporting tf32 dst. Note: LARG is not supported.
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  T32F32    ,  cvt,                01,    RESULT|ROUNDF                                          , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(    F32     ,  cvt,                d0,    RESULT|ROUNDF                                          , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_71)
+// The below template for cvt with empty 1st instruction type is for supporting bf16 source. Note: LARG is not supported.
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  F32A16    ,  cvt,                01,    RESULT|ROUNDF                                          , STANDARD|EXTENDED)
+#else // OPTIX_HAND_EDIT
+DEFINE(    F32     ,  cvt,                0x,    RESULT|ROUNDF                                          , STANDARD|EXTENDED)
+#endif // OPTIX_HAND_EDIT
+#endif // AMPERE && ISA_71
+#if (LWCFG(GLOBAL_CHIP_T194) || LWCFG(GLOBAL_GPU_IMPL_GV11B) || LWCFG(GLOBAL_ARCH_TURING)) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_65)
+DEFINE(  I8I32B32,       cvt.pack,           1112,  RESULT|   |SAT              |LARG                      , STANDARD)
+DEFINE(  I16I32,         cvt.pack,           111,   RESULT|   |SAT              |LARG                      , STANDARD)
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_65)
+// For Sub-byte types
+DEFINE(  I32B32,      cvt.pack,           0001,  RESULT|   |SAT              |LARG                      , STANDARD)
+#endif // Turing
+#endif
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  I64       ,  setlmembase,        0,                                                            , STANDARD)
+DEFINE(  I64       ,  getlmembase,        0,     RESULT                                                 , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_VOLTA) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_64)
+// Public mma : mma.sync.aligned.{m8n8k4/m16n8k8/m16n8k16}.alayout.blayout.dtype.f16.f16.ctype
+DEFINE(  F16F16F16F16  ,   mma,            hhhh,     RESULT|VECTORIZABLE|SHAPE|SYNC|ALIGN                   , STANDARD)
+DEFINE(  F32F16F16F16  ,   mma,            fhhh,     RESULT|VECTORIZABLE|SHAPE|SYNC|ALIGN                   , STANDARD)
+DEFINE(  F32F16F16F32  ,   mma,            fhhf,     RESULT|VECTORIZABLE|SHAPE|SYNC|ALIGN                   , STANDARD)
+// F16F16F16F32 is actually not allowed. But we sneak this past the templates
+// and print an informative error message in the parser instead.
+DEFINE(  F16F16F16F32  ,   mma,            VVVV,     RESULT|VECTORIZABLE|SHAPE|SYNC|ALIGN                   , STANDARD)
+#endif // VOLTA && ISA_64
+
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+// Public mma : mma.sync.aligned.[m8n8k128/m16n8k{128/256}].row.col.{xor/and}.popc.s32.b1.b1.s32
+// To stop templates from erroring out when xor and popc operations
+// are specified for mma instruction we add BOP and ARITHOP features respectively.
+// We do the required checks later in ptx.y.
+DEFINE(  I32I32        ,   mma,            sdds,     RESULT|VECTORIZABLE|SHAPE|SYNC|ALIGN|BOP|ARITHOP       , STANDARD)
+#endif // TURING && ISA_70
+
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_65)
+// Public mma : mma.sync.aligned.{m8n8k16/m8n8k32/m16n8k{16/32/64}}.row.col{.satfinite}.s32.atype.btype.s32
+// 1. atype/btype: .{u8/s8}.{u8/s8}
+DEFINE(  I32I8I8I32     ,    mma,            sdds,     RESULT|VECTORIZABLE|SHAPE|SYNC|ALIGN|SATF              , STANDARD)
+// 2. atype/btype: .{u4/s4}.{u4/s4}
+DEFINE(  I32I32         ,    mma,            sdds,     RESULT|VECTORIZABLE|SHAPE|SYNC|ALIGN|SATF              , STANDARD)
+#endif // TURING && ISA_65
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+// Public mma : mma.sync.aligned.m8n8k4.row.col.f64.f64.f64.f64{.rnd}
+DEFINE(  F64F64F64F64  ,     mma,            0123,     RESULT|VECTORIZABLE|SHAPE|SYNC|ALIGN|ROUNDF            , STANDARD)
+// Public mma with bf16/ tf32: mma.sync.aligned.{shape}.row.col.f32.bf16/tf32.bf16/tf32.f32
+DEFINE(  F32F32        ,     mma,            dddd,     RESULT|VECTORIZABLE|SHAPE|SYNC|ALIGN                   , STANDARD)
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_71)
+// Sparse Public mma : Standard floating point
+DEFINE(  F16F16F16F16 ,      mma,         hhhhdC,   RESULT|VECTORIZABLE|SHAPE|SPARSITY|SYNC|ALIGN,      STANDARD|EXTENDED)
+DEFINE(  F32F16F16F32 ,      mma,         dhhddC,   RESULT|VECTORIZABLE|SHAPE|SPARSITY|SYNC|ALIGN,      STANDARD|EXTENDED)
+
+// Sparse Public mma : The one with TF32/BF16 type.
+DEFINE(  F32F32       ,      mma,         dddddC,   RESULT|VECTORIZABLE|SHAPE|SPARSITY|SYNC|ALIGN,      STANDARD|EXTENDED)
+
+// Sparse Public mma : U8/S8
+DEFINE(  I32I8I8I32   ,      mma,         sddsdC,   RESULT|VECTORIZABLE|SHAPE|SPARSITY|SATF|SYNC|ALIGN, STANDARD|EXTENDED)
+// Sparse Public mma : U4/S4
+DEFINE(  I32I32       ,      mma,         sddsdC,   RESULT|VECTORIZABLE|SHAPE|SPARSITY|SATF|SYNC|ALIGN, STANDARD|EXTENDED)
+#endif // ISA_71
+#endif // AMPERE && ISA_70
+
+#if LWCFG(GLOBAL_ARCH_VOLTA) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_60)
+// TODO: REMOVE versions with SAT since _mma instruction will really take SATF only
+// TODO: Update templates to emit appropriate error messages for TF32 type.
+
+DEFINE(  F16F16    ,  _mma,            hhhh,     RESULT|VECTORIZABLE|SHAPE|SAT|SATF                     , STANDARD|EXTENDED)
+DEFINE(  F32F16    ,  _mma,            fhhh,     RESULT|VECTORIZABLE|SHAPE|SAT|SATF                     , STANDARD|EXTENDED)
+DEFINE(  F32F32    ,  _mma,            fhhf,     RESULT|VECTORIZABLE|SHAPE|SAT|SATF                     , STANDARD|EXTENDED)
+
+// F1F2 is actually not allowed. But we sneak this past the templates
+// and print an informative error message in the parser instead.
+DEFINE(  F16F32    ,  _mma,            VVVV,     RESULT|VECTORIZABLE|SHAPE|SAT|SATF                     , STANDARD|EXTENDED)
+
+DEFINE(  F16F16    ,  wmma.mma,        hhhh,     RESULT|VECTORIZABLE|SHAPE    |SATF|SYNC|ALIGN          , STANDARD)
+DEFINE(  F32F16    ,  wmma.mma,        fhhh,     RESULT|VECTORIZABLE|SHAPE    |SATF|SYNC|ALIGN          , STANDARD)
+DEFINE(  F32F32    ,  wmma.mma,        fhhf,     RESULT|VECTORIZABLE|SHAPE    |SATF|SYNC|ALIGN          , STANDARD)
+DEFINE(  F16F32    ,  wmma.mma,        hhhf,     RESULT|VECTORIZABLE|SHAPE    |SATF|SYNC|ALIGN          , STANDARD)
+
+DEFINE(  F16       ,  wmma.load.a,     hM,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F16       ,  wmma.load.a,     hMu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F16       ,  wmma.load.b,     hM,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F16       ,  wmma.load.b,     hMu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F16       ,  wmma.load.c,     hM,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F16       ,  wmma.load.c,     hMu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F32       ,  wmma.load.c,     fM,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F32       ,  wmma.load.c,     fMu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+
+// Same trick as hmma.F1F2
+DEFINE(  F32       ,  wmma.load.a,     VV,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F32       ,  wmma.load.a,     VVV,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F32       ,  wmma.load.b,     VV,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F32       ,  wmma.load.b,     VVV,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+
+// The memory descriptor variants :
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  F16       ,  wmma.load.a,     hMU,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F16       ,  wmma.load.a,     hMuU,     RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F16       ,  wmma.load.b,     hMU,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F16       ,  wmma.load.b,     hMuU,     RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F16       ,  wmma.load.c,     hMU,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F16       ,  wmma.load.c,     hMuU,     RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F32       ,  wmma.load.c,     fMU,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F32       ,  wmma.load.c,     fMuU,     RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+
+// Same trick as hmma.F1F2
+DEFINE(  F32       ,  wmma.load.a,     VVU,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F32       ,  wmma.load.a,     VVVU,     RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F32       ,  wmma.load.b,     VVU,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F32       ,  wmma.load.b,     VVVU,     RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+#endif // ampere & isa-internal
+
+DEFINE(  F16       ,  wmma.store.d,    Mh,              VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F16       ,  wmma.store.d,    Mhu,             VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F32       ,  wmma.store.d,    Mf,              VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  F32       ,  wmma.store.d,    Mfu,             VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+
+// The memory descriptor variants :
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  F16       ,  wmma.store.d,    MhU,             VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F16       ,  wmma.store.d,    MhuU,            VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F32       ,  wmma.store.d,    MfU,             VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  F32       ,  wmma.store.d,    MfuU,            VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+#endif // ampere & isa-internal
+#endif
+// Sub - Byte WMMA
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_63)
+DEFINE(            ,  wmma.load.a,     sM,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(            ,  wmma.load.a,     sMu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(            ,  wmma.load.b,     sM,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(            ,  wmma.load.b,     sMu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+// Bit and Sub-Byte MMA for WMMA
+// Number of arguments and instruction types are same for Bit and Sub-Byte WMMA.
+// Therefore they are defined using single template. Appropriate checks are added
+// at the instruction level
+DEFINE(  I32I32    ,  wmma.mma,        ssss,     RESULT|VECTORIZABLE|SHAPE|SATF|SYNC|ALIGN|BOP|ARITHOP     , STANDARD)
+
+// The memory descriptor variants :
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(            ,  wmma.load.a,     sMU,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC, STANDARD)
+DEFINE(            ,  wmma.load.a,     sMuU,     RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC, STANDARD)
+DEFINE(            ,  wmma.load.b,     sMU,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC, STANDARD)
+DEFINE(            ,  wmma.load.b,     sMuU,     RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC, STANDARD)
+#endif // ampere & isa-internal
+#endif // turing & isa63
+
+#if (LWCFG(GLOBAL_CHIP_T194) || LWCFG(GLOBAL_GPU_IMPL_GV11B) || LWCFG(GLOBAL_ARCH_TURING)) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_63)
+DEFINE(  I8I8      ,  _mma,            ssss,     RESULT|VECTORIZABLE|SHAPE|SAT|SATF                     , STANDARD|EXTENDED)
+// Integer WMMA
+DEFINE(  I32I8I8I32  ,  wmma.mma,      ssss,     RESULT|VECTORIZABLE|SHAPE    |SATF|SYNC|ALIGN          , STANDARD)
+
+DEFINE(  I8        ,  wmma.load.a,     sM,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  I8        ,  wmma.load.a,     sMu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  I8        ,  wmma.load.b,     sM,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  I8        ,  wmma.load.b,     sMu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+// Instruction types and modifiers of wmma.load.c and wmma.store.d are same for Integer
+// and sub byte/Bit WMMA hence using same template for all
+DEFINE(  I32       ,  wmma.load.c,     sM,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  I32       ,  wmma.load.c,     sMu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+
+DEFINE(  I32       ,  wmma.store.d,    Ms,              VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+DEFINE(  I32       ,  wmma.store.d,    Msu,             VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN          , STANDARD)
+
+// The memory descriptor variants :
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  I8        ,  wmma.load.a,     sMU,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  I8        ,  wmma.load.a,     sMuU,     RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  I8        ,  wmma.load.b,     sMU,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  I8        ,  wmma.load.b,     sMuU,     RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  I32       ,  wmma.load.c,     sMU,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  I32       ,  wmma.load.c,     sMuU,     RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+
+DEFINE(  I32       ,  wmma.store.d,    MsU,             VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+DEFINE(  I32       ,  wmma.store.d,    MsuU,            VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN|DESC     , STANDARD)
+#endif // ampere & isa-internal
+#endif
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+// Double FP WMMA
+DEFINE(  F64       ,  wmma.load.a,     0M,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(  F64       ,  wmma.load.a,     0Mu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(  F64       ,  wmma.load.b,     0M,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(  F64       ,  wmma.load.b,     0Mu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(  F64       ,  wmma.load.c,     0M,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(  F64       ,  wmma.load.c,     0Mu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(  F64       ,  wmma.store.d,    M0,              VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(  F64       ,  wmma.store.d,    M0u,             VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE( F64F64F64F64 , wmma.mma,       0123,     RESULT|VECTORIZABLE|SHAPE|SYNC|ALIGN|ROUNDF      , STANDARD)
+
+/*
+ * Note: SATF not supported on wmma.mma.bf16/tf32. But for consistent template matching,
+ * we allow SATF to be passed and either print error or ignore it later in the parser.
+ */
+// WMMA with tf32/bf16
+DEFINE(            ,  wmma.load.a,     dM,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(            ,  wmma.load.a,     dMu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(            ,  wmma.load.b,     dM,       RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(            ,  wmma.load.b,     dMu,      RESULT|VECTORIZABLE|SHAPE|MEMSPACE|SYNC|ALIGN    , STANDARD)
+DEFINE(  F32F32    ,  wmma.mma,        dddd,     RESULT|VECTORIZABLE|SHAPE|SYNC|ALIGN|SATF        , STANDARD)
+
+#endif // AMPERE && ISA_70
+
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_63)
+// Integer _mma with shape m8n8k32 operates on .u4/.s4
+// But u4/s4  are recognized as modifiers, therefore we need template of _mma
+// with no type to accept such sub word IMMA instructions
+DEFINE(            ,  _mma,            sdds,     RESULT|VECTORIZABLE|SHAPE|SAT|SATF                      , STANDARD|EXTENDED)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_63)
+// To stop templates from erroring out when and/xor and popc operations
+// are specified for _mma instruction we add BOP and ARITHOP features respectively.
+// We do the required checks later in ptx.y.
+DEFINE(  I32I32    ,  _mma,            sdds,     RESULT|VECTORIZABLE|SHAPE|BOP|ARITHOP                   , STANDARD|EXTENDED)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+DEFINE(  F64F64F64F64  ,     _mma,      0123,     RESULT|VECTORIZABLE|SHAPE|ROUNDF                         , STANDARD|EXTENDED)
+
+// Sparse HMMA
+DEFINE(  F16F16F16F16 ,      _mma,         hhhhdC,   RESULT|VECTORIZABLE|SHAPE|THREADGROUP|SPARSITY|SPFORMAT|SATF   , STANDARD|EXTENDED)
+DEFINE(  F32F16F16F32 ,      _mma,         dhhddC,   RESULT|VECTORIZABLE|SHAPE|THREADGROUP|SPARSITY|SPFORMAT|SATF   , STANDARD|EXTENDED)
+
+// Sparse mma : The one with TF32/BF16 type.
+DEFINE(  F32F32   ,      _mma,         dddddC,   RESULT|VECTORIZABLE|SHAPE|THREADGROUP|SPARSITY|SPFORMAT|SATF   , STANDARD|EXTENDED)
+
+// Sparse IMMA
+// 1. s32u8u8s32
+DEFINE(  I32I8I8I32 ,     _mma,         sddsdC,   RESULT|VECTORIZABLE|SHAPE|SPARSITY|THREADGROUP|SPFORMAT|SATF   , STANDARD|EXTENDED)
+// 2. s32u4u4s32
+DEFINE(  I32I32   ,       _mma,         sddsdC,   RESULT|VECTORIZABLE|SHAPE|SPARSITY|THREADGROUP|SPFORMAT|SATF   , STANDARD|EXTENDED)
+
+// Dense IMMA with explicit types for args C and D.
+// 1. s32u8u8s32
+DEFINE(  I32I8I8I32 ,      _mma,         sdds,     RESULT|VECTORIZABLE|SHAPE|SATF                                 , STANDARD|EXTENDED)
+// 2. s32u4u4s32
+DEFINE(  I32I32   ,        _mma,         sdds,     RESULT|VECTORIZABLE|SHAPE|SATF                                 , STANDARD|EXTENDED)
+
+#endif // ampere, 70
+
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+// Floating point GMMA F16
+DEFINE(  F16F16F16F16 ,  _mma.warpgroup,    hUUh,      RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|TRANSB|NEGB|IGNOREC      , STANDARD)
+DEFINE(  F32F16F16F32 ,  _mma.warpgroup,    fUUf,      RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|TRANSB|NEGB|IGNOREC      , STANDARD)
+DEFINE(  F16F16F16F16 ,  _mma.warpgroup,    hUhh,      RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|IGNOREC                  , STANDARD)
+DEFINE(  F32F16F16F32 ,  _mma.warpgroup,    fUhf,      RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|IGNOREC                  , STANDARD)
+DEFINE(  F16F16F16F16 ,  _mma.warpgroup,    hhUh,      RESULT|VECTORIZABLE|SHAPE|TRANSB|NEGB|IGNOREC                  , STANDARD)
+DEFINE(  F32F16F16F32 ,  _mma.warpgroup,    fhUf,      RESULT|VECTORIZABLE|SHAPE|TRANSB|NEGB|IGNOREC                  , STANDARD)
+
+DEFINE(  F16F16F16F16 ,  _mma.warpgroup,    hUUhu,     RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|TRANSB|NEGB|IGNOREC      , STANDARD)
+DEFINE(  F32F16F16F32 ,  _mma.warpgroup,    fUUfu,     RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|TRANSB|NEGB|IGNOREC      , STANDARD)
+DEFINE(  F16F16F16F16 ,  _mma.warpgroup,    hUhhu,     RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|IGNOREC                  , STANDARD)
+DEFINE(  F32F16F16F32 ,  _mma.warpgroup,    fUhfu,     RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|IGNOREC                  , STANDARD)
+DEFINE(  F16F16F16F16 ,  _mma.warpgroup,    hhUhu,     RESULT|VECTORIZABLE|SHAPE|TRANSB|NEGB|IGNOREC                  , STANDARD)
+DEFINE(  F32F16F16F32 ,  _mma.warpgroup,    fhUfu,     RESULT|VECTORIZABLE|SHAPE|TRANSB|NEGB|IGNOREC                  , STANDARD)
+
+DEFINE(               ,  _warpgroup.arrive,            ,                                                              , STANDARD)
+DEFINE(               ,  _warpgroup.commit_batch,      ,                                                              , STANDARD)
+DEFINE(               ,  _warpgroup.wait,              ,                                                              , STANDARD)
+DEFINE(               ,  _warpgroup.wait,             u,                                                              , STANDARD)
+
+// Floating point GMMA BF16/TF32
+DEFINE(  F32F32       ,  _mma.warpgroup,    fUUf,      RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|TRANSB|NEGB|IGNOREC      , STANDARD)
+DEFINE(  F32F32       ,  _mma.warpgroup,    fUdf,      RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|IGNOREC                  , STANDARD)
+DEFINE(  F32F32       ,  _mma.warpgroup,    fdUf,      RESULT|VECTORIZABLE|SHAPE|TRANSB|NEGB|IGNOREC                  , STANDARD)
+
+DEFINE(  F32F32       ,  _mma.warpgroup,    fUUfu,     RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|TRANSB|NEGB|IGNOREC      , STANDARD)
+DEFINE(  F32F32       ,  _mma.warpgroup,    fUdfu,     RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|IGNOREC                  , STANDARD)
+DEFINE(  F32F32       ,  _mma.warpgroup,    fdUfu,     RESULT|VECTORIZABLE|SHAPE|TRANSB|NEGB|IGNOREC                  , STANDARD)
+
+// Floating point Sparse GMMA F16
+DEFINE(  F16F16F16F16 ,  _mma.warpgroup,    hUUhdC,    RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|TRANSB|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC      , STANDARD)
+DEFINE(  F32F16F16F32 ,  _mma.warpgroup,    fUUfdC,    RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|TRANSB|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC      , STANDARD)
+DEFINE(  F16F16F16F16 ,  _mma.warpgroup,    hUhhdC,    RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                  , STANDARD)
+DEFINE(  F32F16F16F32 ,  _mma.warpgroup,    fUhfdC,    RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                  , STANDARD)
+DEFINE(  F16F16F16F16 ,  _mma.warpgroup,    hhUhdC,    RESULT|VECTORIZABLE|SHAPE|TRANSB|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                  , STANDARD)
+DEFINE(  F32F16F16F32 ,  _mma.warpgroup,    fhUfdC,    RESULT|VECTORIZABLE|SHAPE|TRANSB|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                  , STANDARD)
+
+DEFINE(  F16F16F16F16 ,  _mma.warpgroup,    hUUhdLw,   RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|TRANSB|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC      , STANDARD)
+DEFINE(  F32F16F16F32 ,  _mma.warpgroup,    fUUfdLw,   RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|TRANSB|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC      , STANDARD)
+DEFINE(  F16F16F16F16 ,  _mma.warpgroup,    hUhhdLw,   RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                  , STANDARD)
+DEFINE(  F32F16F16F32 ,  _mma.warpgroup,    fUhfdLw,   RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                  , STANDARD)
+DEFINE(  F16F16F16F16 ,  _mma.warpgroup,    hhUhdLw,   RESULT|VECTORIZABLE|SHAPE|TRANSB|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                  , STANDARD)
+DEFINE(  F32F16F16F32 ,  _mma.warpgroup,    fhUfdLw,   RESULT|VECTORIZABLE|SHAPE|TRANSB|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                  , STANDARD)
+
+// Floating point Sparse GMMA BF16/TF32
+DEFINE(  F32F32       ,  _mma.warpgroup,    fUUfdC,    RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|TRANSB|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC      , STANDARD)
+DEFINE(  F32F32       ,  _mma.warpgroup,    fUdfdC,    RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                  , STANDARD)
+DEFINE(  F32F32       ,  _mma.warpgroup,    fdUfdC,    RESULT|VECTORIZABLE|SHAPE|TRANSB|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                  , STANDARD)
+
+DEFINE(  F32F32       ,  _mma.warpgroup,    fUUfdLw,   RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|TRANSB|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC      , STANDARD)
+DEFINE(  F32F32       ,  _mma.warpgroup,    fUdfdLw,   RESULT|VECTORIZABLE|SHAPE|TRANSA|NEGA|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                  , STANDARD)
+DEFINE(  F32F32       ,  _mma.warpgroup,    fdUfdLw,   RESULT|VECTORIZABLE|SHAPE|TRANSB|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                  , STANDARD)
+
+// FP8 GMMA
+DEFINE(  F16Q8Q8F16   ,  _mma.warpgroup,    hUUh,      RESULT|VECTORIZABLE|SHAPE|NEGA|NEGB|IGNOREC       , STANDARD)
+DEFINE(  F32Q8Q8F32   ,  _mma.warpgroup,    fUUf,      RESULT|VECTORIZABLE|SHAPE|NEGA|NEGB|IGNOREC       , STANDARD)
+DEFINE(  F16Q8Q8F16   ,  _mma.warpgroup,    hUhh,      RESULT|VECTORIZABLE|SHAPE|NEGA|IGNOREC            , STANDARD)
+DEFINE(  F32Q8Q8F32   ,  _mma.warpgroup,    fUhf,      RESULT|VECTORIZABLE|SHAPE|NEGA|IGNOREC            , STANDARD)
+DEFINE(  F16Q8Q8F16   ,  _mma.warpgroup,    hhUh,      RESULT|VECTORIZABLE|SHAPE|NEGB|IGNOREC            , STANDARD)
+DEFINE(  F32Q8Q8F32   ,  _mma.warpgroup,    fhUf,      RESULT|VECTORIZABLE|SHAPE|NEGB|IGNOREC            , STANDARD)
+
+DEFINE(  F16Q8Q8F16   ,  _mma.warpgroup,    hUUhu,     RESULT|VECTORIZABLE|SHAPE|NEGA|NEGB|IGNOREC       , STANDARD)
+DEFINE(  F32Q8Q8F32   ,  _mma.warpgroup,    fUUfu,     RESULT|VECTORIZABLE|SHAPE|NEGA|NEGB|IGNOREC       , STANDARD)
+DEFINE(  F16Q8Q8F16   ,  _mma.warpgroup,    hUhhu,     RESULT|VECTORIZABLE|SHAPE|NEGA|IGNOREC            , STANDARD)
+DEFINE(  F32Q8Q8F32   ,  _mma.warpgroup,    fUhfu,     RESULT|VECTORIZABLE|SHAPE|NEGA|IGNOREC            , STANDARD)
+DEFINE(  F16Q8Q8F16   ,  _mma.warpgroup,    hhUhu,     RESULT|VECTORIZABLE|SHAPE|NEGB|IGNOREC            , STANDARD)
+DEFINE(  F32Q8Q8F32   ,  _mma.warpgroup,    fhUfu,     RESULT|VECTORIZABLE|SHAPE|NEGB|IGNOREC            , STANDARD)
+
+// FP8 Sparse GMMA 
+DEFINE(  F16Q8Q8F16   ,  _mma.warpgroup,    hUUhdC,    RESULT|VECTORIZABLE|SHAPE|NEGA|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                   , STANDARD)
+DEFINE(  F32Q8Q8F32   ,  _mma.warpgroup,    fUUfdC,    RESULT|VECTORIZABLE|SHAPE|NEGA|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                   , STANDARD)
+DEFINE(  F16Q8Q8F16   ,  _mma.warpgroup,    hUhhdC,    RESULT|VECTORIZABLE|SHAPE|NEGA|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                        , STANDARD)
+DEFINE(  F32Q8Q8F32   ,  _mma.warpgroup,    fUhfdC,    RESULT|VECTORIZABLE|SHAPE|NEGA|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                        , STANDARD)
+DEFINE(  F16Q8Q8F16   ,  _mma.warpgroup,    hhUhdC,    RESULT|VECTORIZABLE|SHAPE|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                        , STANDARD)
+DEFINE(  F32Q8Q8F32   ,  _mma.warpgroup,    fhUfdC,    RESULT|VECTORIZABLE|SHAPE|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                        , STANDARD)
+
+DEFINE(  F16Q8Q8F16   ,  _mma.warpgroup,    hUUhdLw,   RESULT|VECTORIZABLE|SHAPE|NEGA|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                   , STANDARD)
+DEFINE(  F32Q8Q8F32   ,  _mma.warpgroup,    fUUfdLw,   RESULT|VECTORIZABLE|SHAPE|NEGA|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                   , STANDARD)
+DEFINE(  F16Q8Q8F16   ,  _mma.warpgroup,    hUhhdLw,   RESULT|VECTORIZABLE|SHAPE|NEGA|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                        , STANDARD)
+DEFINE(  F32Q8Q8F32   ,  _mma.warpgroup,    fUhfdLw,   RESULT|VECTORIZABLE|SHAPE|NEGA|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                        , STANDARD)
+DEFINE(  F16Q8Q8F16   ,  _mma.warpgroup,    hhUhdLw,   RESULT|VECTORIZABLE|SHAPE|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                        , STANDARD)
+DEFINE(  F32Q8Q8F32   ,  _mma.warpgroup,    fhUfdLw,   RESULT|VECTORIZABLE|SHAPE|NEGB|THREADGROUP|SPARSITY|SPFORMAT|IGNOREC                        , STANDARD)
+
+// Integer GMMA
+DEFINE(  I32I8I8I32 ,  _mma.warpgroup,    sUUs,      RESULT|VECTORIZABLE|SHAPE|IGNOREC|SATF              , STANDARD)
+DEFINE(  I32I8I8I32 ,  _mma.warpgroup,    sUds,      RESULT|VECTORIZABLE|SHAPE|IGNOREC|SATF              , STANDARD)
+DEFINE(  I32I8I8I32 ,  _mma.warpgroup,    sdUs,      RESULT|VECTORIZABLE|SHAPE|IGNOREC|SATF              , STANDARD)
+DEFINE(  I32I32     ,  _mma.warpgroup,    sUUs,      RESULT|VECTORIZABLE|SHAPE|IGNOREC|SATF              , STANDARD)
+DEFINE(  I32I32     ,  _mma.warpgroup,    sUds,      RESULT|VECTORIZABLE|SHAPE|IGNOREC|SATF              , STANDARD)
+DEFINE(  I32I32     ,  _mma.warpgroup,    sdUs,      RESULT|VECTORIZABLE|SHAPE|IGNOREC|SATF              , STANDARD)
+
+DEFINE(  I32I8I8I32 ,  _mma.warpgroup,    sUUsu,     RESULT|VECTORIZABLE|SHAPE|IGNOREC|SATF              , STANDARD)
+DEFINE(  I32I8I8I32 ,  _mma.warpgroup,    sUdsu,     RESULT|VECTORIZABLE|SHAPE|IGNOREC|SATF              , STANDARD)
+DEFINE(  I32I8I8I32 ,  _mma.warpgroup,    sdUsu,     RESULT|VECTORIZABLE|SHAPE|IGNOREC|SATF              , STANDARD)
+DEFINE(  I32I32     ,  _mma.warpgroup,    sUUsu,     RESULT|VECTORIZABLE|SHAPE|IGNOREC|SATF              , STANDARD)
+DEFINE(  I32I32     ,  _mma.warpgroup,    sUdsu,     RESULT|VECTORIZABLE|SHAPE|IGNOREC|SATF              , STANDARD)
+DEFINE(  I32I32     ,  _mma.warpgroup,    sdUsu,     RESULT|VECTORIZABLE|SHAPE|IGNOREC|SATF              , STANDARD)
+
+// Sparse Integer GMMA
+DEFINE(  I32I8I8I32 ,  _mma.warpgroup,    sUUsd,     RESULT|VECTORIZABLE|SHAPE|IGNOREC|THREADGROUP|SPARSITY|SPFORMAT|SATF  , STANDARD)
+DEFINE(  I32I8I8I32 ,  _mma.warpgroup,    sUdsd,     RESULT|VECTORIZABLE|SHAPE|IGNOREC|THREADGROUP|SPARSITY|SPFORMAT|SATF  , STANDARD)
+DEFINE(  I32I8I8I32 ,  _mma.warpgroup,    sdUsd,     RESULT|VECTORIZABLE|SHAPE|IGNOREC|THREADGROUP|SPARSITY|SPFORMAT|SATF  , STANDARD)
+
+DEFINE(  I32I8I8I32 ,  _mma.warpgroup,    sUUsdu,    RESULT|VECTORIZABLE|SHAPE|IGNOREC|THREADGROUP|SPARSITY|SPFORMAT|SATF  , STANDARD)
+DEFINE(  I32I8I8I32 ,  _mma.warpgroup,    sUdsdu,    RESULT|VECTORIZABLE|SHAPE|IGNOREC|THREADGROUP|SPARSITY|SPFORMAT|SATF  , STANDARD)
+DEFINE(  I32I8I8I32 ,  _mma.warpgroup,    sdUsdu,    RESULT|VECTORIZABLE|SHAPE|IGNOREC|THREADGROUP|SPARSITY|SPFORMAT|SATF  , STANDARD)
+
+// Single-bit GMMA
+// To stop templates from erroring out when xor/and and popc operations
+// are specified for mma instruction we add BOP and ARITHOP features respectively.
+// We do the required checks later in ptx.y.
+DEFINE(  I32I32     ,  _mma.warpgroup,    sUUs,      RESULT|VECTORIZABLE|SHAPE|IGNOREC|BOP|ARITHOP       , STANDARD)
+DEFINE(  I32I32     ,  _mma.warpgroup,    sUds,      RESULT|VECTORIZABLE|SHAPE|IGNOREC|BOP|ARITHOP       , STANDARD)
+DEFINE(  I32I32     ,  _mma.warpgroup,    sdUs,      RESULT|VECTORIZABLE|SHAPE|IGNOREC|BOP|ARITHOP       , STANDARD)
+
+DEFINE(  I32I32     ,  _mma.warpgroup,    sUUsu,     RESULT|VECTORIZABLE|SHAPE|IGNOREC|BOP|ARITHOP       , STANDARD)
+DEFINE(  I32I32     ,  _mma.warpgroup,    sUdsu,     RESULT|VECTORIZABLE|SHAPE|IGNOREC|BOP|ARITHOP       , STANDARD)
+DEFINE(  I32I32     ,  _mma.warpgroup,    sdUsu,     RESULT|VECTORIZABLE|SHAPE|IGNOREC|BOP|ARITHOP       , STANDARD)
+#endif // HOPPER && INTERNAL
+
+//----------------- TMA Instructions ----------------------------------------------------
+// TODO: Rename TEXADDR to reflect that it is being used lwrrently for TENSORADDR.
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+// Without descriptor variants : global -> shared
+// cp.async.bulk.tensor.mbarrier.statespaces.tensorDim
+DEFINE(          ,    cp.async.bulk.tensor,      MMsM,       TEXADDR|MEMSPACES|MBARRIER|TENSORDIM                                     , STANDARD)
+// cp.async.bulk.tensor.mbarrier.statespaces.tensorDim.im2col{.packed_offsets}
+DEFINE(          ,    cp.async.bulk.tensor,      MMsMx,      TEXADDR|MEMSPACES|MBARRIER|TENSORDIM|IM2COL|PACKEDOFF                    , STANDARD)
+// cp.async.bulk.tensor.mbarrier.statespaces.tensorDim.multicast
+DEFINE(          ,    cp.async.bulk.tensor,      MMsMx,      TEXADDR|MEMSPACES|MBARRIER|TENSORDIM|MULTICAST                           , STANDARD)
+// cp.async.bulk.tensor.mbarrier.statespaces.tensorDim.im2col{.packed_offsets}.multicast
+DEFINE(          ,    cp.async.bulk.tensor,      MMsMxx,     TEXADDR|MEMSPACES|MBARRIER|TENSORDIM|IM2COL|PACKEDOFF|MULTICAST          , STANDARD)
+
+// Without descriptor variants : shared -> global
+// cp.async.bulk.tensor.mbarrier.statespaces.tensorDim.im2col
+DEFINE(          ,    cp.async.bulk.tensor,      MsM,        TEXADDR|MEMSPACES|TENSORDIM|IM2COL                                       , STANDARD)
+// cp.reduce.async.bulk.tensor.statespaces.tensorDim.redOp.im2col
+DEFINE(          ,    cp.reduce.async.bulk.tensor, MsM,      TEXADDR|MEMSPACES|TENSORDIM|IM2COL|ATOMOPI|ATOMOPB                       , STANDARD)
+
+// With descriptor variants : global -> shared
+// cp.async.bulk.tensor.mbarrier.statespaces.tensorDim.desc
+DEFINE(          ,    cp.async.bulk.tensor,      MMsMU,      TEXADDR|MEMSPACES|MBARRIER|TENSORDIM|DESC                                , STANDARD)
+// cp.async.bulk.tensor.mbarrier.statespaces.tensorDim.im2col{.packed_offsets}.desc
+DEFINE(          ,    cp.async.bulk.tensor,      MMsMxU,     TEXADDR|MEMSPACES|MBARRIER|TENSORDIM|IM2COL|PACKEDOFF|DESC               , STANDARD)
+// cp.async.bulk.tensor.mbarrier.statespaces.tensorDim.multicast.desc
+DEFINE(          ,    cp.async.bulk.tensor,      MMsMxU,     TEXADDR|MEMSPACES|MBARRIER|TENSORDIM|MULTICAST|DESC                      , STANDARD)
+// cp.async.bulk.tensor.mbarrier.statespaces.tensorDim.im2col{.packed_offsets}.multicast.desc
+DEFINE(          ,    cp.async.bulk.tensor,      MMsMxxU,    TEXADDR|MEMSPACES|MBARRIER|TENSORDIM|IM2COL|PACKEDOFF|MULTICAST|DESC     , STANDARD)
+
+// With descriptor variants : shared -> global
+// cp.async.bulk.tensor.mbarrier.statespaces.tensorDim.im2col.desc
+DEFINE(          ,    cp.async.bulk.tensor,      MsMU,        TEXADDR|MEMSPACES|TENSORDIM|IM2COL|DESC                                  , STANDARD)
+// cp.reduce.async.bulk.tensor.statespaces.tensorDim.redOp.im2col
+DEFINE(          ,    cp.reduce.async.bulk.tensor, MsMU,      TEXADDR|MEMSPACES|TENSORDIM|IM2COL|DESC|ATOMOPI|ATOMOPB                  , STANDARD)
+
+
+// UBLK* instructions
+// cp.async.bulk.multicast.mbarrier.statespaces
+DEFINE(          ,    cp.async.bulk,             MMuMx,      MEMSPACES|MBARRIER|MULTICAST                                             , STANDARD)
+// cp.async.bulk.multicast.mbarrier.statespaces.desc
+DEFINE(          ,    cp.async.bulk,             MMuMxU,     MEMSPACES|MBARRIER|MULTICAST|DESC                                        , STANDARD)
+
+// cp.async.bulk.mbarrier.statespaces
+DEFINE(          ,    cp.async.bulk,             MMuM,       MEMSPACES|MBARRIER                                                       , STANDARD)
+// cp.async.bulk.mbarrier.statespaces.desc
+DEFINE(          ,    cp.async.bulk,             MMuMU,      MEMSPACES|MBARRIER|DESC                                                  , STANDARD)
+
+// cp.async.bulk.statespaces
+DEFINE(          ,    cp.async.bulk,             MMu,        MEMSPACES                                                                , STANDARD)
+// cp.async.bulk.statespaces.desc
+DEFINE(          ,    cp.async.bulk,             MMuU,       MEMSPACES|DESC                                                           , STANDARD)
+
+// cp.reduce.async.bulk.mbarrier.statespaces.redOp
+DEFINE( I[32|64] ,    cp.reduce.async.bulk,      MMuM,       MEMSPACES|MBARRIER|ATOMOPI                                               , STANDARD)
+DEFINE( B[32|64] ,    cp.reduce.async.bulk,      MMuM,       MEMSPACES|MBARRIER|ATOMOPB                                               , STANDARD)
+
+// cp.reduce.async.bulk.statespaces.redOp
+DEFINE( I[32|64] ,    cp.reduce.async.bulk,      MMu,        MEMSPACES|ATOMOPI                                                        , STANDARD)
+DEFINE( B[32|64] ,    cp.reduce.async.bulk,      MMu,        MEMSPACES|ATOMOPB                                                        , STANDARD)
+DEFINE( F[32|64] ,    cp.reduce.async.bulk,      MMu,        MEMSPACES|ATOMOPF                                                        , STANDARD)
+
+// cp.reduce.async.bulk.statespaces.desc.redOp
+DEFINE( I[32|64] ,    cp.reduce.async.bulk,      MMuU,       MEMSPACES|DESC|ATOMOPI                                                   , STANDARD)
+DEFINE( B[32|64] ,    cp.reduce.async.bulk,      MMuU,       MEMSPACES|DESC|ATOMOPB                                                   , STANDARD)
+DEFINE( F[32|64] ,    cp.reduce.async.bulk,      MMuU,       MEMSPACES|DESC|ATOMOPF                                                   , STANDARD)
+
+// cp.reduce.async.bulk.statespaces.add{.noftz}
+DEFINE( F16      ,    cp.reduce.async.bulk,      MMu,        MEMSPACES|ATOMOPF|NOFTZ                                                  , STANDARD)
+DEFINE(          ,    cp.reduce.async.bulk,      MMu,        MEMSPACES|ATOMOPF|NOFTZ                                                  , STANDARD)
+
+// cp.reduce.async.bulk.statespaces.desc.add{.noftz}
+DEFINE( F16      ,    cp.reduce.async.bulk,      MMuU,       MEMSPACES|DESC|ATOMOPF|NOFTZ                                             , STANDARD)
+DEFINE(          ,    cp.reduce.async.bulk,      MMuU,       MEMSPACES|DESC|ATOMOPF|NOFTZ                                             , STANDARD)
+
+#endif // HOPPER && INTERNAL
+
+//----------------- Copy Instructions ----------------------------------------------------
+// As cp instructions is too crowded, some of the checks from here are off-loaded to:
+// * checkCopyInstruction() for more specific checks
+// * isPublicCopyInstruction() for correctly identifying the exact variant (mainly for cp.async{.mbarrier}.arrive)
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+DEFINE(          ,    cp.async,               MMLw,  CACHEOP|MEMSPACES|CACHEPREFETCH                     , STANDARD)
+DEFINE(          ,    cp.async,                MMC,  CACHEOP|MEMSPACES|CACHEPREFETCH                     , STANDARD)
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_75)
+DEFINE(          ,    cp.async,               MMCP,  CACHEOP|MEMSPACES|CACHEPREFETCH                     , STANDARD)
+#endif // ISA_75
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_71)
+DEFINE(          ,    cp.async,              MMLwU,  CACHEOP|MEMSPACES|DESC                              , EXTENDED)
+DEFINE(          ,    cp.async,               MMLW,  CACHEOP|MEMSPACES|DESC                              , EXTENDED)
+#endif // ISA_71
+DEFINE(          ,    cp.async.wait_all,          ,                                                      , STANDARD)
+DEFINE(          ,    cp.async.commit_group,      ,                                                      , STANDARD)
+DEFINE(          ,    cp.async.wait_group,       C,                                                      , STANDARD)
+DEFINE( B64      ,    cp.async.mbarrier.arrive,  M,  MEMSPACE|NOINC                                      , STANDARD)
+#endif // Ampere && ISA_70
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_74)
+DEFINE(          ,    cp.async,              MMLwU,  CACHEOP|MEMSPACES|CACHEHINT|CACHEPREFETCH           , STANDARD)
+DEFINE(          ,    cp.async,               MMLW,  CACHEOP|MEMSPACES|CACHEHINT|CACHEPREFETCH           , STANDARD)
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_75)
+DEFINE(          ,    cp.async,              MMCPU,  CACHEOP|MEMSPACES|CACHEHINT|CACHEPREFETCH           , STANDARD)
+#endif // ISA_75
+#endif // Ampere && ISA_74
+
+//----------------- Alloca & related Instructions ---------------------------------------
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL) || LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_73)
+DEFINE( I[32|64] ,    stacksave,            0, RESULT                                                    , STANDARD)
+DEFINE( I[32|64] ,    stackrestore,         0, RESULT                                                    , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(          ,    alloca,              du, RESULT                                                    , STANDARD)
+DEFINE(          ,    alloca,             duC, RESULT                                                    , STANDARD)
+#endif
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_73)
+DEFINE( I[32|64] ,    alloca,              00, RESULT                                                    , STANDARD)
+DEFINE( I[32|64] ,    alloca,             00C, RESULT                                                    , STANDARD)
+#endif
+
+//----------------- TTU Instructions ----------------------------------------------------
+// FIXME: update version check
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(            ,  _ttuopen,            ,                                TTUSLOT                      , STANDARD)
+DEFINE(            ,  _ttugo,              ,                                                             , STANDARD)
+DEFINE(  B64       ,  _ttust,            M0,            VECTORIZABLE                                     , STANDARD)
+DEFINE(  B64       ,  _ttuld,            0M,     RESULT|VECTORIZABLE|TTU                                 , STANDARD)
+DEFINE(            ,  ttucctl,             ,     CACHEOP                                                 , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_65)
+DEFINE(  B16       ,  ldmatrix,          dM,     RESULT|SHAPE|NUM|TRANS|SYNC|ALIGN|MEMSPACE              , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_63)
+DEFINE(  B16       ,  _ldsm,             dM,     RESULT|SHAPE|NUM|TRANS                                  , STANDARD|EXTENDED)
+// Sub-byte _ldsm/_movm operates on datatypes .u8.u4/.s8.s4 and u4.u2/s4.s2.
+// u8/s8 are represented as datatype however u4/s4 and u2/s2 are recognized as modifiers.
+// Therefore we need 2 variants of sub-byte ldsm/_movm. One with I0 to recognize instruction with
+// u8 and other with no type to recognize instruction with u4
+DEFINE(  I8        ,  _ldsm,             dM,     RESULT|SHAPE|NUM                                        , STANDARD|EXTENDED)
+DEFINE(            ,  _ldsm,             dM,     RESULT|SHAPE|NUM                                        , STANDARD|EXTENDED)
+DEFINE(  B16       ,  _movm,             dd,     RESULT|SHAPE|TRANS                                      , STANDARD|EXTENDED)
+DEFINE(  I8        ,  _movm,             ed,     RESULT|SHAPE|EXPAND                                     , STANDARD|EXTENDED)
+DEFINE(            ,  _movm,             ed,     RESULT|SHAPE|EXPAND                                     , STANDARD|EXTENDED)
+
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_FUTURE)
+DEFINE(  B16       ,  stmatrix,          Md,     RESULT|SHAPE|NUM|TRANS|SYNC|ALIGN|MEMSPACE              , STANDARD)
+#endif
+
+// The following recognizes .bXX.b8
+DEFINE(  B8B8      , scatter,            uuVVVu, RESULT|THREADGROUP                                      , EXTENDED)
+
+// The following recognizes .bXX.b4
+DEFINE(  B8        , scatter,            uuVVVu, RESULT|THREADGROUP                                      , EXTENDED)
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+// The following recognizes {.b8, .b16}.b8
+DEFINE(  B[8|16]B8  , scatter,            uuVVVu, RESULT|THREADGROUP|SPARSITY                            , EXTENDED)
+
+// The following recognizes {.b8, .b16}.b4
+DEFINE(  B[8|16]    , scatter,            uuVVVu, RESULT|THREADGROUP|SPARSITY                            , EXTENDED)
+#endif // Ampere, 70
+
+#endif
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+// This  recognizes .b{16|8}.b4 where b{16|8} represented as instruction type
+// and .b4 represented as type modifier
+DEFINE(  B[8|16]       , spmetadata,         uuCCLw,  RESULT|THREADGROUP                                     , EXTENDED)
+// This recognizes .b{16|8}.b8
+DEFINE(  B[8|16]B8     , spmetadata,         uuCCLw,  RESULT|THREADGROUP                                     , EXTENDED)
+
+DEFINE(  B[4|8|16]B[2|4|8]    , gather,   uuuuC, RESULT|GROUP                                            , EXTENDED)
+DEFINE(  F16B8     , genmetadata,        uuuCLw, RESULT|GROUP|ARITHOP|SEQ                                , EXTENDED)
+DEFINE(  F16       , genmetadata,        uuuCLw, RESULT|GROUP|ARITHOP|SEQ                                , EXTENDED)
+DEFINE(  I8B8      , genmetadata,        uuuCLw, RESULT|GROUP|ARITHOP|SEQ                                , EXTENDED)
+DEFINE(  I8        , genmetadata,        uuuCLw, RESULT|GROUP|ARITHOP|SEQ                                , EXTENDED)
+DEFINE(  B8        , genmetadata,        uuuCLw, RESULT|GROUP|ARITHOP|SEQ                                , EXTENDED)
+DEFINE(            , genmetadata,        uuuCLw, RESULT|GROUP|ARITHOP|SEQ                                , EXTENDED)
+#endif
+//----------------- Texture and Surface Instructions ----------------------------------------------------
+DEFINE(  F32F32    ,  tex,                0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex,                0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex,                0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex,                0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex,                0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex,                0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex,                0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex,                0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex instruction with offset and depth compare args
+DEFINE(  F32F32    ,  tex,                0i1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex,                0i1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex instruction with depth compare arg
+DEFINE(  F32F32    ,  tex,                0i1l,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex,                0i1l,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex,                0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex,                0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex,                0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex,                0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex,                0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex,                0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex,                0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex,                0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex instruction with offset and depth compare args
+DEFINE(  F16F32    ,  tex,                0i1sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex,                0i1sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex instruction with depth compare arg
+DEFINE(  F16F32    ,  tex,                0i1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex,                0i1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex,                0ii1,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex,                0ii1,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex,                0ii1,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex,                0ii1,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex,                0ii1s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex,                0ii1s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex,                0ii1s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex,                0ii1s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex instruction with offset and depth compare args
+DEFINE(  F32F32    ,  tex,                0ii1sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex,                0ii1sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex instruction with depth compare arg
+DEFINE(  F32F32    ,  tex,                0ii1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex,                0ii1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex,                0ii1,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex,                0ii1,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex,                0ii1,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex,                0ii1,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex,                0ii1s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex,                0ii1s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex,                0ii1s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex,                0ii1s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex instruction with offset and depth compare args
+DEFINE(  F16F32    ,  tex,                0ii1sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex,                0ii1sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex instruction with depth compare arg
+DEFINE(  F16F32    ,  tex,                0ii1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex,                0ii1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// footprint tex instruction
+// Supports B32 as destination and only F32 coordinates
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  B32F32    ,  tex,                0i1u,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|FOOTPRINT|COARSE|FLOW, STANDARD)
+DEFINE(  B32F32    ,  tex,                0ii1u,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|FOOTPRINT|COARSE|FLOW, STANDARD)
+#endif
+
+DEFINE(  F32F32    ,  tex.base,           0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex.base,           0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.base,           0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex.base,           0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex.base,           0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex.base,           0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.base,           0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex.base,           0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex.base instruction with offset and depth compare args
+DEFINE(  F32F32    ,  tex.base,           0i1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.base,           0i1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.base instruction with depth compare arg
+DEFINE(  F32F32    ,  tex.base,           0i1l,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.base,           0i1l,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.base,           0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex.base,           0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.base,           0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex.base,           0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.base,           0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex.base,           0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.base,           0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex.base,           0i1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex.base instruction with offset and depth compare args
+DEFINE(  F16F32    ,  tex.base,           0i1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.base,           0i1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.base instruction depth compare arg
+DEFINE(  F16F32    ,  tex.base,           0i1l,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.base,           0i1l,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex.base,           0ii1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex.base,           0ii1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.base,           0ii1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex.base,           0ii1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  F32F32    ,  tex.base,           0ii1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex.base,           0ii1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.base,           0ii1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex.base,           0ii1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.base instruction with offset and depth compare args
+DEFINE(  F32F32    ,  tex.base,           0ii1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.base,           0ii1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+// tex.base instruction depth compare arg
+DEFINE(  F32F32    ,  tex.base,           0ii1l,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.base,           0ii1l,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.base,           0ii1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex.base,           0ii1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.base,           0ii1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex.base,           0ii1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.base,           0ii1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex.base,           0ii1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.base,           0ii1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex.base,           0ii1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.base instruction with offset and depth compare args
+DEFINE(  F16F32    ,  tex.base,           0ii1sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.base,           0ii1sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.base instruction depth compare arg
+DEFINE(  F16F32    ,  tex.base,           0ii1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.base,           0ii1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// footprint tex.base instruction
+// Supports B32 as destination and only F32 coordinates
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  B32F32    ,  tex.base,           0i1u,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|FOOTPRINT|COARSE|FLOW, STANDARD)
+DEFINE(  B32F32    ,  tex.base,           0ii1u,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|FOOTPRINT|COARSE|FLOW, STANDARD)
+#endif
+
+DEFINE(  F32F32    ,  tex.level,          0i11,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex.level,          0i11,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.level,          0i11,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex.level,          0i11,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex.level,          0i11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex.level,          0i11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.level,          0i11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex.level,          0i11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex.level instruction with offset and depth compare args
+DEFINE(  F32F32    ,  tex.level,          0i11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.level,          0i11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.level instruction depth compare arg
+DEFINE(  F32F32    ,  tex.level,          0i11l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.level,          0i11l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.level,          0i11,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex.level,          0i11,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.level,          0i11,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex.level,          0i11,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.level,          0i11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex.level,          0i11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.level,          0i11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex.level,          0i11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex.level instruction with offset and depth compare args
+DEFINE(  F16F32    ,  tex.level,          0i11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.level,          0i11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.level instruction depth compare arg
+DEFINE(  F16F32    ,  tex.level,          0i11l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.level,          0i11l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex.level,          0ii11, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex.level,          0ii11, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.level,          0ii11, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex.level,          0ii11, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex.level,          0ii11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex.level,          0ii11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.level,          0ii11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex.level,          0ii11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.level instruction with offset and depth compare args
+DEFINE(  F32F32    ,  tex.level,          0ii11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.level,          0ii11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+// tex.level instruction depth compare arg
+DEFINE(  F32F32    ,  tex.level,          0ii11l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.level,          0ii11l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.level,          0ii11, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex.level,          0ii11, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.level,          0ii11, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex.level,          0ii11, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.level,          0ii11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex.level,          0ii11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.level,          0ii11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex.level,          0ii11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.level instruction with offset and depth compare args
+DEFINE(  F16F32    ,  tex.level,          0ii11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.level,          0ii11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+// tex.level instruction depth compare arg
+DEFINE(  F16F32    ,  tex.level,          0ii11l, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.level,          0ii11l, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// footprint tex.level instruction
+// Supports B32 as destination and only F32 coordinates
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  B32F32    ,  tex.level,          0i11u,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|FOOTPRINT|COARSE|FLOW, STANDARD)
+DEFINE(  B32F32    ,  tex.level,          0ii11u,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|FOOTPRINT|COARSE|FLOW, STANDARD)
+#endif
+
+DEFINE(  F32F32    ,  tex.grad,           0i1ff, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex.grad,           0i1ff, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad,           0i1ff, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex.grad,           0i1ff, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex.grad instruction with offset arg
+DEFINE(  F32F32    ,  tex.grad,           0i1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex.grad,           0i1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad,           0i1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex.grad,           0i1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+// tex.grad instruction with depth compare arg
+DEFINE(  F32F32    ,  tex.grad,           0i1ffl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad,           0i1ffl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+// tex.grad instruction with offset and depth compare args
+DEFINE(  F32F32    ,  tex.grad,           0i1ffsl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad,           0i1ffsl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.grad,           0i1ff, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex.grad,           0i1ff, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad,           0i1ff, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex.grad,           0i1ff, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex.grad instruction with offset arg
+DEFINE(  F16F32    ,  tex.grad,           0i1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex.grad,           0i1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad,           0i1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex.grad,           0i1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+                                           
+// tex.grad instruction with depth compare arg
+DEFINE(  F16F32    ,  tex.grad,           0i1ffl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad,           0i1ffl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+                                          
+// tex.grad instruction with offset and depth compare args
+DEFINE(  F16F32    ,  tex.grad,           0i1ffsl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad,           0i1ffsl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex.grad,           0ii1ff,RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex.grad,           0ii1ff,RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad,           0ii1ff,RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex.grad,           0ii1ff,RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+                                           
+// tex.grad instruction with offset arg    
+DEFINE(  F32F32    ,  tex.grad,           0ii1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  F32I32    ,  tex.grad,           0ii1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad,           0ii1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  I32I32    ,  tex.grad,           0ii1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+                                           
+// tex.grad instruction with depth compare arg
+DEFINE(  F32F32    ,  tex.grad,           0ii1ffl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad,           0ii1ffl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+                                           
+// tex.grad instruction with offset and depth compare args
+DEFINE(  F32F32    ,  tex.grad,           0ii1ffsl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|    FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad,           0ii1ffsl,  RESULT|RESULTP|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|    FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.grad,           0ii1ff,RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex.grad,           0ii1ff,RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad,           0ii1ff,RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex.grad,           0ii1ff,RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+                                           
+// tex.grad instruction with offset arg    
+DEFINE(  F16F32    ,  tex.grad,           0ii1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  F16I32    ,  tex.grad,           0ii1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad,           0ii1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  H32I32    ,  tex.grad,           0ii1ffs,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+                                           
+// tex.grad instruction with depth compare arg
+DEFINE(  F16F32    ,  tex.grad,           0ii1ffl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad,           0ii1ffl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+                                           
+// tex.grad instruction with offset and depth compare args
+DEFINE(  F16F32    ,  tex.grad,           0ii1ffsl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|    FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad,           0ii1ffsl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|    FLOW        , STANDARD)
+
+// footprint tex.grad instruction
+// Supports B32 as destination and only F32 coordinates
+#if LWCFG(GLOBAL_ARCH_TURING) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  B32F32    ,  tex.grad,           0i1ffu,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|FOOTPRINT|COARSE|FLOW, STANDARD)
+DEFINE(  B32F32    ,  tex.grad,           0ii1ffu, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|FOOTPRINT|COARSE|FLOW, STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  F32F32    ,  tex.clamp,          0i11,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.clamp,          0i11,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex.clamp,          0i11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.clamp,          0i11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex.clamp instruction with offset and depth compare args
+DEFINE(  F32F32    ,  tex.clamp,          0i11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.clamp,          0i11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.clamp instruction depth compare arg
+DEFINE(  F32F32    ,  tex.clamp,          0i11l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.clamp,          0i11l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.clamp,          0i11,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.clamp,          0i11,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.clamp,          0i11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.clamp,          0i11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex.clamp instruction with offset and depth compare args
+DEFINE(  F16F32    ,  tex.clamp,          0i11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.clamp,          0i11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.clamp instruction depth compare arg
+DEFINE(  F16F32    ,  tex.clamp,          0i11l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.clamp,          0i11l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex.clamp,          0ii11, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.clamp,          0ii11, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex.clamp,          0ii11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.clamp,          0ii11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.clamp instruction with offset and depth compare args
+DEFINE(  F32F32    ,  tex.clamp,          0ii11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.clamp,          0ii11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+// tex.clamp instruction depth compare arg
+DEFINE(  F32F32    ,  tex.clamp,          0ii11l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.clamp,          0ii11l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.clamp,          0ii11, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.clamp,          0ii11, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.clamp,          0ii11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.clamp,          0ii11s, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// tex.clamp instruction with offset and depth compare args
+DEFINE(  F16F32    ,  tex.clamp,          0ii11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.clamp,          0ii11sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+// tex.clamp instruction depth compare arg
+DEFINE(  F16F32    ,  tex.clamp,          0ii11l, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.clamp,          0ii11l, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|       FLOW        , STANDARD)
+
+// footprint tex.clamp instruction
+// Supports B32 as destination and only F32 coordinates
+#if LWCFG(GLOBAL_ARCH_TURING)
+DEFINE(  B32F32    ,  tex.clamp,          0i11u,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|FOOTPRINT|COARSE|FLOW, STANDARD)
+DEFINE(  B32F32    ,  tex.clamp,          0ii11u,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|FOOTPRINT|COARSE|FLOW, STANDARD)
+#endif
+
+DEFINE(  F32F32    ,  tex.grad.clamp,     0i1ff1, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad.clamp,     0i1ff1, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex.grad instruction with offset arg
+DEFINE(  F32F32    ,  tex.grad.clamp,     0i1ff1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad.clamp,     0i1ff1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+// tex.grad instruction with depth compare arg
+DEFINE(  F32F32    ,  tex.grad.clamp,     0i1ff1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad.clamp,     0i1ff1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+// tex.grad instruction with offset and depth compare args
+DEFINE(  F32F32    ,  tex.grad.clamp,     0i1ff1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad.clamp,     0i1ff1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.grad.clamp,     0i1ff1, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad.clamp,     0i1ff1, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex.grad instruction with offset arg
+DEFINE(  F16F32    ,  tex.grad.clamp,     0i1ff1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad.clamp,     0i1ff1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+// tex.grad instruction with depth compare arg
+DEFINE(  F16F32    ,  tex.grad.clamp,     0i1ff1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad.clamp,     0i1ff1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|      FLOW        , STANDARD)
+
+// tex.grad instruction with offset and depth compare args
+DEFINE(  F16F32    ,  tex.grad.clamp,     0i1ff1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad.clamp,     0i1ff1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+
+DEFINE(  F32F32    ,  tex.grad.clamp,     0ii1ff1,RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad.clamp,     0ii1ff1,RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex.grad instruction with offset arg
+DEFINE(  F32F32    ,  tex.grad.clamp,     0ii1ff1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad.clamp,     0ii1ff1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+
+// tex.grad instruction with depth compare arg
+DEFINE(  F32F32    ,  tex.grad.clamp,     0ii1ff1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad.clamp,     0ii1ff1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+
+// tex.grad instruction with offset and depth compare args
+DEFINE(  F32F32    ,  tex.grad.clamp,     0ii1ffs1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|    FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tex.grad.clamp,     0ii1ffs1l,  RESULT|RESULTP|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|    FLOW        , STANDARD)
+
+DEFINE(  F16F32    ,  tex.grad.clamp,     0ii1ff1,RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad.clamp,     0ii1ff1,RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|        FLOW        , STANDARD)
+
+// tex.grad instruction with offset arg
+DEFINE(  F16F32    ,  tex.grad.clamp,     0ii1ff1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad.clamp,     0ii1ff1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+
+// tex.grad instruction with depth compare arg
+DEFINE(  F16F32    ,  tex.grad.clamp,     0ii1ff1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad.clamp,     0ii1ff1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|     FLOW        , STANDARD)
+
+// tex.grad instruction with offset and depth compare args
+DEFINE(  F16F32    ,  tex.grad.clamp,     0ii1ff1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|    FLOW        , STANDARD)
+DEFINE(  H32F32    ,  tex.grad.clamp,     0ii1ff1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|    FLOW        , STANDARD)
+
+// footprint tex.grad.clamp instruction
+// Supports B32 as destination and only F32 coordinates
+#if LWCFG(GLOBAL_ARCH_TURING)
+DEFINE(  B32F32    ,  tex.grad.clamp,     0i1ff1u,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|FOOTPRINT|COARSE|FLOW, STANDARD)
+DEFINE(  B32F32    ,  tex.grad.clamp,     0ii1ff1u, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|FOOTPRINT|COARSE|FLOW, STANDARD)
+#endif
+
+#endif
+
+DEFINE(  O        ,   istypep,            PU,    RESULT                                                 , STANDARD)
+
+DEFINE(  I32F32    ,  tld4,               0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW        , STANDARD)
+DEFINE(  F32F32    ,  tld4,               0i1,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW        , STANDARD)
+DEFINE(  I32F32    ,  tld4,               0ii1,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW        , STANDARD)
+DEFINE(  F32F32    ,  tld4,               0ii1,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW        , STANDARD)
+
+DEFINE(  I32F32    ,  tld4,               0i1s,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW       , STANDARD)
+DEFINE(  F32F32    ,  tld4,               0i1s,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW       , STANDARD)
+DEFINE(  I32F32    ,  tld4,               0ii1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW       , STANDARD)
+DEFINE(  F32F32    ,  tld4,               0ii1s,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW       , STANDARD)
+
+// tld4 instruction with depth compare argument
+DEFINE(  I32F32    ,  tld4,               0i1l,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW       , STANDARD)
+DEFINE(  F32F32    ,  tld4,               0i1l,   RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW       , STANDARD)
+DEFINE(  I32F32    ,  tld4,               0ii1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW       , STANDARD)
+DEFINE(  F32F32    ,  tld4,               0ii1l,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW       , STANDARD)
+
+// tld4 instruction with offset and depth compare arguments
+DEFINE(  I32F32    ,  tld4,               0i1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW       , STANDARD)
+DEFINE(  F32F32    ,  tld4,               0i1sl,  RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW       , STANDARD)
+DEFINE(  I32F32    ,  tld4,               0ii1sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW       , STANDARD)
+DEFINE(  F32F32    ,  tld4,               0ii1sl, RESULT|RESULTP|VECTORIZABLE|TEXADDR|TEXMOD|COMPMOD|FLOW       , STANDARD)
+
+DEFINE(  B32       ,  txq,                0i,    RESULT|SURFQ|SMPLQ|TEXQ                                , STANDARD)
+DEFINE(  B32       ,  txq.level,          0is,   RESULT|TEXQ                                            , STANDARD)
+DEFINE(  B32       ,  suq,                0i,    RESULT|SURFQ                                           , STANDARD)
+
+DEFINE(  B[8|16|32|64]     ,  suld.b,             0is,   RESULT|VECTORIZABLE|TEXADDR|TEXMOD|CLAMP|LARG|CACHEOP  , STANDARD)
+DEFINE(  B[8|16|32|64]     ,  sust.b,             is0,          VECTORIZABLE|TEXADDR|TEXMOD|CLAMP|LARG|CACHEOP  , STANDARD)
+
+DEFINE(  B32       ,  sust.p,             is0,          VECTORIZABLE|TEXADDR|TEXMOD|CLAMP|LARG|CACHEOP  , STANDARD)
+
+DEFINE(  B32       ,  sured.b,            is0,   ATOMOPB|             TEXADDR|TEXMOD|CLAMP|LARG         , STANDARD)
+DEFINE(  I[32|64]       ,  sured.b,            is0,   ATOMOPI|             TEXADDR|TEXMOD|CLAMP|LARG         , STANDARD)
+DEFINE(  B32       ,  sured.p,            is0,   ATOMOPB|             TEXADDR|TEXMOD|CLAMP|LARG         , STANDARD)
+
+//----------------- Internal-use Instructions -----------------------------------------------------------
+DEFINE(  B[8|16|32|64]     ,  _sulea.b,           Uis,   RESULT|VECTORIZABLE|TEXADDR|TEXMOD|CLAMP               , STANDARD)
+DEFINE(            ,  _sulea.p,           Uis,   RESULT|             TEXADDR|TEXMOD|CLAMP               , STANDARD)
+DEFINE(  B[8|16|32|64]     ,  _sulea.b,           Pis,   RESULT|VECTORIZABLE|TEXADDR|TEXMOD|CLAMP               , STANDARD)
+DEFINE(            ,  _sulea.p,           Pis,   RESULT|             TEXADDR|TEXMOD|CLAMP               , STANDARD)
+
+DEFINE(  F32       ,  _checkfp.divide,    P00,   RESULT                                                 , STANDARD)
+
+#if LWCFG(GLOBAL_ARCH_VOLTA) // Internal-use Volta instructions
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+// NOTE: .exclusive modifier is allowed only on _warpsync instruction with label as second argument.
+         Allowing EXCLUSIVE feature on both templates to report verbose error messages
+DEFINE(            ,  _warpsync,          u,     EXCLUSIVE                                              , STANDARD)
+DEFINE(            ,  _warpsync,          uT,    EXCLUSIVE                                              , STANDARD)
+#else
+DEFINE(            ,  _warpsync,          u,                                                            , STANDARD)
+#endif // ampere, internal
+#endif
+
+//----------------- Control Flow Instructions -----------------------------------------------------------
+DEFINE(            ,  bra,                T,     FLOW|BRANCH                                            , STANDARD)
+#if LWCFG(GLOBAL_ARCH_AMPERE)
+// bra.colw/div with mask operand
+DEFINE(            ,  bra,                Tu,    FLOW|BRANCH                                            , STANDARD)
+#endif
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_60)
+DEFINE(            ,  brx.idx,            uS,    FLOW                                                   , STANDARD)
+#endif
+
+DEFINE(            ,  call,               T  ,   FLOW                                                   , STANDARD)
+DEFINE(            ,  call,               TA ,   FLOW                                                   , STANDARD)
+DEFINE(            ,  call,               AT ,   FLOW                                                   , STANDARD)
+DEFINE(            ,  call,               ATA,   FLOW                                                   , STANDARD)
+
+DEFINE(            ,  call,               TS  ,  FLOW                                                   , STANDARD)
+DEFINE(            ,  call,               TAS ,  FLOW                                                   , STANDARD)
+DEFINE(            ,  call,               ATS ,  FLOW                                                   , STANDARD)
+DEFINE(            ,  call,               ATAS,  FLOW                                                   , STANDARD)
+
+DEFINE(            ,  ret,                ,      FLOW                                                   , STANDARD)
+DEFINE(            ,  exit,               ,      KEEPREF|NOATEXIT                                       , STANDARD)
+
+//----------------- Parallel Synchronization and Communication Instructions -----------------------------
+DEFINE(            ,  bar,                u,     SYNC|BAR                                               , STANDARD)
+DEFINE(            ,  bar,                uu,    SYNC|BAR                                               , STANDARD)
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_60)
+DEFINE(            ,  barrier,            u,     SYNC|ALIGN                                             , STANDARD)
+DEFINE(            ,  barrier,            uu,    SYNC|ALIGN                                             , STANDARD)
+#endif
+
+DEFINE(            ,  bar.arrive,         u,     BAR                                                    , STANDARD)
+DEFINE(            ,  bar.arrive,         uu,    BAR                                                    , STANDARD)
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_60)
+DEFINE(            ,  barrier.arrive,     uu,        ALIGN                                              , STANDARD)
+DEFINE(            ,  barrier.arrive,     u,         ALIGN                                              , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_60)
+DEFINE(            ,  bar.warp,           u,                               SYNC|ALIGN                   , STANDARD)
+#endif
+
+DEFINE(  I32       ,  bar.red,            0uP,   RESULT|ATOMOPI|BAR                                     , STANDARD)
+DEFINE(  I32       ,  bar.red,            0uuP,  RESULT|ATOMOPI|BAR                                     , STANDARD)
+
+DEFINE(  P         ,  bar.red,            0uP,   RESULT|ATOMOPB|BAR                                     , STANDARD)
+DEFINE(  P         ,  bar.red,            0uuP,  RESULT|ATOMOPB|BAR                                     , STANDARD)
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_60)
+DEFINE(  I32       ,  barrier.red,        0uP,   RESULT|ATOMOPI|ALIGN                                   , STANDARD)
+DEFINE(  I32       ,  barrier.red,        0uuP,  RESULT|ATOMOPI|ALIGN                                   , STANDARD)
+
+DEFINE(  P         ,  barrier.red,        0uP,   RESULT|ATOMOPB|ALIGN                                   , STANDARD)
+DEFINE(  P         ,  barrier.red,        0uuP,  RESULT|ATOMOPB|ALIGN                                   , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  I32       ,  bar.scan,           0uuP,  RESULT                                                 , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(            ,  barrier.cluster,               ,   SYNC|ALIGN                                     , STANDARD)
+DEFINE(            ,  barrier.cluster.arrive,        ,        ALIGN|ORDER                               , STANDARD)
+DEFINE(            ,  barrier.cluster.wait,          ,        ALIGN                                     , STANDARD)
+#endif
+
+DEFINE(            ,  membar,             ,                              SCOPE|CACHEOP|ORDER            , STANDARD)
+#if LWCFG(GLOBAL_ARCH_VOLTA) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_60)
+DEFINE(            ,  fence,              ,                              SCOPE|ORDER                    , STANDARD)
+#endif
+#if LWCFG(GLOBAL_ARCH_VOLTA) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_75)
+DEFINE(            ,  fence.proxy,        ,      PROXYKIND                                              , STANDARD)
+#endif
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_75)
+DEFINE(            ,  membar.proxy,       ,      PROXYKIND                                              , STANDARD)
+#endif
+
+DEFINE(  F32       ,  atom,               0M0,   RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER                    , STANDARD)
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_62)
+DEFINE(  H32       ,  atom,               0M0,   RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ              , STANDARD)
+#endif
+DEFINE(  F64       ,  atom,               0M0,   RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER                    , STANDARD)
+DEFINE(  I[32|64]  ,  atom,               0M0,   RESULT|ATOMOPI|MEMSPACE|SCOPE|ORDER                    , STANDARD)
+DEFINE(  B[32|64]  ,  atom,               0M0,   RESULT|ATOMOPB|MEMSPACE|SCOPE|ORDER                    , STANDARD)
+DEFINE(  B[32|64]  ,  atom,               0M00,  RESULT|CAS    |MEMSPACE|SCOPE|ORDER                    , STANDARD)
+#if LWCFG(GLOBAL_ARCH_VOLTA) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_63)
+DEFINE(  F16       ,  atom,               0M0,   RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ              , STANDARD)
+DEFINE(  B16       ,  atom,               0M00,  RESULT|CAS    |MEMSPACE|SCOPE|ORDER                    , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_AMPERE)
+// The memory descriptor variants :
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_71)
+DEFINE(  H32       ,  atom,               0M0U,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|DESC         , EXTENDED)
+DEFINE(  F16       ,  atom,               0M0U,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|DESC         , EXTENDED)
+DEFINE(  F[32|64]  ,  atom,               0M0U,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER      |DESC         , EXTENDED)
+DEFINE(  I[32|64]  ,  atom,               0M0U,  RESULT|ATOMOPI|MEMSPACE|SCOPE|ORDER      |DESC         , EXTENDED)
+DEFINE(  B[32|64]  ,  atom,               0M0U,  RESULT|ATOMOPB|MEMSPACE|SCOPE|ORDER      |DESC         , EXTENDED)
+#endif // ISA_71
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_74)
+DEFINE(  H32       ,  atom,               0M0U,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|CACHEHINT    , STANDARD)
+DEFINE(  F16       ,  atom,               0M0U,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|CACHEHINT    , STANDARD)
+DEFINE(  F[32|64]  ,  atom,               0M0U,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER      |CACHEHINT    , STANDARD)
+DEFINE(  I[32|64]  ,  atom,               0M0U,  RESULT|ATOMOPI|MEMSPACE|SCOPE|ORDER      |CACHEHINT    , STANDARD)
+DEFINE(  B[32|64]  ,  atom,               0M0U,  RESULT|ATOMOPB|MEMSPACE|SCOPE|ORDER      |CACHEHINT    , STANDARD)
+#endif // ISA_74
+#endif // ampere
+
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_FUTURE)
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16       ,  atom,               0M0,   RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ              , STANDARD)
+DEFINE(  A32       ,  atom,               0M0,   RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ              , STANDARD)
+// The memory descriptor variants :
+DEFINE(  A16       ,  atom,               0M0U,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|DESC         , STANDARD)
+DEFINE(  A32       ,  atom,               0M0U,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|DESC         , STANDARD)
+DEFINE(  A16       ,  atom,               0M0U,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|CACHEHINT    , STANDARD)
+DEFINE(  A32       ,  atom,               0M0U,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|CACHEHINT    , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(  E16       ,  atom,               xMx,   RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ              , STANDARD)
+DEFINE(  E32       ,  atom,               dMd,   RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ              , STANDARD)
+// The memory descriptor variants :
+DEFINE(  E16       ,  atom,               xMxU,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|DESC         , STANDARD)
+DEFINE(  E32       ,  atom,               dMdU,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|DESC         , STANDARD)
+DEFINE(  E16       ,  atom,               xMxU,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|CACHEHINT    , STANDARD)
+DEFINE(  E32       ,  atom,               dMdU,  RESULT|ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|CACHEHINT    , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif // HOPPER && FUTURE
+
+DEFINE(  F32       ,  red,                M0,           ATOMOPF|MEMSPACE|SCOPE|ORDER                    , STANDARD)
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_62)
+DEFINE(  H32       ,  red,                M0,           ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ              , STANDARD)
+#endif
+DEFINE(  F64       ,  red,                M0,           ATOMOPF|MEMSPACE|SCOPE|ORDER                    , STANDARD)
+DEFINE(  I[32|64]  ,  red,                M0,           ATOMOPI|MEMSPACE|SCOPE|ORDER                    , STANDARD)
+DEFINE(  B[32|64]  ,  red,                M0,           ATOMOPB|MEMSPACE|SCOPE|ORDER                    , STANDARD)
+#if LWCFG(GLOBAL_ARCH_VOLTA) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_63)
+DEFINE(  F16       ,  red,                M0,           ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ              , STANDARD)
+#endif
+
+// The memory descriptor variants :
+#if LWCFG(GLOBAL_ARCH_AMPERE)
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_71)
+DEFINE(  H32       ,  red,                M0U,          ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|DESC         , EXTENDED)
+DEFINE(  F16       ,  red,                M0U,          ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|DESC         , EXTENDED)
+DEFINE(  F[32|64]  ,  red,                M0U,          ATOMOPF|MEMSPACE|SCOPE|ORDER      |DESC         , EXTENDED)
+DEFINE(  I[32|64]  ,  red,                M0U,          ATOMOPI|MEMSPACE|SCOPE|ORDER      |DESC         , EXTENDED)
+DEFINE(  B[32|64]  ,  red,                M0U,          ATOMOPB|MEMSPACE|SCOPE|ORDER      |DESC         , EXTENDED)
+#endif // ISA_71
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_74)
+DEFINE(  H32       ,  red,                M0U,          ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|CACHEHINT    , STANDARD)
+DEFINE(  F16       ,  red,                M0U,          ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|CACHEHINT    , STANDARD)
+DEFINE(  F[32|64]  ,  red,                M0U,          ATOMOPF|MEMSPACE|SCOPE|ORDER      |CACHEHINT    , STANDARD)
+DEFINE(  I[32|64]  ,  red,                M0U,          ATOMOPI|MEMSPACE|SCOPE|ORDER      |CACHEHINT    , STANDARD)
+DEFINE(  B[32|64]  ,  red,                M0U,          ATOMOPB|MEMSPACE|SCOPE|ORDER      |CACHEHINT    , STANDARD)
+#endif // ISA_74
+#endif //ampere
+
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_FUTURE)
+#if defined( OPTIX_HAND_EDIT )
+DEFINE(  A16       ,  red,                M0,           ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ              , STANDARD)
+DEFINE(  A32       ,  red,                M0,           ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ              , STANDARD)
+// The memory descriptor variants :
+DEFINE(  A16       ,  red,                M0U,          ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|DESC         , STANDARD)
+DEFINE(  A32       ,  red,                M0U,          ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|DESC         , STANDARD)
+DEFINE(  A16       ,  red,                M0U,          ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|CACHEHINT    , STANDARD)
+DEFINE(  A32       ,  red,                M0U,          ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|CACHEHINT    , STANDARD)
+#else // OPTIX_HAND_EDIT
+DEFINE(  E16       ,  red,                Mx,           ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ              , STANDARD)
+DEFINE(  E32       ,  red,                Md,           ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ              , STANDARD)
+// The memory descriptor variants :
+DEFINE(  E16       ,  red,                MxU,          ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|DESC         , STANDARD)
+DEFINE(  E32       ,  red,                MdU,          ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|DESC         , STANDARD)
+DEFINE(  E16       ,  red,                MxU,          ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|CACHEHINT    , STANDARD)
+DEFINE(  E32       ,  red,                MdU,          ATOMOPF|MEMSPACE|SCOPE|ORDER|NOFTZ|CACHEHINT    , STANDARD)
+#endif // OPTIX_HAND_EDIT
+#endif // HOPPER && FUTURE
+
+#if LWCFG(GLOBAL_ARCH_VOLTA) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+// match non-sync version is INTERNAL
+// TODO: Might want to remove this completely and ask user to switch to _match for internal use
+DEFINE(  B[32|64]  ,  match,              u0,    RESULT|RESULTP|VOTE                                    , STANDARD)
+#endif
+#if LWCFG(GLOBAL_ARCH_VOLTA) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_60)
+// match.sync needs to expand to match and should expand to an internal instruction available for macro expansion
+DEFINE(  B[32|64]  ,  _match,             u0,    RESULT|RESULTP|VOTE                                    , STANDARD)
+DEFINE(  B[32|64]  ,  match,              u0u,   RESULT|RESULTP|VOTE|SYNC|ALIGN                         , STANDARD)
+#endif
+
+DEFINE(  P         ,  vote,               00,    RESULT|VOTE                                            , STANDARD)
+DEFINE(  B32       ,  vote,               0P,    RESULT|VOTE                                            , STANDARD)
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_60)
+DEFINE(  P         ,  vote,               00u,   RESULT|VOTE|SYNC|ALIGN                                 , STANDARD)
+DEFINE(  B32       ,  vote,               0Pu,   RESULT|VOTE|SYNC|ALIGN                                 , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+// redux.sync
+DEFINE(   B32      ,    redux,            uuu,  RESULT|SYNC|BOP|ARITHOP                                  , STANDARD)
+DEFINE(   I32      ,    redux,            uuu,  RESULT|SYNC|BOP|ARITHOP                                  , STANDARD)
+#endif // ampere, 70
+
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_62)
+DEFINE(  B32       , activemask,          0,    RESULT                                                  , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_AMPERE) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_70)
+DEFINE( B64        , mbarrier.init,               Mu,         MEMSPACE                                  , STANDARD)
+DEFINE( B64        , mbarrier.ilwal,               M,         MEMSPACE                                  , STANDARD)
+DEFINE( B64        , mbarrier.arrive,             UM,  RESULT|MEMSPACE                                  , STANDARD)
+DEFINE( B64        , mbarrier.arrive,            UMs,  RESULT|MEMSPACE|NOCOMPLETE                       , STANDARD)
+DEFINE( B64        , mbarrier.test_wait,         PMU,  RESULT|MEMSPACE                                  , STANDARD)
+DEFINE( B64        , mbarrier.arrive_drop,        UM,  RESULT|MEMSPACE                                  , STANDARD)
+DEFINE( B64        , mbarrier.arrive_drop,       UMs,  RESULT|MEMSPACE|NOCOMPLETE                       , STANDARD)
+DEFINE( B64        , mbarrier.pending_count,      uU,  RESULT                                           , STANDARD)
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_71)
+DEFINE( B64        , mbarrier.test_wait.parity,  PMu,  RESULT|MEMSPACE                                  , STANDARD)
+#endif
+#endif
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE( B64        , mbarrier.try_wait,          PMU,  RESULT|MEMSPACE|NOSLEEP                          , STANDARD)
+DEFINE( B64        , mbarrier.try_wait.parity,   PMu,  RESULT|MEMSPACE|NOSLEEP                          , STANDARD)
+DEFINE( B64        , mbarrier.try_wait,         PMUu,  RESULT|MEMSPACE                                  , STANDARD)
+DEFINE( B64        , mbarrier.try_wait.parity,  PMuu,  RESULT|MEMSPACE                                  , STANDARD)
+DEFINE( B64        , mbarrier.expect_copy,        Mu,         MEMSPACE                                  , STANDARD)
+DEFINE( B64        , mbarrier.expect_tx,          Mu,         MEMSPACE                                  , STANDARD)
+
+DEFINE( B64        , mbarrier.arrive.expect_copy,      UMu,  RESULT|MEMSPACE                            , STANDARD)
+DEFINE( B64        , mbarrier.arrive.expect_tx,        UMu,  RESULT|MEMSPACE                            , STANDARD)
+DEFINE( B64        , mbarrier.arrive_drop.expect_copy, UMu,  RESULT|MEMSPACE                            , STANDARD)
+DEFINE( B64        , mbarrier.arrive_drop.expect_tx,   UMu,  RESULT|MEMSPACE                            , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE( I32        , setmaxreg.try_alloc,    PC,  RESULT|SYNC                                           , STANDARD)
+DEFINE( I32        , setmaxreg.alloc,         C,         SYNC                                           , STANDARD)
+DEFINE( I32        , setmaxreg.dealloc,       C,         SYNC                                           , STANDARD)
+DEFINE( I32        , setmaxreg.release,       C,         SYNC                                           , STANDARD)
+
+DEFINE( I32        , setsmemsize,             C,         SYNC                                           , STANDARD)
+DEFINE( I32        , setsmemsize.flush,        ,         SYNC                                           , STANDARD)
+DEFINE( I32        , setsmemsize.flush,        ,                                                        , STANDARD)
+#endif
+
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_PTX_ISA_FUTURE)
+DEFINE(            , elect.one,              uu,   RESULT|RESULTP|SYNC                                  , EXTENDED)
+#endif
+
+//----------------- Miscellaneous Instructions ----------------------------------------------------------
+DEFINE(            ,  trap,               ,                                                             , STANDARD)
+DEFINE(            ,  brkpt,              ,                                                             , STANDARD)
+DEFINE(            ,  pmevent,            C,                                                            , STANDARD)
+DEFINE(            ,  pmevent.mask,       C,                                                            , STANDARD)
+#if LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(            ,  brkpt,              C,                                                            , STANDARD)
+DEFINE(            ,  intr,               ,      ENDIS                                                  , STANDARD)
+DEFINE(            ,  intr.cpu,           ,                                                             , STANDARD)
+
+#if LWCFG(GLOBAL_ARCH_VOLTA) // Internal Volta instructions
+DEFINE(            ,  errbar,             ,                                                             , STANDARD)
+DEFINE(  I32       ,  nanotrap,           u,     RAND                                                   , STANDARD)
+
+// separate variants .x/.y/.z are explicitly added as .x/.y/.z cannot be added
+// as modifier as those will conflict with vector select expressions.
+DEFINE(  I32       ,  setctaid.x,         u,                                                            , STANDARD)
+DEFINE(  I32       ,  setctaid.y,         u,                                                            , STANDARD)
+DEFINE(  I32       ,  setctaid.z,         u,                                                            , STANDARD)
+DEFINE(  I32       ,  setctaid,           uu,                                                           , STANDARD)
+
+DEFINE(            ,  yield,              ,                                                             , STANDARD)
+#endif
+#endif
+
+#if LWCFG(GLOBAL_ARCH_VOLTA) && LWCFG(GLOBAL_FEATURE_PTX_ISA_INTERNAL)
+DEFINE(  I32       ,  nanosleep,          u,     RAND                                                   , STANDARD)
+#elif LWCFG(GLOBAL_ARCH_VOLTA) && LWCFG(GLOBAL_FEATURE_PTX_ISA_VERSION_62)
+DEFINE(  I32       ,  nanosleep,          u,                                                            , STANDARD)
+#endif
+
+//----------------- Video Instructions ------------------------------------------------------------------
+DEFINE(  I32I32I32 ,  vadd|vsub|vabsdiff|vmin|vmax,              012,   VSAT                            , STANDARD)
+DEFINE(  I32I32I32 ,  vadd|vsub|vabsdiff|vmin|vmax,              0120,  VSAT|ARITHOP                    , STANDARD)
+DEFINE(  I32I32I32 ,  vshl|vshr,                                 012,   VSAT        |CLAMP              , STANDARD)
+DEFINE(  I32I32I32 ,  vshl|vshr,                                 0120,  VSAT|ARITHOP|CLAMP              , STANDARD)
+DEFINE(  I32I32I32 ,  vmad,                                      0120,  VSAT        |SHR|VMAD           , STANDARD)
+DEFINE(  I32I32    ,  vset,                                      u01,               |CMP                , STANDARD)
+DEFINE(  I32I32    ,  vset,                                      u01u,       ARITHOP|CMP                , STANDARD)
+
+DEFINE(  I32I32I32 ,  vadd2|vsub2|vavrg2|vabsdiff2|vmin2|vmax2,  0120, VSAT|ARITHOP                     , STANDARD)
+DEFINE(  I32I32    ,  vset2,                                     u01u,      ARITHOP|CMP                 , STANDARD)
+
+DEFINE(  I32I32I32 ,  vadd4|vsub4|vavrg4|vabsdiff4|vmin4|vmax4,  0120, VSAT|ARITHOP                     , STANDARD)
+DEFINE(  I32I32    ,  vset4,                                     u01u,      ARITHOP|CMP                 , STANDARD)

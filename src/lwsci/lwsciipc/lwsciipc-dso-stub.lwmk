@@ -1,0 +1,29 @@
+###############################################################################
+#
+# Copyright (c) 2019 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+#
+###############################################################################
+
+##############################################################################
+# makefile fragment for generating a liblwsciipc.so DSO stub
+##############################################################################
+LWSCIIPC_DSO_STUB = $(OUTPUTDIR)/liblwsciipc-stub.so
+
+LWSCIIPC_TEGRA_EXPORTS = $(LWSCI_PATH)/lwsciipc/liblwsciipc.export
+LWSCIIPC_EXPORTS := $(OUTPUTDIR)/lwsciipc-exports.txt
+
+$(LWSCIIPC_EXPORTS): $(LWSCIIPC_TEGRA_EXPORTS)
+	$(SED) -e 's/@[0-9]\+//' \
+	    -e 's/^\([^#].\+\)$$/\1 func/' \
+	    $(LWSCIIPC_TEGRA_EXPORTS) > \
+	    $(LWSCIIPC_EXPORTS)
+
+$(eval $(call GEN_DSO_STUB_RULE, \
+  $(LWSCIIPC_DSO_STUB),$(LWSCIIPC_EXPORTS),liblwsciipc.so,,))

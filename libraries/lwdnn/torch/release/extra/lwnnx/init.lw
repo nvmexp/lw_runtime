@@ -1,0 +1,39 @@
+#include "luaT.h"
+#include "THC.h"
+#include "THLogAdd.h" /* DEBUG: WTF */
+
+#include <thrust/transform.h>
+#include <thrust/reduce.h>
+#include <thrust/transform_reduce.h>
+#include <thrust/functional.h>
+#include <thrust/device_ptr.h>
+#include "lwblas_v2.h"
+#define LwdaAssert( expression ) \
+if ( !(expression)) { \
+printf( "Assert failed %d:%d at %s:%d\n", blockIdx.x, threadIdx.x,  __FILE__, __LINE__ ); \
+}
+
+#include "utils.c"
+#include "SoftMaxTree.lw"
+#include "BlockSparse.lw"
+#include "WindowSparse.lw"
+#include "WindowGate.lw"
+#include "WindowGate2.lw"
+#include "LazyKBest.lw"
+
+
+LUA_EXTERNC DLL_EXPORT int luaopen_liblwnnx(lua_State *L);
+
+int luaopen_liblwnnx(lua_State *L)
+{
+  lua_newtable(L);
+  
+  lwnnx_SoftMaxTree_init(L);
+  lwnnx_BlockSparse_init(L);
+  lwnnx_WindowSparse_init(L);
+  lwnnx_WindowGate_init(L);
+  lwnnx_WindowGate2_init(L);
+  lwnnx_LazyKBest_init(L);
+
+  return 1;
+}

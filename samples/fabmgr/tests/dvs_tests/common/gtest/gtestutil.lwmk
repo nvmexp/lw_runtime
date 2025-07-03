@@ -1,0 +1,39 @@
+###############################################################################
+# $(LW_SOURCE)/drivers/resman/tests/common/gtest/gtestutil.lwmk
+###############################################################################
+
+###############################################################################
+# Includes defined here:
+
+#   GTEST
+#       Includes all the GTest files
+
+#   GTEST_MAIN
+#       Includes all the GTest files with the GTest generic main file
+
+###############################################################################
+
+GTEST_VERSION = sdk/gtest/1.8.0
+
+define GTEST_ADD
+    $$(eval $(1)_SOURCES += $(common/gtest/_SOURCES))
+    $$(eval $(1)_INCLUDES += $(common/gtest/_INCLUDES))
+    $$(eval $(1)_UNIX_LDFLAGS += $(common/gtest/_UNIX_LDFLAGS))
+    $$(eval $(1)_WIN_LIBS += $(common/gtest/_WIN_LIBS))
+    $$(eval $(1)_MACOSX_LIBS += $(common/gtest/_MACOSX_LIBS))
+endef
+
+define GTEST_MAIN_ADD
+    $$(eval $$(call ADD_COMMON,$(1),GTEST))
+    $$(eval $(1)_SOURCES += $(LW_TOOLS)/$(GTEST_VERSION)/fused-src/gtest/gtest_main.cc)
+endef
+
+common/gtest/_SOURCES += $(FM_TEST_DIR)/common/gtest/GtestUtil.cpp
+common/gtest/_SOURCES += $(LW_TOOLS)/$(GTEST_VERSION)/fused-src/gtest/gtest-all.cc
+common/gtest/_SOURCES += $(LW_SOURCE)/drivers/common/shared/lwstatus/lwstatus.c
+
+common/gtest/_INCLUDES += $(LW_TOOLS)/$(GTEST_VERSION)/fused-src/
+
+common/gtest/_UNIX_LDFLAGS += -pthread
+
+common/gtest/_WIN_LIBS += gdi32.lib

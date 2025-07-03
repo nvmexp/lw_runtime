@@ -1,0 +1,256 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include "lwphy.h"
+#include "lwphy_internal.h"
+#include "descrambling.hpp" // for POLY_* masks etc.
+#include "descrambling.lwh"
+#include "crc.hpp"
+#include "GOLD_2_COALESCED_P_LUT.h"
+#include "GOLD_1_SEQ_LUT.h"
+#include "tensor_desc.hpp"
+
+using namespace lwphy_i;
+using namespace descrambling; // for POLY_ etc.
+
+void lwphyUpdatePdschDmrsParams(PdschDmrsParams * h_dmrs_params, const tb_pars * tb_params,
+                                const gnb_pars * gnb_params) {
+
+    int num_TBs = gnb_params->numTb;
+
+    // Read gnb params
+    int Nf = gnb_params->Nf;
+    int Nt = gnb_params->Nt;
+    int slot_number = gnb_params->slotNumber;
+    int cell_id = gnb_params->cellId;
+
+    // Update per-TB DmrsParams. Note that the gnb params fields are replicated across TBs.
+    for (int TB_id = 0; TB_id < num_TBs; TB_id++) {
+        h_dmrs_params[TB_id].Nf = Nf;
+        h_dmrs_params[TB_id].Nt = Nt;
+        h_dmrs_params[TB_id].slot_number = slot_number;
+        h_dmrs_params[TB_id].cell_id = cell_id;
+
+        // Update TB specific params.
+        h_dmrs_params[TB_id].beta_dmrs = sqrt(tb_params[TB_id].dmrsEnergy * 1.0f);
+
+        h_dmrs_params[TB_id].num_dmrs_symbols = tb_params[TB_id].dmrsMaxLength;
+        if ((h_dmrs_params[TB_id].num_dmrs_symbols < 1) ||
+            (h_dmrs_params[TB_id].num_dmrs_symbols > 2)) {
+            throw std::runtime_error("Invalid number of DMRS symbols. Only one or two are supported.");
+        }
+        h_dmrs_params[TB_id].num_data_symbols = tb_params[TB_id].numSym - h_dmrs_params[TB_id].num_dmrs_symbols;
+
+        h_dmrs_params[TB_id].symbol_number = tb_params[TB_id].startSym;
+        h_dmrs_params[TB_id].num_layers = tb_params[TB_id].numLayers;
+        h_dmrs_params[TB_id].start_Rb = tb_params[TB_id].startPrb;
+        h_dmrs_params[TB_id].num_Rbs = tb_params[TB_id].numPrb;
+        if (h_dmrs_params[TB_id].num_Rbs == 0) {
+            throw std::runtime_error("Zero PRBs allocated for DMRS!");
+        }
+
+        // Up to 8 layers are encoded in an uint32_t, 4 bits at a time.
+        uint32_t port_index = tb_params[TB_id].nPortIndex;
+        for (int i = 0; i < h_dmrs_params[TB_id].num_layers; i++) {
+            h_dmrs_params[TB_id].port_ids[i] = 1000 + ((port_index >> (28 - 4 * i)) & 0x0FU);
+        }
+
+        h_dmrs_params[TB_id].n_scid = tb_params[TB_id].nSCID;
+        h_dmrs_params[TB_id].dmrs_scid = tb_params[TB_id].dmrsScramId;
+    }
+}
+
+
+// Copying gold32 from rate_matching unit. Same code duplicated in descrambling too.
+// Compute 32 bits of the Gold sequence starting from bit n//32
+__device__ inline uint32_t gold32(uint32_t seed2, uint32_t n) {
+    uint32_t prod2;
+
+    uint32_t state2 = __brev(seed2) >> 1; // reverse 31 bits
+    state2 = polyMulHigh31(state2, POLY_2);
+    prod2 = mulModPoly31_Coalesced(state2,
+                                   &GOLD_2_COALESCED_P_LUT[(n) / WORD_SIZE],
+                                   GOLD_2_COALESCED_P_LUT_OFFSET,
+                                   POLY_2);
+
+    uint32_t fstate2 = galois31LFSRWord(prod2, POLY_2_GMASK, 31);
+
+    uint32_t output2 = fibonacciLFSR2_1bit(fstate2);
+
+    return GOLD_1_SEQ_LUT[n / WORD_SIZE] ^ output2;
+}
+
+
+// TODO Potentially fuse the two kernels.
+// compute_dmrs computes: r(m) = 1/sqrt(2) * ((1 - 2 * c(2m)) +  i * (1 - 2 * c(2m + 1)))
+// c is the is the gold value
+template<typename Tcomplex>
+__global__ void compute_dmrs(const PdschDmrsParams * __restrict__ params, int Nf, int Nt, Tcomplex * __restrict__ dmrs_output) {
+
+    int TB_id = blockIdx.y;
+    float positive_scramble_seq = 0.707106781186547 * params[TB_id].beta_dmrs;
+    __shared__ uint32_t shmem_gold_seqs[20];  // overprovisioned. Should be > (blockDim.x * 2 / 32) * 2; // Last * 2 is due to two symbol calc (might be superfluous)
+
+    // Compute (blockDim.x / 32) gold_seq. elements per block; each gold32 call computes 32 bits
+    int gold_elements_one_dmrs = blockDim.x * 2 / 32; // Multipled by 2 because each thread will read 2 bits
+
+    int num_dmrs_symbols = params[TB_id].num_dmrs_symbols;
+
+    for (int i = threadIdx.x; i < num_dmrs_symbols * gold_elements_one_dmrs; i += blockDim.x) {
+        uint32_t gold_index = blockIdx.x * gold_elements_one_dmrs + (i % gold_elements_one_dmrs); // Indexing not affected by # dmrs symbols, just the seed is.
+
+        int symbol_number = params[TB_id].symbol_number + (i / gold_elements_one_dmrs); // symbol number will be 2 or 3
+        uint32_t double_nid = (params[TB_id].dmrs_scid << 1);
+        // Update seed for gold32 scrambling sequence accordingly
+        uint32_t c_init = ((1 << 17) * (params[TB_id].slot_number * OFDM_SYMBOLS_PER_SLOT + symbol_number + 1) * (double_nid + 1) + double_nid + params[TB_id].n_scid) & 0x7FFFFFFFU;
+        shmem_gold_seqs[i] = gold32(c_init, gold_index * 32); // 32 is # of bits
+    }
+    __syncthreads();
+
+
+    // Build scrambling sequence
+    uint32_t output_TB_offset = TB_id *  Nf / 2;
+    int num_TBs = gridDim.y;
+    uint32_t output_symbols_offset = num_TBs *  Nf / 2;
+
+    int i = threadIdx.x;
+    int tid_x = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (tid_x < (Nf / 2)) {
+
+        for (int symbol_id = 0; symbol_id < num_dmrs_symbols; symbol_id++) {
+
+            int base_shmem_index = symbol_id * gold_elements_one_dmrs;
+            int shmem_index = base_shmem_index + (threadIdx.x >> 4); // divide by 16 because each thread will read 2 bit of the gold seq.
+
+            if (shmem_index >= num_dmrs_symbols * gold_elements_one_dmrs) {
+                printf("i %d, threadIdx %d, blockIdx.x %d, blockIdx.y %d, shmem_index %d, gold_elements %d\n",
+                        i, threadIdx.x, blockIdx.x, blockIdx.y, shmem_index, num_dmrs_symbols * gold_elements_one_dmrs);
+            }
+            int shmem_bit_offset = ((threadIdx.x & 0xFU) << 1); // should be OK or could double  or could double  it?
+            uint32_t output_index = symbol_id * output_symbols_offset + output_TB_offset + tid_x;
+
+            uint32_t gold_value = ((shmem_gold_seqs[shmem_index] >> shmem_bit_offset) & 0x3U);
+
+            Tcomplex scrambled_val;
+
+            if (gold_value == 0) {
+                scrambled_val = make_complex<Tcomplex>::create(positive_scramble_seq, positive_scramble_seq);
+            } else if (gold_value == 1) {
+                scrambled_val = make_complex<Tcomplex>::create(-positive_scramble_seq, positive_scramble_seq);
+            } else if (gold_value == 2) {
+                scrambled_val = make_complex<Tcomplex>::create(positive_scramble_seq, -positive_scramble_seq);
+            } else if (gold_value == 3) {
+                scrambled_val = make_complex<Tcomplex>::create(-positive_scramble_seq, -positive_scramble_seq);
+            }
+            dmrs_output[output_index] = scrambled_val;
+        }
+    }
+}
+
+
+template<typename Tcomplex>
+__global__ void re_map_dmrs(const PdschDmrsParams * __restrict__ params, int Nf, int Nt, int num_TBs,
+                            const Tcomplex * __restrict__ dmrs_addr, Tcomplex * __restrict__ re_mapped_dmrs_output) {
+
+    int layer = blockIdx.y;
+
+    // Create a layer to TB map
+    __shared__ int shmem_layer_to_TB_map[16];
+    if (threadIdx.x < 16) {
+        shmem_layer_to_TB_map[threadIdx.x] = -1;
+    }
+    __syncthreads();
+    for (int i = threadIdx.x; i < num_TBs * 16; i += blockDim.x) {
+        int TB = i / 16;
+        int potential_layer_id = i % 16;
+        if (potential_layer_id < params[TB].num_layers) {
+            int actual_layer = (params[TB].port_ids[potential_layer_id] - 1000) + 8 * params[TB].n_scid;
+            shmem_layer_to_TB_map[actual_layer] = TB;
+        }
+    }
+
+    __syncthreads();
+
+    // Now I know which TB this layer corresponds to. Can be at most one w/o frequency division multiplexing.
+    int TB_id = shmem_layer_to_TB_map[layer];
+    if (TB_id == -1) return;
+
+    int num_dmrs_symbols = params[TB_id].num_dmrs_symbols;
+
+    int port_idx = layer - 8 * params[TB_id].n_scid;
+    int delta =  (port_idx >> 1) & 0x1U; // DRMS config. type 1 only; valid options 0 or 1
+    int fOCC_flag = (port_idx & 0x1U); // even port_idx, i.e., fOCC_flag == 0, means Wf(k') is all +1; odd port means Wf(k') is +1, -1, alternating
+    int tOCC_flag = (port_idx >> 2) & 0x1U; // port_idx < 4, i.e., tOCC_flag == 0, means Wt(l') is all +1; port_idx >= 4 means Wt(l') is +1, -1
+
+    //Every thread will read the value from dmrs_addr
+    int tidx = blockIdx.x * blockDim.x + threadIdx.x;
+    uint32_t output_TB_offset = TB_id * Nf / 2;
+
+    //if (tidx < (params[TB_id].num_Rbs * LWPHY_N_TONES_PER_PRB)) {
+    int new_tidx = tidx - (params[TB_id].start_Rb * LWPHY_N_TONES_PER_PRB);
+    if (new_tidx < (params[TB_id].num_Rbs * LWPHY_N_TONES_PER_PRB)) {
+        for (int symbol_id = 0; symbol_id < num_dmrs_symbols; symbol_id++) {
+            uint32_t dmrs_block_x_offset = (symbol_id * num_TBs * Nf / 2) + output_TB_offset + (6 * params->start_Rb) + (new_tidx >> 1);
+
+            __half2 symbol_to_read = dmrs_addr[dmrs_block_x_offset]; // every two threads read the same symbol; only one of the reads is valid
+            if ((fOCC_flag == 1) && (((new_tidx >> 1) & 0x1U) == 0x1U)){
+                symbol_to_read =  make_complex<Tcomplex>::create(-symbol_to_read.x, -symbol_to_read.y);
+            }
+            if ((symbol_id == 1) && (tOCC_flag == 1)) {
+                symbol_to_read =  make_complex<Tcomplex>::create(-symbol_to_read.x, -symbol_to_read.y);
+            }
+
+            __half2 symbol_to_write;
+            if ((new_tidx % 2) == delta) {
+                symbol_to_write = symbol_to_read;
+            } else {
+                symbol_to_write = make_complex<Tcomplex>::create(0, 0);
+            }
+
+            // Write symbol
+            uint32_t output_index = (LWPHY_N_TONES_PER_PRB * 273 * (OFDM_SYMBOLS_PER_SLOT * blockIdx.y + params[TB_id].symbol_number + symbol_id)) +
+                                    (LWPHY_N_TONES_PER_PRB * params[TB_id].start_Rb) + new_tidx;
+            re_mapped_dmrs_output[output_index] = symbol_to_write;
+        }
+    }
+}
+
+
+void lwphyPdschDmrs(PdschDmrsParams * d_params,
+                    lwphyTensorDescriptor_t dmrs_output_desc,
+                    void * dmrs_output_addr,
+                    lwphyTensorDescriptor_t re_mapped_dmrs_output_desc,
+                    void * re_mapped_dmrs_output_addr,
+                    lwdaStream_t strm) {
+
+    int max_Nf = 273 * LWPHY_N_TONES_PER_PRB;
+    int max_Nt = OFDM_SYMBOLS_PER_SLOT;
+
+    // DMRS output sequence has {max_Nf/2, max_Nt, 2} dimensions.
+    const_tensor_pair dmrs_pair(static_cast<const tensor_desc&>(*dmrs_output_desc), dmrs_output_addr);
+
+    const uint32_t threads = 128;
+    int blocks_x = div_round_up(max_Nf/2, (int) threads);
+    int num_TBs = (static_cast<const tensor_desc&>(*dmrs_output_desc)).layout().dimensions[1];
+
+    dim3 num_thread_blocks(blocks_x, num_TBs);
+    compute_dmrs<__half2><<<num_thread_blocks, threads, 0, strm>>>(d_params, max_Nf, max_Nt, (__half2*)dmrs_output_addr);
+
+    // Do resource element mapping
+    int max_Rbs = 273;
+    int re_blocks_x = div_round_up(max_Rbs * LWPHY_N_TONES_PER_PRB, (int) threads);
+    const_tensor_pair re_mapped_dmrs_pair(static_cast<const tensor_desc&>(*re_mapped_dmrs_output_desc), re_mapped_dmrs_output_addr);
+
+    dim3 re_num_thread_blocks(re_blocks_x, re_mapped_dmrs_pair.first.get().layout().dimensions[2]);
+    re_map_dmrs<__half2><<<re_num_thread_blocks, threads, 0, strm>>>(d_params, max_Nf, max_Nt, num_TBs, (__half2*)dmrs_output_addr, (__half2*)re_mapped_dmrs_output_addr);
+
+}
+

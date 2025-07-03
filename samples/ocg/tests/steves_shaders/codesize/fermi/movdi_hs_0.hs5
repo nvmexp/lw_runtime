@@ -1,0 +1,49 @@
+hs_5_0
+hs_decls 
+dcl_input_control_point_count 4 
+dcl_output_control_point_count 4 
+dcl_tessellator_domain domain_quad 
+dcl_tessellator_partitioning partitioning_pow2 
+dcl_tessellator_output_primitive output_triangle_cw 
+dcl_globalFlags refactoringAllowed 
+dcl_constantbuffer cb0[2], immediateIndexed 
+hs_control_point_phase 
+dcl_input vPrim 
+dcl_input vOutputControlPointID 
+dcl_input v[4][0].xy 
+dcl_output o0.xy 
+dcl_temps 1 
+add r0.x, vOutputControlPointID, vPrim 
+mov o0.xy, v[r0.x + 0][0].xyxx 
+ret 
+hs_join_phase 
+dcl_output_siv o0.x, finalQuadUeq0EdgeTessFactor 
+dcl_output_siv o1.x, finalQuadVeq0EdgeTessFactor 
+dcl_output_siv o2.x, finalQuadUeq1EdgeTessFactor 
+dcl_output_siv o3.x, finalQuadVeq1EdgeTessFactor 
+dcl_output_siv o4.x, finalQuadUInsideTessFactor 
+dcl_output_siv o5.x, finalQuadVInsideTessFactor 
+dcl_temps 3 
+max r0.xyzw, cb0[0].xyzw, l(1.000000, 1.000000, 1.000000, 1.000000) 
+min r1.xyzw, r0.xyzw, l(64.000000, 64.000000, 64.000000, 64.000000) 
+add r0.xyzw, r0.zwzw, r0.xyxy 
+and r2.xyzw, r1.xyzw, l(0x007fffff, 0x007fffff, 0x007fffff, 0x007fffff) 
+and r1.xyzw, r1.xyzw, l(0x7f800000, 0x7f800000, 0x7f800000, 0x7f800000) 
+movc r1.xyzw, r2.xyzw, r1.xyzw, l(0x007fffff,0x007fffff,0x007fffff,0x007fffff) 
+utof r1.xyzw, r1.xyzw 
+mov o0.x, r1.x 
+mov o1.x, r1.y 
+mov o2.x, r1.z 
+mov o3.x, r1.w 
+mov_sat r1.xyzw, cb0[1].xyxy 
+mul r0.xyzw, r0.xyzw, r1.xyzw 
+mul r0.xyzw, r0.xyzw, l(0.500000, 0.500000, 0.500000, 0.500000) 
+max r0.xyzw, r0.xyzw, l(1.000000, 1.000000, 1.000000, 1.000000) 
+min r0.xyzw, r0.xyzw, l(64.000000, 64.000000, 64.000000, 64.000000) 
+and r0.xyzw, r0.xyzw, l(0x007fffff, 0x007fffff, 0x7f800000, 0x7f800000) 
+movc r0.xy, r0.xyxx, r0.zwzz, l(0x007fffff,0x007fffff,0,0) 
+utof r0.xy, r0.xyxx 
+mov o4.x, r0.x 
+mov o5.x, r0.y 
+ret 
+

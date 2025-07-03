@@ -1,0 +1,53 @@
+!!FP1.0
+MOVH H1.xyz, f[TEX3];
+MOVH H2.xyz, f[TEX2];
+TEX H0, f[TEX0], TEX1, 2D;
+MULH H1.xyz, H0.y, H1;
+MADH H0.xyz, H2.xyzz, H0.x, H1.xyzz;
+MOVH H1.xyz, f[TEX4];
+MADH H0.xyz, H1, H0.z, H0;
+MOVH H1.xyz, f[TEX1];
+DP3H H1.y, H0, H1;
+MOVH H2.xyz, f[TEX1];
+DP3H H1.x, H0, H0;
+RCPH H1.w, H1.x;
+DP3H H2.x, H2, H2;
+MULH H0.w, H1, H1.y;
+MOVH H1.xy, f[TEX1];
+ADDH H1.w, H0, H0;
+MOVH H2.yzw, f[TEX1].wxyz;
+MADH H1.xy, H1.w, H0, -H1;
+TEX H1, H1, TEX7, LWBE;
+LG2H H0.w, |H2.x|;
+MULH H0.w, H0, {0.5, 0, 0, 0}.x; 
+EX2H H1.w, -H0.w;
+MULH H2.yzw, H1.w, H2;
+DP3H H0.x, H2.yzwy, H0;
+SGEH H0.z, H0.x, {0.855620, 0.770058, 0.693052, 0.623747}.x;
+ADDH H0.w, H0.x, -{0.561372, 0.505235, 0.454712, 0.409240}.x;
+LG2H H0.x, |H2.x|;
+MULH H0.x, H0, {0.5, 0, 0, 0}.x; 
+MULH H0.w, H0.z, -H0;
+ADDH H1.w, {0.241652, 0.217487, 0.195738, 0.176165}.x, H0;
+EX2H H0.y, -H0.x;
+ADDH H0.w, -H1, {0.958548, 0.142693, 0.128424, 0.115582}.x;
+MULH H0.z, H0.w, H0.w;
+MOVH H0, H0.z;
+MULH H1.w, H0.y, H2.x;
+MULH H0.z, H0, H0;
+MULH H0.w, H0, H0.z;
+MADH H1.xyz, H1, H0.w, {0.104023, 0.093621, 0.084259, 0.075833};
+MOVH H0.w, -{0.0068250, 0.061425, 0.055282, 0.049754}.x;
+ADDH H1.w, H1, H0;
+ADDH H0.w, H0, {0.044779, 0.040301, 0.036271, 0.032644}.x;
+RCPH H0.w, H0.w;
+MULH_SAT H1.w, H1, H0;
+MOVH H0, H1;
+MOVH o[COLH], H0; 
+END
+
+# Passes = 26 
+
+# Registers = 2 
+
+# Textures = 5 

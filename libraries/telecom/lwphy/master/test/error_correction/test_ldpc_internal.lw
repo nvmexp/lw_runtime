@@ -1,0 +1,946 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+// Decrease N_TEST_VALUES before enabling this... 
+//#define LWPHY_DEBUG 1
+
+#include <gtest/gtest.h>
+#include <random>
+#include <limits>
+#include <type_traits>
+#include "ldpc2.hpp"
+#include "ldpc2.lwh"
+#include "ldpc2_c2v_x2.lwh"
+#include "lwphy.hpp"
+#include "ldpc2_app_address.lwh"
+#include "ldpc2_app_address_fp.lwh"
+
+using namespace ldpc2;
+
+template <int BG, int CHECK_IDX, class TAddr0, class TAddr1>
+__device__
+void address_pairs_compare_node(unsigned int*             dErrorCount,
+                                const LDPC_kernel_params& params,
+                                TAddr0&                   addr0,
+                                TAddr1&                   addr1)
+{
+    int app_addr_0[max_row_degree<BG>::value];    // shared memory (byte) addresses
+    int app_addr_1[max_row_degree<BG>::value]; // shared memory (byte) addresses
+
+    //if(0 == threadIdx.x)
+    //{
+    //    printf("address_pairs_compare_node(BG = %i, CHECK = %i)\n", BG, CHECK_IDX);
+    //}
+    
+    addr0.generate<CHECK_IDX>(params, app_addr_0);
+    addr1.generate<CHECK_IDX>(params, app_addr_1);
+
+    for(int i = 0; i < row_degree<BG, CHECK_IDX>::value; ++i)
+    {
+        if(app_addr_0[i] != app_addr_1[i])
+        {
+            atomicAdd(dErrorCount, 1);
+            printf("addr[%i, %u, %i] error: %i != %i (row_degree = %i)\n", CHECK_IDX, threadIdx.x, i, app_addr_0[i], app_addr_1[i], row_degree<BG, CHECK_IDX>::value);
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// address_pairs_compare_node_unroll
+template <int BG, int NODE_COUNT, class TAddr0, class TAddr1> struct address_pairs_compare_node_unroll;
+template <int BG, class TAddr0, class TAddr1>
+struct address_pairs_compare_node_unroll<BG, 1, TAddr0, TAddr1>
+{
+    __device__
+    static void compare(unsigned int*             dErrorCount,
+                        const LDPC_kernel_params& params,
+                        TAddr0&                   addr0,
+                        TAddr1&                   addr1)
+    {
+        address_pairs_compare_node<BG, 0, TAddr0, TAddr1>(dErrorCount, params, addr0, addr1);
+    }
+};
+
+template <int BG, int NODE_COUNT, class TAddr0, class TAddr1>
+struct address_pairs_compare_node_unroll
+{
+    __device__
+    static void compare(unsigned int*             dErrorCount,
+                        const LDPC_kernel_params& params,
+                        TAddr0&                   addr0,
+                        TAddr1&                   addr1)
+    {
+        address_pairs_compare_node_unroll<BG, NODE_COUNT-1, TAddr0, TAddr1>::compare(dErrorCount, params, addr0, addr1);
+        address_pairs_compare_node<BG, NODE_COUNT-1, TAddr0, TAddr1>(dErrorCount, params, addr0, addr1);
+    }
+};
+
+////////////////////////////////////////////////////////////////////////
+// address_pairs_compare()
+template <typename                           T,
+          int                                BG,
+          int                                Z,
+          template<typename, int, int> class TAddr0,
+          template<typename, int, int> class TAddr1,
+          int                                MAX_NUM_PARITY>
+__global__ __launch_bounds__(Z, 1)
+void address_pairs_compare(unsigned int*             dErrorCount,
+                           const LDPC_kernel_params& params)
+{
+    typedef TAddr0<T, BG, Z> addr0_t;
+    typedef TAddr1<T, BG, Z> addr1_t;
+    
+    typedef address_pairs_compare_node_unroll<BG, MAX_NUM_PARITY, addr0_t, addr1_t> compare_unroll_t;
+    
+    addr0_t          addr0;
+    addr1_t          addr1;
+    compare_unroll_t comp;
+    comp.compare(dErrorCount, params, addr0, addr1);
+}
+
+template <typename                           T,
+          int                                BG,
+          int                                Z,
+          template<typename, int, int> class TAddr0,
+          template<typename, int, int> class TAddr1,
+          int                                MAX_NUM_PARITY>
+void perform_address_compare(unsigned int* dErrorCount)
+{
+    //------------------------------------------------------------------
+    // Reset the error count
+    LWDA_CHECK(lwdaMemset(dErrorCount, 0, sizeof(unsigned int)));
+
+    const int mb = MAX_NUM_PARITY;
+    const int Kb = max_info_nodes<BG>::value;
+    
+    //------------------------------------------------------------------
+    // Initialize data structures describing the LDPC configuration
+    LDPC_config config(BG,          // bg
+                       Kb,          // kb
+                       mb,          // mb
+                       Z,           // z
+                       LWPHY_R_16F, // data type
+                       1,           // num codewords
+                       false,       // early termination
+                       10);         // num iterations
+    // We aren't using input/output addresses for address callwlations,
+    // so leave them NULL here
+    LDPC_kernel_params params(config,             // LDPC config
+                              (Kb + mb) * Z,      // input_stride_elem
+                              nullptr,            // input_addr
+                              (Kb * Z + 31) / 32, // output_stride_words
+                              nullptr,            // output_addr
+                              1.0f,               // normalization
+                              nullptr);           // workspace addr
+    //------------------------------------------------------------------
+    // Ilwoke the kernel
+    address_pairs_compare<T, BG, Z, TAddr0, TAddr1, MAX_NUM_PARITY><<<1, Z>>>(dErrorCount, params);
+
+    //------------------------------------------------------------------
+    // Copy data back to the host to check
+    unsigned int hErrorCount = 0;
+    LWDA_CHECK(lwdaMemcpy(&hErrorCount, dErrorCount, sizeof(unsigned int), lwdaMemcpyDeviceToHost));
+    LWDA_CHECK(lwdaDeviceSynchronize());
+    ASSERT_EQ(hErrorCount, 0) << "Errors encountered for BG=" << BG << ", Z=";
+}
+
+////////////////////////////////////////////////////////////////////////
+// LDPCInternal.AddressPairsHalf
+// Test to validate APP address callwlation functions.
+// Ideally, we would have a reference CPU implementation, but for now
+// we are just testing "new" implementations that use denormalized
+// floats (app_loc_address_fp) against the original implementation
+// (app_loc_address).
+TEST(LDPCInternal, AddressPairsHalf)
+{
+    //------------------------------------------------------------------
+    // Allocate and initialize a device buffer with a variable to count
+    // differences.
+    lwphy::unique_device_ptr<unsigned int> dErrorCount = lwphy::make_unique_device<unsigned int>(1);
+
+    perform_address_compare<__half, 1, 384, app_loc_address, app_loc_address_fp, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<__half, 1, 352, app_loc_address, app_loc_address_fp, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<__half, 1, 320, app_loc_address, app_loc_address_fp, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<__half, 1, 288, app_loc_address, app_loc_address_fp, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<__half, 1, 256, app_loc_address, app_loc_address_fp, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<__half, 1, 224, app_loc_address, app_loc_address_fp, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<__half, 1, 192, app_loc_address, app_loc_address_fp, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<__half, 1, 160, app_loc_address, app_loc_address_fp, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<__half, 1, 128, app_loc_address, app_loc_address_fp, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<__half, 1, 96,  app_loc_address, app_loc_address_fp, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<__half, 1, 64,  app_loc_address, app_loc_address_fp, max_parity_nodes<1>::value>(dErrorCount.get());
+
+    perform_address_compare<__half, 2, 384, app_loc_address, app_loc_address_fp, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<__half, 2, 352, app_loc_address, app_loc_address_fp, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<__half, 2, 320, app_loc_address, app_loc_address_fp, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<__half, 2, 288, app_loc_address, app_loc_address_fp, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<__half, 2, 256, app_loc_address, app_loc_address_fp, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<__half, 2, 224, app_loc_address, app_loc_address_fp, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<__half, 2, 192, app_loc_address, app_loc_address_fp, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<__half, 2, 160, app_loc_address, app_loc_address_fp, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<__half, 2, 128, app_loc_address, app_loc_address_fp, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<__half, 2, 96,  app_loc_address, app_loc_address_fp, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<__half, 2, 64,  app_loc_address, app_loc_address_fp, max_parity_nodes<2>::value>(dErrorCount.get());
+}
+
+////////////////////////////////////////////////////////////////////////
+// LDPCInternal.AddressPairsFloat
+// Test to validate APP address callwlation functions.
+// Note that the callwlation of APP addresses for float APP values can
+// also be used when working with a pair of fp16 values (because
+// sizeof(float) = sizeof(__half2). (This might be the case for a kernel
+// that decodes 2 codewords at a time.)
+TEST(LDPCInternal, AddressPairsFloat)
+{
+    //------------------------------------------------------------------
+    // Allocate and initialize a device buffer with a variable to count
+    // differences.
+    lwphy::unique_device_ptr<unsigned int> dErrorCount = lwphy::make_unique_device<unsigned int>(1);
+
+    // BG1
+    // Using (floor(2^16 / (Z * 4)) - 22) for max num parity nodes
+    perform_address_compare<float, 1, 384, app_loc_address, app_loc_address_fp_imad, 20>                        (dErrorCount.get());
+    perform_address_compare<float, 1, 352, app_loc_address, app_loc_address_fp_imad, 24>                        (dErrorCount.get());
+    perform_address_compare<float, 1, 320, app_loc_address, app_loc_address_fp_imad, 29>                        (dErrorCount.get());
+    perform_address_compare<float, 1, 288, app_loc_address, app_loc_address_fp_imad, 34>                        (dErrorCount.get());
+    perform_address_compare<float, 1, 256, app_loc_address, app_loc_address_fp_imad, 42>                        (dErrorCount.get());
+    perform_address_compare<float, 1, 224, app_loc_address, app_loc_address_fp_imad, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<float, 1, 192, app_loc_address, app_loc_address_fp_imad, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<float, 1, 160, app_loc_address, app_loc_address_fp_imad, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<float, 1, 128, app_loc_address, app_loc_address_fp_imad, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<float, 1, 96,  app_loc_address, app_loc_address_fp_imad, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<float, 1, 64,  app_loc_address, app_loc_address_fp_imad, max_parity_nodes<1>::value>(dErrorCount.get());
+
+    // BG2
+    // Using (floor(2^16 / (Z * 4)) - 10) for max num parity nodes
+    perform_address_compare<float, 2, 384, app_loc_address, app_loc_address_fp_imad, 32>                        (dErrorCount.get());
+    perform_address_compare<float, 2, 352, app_loc_address, app_loc_address_fp_imad, 36>                        (dErrorCount.get());
+    perform_address_compare<float, 2, 320, app_loc_address, app_loc_address_fp_imad, 41>                        (dErrorCount.get());
+    perform_address_compare<float, 2, 288, app_loc_address, app_loc_address_fp_imad, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<float, 2, 256, app_loc_address, app_loc_address_fp_imad, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<float, 2, 224, app_loc_address, app_loc_address_fp_imad, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<float, 2, 192, app_loc_address, app_loc_address_fp_imad, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<float, 2, 160, app_loc_address, app_loc_address_fp_imad, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<float, 2, 128, app_loc_address, app_loc_address_fp_imad, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<float, 2, 96,  app_loc_address, app_loc_address_fp_imad, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<float, 2, 64,  app_loc_address, app_loc_address_fp_imad, max_parity_nodes<2>::value>(dErrorCount.get());
+}
+
+
+////////////////////////////////////////////////////////////////////////
+// LDPCInternal.AddressPairsFloatLarge
+// Test to validate APP address callwlation functions.
+// Note that the callwlation of APP addresses for float APP values can
+// also be used when working with a pair of fp16 values (because
+// sizeof(float) = sizeof(__half2). (This might be the case for a kernel
+// that decodes 2 codewords at a time.)
+TEST(LDPCInternal, AddressPairsFloatLarge)
+{
+    //------------------------------------------------------------------
+    // Allocate and initialize a device buffer with a variable to count
+    // differences.
+    lwphy::unique_device_ptr<unsigned int> dErrorCount = lwphy::make_unique_device<unsigned int>(1);
+
+    // Only check BG/Z pairs for which 16 bits is not enough to store
+    // all APP data (e.g. sizeof(T) = 4, lower code rates, ..)
+    // BG1
+    perform_address_compare<float, 1, 384, app_loc_address, app_loc_address_fp_imad_lg, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<float, 1, 352, app_loc_address, app_loc_address_fp_imad_lg, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<float, 1, 320, app_loc_address, app_loc_address_fp_imad_lg, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<float, 1, 288, app_loc_address, app_loc_address_fp_imad_lg, max_parity_nodes<1>::value>(dErrorCount.get());
+    perform_address_compare<float, 1, 256, app_loc_address, app_loc_address_fp_imad_lg, max_parity_nodes<1>::value>(dErrorCount.get());
+
+    // BG2
+    perform_address_compare<float, 2, 384, app_loc_address, app_loc_address_fp_imad_lg, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<float, 2, 352, app_loc_address, app_loc_address_fp_imad_lg, max_parity_nodes<2>::value>(dErrorCount.get());
+    perform_address_compare<float, 2, 320, app_loc_address, app_loc_address_fp_imad_lg, max_parity_nodes<2>::value>(dErrorCount.get());
+}
+
+//typedef row_context_sel_prmt<__half, sign_store_policy_split_src> rc_fp16_t;
+typedef row_context<__half, sign_store_policy_split_src> rc_fp16_t;
+//typedef row_context<__half, sign_store_policy_split_dst> rc_fp16_t;
+
+
+////////////////////////////////////////////////////////////////////////
+// test_rc_fp16_kernel()
+// Test kernel for the LDPC row_context class using fp16 APP data
+__global__ void test_rc_fp16_kernel(int            num_tests,
+                                    int            row_degree,
+                                    __half2*       pout,
+                                    const __half2* pin)
+{
+    typedef typename rc_fp16_t::extract_context     ec_fp16_t;
+    //------------------------------------------------------------------
+    const int      inputIdx  = (blockDim.x * blockIdx.x) + threadIdx.x;
+    const int      row_words = (row_degree + 1) / 2;
+    const __half2* tIn       = pin  + (inputIdx * row_words);
+    __half2*       tOut      = pout + (inputIdx * row_words);
+    //------------------------------------------------------------------
+    if(inputIdx >= num_tests)
+    {
+        return;
+    }
+    //------------------------------------------------------------------
+    // Load data into registers
+    word_t app[10]; // Max
+    for(int i = 0; i < row_words; ++i)
+    {
+        // Setting elements with indices (i * 2) and ((i * 2) + 1)
+        app[i].f16x2 = tIn[i];
+        // Set the spare value to something that won't be min0 or min1
+        if(((i * 2) + 1) >= row_degree)
+        {
+            app[i].f16x2.y = 0x7C00;
+        }
+    }
+    
+    //------------------------------------------------------------------
+    // Update the compressed min-sum representation
+    rc_fp16_t rc;
+    for(int i = 0; i < row_words; ++i)
+    {
+        if(0 == i)
+        {
+            rc.init(app[i]);
+            KERNEL_PRINT("test_rc_fp16_kernel() [%i] init: min1 = %f, min0 = %f, min0_index = %i, signs = 0x%X\n",
+                         inputIdx,
+                         __high2float(rc.min1_min0.f16x2),
+                         __low2float(rc.min1_min0.f16x2),
+                         rc.min0_index,
+                         rc.signs);
+        }
+        else
+        {
+            if(((i * 2)  + 1) >= row_degree)
+            {
+                rc.update_low(app[i], i);
+            }
+            else
+            {
+                rc.update(app[i], i);
+            }
+            KERNEL_PRINT("test_rc_fp16_kernel() [%i] update: min1 = %f, min0 = %f, min0_index = %i, signs = 0x%X\n",
+                         inputIdx,
+                         __high2float(rc.min1_min0.f16x2),
+                         __low2float(rc.min1_min0.f16x2),
+                         rc.min0_index,
+                         rc.signs);
+        }
+    }
+    rc.finalize_no_normalize(row_words);
+    ec_fp16_t ec = rc.get_extract_context();
+    KERNEL_PRINT("test_rc_fp16_kernel() [%i]: min1 = %f, min0 = %f, min0_index = %i, signs = 0x%X\n",
+                 inputIdx,
+                 __high2float(rc.min1_min0.f16x2),
+                 __low2float(rc.min1_min0.f16x2),
+                 rc.min0_index,
+                 rc.signs);
+    //------------------------------------------------------------------
+    // Extract values
+    for(int i = 0; i < row_words; ++i)
+    {
+        word_t w = rc.extract(ec, i); 
+        tOut[i] = w.f16x2;
+    }
+}
+
+typedef row_context<__half2, sign_mgr_pair_src> rc_fp16x2_t;
+
+////////////////////////////////////////////////////////////////////////
+// test_rc_fp16x2_kernel()
+// Test kernel for the LDPC row_context class using fp16x2 APP data to
+// represent processing 2 codewords at a time.
+__global__ void test_rc_fp16x2_kernel(int            num_tests,
+                                      int            row_degree,
+                                      __half2*       pout,
+                                      const __half2* pin)
+{
+    const int      inputIdx  = (blockDim.x * blockIdx.x) + threadIdx.x;
+    const __half2* tIn       = pin  + (inputIdx * row_degree);
+    __half2*       tOut      = pout + (inputIdx * row_degree);
+    //------------------------------------------------------------------
+    if(inputIdx >= num_tests)
+    {
+        return;
+    }
+    //------------------------------------------------------------------
+    // Load input data into registers
+    word_t app[19]; // Maximum row degree
+    for(int i = 0; i < row_degree; ++i)
+    {
+        app[i].f16x2 = tIn[i];
+    }
+    //------------------------------------------------------------------
+    // Update the compressed min-sum representation
+    rc_fp16x2_t rc;
+    rc.init(app[0], app[1]);
+    KERNEL_PRINT("test_rc_fp16x2_kernel() [%i] init: min1 = [%f | %f], min0 = [%f | %f], min0_index = [%i | %i], signs = [0x%X | 0x%X]\n",
+                 inputIdx,
+                 __high2float(rc.min1.f16x2),
+                 __low2float(rc.min1.f16x2),
+                 __high2float(rc.min0.f16x2),
+                 __low2float(rc.min0.f16x2),
+                 rc.min0_index.u16x2.y,
+                 rc.min0_index.u16x2.x,
+                 rc_fp16x2_t::sign_mgr_t::debug_get_codeword_signs(rc.signs_0_9, rc.signs_10_, 1),
+                 rc_fp16x2_t::sign_mgr_t::debug_get_codeword_signs(rc.signs_0_9, rc.signs_10_, 0));
+    for(int i = 2; i < row_degree; ++i)
+    {
+        rc.update(app[i], i);
+        //KERNEL_PRINT("test_rc_fp16x2_kernel() [%i] update: min1 = [%f | %f], min0 = [%f | %f], min0_index = [%i | %i], signs = [0x%X | 0x%X]\n",
+        //               inputIdx,
+        //               __high2float(rc.min1.f16x2),
+        //               __low2float(rc.min1.f16x2),
+        //               __high2float(rc.min0.f16x2),
+        //               __low2float(rc.min0.f16x2),
+        //               rc.min0_index.u16x2.y,
+        //               rc.min0_index.u16x2.x,
+        //               rc_fp16x2_t::sign_mgr_t::debug_get_codeword_signs(rc.signs_0_9, rc.signs_10_, 1),
+        //               rc_fp16x2_t::sign_mgr_t::debug_get_codeword_signs(rc.signs_0_9, rc.signs_10_, 0));
+    }
+    KERNEL_PRINT("test_rc_fp16_kernel() [%i]: min1 = [%f | %f], min0 = [%f | %f], min0_index = [%i | %i], signs = [0x%X | 0x%X]\n",
+                 inputIdx,
+                 __high2float(rc.min1.f16x2),
+                 __low2float(rc.min1.f16x2),
+                 __high2float(rc.min0.f16x2),
+                 __low2float(rc.min0.f16x2),
+                 rc.min0_index.u16x2.y,
+                 rc.min0_index.u16x2.x,
+                 rc_fp16x2_t::sign_mgr_t::debug_get_codeword_signs(rc.signs_0_9, rc.signs_10_, 1),
+                 rc_fp16x2_t::sign_mgr_t::debug_get_codeword_signs(rc.signs_0_9, rc.signs_10_, 0));
+
+    rc.finalize_no_normalize(row_degree);
+    //------------------------------------------------------------------
+    // Extract values
+    typedef typename rc_fp16x2_t::extract_context ec_fp16x2_t;
+    
+    ec_fp16x2_t ec = rc.get_extract_context();
+    for(int i = 0; i < row_degree; ++i)
+    {
+        word_t w = rc.extract(ec, i); 
+        tOut[i] = w.f16x2;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// LDPCInternalHalf
+// Test fixture with source data for half precision. Sequences of fp16
+// values are stored combined to form a sequence of half2 instances.
+class LDPCInternalHalf : public ::testing::Test
+{
+protected:
+    static const size_t N_TEST_VALUES = 19 * 1024;
+    //static const size_t N_TEST_VALUES = 38;
+    static const size_t N_TEST_PAIRS = (N_TEST_VALUES + 1) / 2;
+    typedef lwphy::buffer<__half2, lwphy::device_alloc> half2_buffer_device_t;
+    //------------------------------------------------------------------
+    // SetUp()
+    void SetUp() override
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Random number generation. Choose an interval that will not
+        // overflow fp16
+        //std::random_device rd;
+        //std::mt19937       e2(rd());
+        std::mt19937                     e2;
+        std::uniform_real_distribution<> dist(-60*1024.0f, 60*1024.0f);
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Allocate host storage
+        random_src.resize(((N_TEST_VALUES + 1) / 2) * 2);
+        random_src_half2.resize(N_TEST_PAIRS);
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Generate random data, but store as fp16
+        for(size_t i = 0; i < random_src.size(); ++i)
+        {
+            random_src[i] = dist(e2);
+            DEBUG_PRINTF("%lu: %.1f\n", i, __half2float(random_src[i]));
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Pair fp16 values into half2 values for use by the kernel
+        for(size_t i = 0; i < random_src_half2.size(); ++i)
+        {
+            DEBUG_PRINTF("%lu: [%.1f | %.1f]\n", i, __half2float(random_src[i*2+1]), __half2float(random_src[i*2]));
+            random_src_half2[i] = __floats2half2_rn(random_src[i * 2], random_src[i * 2 + 1]);
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Initialize a device buffer with the src contents
+        random_src_half2_device = half2_buffer_device_t(N_TEST_PAIRS);
+        LWDA_CHECK(lwdaMemcpy(random_src_half2_device.addr(),
+                              random_src_half2.data(),
+                              random_src_half2.size() * sizeof(random_src_half2[0]),
+                              lwdaMemcpyHostToDevice));
+    }
+    //------------------------------------------------------------------
+    //void TearDown() override {}
+    //------------------------------------------------------------------
+    // Data
+    std::vector<__half>   random_src;
+    std::vector<__half2>  random_src_half2;
+    half2_buffer_device_t random_src_half2_device;
+};
+
+////////////////////////////////////////////////////////////////////////
+// get_elem_from_pairs()
+// Retrieves a float element from a set of __half2 instances. The index
+// is the "element" index, where each __half2 contains 2 elements.
+float get_elem_from_pairs(const __half2* src, int index)
+{
+    const int pairIndex = index / 2;
+    return (0 == (index % 2))           ?
+           __low2float(src[pairIndex])  :
+           __high2float(src[pairIndex]) ;
+}
+
+////////////////////////////////////////////////////////////////////////
+// set_pair_elem()
+// Sets an element in a set of __half2 instances. The index
+// is the "element" index, where each __half2 contains 2 elements.
+void set_pair_elem(__half2* dst, int index, float f)
+{
+    const int pairIndex = index / 2;
+    __half2 __floats2half2_rn(const float a, const float b);
+    dst[pairIndex] = (0 == (index % 2))                                 ?
+                     __floats2half2_rn(f, __high2float(dst[pairIndex])) :
+                     __floats2half2_rn(__low2float(dst[pairIndex]), f)  ;
+}
+
+////////////////////////////////////////////////////////////////////////
+// host_min_sum()
+void host_min_sum(int            N,
+                  __half2*       dst,
+                  const __half2* src)
+{
+    //------------------------------------------------------------------
+    // Initialize min-sum representation
+    float        min0       = std::numeric_limits<float>::infinity();
+    float        min1       = std::numeric_limits<float>::infinity();
+    int          min0_index = -1;
+    unsigned int signs      = 0;
+    //------------------------------------------------------------------
+    // Update min-sum representation
+    for(int i = 0; i < N; ++i)
+    {
+        float        f      = get_elem_from_pairs(src, i);
+        unsigned int is_neg = (f < 0) ? 1 : 0;
+        signs |= (is_neg << i);
+        if(fabs(f) < min0)
+        {
+            min0_index = i;
+            min1       = min0;
+            min0       = fabsf(f);
+        }
+        else if(fabsf(f) < min1)
+        {
+            min1 = fabsf(f);
+        }
+    }
+    //------------------------------------------------------------------
+    // Extract values from min-sum representation
+    uint32_t  sign_prod_is_neg = ((unsigned int)__builtin_popcount(signs) & 0x1);
+    for(int i = 0; i < N; ++i)
+    {
+        float value  = (i == min0_index) ? min1 : min0;
+        if(((signs >> i) & 0x1) ^ sign_prod_is_neg)
+        {
+            value = - value;
+        }
+        set_pair_elem(dst, i, value);
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// min_sum_context
+// Host struct to keep track of min0, min1, min0_index, and signs, and
+// to provide the extracted sequence of values.
+struct min_sum_context
+{
+    min_sum_context() :
+        min0(std::numeric_limits<float>::infinity()),
+        min1(std::numeric_limits<float>::infinity()),
+        min0_index(-1),
+        signs(0)
+    {
+    }
+    void process(float f, int i)
+    {
+        unsigned int is_neg = (f < 0) ? 1 : 0;
+        signs |= (is_neg << i);
+        if(fabs(f) < min0)
+        {
+            min0_index = i;
+            min1       = min0;
+            min0       = fabsf(f);
+        }
+        else if(fabsf(f) < min1)
+        {
+            min1 = fabsf(f);
+        }
+    }
+    float extract(int i)
+    {
+        uint32_t  sign_prod_is_neg = ((unsigned int)__builtin_popcount(signs) & 0x1);
+        float value  = (i == min0_index) ? min1 : min0;
+        //printf("extract[%i]: signs = 0x%X, popcnt = %i, sign_prod_is_neg = %u, check = %u\n",
+        //       i,
+        //       signs,
+        //       __builtin_popcount(signs),
+        //       sign_prod_is_neg,
+        //       ((signs >> i) & 0x1));
+        if(((signs >> i) & 0x1) ^ sign_prod_is_neg)
+        {
+            value = -value;
+        }
+        return value;
+    }
+    float min0;
+    float min1;
+    int   min0_index;
+    int   signs;
+};
+
+////////////////////////////////////////////////////////////////////////
+// host_min_sum_x2()
+void host_min_sum_x2(int            N,
+                     __half2*       dst,
+                     const __half2* src)
+{
+    min_sum_context msctx[2];
+    //------------------------------------------------------------------
+    // Update min-sum representation
+    for(int i = 0; i < N; ++i)
+    {
+        msctx[0].process(__low2float(src[i]), i);
+        msctx[1].process(__high2float(src[i]), i);
+    }
+    //------------------------------------------------------------------
+    // Extract values from min-sum representation
+    for(int i = 0; i < N; ++i)
+    {
+        dst[i] = __floats2half2_rn(msctx[0].extract(i), msctx[1].extract(i));
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// Compare the output of a min-sum row context to a host reference
+// implementation. fp16 values are stored in pairs "along" the row, such
+// that for odd row degrees there will be an extra unused value in the
+// last pair.
+//
+// The row context determines the two smallest values, the index of the
+// smallest, and the signs of the inputs, and then generates an output
+// sequence as dictated by those values.
+TEST_F(LDPCInternalHalf, RowContext_fp16)
+{
+    std::vector<__half2> hostRef(random_src_half2.size());
+    half2_buffer_device_t k_out;
+    //------------------------------------------------------------------
+    // Loop over all 5G row degrees (BG1 and BG2)
+    std::array<int, 9> row_degrees{3, 4, 5, 6, 7, 8, 9, 10, 19};
+    //std::array<int, 1> row_degrees{19};
+    for(auto row_degree : row_degrees)
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // How many tests can we run for the amount of allocated data,
+        // for the current row degree?
+        const size_t PAIRS_PER_ROW = (row_degree + 1) / 2;
+        const size_t NUM_ROW_TESTS = (random_src.size() / 2) / PAIRS_PER_ROW;
+
+        DEBUG_PRINTF("row_degree = %i, num_tests = %lu\n", row_degree, NUM_ROW_TESTS);
+        
+        hostRef.resize(NUM_ROW_TESTS * PAIRS_PER_ROW);
+        k_out = half2_buffer_device_t(NUM_ROW_TESTS * PAIRS_PER_ROW);
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Generate reference data on the host
+        for(size_t i = 0; i < NUM_ROW_TESTS; ++i)
+        {
+            const __half2* hostSrc = random_src_half2.data() + (PAIRS_PER_ROW * i);
+            __half2*       hostDst = hostRef.data()          + (PAIRS_PER_ROW * i);
+            host_min_sum(row_degree, hostDst, hostSrc);
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Execute the kernel on the device
+        dim3 blkDim(32);
+        dim3 grdDim((NUM_ROW_TESTS + (blkDim.x - 1)) / blkDim.x);
+        test_rc_fp16_kernel<<<grdDim, blkDim>>>(NUM_ROW_TESTS,
+                                                row_degree,
+                                                k_out.addr(),
+                                                random_src_half2_device.addr());
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Transfer results back to the host
+        std::vector<__half2> deviceResults(random_src_half2.size());
+        LWDA_CHECK(lwdaMemcpy(deviceResults.data(),
+                              k_out.addr(),
+                              k_out.size() * sizeof(half2_buffer_device_t::element_t),
+                              lwdaMemcpyDeviceToHost));
+        lwdaDeviceSynchronize();
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Compare results
+        for(size_t i = 0; i < NUM_ROW_TESTS; ++i)
+        {
+            const __half2* hostRow   = hostRef.data()       + (PAIRS_PER_ROW * i);
+            const __half2* deviceRow = deviceResults.data() + (PAIRS_PER_ROW * i);
+            for(size_t j = 0; j < row_degree; ++j)
+            {
+                const float hostValue   = get_elem_from_pairs(hostRow,   j);
+                const float deviceValue = get_elem_from_pairs(deviceRow, j);
+                if(hostValue != deviceValue)
+                {
+                    DEBUG_PRINTF("FAILURE: ROW_DEGREE = %i, TEST = %lu, INDEX = %lu, HOST = %f, DEVICE = %f\n",
+                                 row_degree,
+                                 i,
+                                 j,
+                                 hostValue,
+                                 deviceValue);
+                }
+                else
+                {
+                    DEBUG_PRINTF("MATCH: ROW_DEGREE = %i, TEST = %lu, INDEX = %lu, VALUE = %f\n",
+                                 row_degree,
+                                 i,
+                                 j,
+                                 hostValue);
+                }
+                EXPECT_EQ(hostValue, deviceValue);
+            }
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// Compare the output of a min-sum row context to a host reference
+// implementation. Two separate codewords are represented by the hi and
+// lo values in the sequence, and the row context generates a pair of
+// output sequences.
+//
+// For each codeword, the row context determines the two smallest values,
+// the index of the smallest, and the signs of the inputs, and then
+// generates an output sequence as dictated by those values.
+TEST_F(LDPCInternalHalf, RowContext_fp16x2)
+{
+    std::vector<__half2> hostRef(random_src_half2.size());
+    half2_buffer_device_t k_out;
+    //------------------------------------------------------------------
+    // Loop over all 5G row degrees (BG1 and BG2)
+    std::array<int, 9> row_degrees{3, 4, 5, 6, 7, 8, 9, 10, 19};
+    //std::array<int, 1> row_degrees{19};
+    for(auto row_degree : row_degrees)
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // How many tests can we run for the amount of allocated data,
+        // for the current row degree?
+        const size_t NUM_ROW_TESTS = random_src_half2.size() / row_degree;
+
+        DEBUG_PRINTF("row_degree = %i, num_half2 = %lu, num_tests = %lu\n", row_degree, random_src_half2.size(), NUM_ROW_TESTS);
+
+        hostRef.resize(NUM_ROW_TESTS * row_degree);
+        k_out = half2_buffer_device_t(NUM_ROW_TESTS * row_degree);
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Generate reference data on the host
+        for(size_t i = 0; i < NUM_ROW_TESTS; ++i)
+        {
+            const __half2* hostSrc = random_src_half2.data() + (row_degree * i);
+            __half2*       hostDst = hostRef.data()          + (row_degree * i);
+            host_min_sum_x2(row_degree, hostDst, hostSrc);
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Execute the kernel on the device
+        dim3 blkDim(32);
+        dim3 grdDim((NUM_ROW_TESTS + (blkDim.x - 1)) / blkDim.x);
+        test_rc_fp16x2_kernel<<<grdDim, blkDim>>>(NUM_ROW_TESTS,
+                                                  row_degree,
+                                                  k_out.addr(),
+                                                  random_src_half2_device.addr());
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Transfer results back to the host
+        std::vector<__half2> deviceResults(random_src_half2.size());
+        LWDA_CHECK(lwdaMemcpy(deviceResults.data(),
+                              k_out.addr(),
+                              k_out.size() * sizeof(half2_buffer_device_t::element_t),
+                              lwdaMemcpyDeviceToHost));
+        lwdaDeviceSynchronize();
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Compare results
+        for(size_t i = 0; i < NUM_ROW_TESTS; ++i)
+        {
+            const __half2* hostRow   = hostRef.data()       + (row_degree * i);
+            const __half2* deviceRow = deviceResults.data() + (row_degree * i);
+            for(size_t j = 0; j < row_degree; ++j)
+            {
+                const float hostValues[2]   = { __low2float(hostRow[j]),   __high2float(hostRow[j])   };
+                const float deviceValues[2] = { __low2float(deviceRow[j]), __high2float(deviceRow[j]) };
+                for(int c = 0; c < 2; ++c)
+                {
+                    if(hostValues[c] != deviceValues[c])
+                    {
+                        DEBUG_PRINTF("FAILURE: ROW_DEGREE = %i, TEST_IDX = %lu, ROW_INDEX = %lu.%s, HOST = %f, DEVICE = %f\n",
+                                     row_degree,
+                                     i,
+                                     j,
+                                     (0 == c) ? "LO" : "HI",
+                                     hostValues[c],
+                                     deviceValues[c]);
+                    }
+                    else
+                    {
+                        DEBUG_PRINTF("MATCH: ROW_DEGREE = %i, TEST_IDX = %lu, ROW_INDEX = %lu.%s, VALUE = %f\n",
+                                     row_degree,
+                                     i,
+                                     j,
+                                     (0 == c) ? "LO" : "HI",
+                                     hostValues[c]);
+                    }
+                    EXPECT_EQ(hostValues[c], deviceValues[c]);
+                }
+            }
+        }
+    }
+
+}
+
+////////////////////////////////////////////////////////////////////////
+// kernel_loader_test()
+// Kernel to instantiate a loader object that works with 2 codewords at
+// a time.
+template <int Z, int V>
+__global__ __launch_bounds__(Z)
+void kernel_loader_test(LDPC_kernel_params params,
+                        __half2*           out,
+                        size_t             out_stride_elements)
+{
+    typedef llr_loader_fixed<__half2, Z, V>  llr_loader_t;
+    typedef typename llr_loader_t::app_buf_t app_buf_t;
+
+    extern __shared__ char smem[];
+    //__shared__ char smem[llr_loader_t::LLR_BUFFER_SIZE];
+    
+    app_buf_t*   app_smem = reinterpret_cast<app_buf_t*>(smem);
+    llr_loader_t loader;
+    loader.load_sync(params, smem);
+
+    __half2* wordOutput = out + (blockIdx.x * out_stride_elements);
+    for(int i = 0; i < V; ++i)
+    {
+        if(0 == threadIdx.x)
+        {
+            float2 fCheck = __half22float2(app_smem[(i * Z) + threadIdx.x]);
+            //printf("[%u]: HI = %f, LO = %f\n", (i * Z) + threadIdx.x, fCheck.y, fCheck.x);
+            
+        }
+        wordOutput[(i * Z) + threadIdx.x] = app_smem[(i * Z) + threadIdx.x];
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// Compare the output of a min-sum row context to a host reference
+// implementation. Two separate codewords are represented by the hi and
+// lo values in the sequence, and the row context generates a pair of
+// output sequences.
+TEST(LDPCInternal, Loader_fp16x2)
+{
+    const int BG     = 1;
+    const int mb     = 4; // max_parity_nodes<1>::value; 
+    const int Kb     = max_info_nodes<1>::value;
+    const int Z      = 384;
+    const int NUM_CW = 79;
+    const int N      = (mb + Kb) * Z;
+    const int K      = Kb * Z;
+    //------------------------------------------------------------------
+    // Allocate input, output, and "test" tensors. Input will be a set
+    // of NUM_CW codewords, and output will be a tensor of output bits.
+    // The "test" tensor output will be a set of NUM_CW/2 "paired"
+    // codewords, with values from 2 codewords combined into the high
+    // and low values of a fp16x2 word.
+    lwphy::typed_tensor<LWPHY_R_16F, lwphy::pinned_alloc> tLLR(lwphy::tensor_layout({N, NUM_CW}));
+    lwphy::typed_tensor<LWPHY_C_16F, lwphy::pinned_alloc> tTest(lwphy::tensor_layout({N, (NUM_CW + 1) / 2}));
+    lwphy::tensor_device                                  tOut(lwphy::tensor_info(LWPHY_BIT, {K, NUM_CW}));
+    //------------------------------------------------------------------
+    // Generate random data
+    // Random number generation. Choose an interval that will not
+    // overflow fp16
+    //std::random_device rd;
+    //std::mt19937       e2(rd());
+    std::mt19937                     e2;
+    std::uniform_real_distribution<> dist(-32.0f, 32.0f);
+    for(int iCW = 0; iCW < NUM_CW; ++iCW)
+    {
+        for(int iLLR = 0; iLLR < N; ++iLLR)
+        {
+            int idx[2] = {iLLR, iCW};
+            tLLR(idx) = __float2half(dist(e2));
+            //if(0 == (iLLR % Z)) printf("tLLR(%i, %i) = %f\n", idx[0], idx[1], __half2float(tLLR(idx)));
+        }
+    }
+    //------------------------------------------------------------------
+    // Initialize data structures describing the LDPC configuration
+    LDPC_config config(BG,          // bg
+                       Kb,          // kb
+                       mb,          // mb
+                       Z,           // z
+                       LWPHY_R_16F, // data type
+                       NUM_CW,      // num codewords
+                       false,       // early termination
+                       10);         // num iterations
+    // We aren't using input/output addresses for address callwlations,
+    // so leave them NULL here
+    LDPC_kernel_params params(config,               // LDPC config
+                              tLLR.strides()[1],    // input_stride_elem
+                              tLLR.addr(),          // input_addr
+                              tOut.strides()[1]/32, // output_stride_words
+                              tOut.addr(),          // output_addr
+                              1.0f,                 // normalization
+                              nullptr);             // workspace addr
+    dim3 blkDim(Z);
+    dim3 grdDim((NUM_CW + 1) / 2);
+#if 1
+    // dynamic shared memory specification in exelwtion configuration
+    const size_t SHMEM_SIZE = sizeof(__half2) * N;
+#else
+    // shared memory statically allocated in kernel
+    const size_t SHMEM_SIZE = 0;
+#endif
+    //printf("SHMEM_SIZE = %lu\n", SHMEM_SIZE);
+    kernel_loader_test<Z, mb + Kb><<<grdDim, blkDim, SHMEM_SIZE>>>(params,
+                                                                   tTest.addr(),
+                                                                   tTest.strides()[1]);
+    //------------------------------------------------------------------
+    // Check for kernel errors
+    lwdaDeviceSynchronize();
+    lwdaError_t e = lwdaGetLastError();
+    if(e != lwdaSuccess)
+    {
+        throw lwphy_i::lwda_exception(e);
+    }
+    //------------------------------------------------------------------
+    // Compare results to source data
+    for(int iCW = 0; iCW < NUM_CW; ++iCW)
+    {
+        for(int iLLR = 0; iLLR < N; ++iLLR)
+        {
+            int idx_src[2] = {iLLR, iCW};
+            int idx_out[2] = {iLLR, iCW / 2};
+            __half  src  = tLLR(idx_src);
+            __half2 out = tTest(idx_out);
+            // Exact comparision should be OK here - no computations
+            EXPECT_EQ(__half2float(src),
+                      (0 == (iCW % 2)) ? __low2float(out) : __high2float(out));
+            //printf("src = %f, out = %f\n",
+            //        __half2float(src),
+            //        (0 == (iCW % 2)) ? __low2float(out) : __high2float(out));
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// main()
+int main(int argc, char* argv[])
+{
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}

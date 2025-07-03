@@ -1,0 +1,27 @@
+ADD R0, -v[OPOS], c[4]
+DP3 o[TEX0].x, v[TEX1], R0
+DP3 o[TEX0].y, v[TEX2], R0
+DP3 o[TEX0].z, v[TEX3], R0
+DP4 o[TEX1].x, v[TEX0], c[10]
+DP4 o[TEX1].y, v[TEX0], c[11]
+MOV o[TEX2], c[20]
+DP4 o[TEX2].x, v[OPOS], c[9]
+DP4 o[TEX3].x, v[OPOS], c[6]
+DP4 o[TEX3].y, v[OPOS], c[7]
+DP4 o[TEX3].w, v[OPOS], c[8]
+DP4 o[TEX4].x, v[TEX0], c[12]
+DP4 o[TEX4].y, v[TEX0], c[13]
+DP4 o[TEX5].x, v[TEX0], c[14]
+DP4 o[TEX5].y, v[TEX0], c[15]
+ADD  R0, -v[OPOS], c[4]
+DP3  R1, R0, R0
+RSQ  R1, R1.x
+MUL  R0, R0, R1.x
+ADD  R1, -v[OPOS], c[5]
+DP3  R2, R1, R1
+RSQ  R2, R2.x
+MUL  R1, R1, R2.x
+ADD  R0, R0, R1
+DP3  o[TEX6].x, v[TEX1], R0
+DP3  o[TEX6].y, v[TEX2], R0
+DP3  o[TEX6].z, v[TEX3], R0

@@ -1,0 +1,51 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+# UUID generation. Used to check the validity of serialized modules.
+
+OPTIX_UUID_H   = $(OUTPUTDIR)/g_optix_uuid.h
+OPTIX_UUID_PL  = $(LW_SOURCE)/drivers/rtcore/support/uuidgen/uuidgen.pl
+OPTIX_UUID_CPP = $(LW_OPTIX)/src/Util/optixUuid.cpp
+OPTIX_UUID_OBJ = $(call BUILD_OPTIX_OBJECT_LIST,Uuid,$(OPTIX_UUID_CPP))
+
+OTHER_FILES_TO_REMOVE += $(OPTIX_UUID_H)
+
+# Update the UUID if any of the following changes.
+OPTIX_UUID_OBJ_DEP = $(filter-out $(OPTIX_UUID_OBJ), $(ALL_OBJECTS))
+
+# Make the header dependent on the objs, but don't use as input to the generator, because this causes 
+# weird issues
+$(OPTIX_UUID_H) : $(OPTIX_UUID_OBJ_DEP)
+
+# Rule for generating the UUID header.
+$(OPTIX_UUID_H) : $(OPTIX_UUID_PL)
+	@$(ECHO) "Generating unique driver id to g_optix_uuid.h"
+	$(PERL) $(OPTIX_UUID_PL) >$@
+
+# Add the path to the generated header file only for compiling optix_uuid.cpp
+$(OPTIX_UUID_OBJ) : LW_INCLUDES += $(OUTPUTDIR)
+
+# Let OPTIX_UUID_OBJ depend on the generated header file, this is no build rule, just a means to trigger 
+# compilation of optix_uuid.cpp if the header file was changed
+$(OPTIX_UUID_OBJ) : $(OPTIX_UUID_H)

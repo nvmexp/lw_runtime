@@ -1,0 +1,644 @@
+/*
+ * Copyright (c) 2017, LWPU CORPORATION. All rights reserved.
+ */
+
+
+#include <LWCA/ComputeCapability.h>
+#include <optixu/optixu_aabb.h>
+#include <optixu/optixu_math.h>
+
+#include "ResampleMotionAabb.h"
+
+using namespace optix;
+using namespace optix::lwca;
+
+#ifdef __LWDACC__
+#define RT_ASSERT( x )
+#endif
+
+namespace optix {
+
+__device__ __host__ __inline__ Aabb lerp( const Aabb& a, const Aabb& b, float t )
+{
+    return Aabb( lerp( a.m_min, b.m_min, t ), lerp( a.m_max, b.m_max, t ) );
+}
+
+namespace {
+
+struct ResampleAabbs
+{
+    const optix::Aabb* inAabbs;
+    const unsigned int inMotionSteps;
+    const float*       inTimes;
+    optix::Aabb*       outAabbs;
+    const unsigned int outMotionSteps;
+    const float        outTimeBegin;
+    const float        outTimeEnd;
+};
+
+struct ResampleRegularAabbsKernelParams
+{
+    const unsigned int geometryPrimCount;
+    const optix::Aabb* geometryAabbs;
+    const unsigned int geometryMotionSteps;
+    const float        geometryTimeBegin;
+    const float        geometryTimeEnd;
+    optix::Aabb*       buildAabbs;
+    const unsigned int buildMotionSteps;
+    const float        buildTimeBegin;
+    const float        buildTimeEnd;
+};
+
+struct ResampleAabbsKernelParams
+{
+    const size_t            motionAabbsCount;
+    const MotionAabbDevice* motionAabbs;
+    const Aabb*             inputAabbs;
+    const float*            inputTimes;
+    optix::Aabb*            buildAabbs;
+    const unsigned int      buildMotionSteps;
+    const float             buildTimeBegin;
+    const float             buildTimeEnd;
+};
+
+struct SegmentBorder
+{
+    float time = 0;
+    // index within the current motion aabbs, i.e., [0,maabb.keyCount)
+    unsigned int aabbIndex = 0;
+    // (potentially) interpolated aabbs at the segment border
+    optix::Aabb interpolatedAabb;
+};
+
+template <bool timesRegularDistribution = true>
+__device__ __host__ __inline__ void resample_aabbs_in_segment( const ResampleAabbs& p,
+                                                               const SegmentBorder& segmentBegin,
+                                                               const SegmentBorder& segmentEnd,
+                                                               Aabb&                outAabb0,
+                                                               Aabb&                outAabb1 )
+{
+    // only used if timesRegularDistribution == true
+    const float inStepSize = timesRegularDistribution ? ( p.inTimes[1] - p.inTimes[0] ) / (float)( p.inMotionSteps - 1 ) : 1.f;
+    auto inTime            = [&]( int index ) {
+        // 'if' will be resolved at compile time
+        if( timesRegularDistribution )
+            return p.inTimes[0] + index * inStepSize;
+        else
+            return p.inTimes[index];
+    };
+    auto inAabb      = [&]( unsigned int index ) -> const Aabb& { return p.inAabbs[index]; };
+    auto lower_bound = [&]( unsigned int first, unsigned int last, float value ) -> unsigned int {
+        unsigned int it, step;
+        unsigned int count = last - first;
+        while( count > 0 )
+        {
+            it   = first;
+            step = count / 2;
+            it += step;
+            if( inTime( it ) < value )
+            {
+                first = ++it;
+                count -= step + 1;
+            }
+            else
+                count = step;
+        }
+        return first;
+    };
+
+    // loop over all input aabbs that are within the segment
+    const int begin                  = segmentBegin.aabbIndex;
+    const int end                    = segmentEnd.aabbIndex;
+    const int countIntermediateBoxes = end - begin;
+    if( countIntermediateBoxes == 0 )
+    {
+        outAabb0 = segmentBegin.interpolatedAabb;
+        outAabb1 = segmentEnd.interpolatedAabb;
+        return;
+    }
+    // mid is somewhat 'central-ish' in the case that the input aabbs are uniformly distributed since all aabbs [begin,end) are within the current segment
+    int mid = begin + ( countIntermediateBoxes - 1 ) / 2;
+    // for irregular distribution, we find the index that is close to the center
+    if( !timesRegularDistribution )
+    {
+        mid = lower_bound( begin, end, optix::lerp( segmentBegin.time, segmentEnd.time, 0.5f ) );
+        if( mid == end )
+            mid = end - 1;
+    }
+    const float timeMid = inTime( mid );
+    // left index for (axis_min/max): x_min, x_max, y_min, ..., z_max
+    int3 leftIndex_min = make_int3( mid, mid, mid );
+    int3 leftIndex_max = make_int3( mid, mid, mid );
+    // same for right index
+    int3 rightIndex_min = make_int3( mid + 1, mid + 1, mid + 1 );
+    int3 rightIndex_max = make_int3( mid + 1, mid + 1, mid + 1 );
+    outAabb0            = inAabb( mid );
+    // derivative... increase of min/max from left index to right index
+    float3 diff_min, diff_max;
+    if( mid + 1 != end )
+    {
+        // init to right index (which are all the same: mid+1)
+        outAabb1 = inAabb( mid + 1 );
+        // diffs are per differential time
+        diff_min = ( outAabb1.m_min - outAabb0.m_min ) / ( timesRegularDistribution ? inStepSize : inTime( mid + 1 ) - timeMid );
+        diff_max = ( outAabb1.m_max - outAabb0.m_max ) / ( timesRegularDistribution ? inStepSize : inTime( mid + 1 ) - timeMid );
+
+        auto extrapolateAndUpdate = [&]( int geomIndex, const optix::Aabb& toCheck, const float diffTime ) {
+#define PER_COMPONENT( min, x, comp )                                                                                  \
+    {                                                                                                                  \
+        const float extrapolate = outAabb0.m_##min.x + diff_##min.x * diffTime;                                        \
+        if( toCheck.m_##min.x comp extrapolate )                                                                       \
+        {                                                                                                              \
+            outAabb1.m_##min.x = toCheck.m_##min.x;                                                                    \
+            rightIndex_##min.x = geomIndex;                                                                            \
+            diff_##min.x       = ( toCheck.m_##min.x - outAabb0.m_##min.x ) / diffTime;                                \
+        }                                                                                                              \
+    }
+
+            PER_COMPONENT( min, x, < );
+            PER_COMPONENT( min, y, < );
+            PER_COMPONENT( min, z, < );
+            PER_COMPONENT( max, x, > );
+            PER_COMPONENT( max, y, > );
+            PER_COMPONENT( max, z, > );
+#undef PER_COMPONENT
+        };
+
+        // walk from mid+2 to end-1
+        for( int geomIndex = mid + 2; geomIndex < end; ++geomIndex )
+        {
+            const optix::Aabb& toCheck = inAabb( geomIndex );
+            // extrapolate from known fixed point mid
+            const float diffTime = timesRegularDistribution ? ( geomIndex - mid ) * inStepSize : inTime( geomIndex ) - timeMid;
+            extrapolateAndUpdate( geomIndex, toCheck, diffTime );
+        }
+
+        if( segmentEnd.interpolatedAabb.valid() )
+        {
+            // one more box to check... 'end', i.e., segmentEnd.interpolatedAabb
+            const optix::Aabb& toCheck  = segmentEnd.interpolatedAabb;
+            const float        diffTime = segmentEnd.time - timeMid;
+            extrapolateAndUpdate( end, toCheck, diffTime );
+        }
+    }
+    else if( !timesRegularDistribution )
+    {
+        RT_ASSERT( segmentEnd.interpolatedAabb.valid() )
+        // init to right index (which are all the same: mid+1)
+        outAabb1             = segmentEnd.interpolatedAabb;
+        const float diffTime = segmentEnd.time - timeMid;
+        diff_min             = ( outAabb1.m_min - outAabb0.m_min ) / diffTime;
+        diff_max             = ( outAabb1.m_max - outAabb0.m_max ) / diffTime;
+    }
+    else
+    {
+        // if mid is really the mid index, mid+1==end can only be the case if countIntermediateBoxes==1
+        // hence, we must have one geom aabb and one interpolated aabb
+        RT_ASSERT( countIntermediateBoxes == 1 );
+        if( segmentBegin.interpolatedAabb.valid() && segmentEnd.interpolatedAabb.valid() )
+        {
+            outAabb1                = segmentEnd.interpolatedAabb;
+            const float ilwDiffTime = 1.0f / ( segmentEnd.time - timeMid );
+            diff_min                = ( outAabb1.m_min - outAabb0.m_min ) * ilwDiffTime;
+            diff_max                = ( outAabb1.m_max - outAabb0.m_max ) * ilwDiffTime;
+        }
+        else if( segmentBegin.interpolatedAabb.valid() )
+        {
+            outAabb0 = segmentBegin.interpolatedAabb;
+            outAabb1 = inAabb( mid );
+            return;
+        }
+        else
+        {
+            outAabb1 = segmentEnd.interpolatedAabb;
+            return;
+        }
+    }
+
+    // Now loop until endpoints do not change.
+    // Start by forcing an initial left walk, since we went right above.
+    bool endpoint_updated = true;
+    bool walk_right       = false;
+
+    auto minComponent = []( const int3& v ) { return min( v.x, min( v.y, v.z ) ); };
+    auto maxComponent = []( const int3& v ) { return max( v.x, max( v.y, v.z ) ); };
+
+    while( endpoint_updated )
+    {
+        endpoint_updated = false;
+        // This is slightly different from the version atop as
+        // a) it has an additional condition that checks if the rightIndex is < that what we lwrrently compare against (geomIndex).
+        // b) we don't have a fixed time diff (time of refAabb.m_##min.x is varying now), but a 'reference' time (that at geomIndex, which may be end, i.e., 'out of bounds')
+        // c) this can walk left and right using the 'walk_right' variable. Note that the compiler should optimize tests away when inlining the lambda
+        auto extrapolateAndUpdate = [&]( int geomIndex, const optix::Aabb& toCheck, const float toCheckTime ) {
+            const int3&        refIndex_min    = walk_right ? leftIndex_min : rightIndex_min;
+            const int3&        refIndex_max    = walk_right ? leftIndex_max : rightIndex_max;
+            int3&              targetIndex_min = walk_right ? rightIndex_min : leftIndex_min;
+            int3&              targetIndex_max = walk_right ? rightIndex_max : leftIndex_max;
+            const optix::Aabb& refAabb         = walk_right ? outAabb0 : outAabb1;
+            optix::Aabb&       targetAabb      = walk_right ? outAabb1 : outAabb0;
+#define PER_COMPONENT( min, x, comp )                                                                                                                                     \
+    if( ( walk_right && rightIndex_##min.x < geomIndex ) || ( !walk_right && leftIndex_##min.x > geomIndex ) )                                                            \
+    {                                                                                                                                                                     \
+        /*if we walk right, check if the left index is < begin, in which case the reference is the beginning of the segment, i.e., we take the time from 'segmentBegin'*/ \
+        const float refTime = ( walk_right && refIndex_##min.x < begin ) || ( !walk_right && refIndex_##min.x >= end ) ?                                                  \
+                                  ( walk_right ? segmentBegin.time : segmentEnd.time ) :                                                                                  \
+                                  inTime( refIndex_##min.x );                                                                                                             \
+        const float diffTime    = toCheckTime - refTime;                                                                                                                  \
+        const float extrapolate = refAabb.m_##min.x + diff_##min.x * diffTime;                                                                                            \
+        if( toCheck.m_##min.x comp extrapolate )                                                                                                                          \
+        {                                                                                                                                                                 \
+            targetAabb.m_##min.x = toCheck.m_##min.x;                                                                                                                     \
+            targetIndex_##min.x  = geomIndex;                                                                                                                             \
+            diff_##min.x         = ( toCheck.m_##min.x - refAabb.m_##min.x ) / diffTime;                                                                                  \
+            endpoint_updated     = true;                                                                                                                                  \
+        }                                                                                                                                                                 \
+    }
+            PER_COMPONENT( min, x, < );
+            PER_COMPONENT( min, y, < );
+            PER_COMPONENT( min, z, < );
+            PER_COMPONENT( max, x, > );
+            PER_COMPONENT( max, y, > );
+            PER_COMPONENT( max, z, > );
+#undef PER_COMPONENT
+        };
+
+        if( walk_right )
+        {
+            // go right... find min starting point
+            for( int geomIndex = min( minComponent( rightIndex_min ), minComponent( rightIndex_max ) ) + 1; geomIndex < end; ++geomIndex )
+            {
+                const optix::Aabb& toCheck = inAabb( geomIndex );
+                extrapolateAndUpdate( geomIndex, toCheck, inTime( geomIndex ) );
+            }
+
+            if( segmentEnd.interpolatedAabb.valid() )
+            {
+                // one more box to check... 'end', i.e., segmentEnd.interpolatedAabb
+                const optix::Aabb& toCheck = segmentEnd.interpolatedAabb;
+                // it is important to use an index >=end
+                extrapolateAndUpdate( end, toCheck, segmentEnd.time );
+            }
+        }
+        else
+        {
+            // go left... find max starting point
+            int geomIndex = max( maxComponent( leftIndex_min ), maxComponent( leftIndex_max ) ) - 1;
+            for( ; geomIndex >= begin; --geomIndex )
+            {
+                const optix::Aabb& toCheck = inAabb( geomIndex );
+                extrapolateAndUpdate( geomIndex, toCheck, inTime( geomIndex ) );
+            }
+
+            if( segmentBegin.interpolatedAabb.valid() )
+            {
+                // one more box to check... 'begin', i.e., segmentBegin.interpolatedAabb
+                const optix::Aabb& toCheck = segmentBegin.interpolatedAabb;
+                // it is important to use an index <begin
+                extrapolateAndUpdate( begin - 1, toCheck, segmentBegin.time );
+            }
+        }
+        walk_right = !walk_right;
+    }
+
+// extrapolate aabb0, aabb1 to the segment bounds
+#define PER_COMPONENT( min, x )                                                                                        \
+    if( rightIndex_##min.x < end )                                                                                     \
+    {                                                                                                                  \
+        const float diffTime = segmentEnd.time - inTime( rightIndex_##min.x );                                         \
+        outAabb1.m_##min.x   = outAabb1.m_##min.x + diff_##min.x * diffTime;                                           \
+    }                                                                                                                  \
+    if( leftIndex_##min.x >= begin )                                                                                   \
+    {                                                                                                                  \
+        const float diffTime = segmentBegin.time - inTime( leftIndex_##min.x );                                        \
+        outAabb0.m_##min.x   = outAabb0.m_##min.x + diff_##min.x * diffTime;                                           \
+    }
+    PER_COMPONENT( min, x );
+    PER_COMPONENT( min, y );
+    PER_COMPONENT( min, z );
+    PER_COMPONENT( max, x );
+    PER_COMPONENT( max, y );
+    PER_COMPONENT( max, z );
+#undef PER_COMPONENT
+}
+
+template <bool timesRegularDistribution = true>
+__device__ __host__ __inline__ void resample_aabbs( const ResampleAabbs& p )
+{
+    // only used in case of timesRegularDistribution, refactor?
+    const float inStepSize = timesRegularDistribution ? ( p.inTimes[1] - p.inTimes[0] ) / (float)( p.inMotionSteps - 1 ) : 1.f;
+    const float outStepSize = ( p.outTimeEnd - p.outTimeBegin ) / (float)( p.outMotionSteps - 1 );
+    auto inTime             = [&]( int index ) {
+        // 'if' will be resolved at compile time
+        if( timesRegularDistribution )
+            return p.inTimes[0] + index * inStepSize;
+        else
+            return p.inTimes[index];
+    };
+    auto inAabb           = [&]( unsigned int index ) -> const Aabb& { return p.inAabbs[index]; };
+    auto interpolateAabbs = [&]( float refTime, unsigned int aabbIndexA, unsigned int aabbIndexB ) -> optix::Aabb {
+        float interpolant;
+        // 'if' will be resolved at compile time
+        if( timesRegularDistribution )
+            interpolant = ( refTime - inTime( aabbIndexA ) ) / inStepSize;
+        else
+        {
+            const float timeA = inTime( aabbIndexA );
+            const float timeB = inTime( aabbIndexB );
+            interpolant       = ( refTime - timeA ) / ( timeB - timeA );
+        }
+        return optix::lerp( inAabb( aabbIndexA ), inAabb( aabbIndexB ), interpolant );
+    };
+    auto outAabb = [&]( unsigned int index ) -> Aabb& { return p.outAabbs[index]; };
+
+    // Note that the meaning of segmentBorder.aabbOffset is somewhat different for segmentBegin/segmentEnd as they are considered as standard iterators
+    //  When processing a segment, we assume the set of input geom aabbs to be [segmentBegin.aabbOffset, segmentEnd.aabbOffset)
+    // Therefore, the handling of inTime(segmentBorder.aabbOffset) == segmentBorder.time is different for segmentBegin/segmentEnd
+    // -> for segmentBegin we use segmentBegin.aabbOffset
+    // -> for segmentEnd, we set segmentEnd.inInterpolatedAabb = inAabb(segmentEnd.aabbOffset);
+    // We could also implement segmentBegin/segmentEnd as pointers and swap the pointers after processing a segment, but that may confuse the compiler when it comes to registers.
+    SegmentBorder segmentBegin, segmentEnd;
+
+    // ilwalidate first output aabb, as it may only get extended, all others will be overwritten
+    outAabb( 0 ).ilwalidate();
+
+    // loop over output segments
+    // 'segmentIndex' is a bit arbitrary and corresponds here to the aabb index at the end of the segment
+    // -> could also be the beginning, but this way seemed more colwinient (fewer +1)
+    // find first segment where p.inTimeBegin < segmentEnd.time
+    unsigned int segmentIndex = 1u;
+    segmentBegin.time         = p.outTimeBegin;
+    segmentEnd.time           = ( p.outMotionSteps == 2 ) ? p.outTimeEnd : p.outTimeBegin + outStepSize;
+    while( p.inTimes[0] >= segmentEnd.time && segmentIndex < p.outMotionSteps )
+    {
+        // clamp
+        // todo: consider in border mode vanish... outAabb(segmentIndex).ilwalidate()?
+        outAabb( segmentIndex ) = inAabb( 0 );
+        ++segmentIndex;
+        segmentBegin.time = segmentEnd.time;
+        segmentEnd.time = ( segmentIndex == p.outMotionSteps - 1 ) ? p.outTimeEnd : p.outTimeBegin + segmentIndex * outStepSize;
+    }
+    // outAabb(0) has not yet been touched...
+    // if we actually 'skipped' some segments, also set it to inAabb(0)
+    // alternatively, we could also add 'outAabb(segmentIndex-1) = inAabb(0);' into the loop above
+    if( segmentIndex > 1 )
+        outAabb( 0 ) = inAabb( 0 );
+
+    //////////////////////////////////////////////////////////////////////////
+    // neither of this should be needed/happen since we assume that (as of now):
+    // p.outTimeBegin <= p.inTimeBegin && p.outTimeEnd >= p.inTimeEnd
+    if( segmentIndex == p.outMotionSteps )
+        return;
+    while( inTime( segmentBegin.aabbIndex ) < segmentBegin.time && segmentBegin.aabbIndex < p.inMotionSteps )
+        ++segmentBegin.aabbIndex;
+    // -> inTime(segmentBegin.aabbOffset) >= segmentBegin.time || segmentBegin.aabbOffset == inMotionSteps
+    //////////////////////////////////////////////////////////////////////////
+
+    // given: p.inTimeBegin < segmentEnd.time
+    if( p.inTimes[0] == segmentBegin.time )
+    {
+        // if the times align, we want to use in aabb directly (segmentBegin points to the first aabb that will be used for the segment)
+        // hence, we ilwalidate the interpolate as we don't want to use it!
+        segmentBegin.interpolatedAabb.ilwalidate();
+    }
+    else if( segmentBegin.aabbIndex == 0 )
+    {
+        // as above, this must be the only possible else case, if:
+        // p.outTimeBegin <= p.inTimeBegin && p.outTimeEnd >= p.inTimeEnd
+        segmentBegin.interpolatedAabb = inAabb( segmentBegin.aabbIndex );
+    }
+    else
+    {
+        // as above, not reachable if
+        // p.outTimeBegin <= p.inTimeBegin && p.outTimeEnd >= p.inTimeEnd
+        segmentBegin.interpolatedAabb = interpolateAabbs( segmentBegin.time, segmentBegin.aabbIndex - 1, segmentBegin.aabbIndex );
+    }
+
+    segmentEnd.aabbIndex = segmentBegin.aabbIndex;
+
+    for( ; segmentIndex < p.outMotionSteps; ++segmentIndex )
+    {
+        // hopefully, this test avoids potential (minor) precision issues
+        segmentEnd.time = ( segmentIndex == p.outMotionSteps - 1 ) ? p.outTimeEnd : p.outTimeBegin + segmentIndex * outStepSize;
+        while( inTime( segmentEnd.aabbIndex ) < segmentEnd.time && segmentEnd.aabbIndex < p.inMotionSteps )
+            ++segmentEnd.aabbIndex;
+        bool done       = false;
+        bool endAligned = false;
+        if( segmentEnd.aabbIndex < p.inMotionSteps )
+        {
+            // inTimeAtIndex >= segmentEnd.time
+            if( inTime( segmentEnd.aabbIndex ) == segmentEnd.time )
+            {
+                // if the times align, we want do NOT use the in directly (the end points to the first aabb that will NOT be used for the segment)
+                // hence, we set the interpolate
+                // note that we do not want to simply advance segmentEnd.aabbIndex to be able to assign segmentEnd to segmentBegin
+                segmentEnd.interpolatedAabb = inAabb( segmentEnd.aabbIndex );
+                endAligned                  = true;
+            }
+            else
+            {
+                // inTime(segmentEnd.aabbIndex > segmentEnd.time
+                segmentEnd.interpolatedAabb = interpolateAabbs( segmentEnd.time, segmentEnd.aabbIndex - 1, segmentEnd.aabbIndex );
+            }
+        }
+        else
+        {
+            segmentEnd.interpolatedAabb = inAabb( p.inMotionSteps - 1 );
+            done                        = true;
+        }
+
+        // Note the case of:
+        // inTime(segmentBegin.aabbIndex) == segmentEnd.time
+        if( inTime( segmentBegin.aabbIndex ) == segmentEnd.time && segmentBegin.aabbIndex < p.inMotionSteps )
+            RT_ASSERT( segmentBegin.interpolatedAabb.valid() && segmentBegin.aabbIndex == segmentEnd.aabbIndex
+                       && segmentEnd.interpolatedAabb.valid() );
+
+        optix::Aabb outAabb0;
+        resample_aabbs_in_segment<timesRegularDistribution>( p, segmentBegin, segmentEnd, outAabb0, outAabb( segmentIndex ) );
+        outAabb( segmentIndex - 1u ).include( outAabb0 );
+
+        if( done )
+            break;
+
+        // for next segment.. new begin = old end
+        segmentBegin = segmentEnd;
+        if( endAligned )
+            // The handling of inTime(segmentBorder.aabbIndex) == segmentBorder.time is different for segmentBegin/segmentEnd (see above)
+            // In case of time alignment (now: inTime(segmentBegin.aabbIndex) == segmentBegin.time)),
+            // use the key directly (segmentBegin.aabbIndex), ilwalidate the interpolation
+            segmentBegin.interpolatedAabb.ilwalidate();
+    }
+
+    while( ++segmentIndex < p.outMotionSteps )
+    {
+        RT_ASSERT( segmentEnd.aabbIndex == p.inMotionSteps );
+        // clamp
+        // todo: consider in border mode vanish... outAabb(segmentIndex).ilwalidate()?
+        const float segmentBeginTime = p.outTimeBegin + segmentIndex * outStepSize;
+        RT_ASSERT( ( timesRegularDistribution && p.inTimes[1] < segmentBeginTime )
+                   || ( !timesRegularDistribution && inTime( segmentEnd.aabbIndex - 1 ) < segmentBeginTime ) );
+        (void)segmentBeginTime;
+        outAabb( segmentIndex ) = inAabb( p.inMotionSteps - 1 );
+        ++segmentIndex;
+    }
+
+    return;
+}
+
+//////////////////////////////////////////////////////////////////////////
+// actual lwca kernels
+//////////////////////////////////////////////////////////////////////////
+__global__ void kernel_resample_regular_geometry_aabbs( const ResampleRegularAabbsKernelParams p )
+{
+    const unsigned int id = threadIdx.x + blockDim.x * ( threadIdx.y + blockDim.y * ( blockIdx.x + gridDim.x * blockIdx.y ) );
+    if( id >= p.geometryPrimCount )
+        return;
+
+    ResampleAabbs params = {&p.geometryAabbs[id * p.geometryMotionSteps], p.geometryMotionSteps,
+                            &p.geometryTimeBegin,  // warning, assumes that p.geometryTimeBegin, p.geometryTimeEnd can be accessed via pointer (&p.geometryTimeBegin)[0], (&p.geometryTimeBegin)[1]
+                            &p.buildAabbs[id * p.buildMotionSteps], p.buildMotionSteps, p.buildTimeBegin, p.buildTimeEnd};
+    resample_aabbs<true>( params );
+}
+
+__global__ void kernel_resample_aabbs( const ResampleAabbsKernelParams p )
+{
+    const unsigned int id = threadIdx.x + blockDim.x * ( threadIdx.y + blockDim.y * ( blockIdx.x + gridDim.x * blockIdx.y ) );
+    if( id >= p.motionAabbsCount )
+        return;
+
+    const MotionAabbDevice& maabb = p.motionAabbs[id];
+    if( maabb.keyCount == 0 )
+    {
+        for( size_t k = 0; k < p.buildMotionSteps; ++k )
+            p.buildAabbs[id * p.buildMotionSteps + k].ilwalidate();
+    }
+    else if( maabb.keyCount == 1 )
+    {
+        for( size_t k                                 = 0; k < p.buildMotionSteps; ++k )
+            p.buildAabbs[id * p.buildMotionSteps + k] = p.inputAabbs[maabb.aabbBufferOffset];
+    }
+    else if( maabb.timesCount == 2 )
+    {
+        ResampleAabbs params = {&p.inputAabbs[maabb.aabbBufferOffset],
+                                maabb.keyCount,
+                                &p.inputTimes[maabb.timesBufferOffset],
+                                &p.buildAabbs[id * p.buildMotionSteps],
+                                p.buildMotionSteps,
+                                p.buildTimeBegin,
+                                p.buildTimeEnd};
+        resample_aabbs<true>( params );
+    }
+    else
+    {
+        RT_ASSERT( maabb.timesCount > 2 );
+        RT_ASSERT( maabb.timesCount == maabb.keyCount );
+        ResampleAabbs params = {&p.inputAabbs[maabb.aabbBufferOffset],
+                                maabb.keyCount,
+                                &p.inputTimes[maabb.timesBufferOffset],
+                                &p.buildAabbs[id * p.buildMotionSteps],
+                                p.buildMotionSteps,
+                                p.buildTimeBegin,
+                                p.buildTimeEnd};
+        resample_aabbs<false>( params );
+    }
+
+    return;
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Trampoline functions to call lwca kernels
+//////////////////////////////////////////////////////////////////////////
+
+// This is just a helper function used to compute grid and block.
+void optix_lwda_getKernelDim( dim3& Dg, dim3& Db, uint numElems, const ComputeCapability sm_ver )
+{
+    // clang-format off
+    if(sm_ver < SM(12)) Db = dim3{32u, 2u};
+    else if(sm_ver < SM(20)) Db = dim3{32u, 4u};
+    else if(sm_ver < SM(30)) Db = dim3{32u, 8u};
+    else /*  >= SM(30)  */       Db = dim3{32u, 16u};
+    // clang-format on
+
+    unsigned int block_len = Db.x * Db.y;
+    unsigned int grid_x    = ( numElems + 32768 - 1 ) / ( 32768 );
+    unsigned int grid_y    = grid_x > 0 ? ( numElems + block_len * grid_x - 1 ) / ( block_len * grid_x ) : 0;
+    Dg            = dim3{ grid_x, grid_y };
+}
+
+}  // unnamed namespace
+
+void resampleMotionAabbsWithRegularDistributionDevice( const optix::lwca::ComputeCapability sm_ver,
+                                                       void*                                stream,
+                                                       const unsigned int                   geometryPrimCount,
+                                                       const optix::Aabb*                   geometryAabbs,
+                                                       const unsigned int                   geometryMotionSteps,
+                                                       const float                          geometryTimeBegin,
+                                                       const float                          geometryTimeEnd,
+                                                       optix::Aabb*                         buildAabbs,
+                                                       const unsigned int                   buildMotionSteps,
+                                                       const float                          buildTimeBegin,
+                                                       const float                          buildTimeEnd )
+{
+    dim3 grid, block;
+    optix_lwda_getKernelDim( grid, block, geometryPrimCount, sm_ver );
+
+    ResampleRegularAabbsKernelParams p = {geometryPrimCount, geometryAabbs,   geometryMotionSteps,
+                                          geometryTimeBegin, geometryTimeEnd, buildAabbs,
+                                          buildMotionSteps,  buildTimeBegin,  buildTimeEnd};
+
+    lwdaStream_t lwdaStream = (lwdaStream_t)stream;
+    kernel_resample_regular_geometry_aabbs<<<grid, block, 0, lwdaStream>>>( p );
+}
+
+void resampleMotionAabbsDevice( const optix::lwca::ComputeCapability sm_ver,
+                                const size_t                         motionAabbsCount,
+                                const MotionAabbDevice*              motionAabbs,
+                                const Aabb*                          inputAabbs,
+                                const float*                         inputTimes,
+                                optix::Aabb*                         buildAabbs,
+                                const unsigned int                   buildMotionSteps,
+                                const float                          buildTimeBegin,
+                                const float                          buildTimeEnd )
+{
+    dim3 grid, block;
+    optix_lwda_getKernelDim( grid, block, (unsigned int)motionAabbsCount, sm_ver );
+
+    ResampleAabbsKernelParams p = {motionAabbsCount, motionAabbs,      inputAabbs,     inputTimes,
+                                   buildAabbs,       buildMotionSteps, buildTimeBegin, buildTimeEnd};
+
+    kernel_resample_aabbs<<<grid, block>>>( p );
+}
+
+void resampleMotionAabbsHost( const optix::Aabb* inputAabbs,
+                              const unsigned int inputAabbsCount,
+                              const float*       inputTimes,
+                              const unsigned int inputTimesCount,
+                              optix::Aabb*       buildAabbs,
+                              const unsigned int buildMotionSteps,
+                              const float        buildTimeBegin,
+                              const float        buildTimeEnd )
+{
+    if( inputAabbsCount == 0 )
+    {
+        for( size_t k = 0; k < buildMotionSteps; ++k )
+            buildAabbs[k].ilwalidate();
+    }
+    else if( inputAabbsCount == 1 )
+    {
+        for( size_t k     = 0; k < buildMotionSteps; ++k )
+            buildAabbs[k] = inputAabbs[0];
+    }
+    else
+    {
+        ResampleAabbs p = {inputAabbs,       inputAabbsCount, inputTimes,  buildAabbs,
+                           buildMotionSteps, buildTimeBegin,  buildTimeEnd};
+        if( inputTimesCount == 2 )
+            resample_aabbs<true>( p );
+        else
+            resample_aabbs<false>( p );
+    }
+
+    return;
+}
+
+}  // namespace optix

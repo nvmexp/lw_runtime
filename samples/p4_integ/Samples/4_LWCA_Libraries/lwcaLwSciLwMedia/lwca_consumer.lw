@@ -1,0 +1,856 @@
+/* Copyright (c) 2022, LWPU CORPORATION. All rights reserved.
+
+ *
+
+ * Redistribution and use in source and binary forms, with or without
+
+ * modification, are permitted provided that the following conditions
+
+ * are met:
+
+ *  * Redistributions of source code must retain the above copyright
+
+ *    notice, this list of conditions and the following disclaimer.
+
+ *  * Redistributions in binary form must reproduce the above copyright
+
+ *    notice, this list of conditions and the following disclaimer in the
+
+ *    documentation and/or other materials provided with the distribution.
+
+ *  * Neither the name of LWPU CORPORATION nor the names of its
+
+ *    contributors may be used to endorse or promote products derived
+
+ *    from this software without specific prior written permission.
+
+ *
+
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+
+ * PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+ */
+
+
+
+#include <iostream>
+
+
+
+#include <lwda_runtime.h>
+
+#include "lwda_consumer.h"
+
+#include <helper_image.h>
+
+#include "lwmedia_image_lwscibuf.h"
+
+#include "lwmedia_utils/cmdline.h"
+
+
+
+// Enable this to 1 if require lwca processed output to ppm file.
+
+#define WRITE_OUTPUT_IMAGE 0
+
+
+
+#define checkLwSciErrors(call)                              \
+
+  do {                                                      \
+
+    LwSciError _status = call;                              \
+
+    if (LwSciError_Success != _status) {                    \
+
+      printf(                                               \
+
+          "LWSCI call in file '%s' in line %i returned"     \
+
+          " %d, expected %d\n",                             \
+
+          __FILE__, __LINE__, _status, LwSciError_Success); \
+
+      fflush(stdout);                                       \
+
+      exit(EXIT_FAILURE);                                   \
+
+    }                                                       \
+
+  } while (0)
+
+
+
+__global__ static void yuvToGrayscale(lwdaSurfaceObject_t surfaceObject,
+
+                                      unsigned int *dstImage,
+
+                                      int32_t imageWidth, int32_t imageHeight) {
+
+  size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+
+  size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+
+
+
+  uchar4 *dstImageUchar4 = (uchar4 *)dstImage;
+
+  for (; x < imageWidth && y < imageHeight;
+
+       x += gridDim.x * blockDim.x, y += gridDim.y * blockDim.y) {
+
+    int colInBytes = x * sizeof(unsigned char);
+
+    unsigned char luma =
+
+        surf2Dread<unsigned char>(surfaceObject, colInBytes, y);
+
+    uchar4 grayscalePix = make_uchar4(luma, luma, luma, 0);
+
+
+
+    dstImageUchar4[y * imageWidth + x] = grayscalePix;
+
+  }
+
+}
+
+
+
+static void lwdaImportLwSciSync(lwdaExternalSemaphore_t &extSem,
+
+                                LwSciSyncObj &syncObj) {
+
+  lwdaExternalSemaphoreHandleDesc extSemDesc;
+
+  memset(&extSemDesc, 0, sizeof(extSemDesc));
+
+  extSemDesc.type = lwdaExternalSemaphoreHandleTypeLwSciSync;
+
+  extSemDesc.handle.lwSciSyncObj = (void *)syncObj;
+
+
+
+  checkLwdaErrors(lwdaImportExternalSemaphore(&extSem, &extSemDesc));
+
+}
+
+
+
+static void waitExternalSemaphore(lwdaExternalSemaphore_t &waitSem,
+
+                                  LwSciSyncFence *fence, lwdaStream_t stream) {
+
+  lwdaExternalSemaphoreWaitParams waitParams;
+
+  memset(&waitParams, 0, sizeof(waitParams));
+
+  // For cross-process signaler-waiter applications need to use LwSciIpc
+
+  // and LwSciSync[Export|Import] utilities to share the LwSciSyncFence
+
+  // across process. This step is optional in single-process.
+
+  waitParams.params.lwSciSync.fence = (void *)fence;
+
+  waitParams.flags = 0;
+
+
+
+  checkLwdaErrors(
+
+      lwdaWaitExternalSemaphoresAsync(&waitSem, &waitParams, 1, stream));
+
+}
+
+
+
+static void signalExternalSemaphore(lwdaExternalSemaphore_t &signalSem,
+
+                                    LwSciSyncFence *fence,
+
+                                    lwdaStream_t stream) {
+
+  lwdaExternalSemaphoreSignalParams signalParams;
+
+  memset(&signalParams, 0, sizeof(signalParams));
+
+  // For cross-process signaler-waiter applications need to use LwSciIpc
+
+  // and LwSciSync[Export|Import] utilities to share the LwSciSyncFence
+
+  // across process. This step is optional in single-process.
+
+  signalParams.params.lwSciSync.fence = (void *)fence;
+
+  signalParams.flags = 0;
+
+
+
+  checkLwdaErrors(
+
+      lwdaSignalExternalSemaphoresAsync(&signalSem, &signalParams, 1, stream));
+
+}
+
+
+
+static void yuvToGrayscaleLwdaKernel(lwdaExternalResInterop &lwdaExtResObj,
+
+                                     int32_t imageWidth, int32_t imageHeight) {
+
+#if WRITE_OUTPUT_IMAGE
+
+  unsigned int *h_dstImage;
+
+  checkLwdaErrors(lwdaMallocHost(
+
+      &h_dstImage, sizeof(unsigned int) * imageHeight * imageWidth));
+
+#endif
+
+  dim3 block(16, 16, 1);
+
+  dim3 grid((imageWidth / block.x) + 1, (imageHeight / block.y) + 1, 1);
+
+
+
+  yuvToGrayscale<<<grid, block, 0, lwdaExtResObj.stream>>>(
+
+      lwdaExtResObj.lwdaSurfaceLwmediaBuf[0], lwdaExtResObj.d_outputImage,
+
+      imageWidth, imageHeight);
+
+
+
+#if WRITE_OUTPUT_IMAGE
+
+  checkLwdaErrors(
+
+      lwdaMemcpyAsync(h_dstImage, lwdaExtResObj.d_outputImage,
+
+                      sizeof(unsigned int) * imageHeight * imageWidth,
+
+                      lwdaMemcpyDeviceToHost, lwdaExtResObj.stream));
+
+  checkLwdaErrors(lwdaStreamSynchronize(lwdaExtResObj.stream));
+
+  char outputFilename[1024];
+
+  std::string image_filename = "Grayscale";
+
+  strcpy(outputFilename, image_filename.c_str());
+
+  strcpy(outputFilename + image_filename.length(), "_lwsci_out.ppm");
+
+  sdkSavePPM4ub(outputFilename, (unsigned char *)h_dstImage, imageWidth,
+
+                imageHeight);
+
+  printf("Wrote '%s'\n", outputFilename);
+
+  checkLwdaErrors(lwdaFreeHost(h_dstImage));
+
+#endif
+
+}
+
+
+
+static void lwdaImportLwSciImage(lwdaExternalResInterop &lwdaExtResObj,
+
+                                 LwSciBufObj &inputBufObj) {
+
+  LwSciBufModule module = NULL;
+
+  LwSciBufAttrList attrlist = NULL;
+
+  LwSciBufAttrKeyValuePair pairArrayOut[10];
+
+
+
+  checkLwSciErrors(LwSciBufModuleOpen(&module));
+
+  checkLwSciErrors(LwSciBufAttrListCreate(module, &attrlist));
+
+  checkLwSciErrors(LwSciBufObjGetAttrList(inputBufObj, &attrlist));
+
+
+
+  memset(pairArrayOut, 0, sizeof(LwSciBufAttrKeyValuePair) * 10);
+
+
+
+  int numAttrs = 0;
+
+  pairArrayOut[numAttrs++].key = LwSciBufImageAttrKey_Size;
+
+  pairArrayOut[numAttrs++].key = LwSciBufImageAttrKey_PlaneChannelCount;
+
+  pairArrayOut[numAttrs++].key = LwSciBufImageAttrKey_PlaneCount;
+
+  pairArrayOut[numAttrs++].key = LwSciBufImageAttrKey_PlaneWidth;
+
+  pairArrayOut[numAttrs++].key = LwSciBufImageAttrKey_PlaneHeight;
+
+  pairArrayOut[numAttrs++].key = LwSciBufImageAttrKey_Layout;
+
+  pairArrayOut[numAttrs++].key = LwSciBufImageAttrKey_PlaneBitsPerPixel;
+
+  pairArrayOut[numAttrs++].key = LwSciBufImageAttrKey_PlaneOffset;
+
+
+
+  checkLwSciErrors(LwSciBufAttrListGetAttrs(attrlist, pairArrayOut, numAttrs));
+
+
+
+  uint64_t size = *(uint64_t *)pairArrayOut[0].value;
+
+  uint8_t channelCount = *(uint8_t *)pairArrayOut[1].value;
+
+  lwdaExtResObj.planeCount = *(int32_t *)pairArrayOut[2].value;
+
+  lwdaExtResObj.imageWidth =
+
+      (int32_t *)malloc(sizeof(int32_t) * lwdaExtResObj.planeCount);
+
+  lwdaExtResObj.imageHeight =
+
+      (int32_t *)malloc(sizeof(int32_t) * lwdaExtResObj.planeCount);
+
+  lwdaExtResObj.planeOffset =
+
+      (uint64_t *)malloc(sizeof(uint64_t) * lwdaExtResObj.planeCount);
+
+
+
+  memcpy(lwdaExtResObj.imageWidth, (int32_t *)pairArrayOut[3].value,
+
+         lwdaExtResObj.planeCount * sizeof(int32_t));
+
+  memcpy(lwdaExtResObj.imageHeight, (int32_t *)pairArrayOut[4].value,
+
+         lwdaExtResObj.planeCount * sizeof(int32_t));
+
+  memcpy(lwdaExtResObj.planeOffset, (uint64_t *)pairArrayOut[7].value,
+
+         lwdaExtResObj.planeCount * sizeof(uint64_t));
+
+
+
+  LwSciBufAttrValImageLayoutType layout =
+
+      *(LwSciBufAttrValImageLayoutType *)pairArrayOut[5].value;
+
+  uint32_t bitsPerPixel = *(uint32_t *)pairArrayOut[6].value;
+
+
+
+  if (layout != LwSciBufImage_BlockLinearType) {
+
+    printf("Image layout is not block linear.. waiving exelwtion\n");
+
+    exit(EXIT_WAIVED);
+
+  }
+
+
+
+  lwdaExternalMemoryHandleDesc memHandleDesc;
+
+  memset(&memHandleDesc, 0, sizeof(memHandleDesc));
+
+  memHandleDesc.type = lwdaExternalMemoryHandleTypeLwSciBuf;
+
+  memHandleDesc.handle.lwSciBufObject = inputBufObj;
+
+  memHandleDesc.size = size;
+
+  checkLwdaErrors(
+
+      lwdaImportExternalMemory(&lwdaExtResObj.extMemImageBuf, &memHandleDesc));
+
+
+
+  lwdaExtResObj.d_mipmapArray = (lwdaMipmappedArray_t *)malloc(
+
+      sizeof(lwdaMipmappedArray_t) * lwdaExtResObj.planeCount);
+
+
+
+  for (int i = 0; i < lwdaExtResObj.planeCount; i++) {
+
+    lwdaExtent extent = {};
+
+    memset(&extent, 0, sizeof(extent));
+
+    extent.width = lwdaExtResObj.imageWidth[i];
+
+    extent.height = lwdaExtResObj.imageHeight[i];
+
+    extent.depth = 0;
+
+    lwdaChannelFormatDesc desc;
+
+    switch (channelCount) {
+
+      case 1:
+
+      default:
+
+        desc = lwdaCreateChannelDesc(bitsPerPixel, 0, 0, 0,
+
+                                     lwdaChannelFormatKindUnsigned);
+
+        break;
+
+      case 2:
+
+        desc = lwdaCreateChannelDesc(bitsPerPixel, bitsPerPixel, 0, 0,
+
+                                     lwdaChannelFormatKindUnsigned);
+
+        break;
+
+      case 3:
+
+        desc = lwdaCreateChannelDesc(bitsPerPixel, bitsPerPixel, bitsPerPixel,
+
+                                     0, lwdaChannelFormatKindUnsigned);
+
+        break;
+
+      case 4:
+
+        desc =
+
+            lwdaCreateChannelDesc(bitsPerPixel, bitsPerPixel, bitsPerPixel,
+
+                                  bitsPerPixel, lwdaChannelFormatKindUnsigned);
+
+        break;
+
+    }
+
+
+
+    lwdaExternalMemoryMipmappedArrayDesc mipmapDesc = {0};
+
+    mipmapDesc.offset = lwdaExtResObj.planeOffset[i];
+
+    mipmapDesc.formatDesc = desc;
+
+    mipmapDesc.extent = extent;
+
+    mipmapDesc.flags = 0;
+
+    mipmapDesc.numLevels = 1;
+
+    checkLwdaErrors(lwdaExternalMemoryGetMappedMipmappedArray(
+
+        &lwdaExtResObj.d_mipmapArray[i], lwdaExtResObj.extMemImageBuf,
+
+        &mipmapDesc));
+
+  }
+
+}
+
+
+
+static lwdaSurfaceObject_t createLwdaSurface(lwdaArray_t &d_mipLevelArray) {
+
+  lwdaResourceDesc resourceDesc;
+
+  memset(&resourceDesc, 0, sizeof(resourceDesc));
+
+  resourceDesc.resType = lwdaResourceTypeArray;
+
+  resourceDesc.res.array.array = d_mipLevelArray;
+
+
+
+  lwdaSurfaceObject_t surfaceObject;
+
+  checkLwdaErrors(lwdaCreateSurfaceObject(&surfaceObject, &resourceDesc));
+
+  return surfaceObject;
+
+}
+
+
+
+static lwdaStream_t createLwdaStream(int deviceId) {
+
+  checkLwdaErrors(lwdaSetDevice(deviceId));
+
+  lwdaStream_t stream;
+
+  checkLwdaErrors(lwdaStreamCreateWithFlags(&stream, lwdaStreamNonBlocking));
+
+  return stream;
+
+}
+
+
+
+// LWCA setup buffers/synchronization objects for interop via LwSci API.
+
+void setupLwda(lwdaExternalResInterop &lwdaExtResObj, LwSciBufObj &inputBufObj,
+
+               LwSciSyncObj &syncObj, LwSciSyncObj &lwdaSignalerSyncObj,
+
+               int deviceId) {
+
+  checkLwdaErrors(lwdaSetDevice(deviceId));
+
+  lwdaImportLwSciSync(lwdaExtResObj.waitSem, syncObj);
+
+  lwdaImportLwSciSync(lwdaExtResObj.signalSem, lwdaSignalerSyncObj);
+
+
+
+  lwdaImportLwSciImage(lwdaExtResObj, inputBufObj);
+
+  lwdaExtResObj.d_mipLevelArray =
+
+      (lwdaArray_t *)malloc(sizeof(lwdaArray_t) * lwdaExtResObj.planeCount);
+
+  lwdaExtResObj.lwdaSurfaceLwmediaBuf = (lwdaSurfaceObject_t *)malloc(
+
+      sizeof(lwdaSurfaceObject_t) * lwdaExtResObj.planeCount);
+
+
+
+  for (int i = 0; i < lwdaExtResObj.planeCount; ++i) {
+
+    uint32_t mipLevelId = 0;
+
+    checkLwdaErrors(
+
+        lwdaGetMipmappedArrayLevel(&lwdaExtResObj.d_mipLevelArray[i],
+
+                                   lwdaExtResObj.d_mipmapArray[i], mipLevelId));
+
+    lwdaExtResObj.lwdaSurfaceLwmediaBuf[i] =
+
+        createLwdaSurface(lwdaExtResObj.d_mipLevelArray[i]);
+
+  }
+
+
+
+  lwdaExtResObj.stream = createLwdaStream(deviceId);
+
+  checkLwdaErrors(lwdaMalloc(&lwdaExtResObj.d_outputImage,
+
+                             sizeof(unsigned int) *
+
+                                 lwdaExtResObj.imageWidth[0] *
+
+                                 lwdaExtResObj.imageHeight[0]));
+
+}
+
+
+
+// LWCA clean up buffers used **with** LwSci API.
+
+void cleanupLwda(lwdaExternalResInterop &lwdaExtResObj) {
+
+  for (int i = 0; i < lwdaExtResObj.planeCount; i++) {
+
+    checkLwdaErrors(
+
+        lwdaDestroySurfaceObject(lwdaExtResObj.lwdaSurfaceLwmediaBuf[i]));
+
+    checkLwdaErrors(lwdaFreeMipmappedArray(lwdaExtResObj.d_mipmapArray[i]));
+
+  }
+
+  free(lwdaExtResObj.d_mipmapArray);
+
+  free(lwdaExtResObj.d_mipLevelArray);
+
+  free(lwdaExtResObj.lwdaSurfaceLwmediaBuf);
+
+  free(lwdaExtResObj.imageWidth);
+
+  free(lwdaExtResObj.imageHeight);
+
+  checkLwdaErrors(lwdaDestroyExternalSemaphore(lwdaExtResObj.waitSem));
+
+  checkLwdaErrors(lwdaDestroyExternalSemaphore(lwdaExtResObj.signalSem));
+
+  checkLwdaErrors(lwdaDestroyExternalMemory(lwdaExtResObj.extMemImageBuf));
+
+  checkLwdaErrors(lwdaStreamDestroy(lwdaExtResObj.stream));
+
+  checkLwdaErrors(lwdaFree(lwdaExtResObj.d_outputImage));
+
+}
+
+
+
+void runLwdaOperation(lwdaExternalResInterop &lwdaExtResObj,
+
+                      LwSciSyncFence *lwdaWaitFence,
+
+                      LwSciSyncFence *lwdaSignalFence, int deviceId,
+
+                      int iterations) {
+
+  checkLwdaErrors(lwdaSetDevice(deviceId));
+
+  static int64_t launch = 0;
+
+
+
+  waitExternalSemaphore(lwdaExtResObj.waitSem, lwdaWaitFence,
+
+                        lwdaExtResObj.stream);
+
+
+
+  // run lwca kernel over surface object of the LUMA surface part to extract
+
+  // grayscale.
+
+  yuvToGrayscaleLwdaKernel(lwdaExtResObj, lwdaExtResObj.imageWidth[0],
+
+                           lwdaExtResObj.imageHeight[0]);
+
+
+
+  // signal fence till the second last iterations for LwMedia2DBlit to wait for
+
+  // lwca signal and for final iteration as there is no corresponding LwMedia
+
+  // operation pending therefore we end with lwdaStreamSynchronize()
+
+  if (launch < iterations - 1) {
+
+    signalExternalSemaphore(lwdaExtResObj.signalSem, lwdaSignalFence,
+
+                            lwdaExtResObj.stream);
+
+  } else {
+
+    checkLwdaErrors(lwdaStreamSynchronize(lwdaExtResObj.stream));
+
+  }
+
+  launch++;
+
+}
+
+
+
+// LWCA imports and operates on LwSci buffer/synchronization objects
+
+void setupLwda(Blit2DTest *ctx, lwdaResources &lwdaResObj, int deviceId) {
+
+  checkLwdaErrors(lwdaSetDevice(deviceId));
+
+  lwdaResObj.d_yuvArray =
+
+      (lwdaArray_t *)malloc(sizeof(lwdaArray_t) * ctx->numSurfaces);
+
+  lwdaResObj.lwdaSurfaceLwmediaBuf = (lwdaSurfaceObject_t *)malloc(
+
+      sizeof(lwdaSurfaceObject_t) * ctx->numSurfaces);
+
+  lwdaChannelFormatDesc channelDesc;
+
+  switch (ctx->bytesPerPixel) {
+
+    case 1:
+
+    default:
+
+      channelDesc =
+
+          lwdaCreateChannelDesc(8, 0, 0, 0, lwdaChannelFormatKindUnsigned);
+
+      break;
+
+  }
+
+
+
+  for (int k = 0; k < ctx->numSurfaces; k++) {
+
+    checkLwdaErrors(lwdaMallocArray(
+
+        &lwdaResObj.d_yuvArray[k], &channelDesc,
+
+        ctx->widthSurface * ctx->xScalePtr[k] * ctx->bytesPerPixel,
+
+        ctx->heightSurface * ctx->yScalePtr[k]));
+
+    lwdaResObj.lwdaSurfaceLwmediaBuf[k] =
+
+        createLwdaSurface(lwdaResObj.d_yuvArray[k]);
+
+  }
+
+  checkLwdaErrors(lwdaMalloc(
+
+      &lwdaResObj.d_outputImage,
+
+      sizeof(unsigned int) * ctx->widthSurface * ctx->heightSurface));
+
+
+
+  lwdaResObj.stream = createLwdaStream(deviceId);
+
+}
+
+
+
+// LWCA clean up buffers used **without** LwSci API.
+
+void cleanupLwda(Blit2DTest *ctx, lwdaResources &lwdaResObj) {
+
+  for (int k = 0; k < ctx->numSurfaces; k++) {
+
+    checkLwdaErrors(
+
+        lwdaDestroySurfaceObject(lwdaResObj.lwdaSurfaceLwmediaBuf[k]));
+
+    checkLwdaErrors(lwdaFreeArray(lwdaResObj.d_yuvArray[k]));
+
+  }
+
+
+
+  free(lwdaResObj.lwdaSurfaceLwmediaBuf);
+
+
+
+  checkLwdaErrors(lwdaStreamDestroy(lwdaResObj.stream));
+
+  checkLwdaErrors(lwdaFree(lwdaResObj.d_outputImage));
+
+}
+
+
+
+static void yuvToGrayscaleLwdaKernelNonLwSci(lwdaResources &lwdaResObj,
+
+                                             int deviceId, int32_t imageWidth,
+
+                                             int32_t imageHeight) {
+
+#if WRITE_OUTPUT_IMAGE
+
+  unsigned int *h_dstImage;
+
+  checkLwdaErrors(lwdaMallocHost(
+
+      &h_dstImage, sizeof(unsigned int) * imageHeight * imageWidth));
+
+#endif
+
+  dim3 block(16, 16, 1);
+
+  dim3 grid((imageWidth / block.x) + 1, (imageHeight / block.y) + 1, 1);
+
+
+
+  yuvToGrayscale<<<grid, block, 0, lwdaResObj.stream>>>(
+
+      lwdaResObj.lwdaSurfaceLwmediaBuf[0], lwdaResObj.d_outputImage, imageWidth,
+
+      imageHeight);
+
+
+
+#if WRITE_OUTPUT_IMAGE
+
+  checkLwdaErrors(
+
+      lwdaMemcpyAsync(h_dstImage, lwdaResObj.d_outputImage,
+
+                      sizeof(unsigned int) * imageHeight * imageWidth,
+
+                      lwdaMemcpyDeviceToHost, lwdaResObj.stream));
+
+  checkLwdaErrors(lwdaStreamSynchronize(lwdaResObj.stream));
+
+  char outputFilename[1024];
+
+  std::string image_filename = "Grayscale";
+
+  strcpy(outputFilename, image_filename.c_str());
+
+  strcpy(outputFilename + image_filename.length(), "_non-lwsci_out.ppm");
+
+  sdkSavePPM4ub(outputFilename, (unsigned char *)h_dstImage, imageWidth,
+
+                imageHeight);
+
+  printf("Wrote '%s'\n", outputFilename);
+
+  checkLwdaErrors(lwdaFreeHost(h_dstImage));
+
+#else
+
+  checkLwdaErrors(lwdaStreamSynchronize(lwdaResObj.stream));
+
+#endif
+
+}
+
+
+
+// LWCA operates **without** LwSci APIs buffer/synchronization objects.
+
+void runLwdaOperation(Blit2DTest *ctx, lwdaResources &lwdaResObj,
+
+                      int deviceId) {
+
+  for (int k = 0; k < ctx->numSurfaces; k++) {
+
+    checkLwdaErrors(lwdaMemcpy2DToArray(
+
+        lwdaResObj.d_yuvArray[k], 0, 0, ctx->dstBuff[k],
+
+        ctx->widthSurface * ctx->xScalePtr[k] * ctx->bytesPerPixel,
+
+        ctx->widthSurface * ctx->xScalePtr[k] * ctx->bytesPerPixel,
+
+        ctx->heightSurface * ctx->yScalePtr[k], lwdaMemcpyHostToDevice));
+
+  }
+
+  // run lwca kernel over surface object of the LUMA surface part to extract
+
+  // grayscale.
+
+  yuvToGrayscaleLwdaKernelNonLwSci(lwdaResObj, deviceId, ctx->widthSurface,
+
+                                   ctx->heightSurface);
+
+}
+

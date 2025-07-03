@@ -1,0 +1,238 @@
+###############################################################################
+#
+# Copyright (c) 2019-2022 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+#
+###############################################################################
+
+##############################################################################
+# drivers/lwsci/lwscicommon/lwscicommon.lwmk
+##############################################################################
+
+##############################################################################
+# Identify this module to lwCommon.lwmk so it can decide the build type
+##############################################################################
+
+LW_MODULE_BUILD_TYPE_ALIASES = lwscicommon
+
+include $(LW_SOURCE)/drivers/lwsci/lwsci.lwmk
+
+##############################################################################
+# string to prepend in unix builds when exelwting rules in this gmake instance
+##############################################################################
+
+LW_MODULE_LOGGING_NAME = "lwscicommon"
+
+##############################################################################
+# Build liblwscicommon as position-independent code
+##############################################################################
+
+LW_BUILD_PIC = 1
+
+##############################################################################
+# Path shorthands
+##############################################################################
+
+LWSCI_PATH       = $(LW_SOURCE)/drivers/lwsci
+LWSCICOMMON_PATH = $(LWSCI_PATH)/lwscicommon
+
+##############################################################################
+# define SOURCES
+##############################################################################
+
+ifeq ($(LW_BACKEND_RESMAN), 1)
+  LWSCICOMMON_SOURCES += lwscicommon_errcolwersion_resman.c
+  LWSCICOMMON_SOURCES += lwscicommon_amd64.c
+endif
+LWSCICOMMON_SOURCES += lwscicommon_objref.c
+LWSCICOMMON_SOURCES += lwscicommon_libc.c
+LWSCICOMMON_SOURCES += lwscicommon_transportutils.c
+
+ifeq ($(LW_TARGET_OS),$(filter $(LW_TARGET_OS),QNX Linux))
+LWSCICOMMON_SOURCES += lwscicommon_posix.c
+endif
+
+ifeq ($(LW_TARGET_ARCH), aarch64)
+LWSCICOMMON_SOURCES += lwscicommon_aarch64.c
+endif
+
+SOURCES += $(addprefix $(LWSCICOMMON_PATH)/src/,$(LWSCICOMMON_SOURCES))
+
+#############################################################################
+# Disable pragma errors in Coverity build
+##############################################################################
+
+# When build is initiated from tmake, COVLKTMPDIR is passed in to lwmake from
+# tmake if LW_BUILD_CONFIGURATION_IS_COVERITY=1 in tmake configuration.
+#
+# The LW_BUILD_CONFIGURATION_IS_COVERITY defined in tmake is not visible in
+# lwmake. User should define environment variable
+# LW_BUILD_CONFIGURATION_IS_COVERITY when locally doing Coverity build using
+# unix-build.
+LW_BUILD_CONFIGURATION_IS_COVERITY ?=
+
+# Automatically set LW_BUILD_CONFIGURATION_IS_COVERITY if Coverity build is
+# initiated from tmake.
+ifdef COVLKTMPDIR
+  LW_BUILD_CONFIGURATION_IS_COVERITY = 1
+endif
+
+ifeq ($(LW_BUILD_CONFIGURATION_IS_COVERITY),1)
+  $(call BUILD_OBJECT_LIST,$(SOURCES)): LW_WARNINGS_NOERROR += unknown-pragmas
+endif
+
+##############################################################################
+# define LW_INCLUDES
+##############################################################################
+
+LW_INCLUDES += $(LWSCI_PATH)/inc/public
+LW_INCLUDES += $(LWSCICOMMON_PATH)/inc
+
+#include cheetah headers
+ifeq ($(LW_TEGRA_MIRROR_INCLUDES), 1)
+#get lwrm headers from sdk/inc and RMAPI_TEGRA_MIRROR if we are building
+#perforce tree.
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+else
+ifeq ($(LW_TEGRA_DIRECT_INCLUDES), 1)
+#get lwrm headers directly from core/include
+  LW_INCLUDES += $(TEGRA_TOP)/core/include
+endif
+endif
+
+#include x86 headers
+ifeq ($(LW_BACKEND_RESMAN), 1)
+  include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(LWSCICOMMON_PATH)/inc/x86
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+endif
+
+# Coverity specific includes
+ifeq ($(LW_BUILD_CONFIGURATION_IS_COVERITY),1)
+  LW_INCLUDES += $(LWSCICOMMON_PATH)/inc/covanalysis_enable
+else
+  LW_INCLUDES += $(LWSCICOMMON_PATH)/inc/covanalysis_disable
+endif
+
+LW_INCLUDES += $(OUTPUTDIR)
+
+
+#############################################################################
+# define LW_DEFINES
+##############################################################################
+
+# For lwmake builds, lwcfg feature flags are available to LWSCI.
+ifdef LWCFG_INITIALIZED
+  LW_DEFINES += LWCFG_ENABLED
+endif
+
+# Embedded defines this on the command line for their builds.
+LW_BUILD_EMBEDDED ?= 0
+
+LW_DEFINES += LW_BUILD_EMBEDDED=1
+
+# Link in libpthread
+LDFLAGS += $(PTHREAD_LDFLAGS)
+
+##############################################################################
+# Definitions for the LWID string
+##############################################################################
+
+# Most binaries built as part of the UNIX GPU driver package contain a
+# stamp identifying the binary. This includes a timestamp, and in
+# internal builds, also username and hostname.
+# The info is helpful in triage issues reported by the lwstomers.
+#
+# However the stamp makes the checksum of the binary unique in each build
+# instance, even the codebase doesn't change. It is an undesirable feature
+# in safety product.
+#
+# So only adds the LWID string in non-safety build.
+
+ifndef LWCFG_GLOBAL_SAFETY_BUILD
+  LWID_STRINGNAME = "LW_LWSCICOMMON_ID"
+  LWID_MODULENAME = "LwSciCommon Shared Library"
+
+  SOURCES += $(LWIDSTRING)
+endif
+
+##############################################################################
+# Define DSO stubs
+##############################################################################
+ifeq ($(LW_BACKEND_RESMAN), 0)
+ifeq ($(LW_TARGET_OS), QNX)
+include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwos_s3_safety.lwmk
+endif
+ifeq ($(LW_TARGET_OS), Linux)
+include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwos.lwmk
+endif
+endif
+
+##############################################################################
+# Define library dependencies
+##############################################################################
+DSO_STUBS :=
+ifeq ($(LW_BACKEND_RESMAN), 0)
+ifeq ($(LW_TARGET_OS), QNX)
+DSO_STUBS += $(LWOS_S3_SAFETY_DSO_STUB)
+endif
+ifeq ($(LW_TARGET_OS), Linux)
+DSO_STUBS += $(LWOS_DSO_STUB)
+endif
+endif
+
+##############################################################################
+# Colwert the mobile exports file to the desktop format.
+##############################################################################
+
+LWSCICOMMON_EXPORTS = $(OUTPUTDIR_COMMON)/liblwscicommon-exports.txt
+
+LWSCICOMMON_EXPORTS_SOURCES = liblwscicommon.export
+
+
+$(LWSCICOMMON_EXPORTS): $(LWSCICOMMON_EXPORTS_SOURCES)
+	$(CAT) $(LWSCICOMMON_EXPORTS_SOURCES) | \
+	$(SORT) | $(UNIQ) | \
+	$(SED) -e 's/@[0-9]\+//' \
+	    -e 's/^\([^#].\+\)$$/\1 func/' > $@
+
+##############################################################################
+# define how to mangle the object files
+##############################################################################
+
+ifeq ($(LW_MANGLE_SYMBOLS),1)
+  # If the component has symbols needing mangling, such as internal API entry
+  # points, generate a mangle list and define the mangling rule here.
+
+  # liblwscicommon contains no exposed symbols requiring mangling.
+  LINK_OBJECTS = $(OBJECTS)
+  LWSCICOMMON_MANGLE_FILE =
+else
+  # If symbol mangling is disabled, LINK_OBJECTS == OBJECTS and there is
+  # no mangle file.
+  LINK_OBJECTS = $(OBJECTS)
+  LWSCICOMMON_MANGLE_FILE =
+endif
+
+##############################################################################
+# define how to build the linker script used when linking liblwscicommon
+##############################################################################
+
+LWSCICOMMON_LINKER_SCRIPT = $(OUTPUTDIR_COMMON)/liblwscicommon.map$(MANGLE_SUFFIX)
+
+$(eval $(call LINKER_SCRIPT_RULE, \
+  $(LWSCICOMMON_LINKER_SCRIPT), \
+  $(LWSCICOMMON_EXPORTS), \
+  $(LWSCICOMMON_MANGLE_FILE)))
+
+##############################################################################
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

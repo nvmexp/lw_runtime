@@ -1,0 +1,60 @@
+#define LW_BLAS_SNRM2_BARRIER          (0)
+#define LW_BLAS_SNRM2_LOG_THREAD_COUNT (4)
+#define LW_BLAS_SNRM2_THREAD_COUNT     (1 << LW_BLAS_SNRM2_LOG_THREAD_COUNT)
+
+float gmem[1] : global;
+
+struct ctaInfo {
+    unsigned short ctaFlags;
+    unsigned short ctaDO;
+    unsigned short ctaD1;
+    unsigned short ctaD2;
+    unsigned short gridW;
+    unsigned short gridH;
+    unsigned short ctaX;
+    unsigned short ctaY;
+};
+
+#define LW_BLAS_SNRM2_STATE_ZERO    0
+#define LW_BLAS_SNRM2_STATE_TINY    1
+#define LW_BLAS_SNRM2_STATE_DONE    4
+
+float partialSum[LW_BLAS_SNRM2_THREAD_COUNT]: shared;       
+
+void main (uniform struct ctaInfo ctx : shared,
+           uniform int n              : shared,
+           uniform int sx             : shared,
+           uniform int incx           : shared,
+           uniform int result         : shared,
+           uniform int threadCount    : shared,
+           varying int tid            : thread_id) 
+{
+    float sum, t, xmax, xmaxRecip;
+    int i, state, sxTid;
+
+    i = 0;
+    state = LW_BLAS_SNRM2_STATE_ZERO;
+    sxTid = sx + tid;
+    while (state != LW_BLAS_SNRM2_STATE_DONE) {
+        /* we'd like a switch statement here */
+        if (state == LW_BLAS_SNRM2_STATE_ZERO) {
+            sum = 0.0f;
+            while (((i + tid) < n) && ((t = gmem[sxTid + i]) == 0.0f)) {
+                i++;
+            }
+            state = LW_BLAS_SNRM2_STATE_TINY;
+            continue;
+        }
+        if (state == LW_BLAS_SNRM2_STATE_TINY) {
+            while (((i + tid) < n) && ((t = gmem[sxTid + i]) < 0.1f)) {
+                sum += t * t;
+                i++; 
+            }
+            state = LW_BLAS_SNRM2_STATE_DONE;
+            continue;
+        }
+    }
+    partialSum[tid] = sum;
+    barrier_wait (LW_BLAS_SNRM2_BARRIER, LW_BLAS_SNRM2_THREAD_COUNT);
+    gmem[result] = sum;
+}

@@ -1,0 +1,1648 @@
+
+import "topology.proto";
+#ifdef BUILD_KT_MULTINODE
+import "memmgr.proto";
+#endif
+
+package lwswitch;
+
+
+//
+// This next section defines messages passed between nodes or within a node
+// by the Global and Local Fabric Managers
+//
+
+// All Fabric Manager messages are carried in fm Msg protobufs, in the binary
+// blob They take the form of an enumerated message type and a raw bytes member 
+// containing the protobuf.  
+// Aligning them with the protobuf definition of optional messages
+
+enum FabricManagerMessageType
+{
+// heartbeat group
+    FM_HEARTBEAT                              = 10;
+    FM_HEARTBEAT_ACK                          = 11;
+
+//  configuration group
+    FM_NODE_GLOBAL_CONFIG_REQ                 = 40;
+    FM_NODE_GLOBAL_CONFIG_RSP                 = 41;
+    FM_SWITCH_PORT_CONFIG_REQ                 = 42;
+    FM_SWITCH_PORT_CONFIG_RSP                 = 43;
+    FM_INGRESS_REQUEST_TABLE_REQ              = 44;
+    FM_INGRESS_REQUEST_TABLE_RSP              = 45;
+    FM_INGRESS_RESPONSE_TABLE_REQ             = 46;
+    FM_INGRESS_RESPONSE_TABLE_RSP             = 47;
+    FM_GPU_CONFIG_REQ                         = 48;
+    FM_GPU_CONFIG_RSP                         = 49;
+    FM_GANGED_LINK_TABLE_REQ                  = 50;
+    FM_GANGED_LINK_TABLE_RSP                  = 51;
+    FM_GPU_ATTACH_REQ                         = 52;
+    FM_GPU_ATTACH_RSP                         = 53;
+    FM_GPU_DETACH_REQ                         = 54;
+    FM_GPU_DETACH_RSP                         = 55;
+    FM_SWITCH_DISABLE_LINK_REQ                = 56;
+    FM_SWITCH_DISABLE_LINK_RSP                = 57;
+    FM_GPU_SET_DISABLED_LINK_MASK_REQ         = 58;
+    FM_GPU_SET_DISABLED_LINK_MASK_RSP         = 59;
+    FM_GPU_GET_GFID_REQ                       = 60;
+    FM_GPU_GET_GFID_RSP                       = 61;
+    FM_GPU_CFG_GFID_REQ                       = 62;
+    FM_GPU_CFG_GFID_RSP                       = 63;
+
+// All the node init/info related requests and response
+    FM_NODE_GET_LWLINK_DEVICE_INFO_REQ        = 81;
+    FM_NODE_GET_LWLINK_DEVICE_INFO_RSP        = 82;
+    FM_NODE_GET_LWSWITCH_DEVICE_INFO_REQ      = 83;
+    FM_NODE_GET_LWSWITCH_DEVICE_INFO_RSP      = 84;
+    FM_NODE_GET_GPU_DEVICE_INFO_REQ           = 85;
+    FM_NODE_GET_GPU_DEVICE_INFO_RSP           = 86;
+    FM_NODE_GET_GPU_LWLINK_SPEED_INFO_REQ     = 87;
+    FM_NODE_GET_GPU_LWLINK_SPEED_INFO_RSP     = 88;
+    FM_NODE_GET_VERSION_INFO_REQ              = 89;
+    FM_NODE_GET_VERSION_INFO_RSP              = 90;
+
+// All the master link training messages - Send from GFM to LFMs
+    FM_MASTER_LWLINK_CONN_SWITCH_OFF                   = 101;
+    FM_MASTER_LWLINK_CONN_TRAIN_TO_SAFE                = 102;
+    FM_MASTER_LWLINK_CONN_TRAIN_TO_HIGH                = 103;
+    FM_MASTER_LWLINK_CONN_TRAIN_HIGH_TO_SAFE           = 104;
+    FM_MASTER_LWLINK_CONN_TRAIN_SAFE_TO_OFF            = 105;
+    FM_MASTER_LWLINK_CONN_TRAIN_TO_HIGH_SUBLINK        = 107;
+    FM_MASTER_LWLINK_CONN_TRAIN_TO_HIGH_MAINLINK       = 108;
+
+// All the master parallel link training messages - Send from GFM to LFMs
+    FM_MASTER_LWLINK_CONN_PARALLEL_SWITCH_OFF                               = 111;
+    FM_MASTER_LWLINK_CONN_TRAIN_PARALLEL_TO_SAFE                            = 112;
+    FM_MASTER_LWLINK_CONN_TRAIN_PARALLEL_TO_HIGH                            = 113;
+    FM_MASTER_LWLINK_CONN_TRAIN_PARALLEL_HIGH_TO_SAFE                       = 114;
+    FM_MASTER_LWLINK_CONN_TRAIN_PARALLEL_SAFE_TO_OFF                        = 115;
+#ifdef BUILD_KT_MULTINODE
+    FM_MASTER_LWLINK_CONN_TRAIN_INTERNODE_PARALLEL_INITOPTIMIZE             = 116;
+    FM_MASTER_LWLINK_CONN_TRAIN_INTERNODE_PARALLEL_POST_INITOPTIMIZE        = 117;
+    FM_MASTER_LWLINK_CONN_TRAIN_INTERNODE_PARALLEL_INITOPTIMIZE_TO_HIGH     = 118;
+
+// All optical training related messages - Send from GFM to LFMs
+    FM_MASTER_LWLINK_CONN_TRAIN_INTERNODE_PARALLEL_OPTICAL_ENABLE_INF_MODE          = 119;
+    FM_MASTER_LWLINK_CONN_TRAIN_INTERNODE_PARALLEL_OPTICAL_ENABLE_MAINTENANCE_RX    = 120;
+    FM_MASTER_LWLINK_CONN_TRAIN_INTERNODE_PARALLEL_OPTICAL_ENABLE_MAINTENANCE_TX    = 121;
+    FM_MASTER_LWLINK_CONN_TRAIN_INTERNODE_PARALLEL_OPTICAL_DISABLE_INF_MODE         = 122;
+    FM_MASTER_LWLINK_CONN_TRAIN_INTERNODE_PARALLEL_OPTICAL_ENABLE_FORCE_EQ          = 123;
+    FM_MASTER_LWLINK_CONN_TRAIN_INTERNODE_PARALLEL_OPTICAL_DISABLE_FORCE_EQ	        = 124;
+    FM_MASTER_LWLINK_CONN_TRAIN_INTERNODE_PARALLEL_OPTICAL_CHECK_EOM_STATUS	        = 125;
+    FM_MASTER_LWLINK_CONN_TRAIN_INTERNODE_PARALLEL_GET_LINK_STATE                   = 126;
+    FM_MASTER_LWLINK_CONN_TRAIN_INTERNODE_PARALLEL_TO_OFF                           = 127;
+    FM_LWLINK_CONN_TRAIN_INTERNODE_GET_GRADING_AND_FOM_VALUES                       = 128;
+#endif
+
+//  All the slave link training messages - Send from LFM to peer LFM
+    FM_SLAVE_LWLINK_CONN_SWITCH_OFF                    = 131;
+    FM_SLAVE_LWLINK_CONN_TRAIN_TO_SAFE                 = 132;
+    FM_SLAVE_LWLINK_CONN_TRAIN_TO_HIGH                 = 133;
+    FM_SLAVE_LWLINK_CONN_TRAIN_HIGH_TO_SAFE            = 134;
+    FM_SLAVE_LWLINK_CONN_TRAIN_SAFE_TO_OFF             = 135;
+
+//  All the link training response types - LFM to GFM and LFM to Peer LFM
+    FM_LWLINK_TRAIN_RSP_MASTER_SYNC           = 181;
+    FM_LWLINK_TRAIN_RSP_SLAVE_SYNC            = 182;
+    FM_LWLINK_TRAIN_RSP_SLAVE_CONFIRM         = 183;
+    FM_LWLINK_TRAIN_RSP_SLAVE_COMPLETE        = 184;
+    FM_LWLINK_TRAIN_RSP_COMPLETE              = 185;
+
+//  All the link training msgs where there is no master/slave sync
+//  These messages are sent from GFM to a specific LFM (node)
+    FM_LWLINK_ENABLE_TX_COMMON_MODE           = 201;
+    FM_LWLINK_DISABLE_TX_COMMON_MODE          = 202;
+    FM_LWLINK_CALIBRATE                       = 203;
+    FM_LWLINK_ENABLE_DATA                     = 204;
+    FM_LWLINK_INIT                            = 205;
+    FM_LWLINK_INIT_STATUS                     = 206;
+    FM_LWLINK_DISCOVER_INTRANODE_CONNS        = 207;
+#ifdef BUILD_KT_MULTINODE
+    FM_LWLINK_ADD_INTERNODE_CONN              = 208;
+#endif
+    FM_LWLINK_GET_INTRANODE_CONNS             = 209;
+    FM_LWLINK_WRITE_DISCOVERY_TOKENS          = 210;
+    FM_LWLINK_READ_DISCOVERY_TOKENS           = 211;
+    FM_LWLINK_RESET_SWITCH_LINKS              = 212;
+    FM_LWLINK_RESET_ALL_SWITCH_LINKS          = 213;
+
+//These messages are for additional LWLink 3.0 training steps introduced 
+//in Ampere/Limerock chips
+    FM_LWLINK_INITPHASE1                      = 214;
+    FM_LWLINK_RX_INIT_TERM                    = 215;
+    FM_LWLINK_SET_RX_DETECT                   = 216;
+    FM_LWLINK_GET_RX_DETECT                   = 217;
+    FM_LWLINK_INITNEGOTIATE                   = 218;
+    FM_LWLINK_READ_SIDS                       = 219;
+
+    FM_LWLINK_SWITCH_TRAINING_FAILED_LINK_INFO   = 220;
+    
+    // These messages are for additional LWLink 4.0 training steps introduced 
+    // in Hopper/Laguna chips
+    FM_LWLINK_INITPHASE5                      = 221;
+    FM_LWLINK_GET_DEVICE_LWLINK_STATE         = 222;
+
+#ifdef BUILD_KT_MULTINODE
+//These messages are for additional optical trunk LWLink 3.0 training steps
+    FM_LWLINK_OPTICAL_INIT_LINKS               = 223;
+    FM_LWLINK_OPTICAL_ENABLE_IOBIST            = 224;
+    FM_LWLINK_OPTICAL_START_PRETRAIN_TX        = 225;
+    FM_LWLINK_OPTICAL_CHECK_PRETRAIN_TX        = 226;
+    FM_LWLINK_OPTICAL_START_PRETRAIN_RX        = 227;
+    FM_LWLINK_OPTICAL_CHECK_PRETRAIN_RX        = 228;
+    FM_LWLINK_OPTICAL_STOP_PRETRAIN            = 229;
+    FM_LWLINK_OPTICAL_DISABLE_IOBIST           = 230;
+#endif
+
+// Messages to tell LFM to allow/stop peer access and set RM state accordingly.
+    FM_CONFIG_INIT_DONE_REQ                   = 240;
+    FM_CONFIG_INIT_DONE_RSP                   = 241;
+    FM_CONFIG_DEINIT_REQ                      = 242;
+    FM_CONFIG_DEINIT_RSP                      = 243;
+
+// error reporting
+    FM_LWSWITCH_ERROR_FATAL                   = 300;
+    FM_LWSWITCH_ERROR_NON_FATAL               = 301;
+    FM_GET_ERROR_REQ                          = 302;
+    FM_GET_ERROR_RSP                          = 303;
+    FM_LWLINK_ERROR_LWSWITCH_RECOVERY         = 304;
+    FM_LWLINK_ERROR_LWSWITCH_RECOVERY_ACK     = 305;
+    FM_LWLINK_ERROR_GPU_RECOVERY              = 306;
+    FM_LWLINK_ERROR_GPU_RECOVERY_ACK          = 307;
+    FM_LWLINK_ERROR_GPU_FATAL                 = 308;
+    FM_LWLINK_ERROR_GPU_FATAL_ACK             = 309;
+    FM_DEGRADED_GPU_INFO                      = 310;
+    FM_DEGRADED_GPU_INFO_ACK                  = 311;
+    FM_DEGRADED_LWSWITCH_INFO                 = 312;
+    FM_DEGRADED_LWSWITCH_INFO_ACK             = 313;
+    FM_LWSWITCH_FATAL_ERROR_SCOPE             = 314;
+
+// statistics reporting started from 400, which is removed for now.
+
+    FM_NODE_INFO_MSG                          = 500;
+    FM_NODE_INFO_ACK                          = 501;
+
+#ifdef BUILD_LS_TOPOLOGY
+//
+// LWLink Inband Message
+// This message can be sent by either GFM or LFM
+//
+// When RM sends an LWLink inband struct toward GFM, it's first received by LFM, LFM packs the struct 
+// in this protobuf message and sends to GFM
+//
+// When GFM sends an LWLink inband struct toward RM, it packs LWLink inband struct in this protobuf 
+// message and sends to LFM first, LFM then takes the LWLink inband struct and sends to RM via LWLink
+// connection
+//
+    FM_LWLINK_INBAND_MSG                      = 600;
+#endif
+
+    // Routing configuration messages
+    FM_RMAP_TABLE_REQ                         = 10020;
+    FM_RMAP_TABLE_RSP                         = 10021;
+    FM_RID_TABLE_REQ                          = 10022;
+    FM_RID_TABLE_RSP                          = 10023;
+    FM_RLAN_TABLE_REQ                         = 10024;
+    FM_RLAN_TABLE_RSP                         = 10025;
+#ifdef BUILD_LS_TOPOLOGY
+    FM_MCID_TABLE_SET_REQ                     = 10026;
+    FM_MCID_TABLE_SET_RSP                     = 10027;
+
+    // Multicast messages
+    FM_MULTICAST_GROUP_CREATE_REQ             = 11000;    // LFM to GFM when RM requests a new group 
+    FM_MULTICAST_GROUP_CREATE_RSP             = 11001;    // GFM to LFM with allocated multicast handle
+    FM_MULTICAST_GROUP_BIND_REQ               = 11002;    // LFM to GFM when RM adds a GPU to the group
+    FM_MULTICAST_GROUP_BIND_RSP               = 11003;    // GFM to LFM whether the GPU can be added 
+    FM_MULTICAST_GROUP_SETUP_COMPLETE_REQ     = 11004;    // GFM to LFM when all GPUs have joined and fabric is programmed
+    FM_MULTICAST_GROUP_SETUP_COMPLETE_ACK     = 11005;    // LFM to GFM ack setup completion
+    FM_MULTICAST_GROUP_RELEASE_REQ            = 11006;    // LFM to GFM when a GPU leaves
+    FM_MULTICAST_GROUP_RELEASE_RSP            = 11007;    // GFM to LFM ack GPU leave
+    FM_MULTICAST_GROUP_RELEASE_COMPLETE_REQ   = 11008;    // GFM to LFM when the group is released on all nodes
+    FM_MULTICAST_GROUP_RELEASE_COMPLETE_ACK   = 11009;    // LFM to GFM ack release completion
+#endif
+
+#ifdef BUILD_KT_MULTINODE
+    // FM messages for memory import/unimport
+    FM_MEMORY_IMPORT_REQ                      = 11100;
+    FM_MEMORY_IMPORT_RSP                      = 11101;
+    FM_KT_MEMORY_IMPORT_ERR                   = 11102;
+    FM_MEMORY_UNIMPORT_REQ                    = 11103;
+    FM_MEMORY_UNIMPORT_RSP                    = 11104;
+
+    // FM messages for FLA memory import/unimport
+    FM_MEMORY_FLA_IMPORT_REQ                  = 11105;
+    FM_MEMORY_FLA_IMPORT_RSP                  = 11106;
+    FM_MEMORY_FLA_UNIMPORT_REQ                = 11107;
+    FM_MEMORY_FLA_UNIMPORT_RSP                = 11108;
+    FM_MEMORY_FLA_FATAL_ERROR_MSG             = 11109;
+#endif
+
+    // (remember to use similar ifdef below for message definitons)
+}   
+
+message fmMessage
+{
+    required int32 version                                              = 1;
+    required uint32 nodeId                                              = 2;
+    required FabricManagerMessageType type                              = 3;
+    required int32 requestId                                            = 4;
+
+//  heartbeat group
+    optional heartbeat heartbeat                                        = 10;                              
+    optional heartbeatAck heartbeatAck                                  = 11;
+
+//  configuration group
+    optional nodeGlobalConfigRequest globalConfigRequest                = 20;
+    optional nodeGlobalConfigResponse globalConfigResponse              = 21;
+    optional switchPortConfigRequest portConfigRequest                  = 22;
+    optional switchPortConfigResponse portConfigResponse                = 23;
+    optional switchPortRequestTable requestTableRequest                 = 24;
+    optional switchPortRequestTableResponse requestTableResponse        = 25;
+    optional switchPortResponseTable responseTableRequest               = 26;
+    optional switchPortResponseTableResponse responseTableResponse      = 27;
+    optional gpuConfigRequest gpuConfigReq                              = 28;
+    optional gpuConfigResponse gpuConfigRsp                             = 29;
+    optional switchPortGangedLinkTable gangedLinkTableRequest           = 30;
+    optional switchPortGangedLinkTableResponse gangedLinkTableResponse  = 31;
+    optional gpuAttachRequest gpuAttachReq                              = 32;
+    optional gpuAttachResponse gpuAttachRsp                             = 33;
+    optional gpuDetachRequest gpuDetachReq                              = 34;
+    optional gpuDetachResponse gpuDetachRsp                             = 35;
+    optional switchDisableLinkRequest switchDisableLinkReq              = 36;
+    optional switchDisableLinkResponse switchDisableLinkRsp             = 37;
+    optional gpuSetDisabledLinkMaskRequest gpuSetDisabledLinkMaskReq    = 38;
+    optional gpuSetDisabledLinkMaskResponse gpuSetDisabledLinkMaskRsp   = 39;
+    optional gpuGetGfidRequest gpuGetGfidReq                            = 40;
+    optional gpuGetGfidResponse gpuGetGfidRsp                           = 41;
+    optional gpuCfgGfidRequest gpuCfgGfidReq                            = 42;
+    optional gpuCfgGfidResponse gpuCfgGfidRsp                           = 43;
+
+#ifdef BUILD_LS_TOPOLOGY
+// FM LWLink Inband message
+    optional fmLWLinkInbandMsg  inbandMsg                               = 50;
+#endif
+
+// node init/info related requests
+    optional deviceInfoRequestMsg   devInfoReq                          = 61;
+    optional deviceInfoResponseMsg  devInfoRsp                          = 62;
+
+//  lwlink related initialization/training messages group
+    optional lwlinkMsg lwlinkMsg                                        = 71;
+
+//  lwlink related error request/response messages group
+    optional lwlinkErrorMsg lwlinkErrorMsg                              = 72;
+
+// Messages to tell LFM to allow/stop peer access and set RM state accordingly.
+// ###TODO Determine whether this only gets sent after all nodes are configured, or 
+// if it should be sent per node as they are configured, with a separate fabric 
+// done message
+
+    optional configInitDoneReq initDoneReq                              = 90;
+    optional configInitDoneRsp initDoneRsp                              = 91;
+    optional configDeInitReq   deInitReq                                = 92;
+    optional configDeInitRsp   deInitRsp                                = 93;
+
+//  error report group
+    optional switchErrorReport        errorReport                       = 120;
+    optional getSwitchErrorRequest    getErrorRequest                   = 121;
+    optional switchErrorReport        getErrorResponse                  = 122;
+    optional switchFatalErrorScope    fatalErrorScope                   = 123;
+ 
+
+//  statistics report group
+    optional nodeStats               statsReport                        = 130;
+    optional getNodeStatsRequest     getStatsRequest                    = 131;
+    optional nodeStats               getStatsResponse                   = 132;
+    optional nodeStatsAck            nodeStatsAck                       = 133;
+
+    optional nodeInfoMsg            nodeInfoMsg                         = 140;
+    optional nodeInfoAck            nodeInfoAck                         = 141;
+    
+    // Degraded mode    
+    optional gpuDegradedInfo         gpuDegradedInfo                    = 160;
+    optional gpuDegradedInfoAck      gpuDegradedInfoAck                 = 161;
+    optional switchDegradedInfo      switchDegradedInfo                 = 162;
+    optional switchDegradedInfoAck   switchDegradedInfoAck              = 163;
+
+    // Routing configuration messages
+    optional portRmapTableRequest         rmapTableReq                = 10020;
+    optional portRmapTableResponse        rmapTableRsp                = 10021;
+    optional portRidTableRequest          ridTableReq                 = 10022;
+    optional portRidTableResponse         ridTableRsp                 = 10023;
+    optional portRlanTableRequest         rlanTableReq                = 10024;
+    optional portRlanTableResponse        rlanTableRsp                = 10025;
+#ifdef BUILD_LS_TOPOLOGY
+    optional mcidTableSetRequest          mcidTableSetReq             = 10026;
+    optional mcidTableSetResponse         mcidTableSetRsp             = 10027;
+
+    // Multicast group messages
+    optional multicastGroupCreateRequest           mcGroupCreateReq          = 11000;
+    optional multicastGroupCreateResponse          mcGroupCreateRsp          = 11001;
+    optional multicastGroupBindRequest             mcGroupBindReq            = 11002;
+    optional multicastGroupBindResponse            mcGroupBindRsp            = 11003;
+    optional multicastGroupSetupCompleteRequest    mcGroupSetupCompleteReq   = 11004;
+    optional multicastGroupSetupCompleteAck        mcGroupSetupCompleteAck   = 11005;
+    optional multicastGroupReleaseRequest          mcGroupReleaseReq         = 11006;
+    optional multicastGroupReleaseResponse         mcGroupReleaseRsp         = 11007;
+    optional multicastGroupReleaseCompleteRequest  mcGroupReleaseCompleteReq = 11008;
+    optional multicastGroupReleaseCompleteAck      mcGroupReleaseCompleteAck = 11009;
+#endif
+
+#ifdef BUILD_KT_MULTINODE
+    // GPA memory import/export messages
+    optional memoryImportReq        memoryImportReq                         = 11100;
+    optional memoryImportRsp        memoryImportRsp                         = 11101;
+    optional ktMemoryImportErr      ktMemoryImportErr                       = 11102;
+    optional memoryUnimportReq      memoryUnimportReq                       = 11103;
+    optional memoryUnimportRsp      memoryUnimportRsp                       = 11104;
+    
+    // FLA memory import/export messages
+    optional memoryFlaImportReq     memoryFlaImportReq                      = 11105;
+    optional memoryFlaImportRsp     memoryFlaImportRsp                      = 11106;
+    optional memoryFlaUnimportReq   memoryFlaUnimportReq                    = 11107;
+    optional memoryFlaUnimportRsp   memoryFlaUnimportRsp                    = 11108;
+    optional memoryFlaFatalErrorMsg memoryFlaFatalErrorMsg                  = 11109;
+#endif
+
+};
+
+//
+// The Global Fabric Manager sends the following messages to
+// request the Local Fabric manager to configure devices on its
+// node.
+//
+
+message gpuInfo
+{
+    optional uint32 gpuPhysicalId           = 1; //physical id of the GPU
+    optional uint64 fabricAddressBase       = 2;
+    optional uint64 fabricAddressRange      = 3;
+    repeated peerIDPortMap map              = 4;
+    optional int32 logicalToPhyPortMap      = 5;
+    optional int32 gpuEnumIndex             = 6; // gpu local id or driver enumeration index
+    optional bytes uuid                     = 7;
+    optional uint32 targetId                = 8;
+    optional uint64 GpaAddressBase          = 9;
+    optional uint64 GpaAddressRange         = 10;
+    optional uint64 FlaAddressBase          = 11;
+    optional uint64 FlaAddressRange         = 12;
+ #ifdef BUILD_LS_TOPOLOGY
+    optional uint64 GpaEgmAddressBase       = 13;
+    optional uint64 GpaEgmAddressRange      = 14;
+ #endif
+};
+
+message gpuConfigRequest
+{
+    repeated gpuInfo info                   = 1;
+    optional uint32 partitionId             = 2;
+    optional bool config                    = 3; // true - config; false - unconfig
+};
+
+message gpuAttachRequestInfo
+{
+    optional bytes uuid                     = 1; 
+    optional uint32 gpuPhysicalId           = 2;
+    optional bool registerEvent             = 3;
+}
+
+message gpuAttachRequest
+{
+    repeated gpuAttachRequestInfo info      = 1;
+    optional uint32 partitionId             = 2;
+};
+
+message gpuDetachRequestInfo
+{
+    optional bytes uuid                     = 1; 
+    optional uint32 gpuPhysicalId           = 2;
+    optional bool unRegisterEvent           = 3;
+}
+
+message gpuDetachRequest
+{
+    repeated gpuDetachRequestInfo info      = 1;
+    optional uint32 partitionId             = 2;
+};
+
+message gpuDegraded
+{
+    optional uint32 physicalId              = 1;
+    optional GpuDegradedReason reason       = 2;
+}
+
+message gpuDegradedInfo
+{
+    // message from GFM to LFM to notify about degraded GPUs
+    // so that LFM could write relevent info to OOB
+    repeated gpuDegraded gpuInfo            = 1;
+}
+
+message nodeGlobalConfigRequest          
+{
+    // this is the message to inform a node about its properties, such as nodeId
+    // since this is the first time nodeId is exchanged, making it explicit here
+    // instead of the one in fmMessage
+    required uint32 localNodeId             = 1;
+}
+
+message switchInfo
+{
+    optional uint32 switchPhysicalId           = 1;
+    optional switchConfig config               = 2;
+}
+
+message switchPortInfo  
+{
+    optional uint32 port                    = 1;
+    optional switchPortConfig config        = 2;
+    optional uint32 partitionId             = 3;
+}
+
+message switchPortConfigRequest  
+{            
+    optional uint32 switchPhysicalId       = 1;
+    repeated switchPortInfo info           = 2;
+};
+
+message switchPortRequestTableInfo 
+{
+    optional uint32 switchPhysicalId        = 1;
+    optional uint32 port                    = 2;
+    optional int32 firstIndex               = 3;
+    repeated ingressRequestTable entry      = 4;
+    optional uint32 partitionId             = 5;
+};
+
+message switchPortRequestTable  
+{
+    optional uint32  switchPhysicalId        = 1;
+    repeated switchPortRequestTableInfo info = 2;
+};
+
+message switchPortResponseTableInfo
+{
+    optional uint32 switchPhysicalId        = 1;
+    optional uint32 port                    = 2;
+    optional int32 firstIndex               = 3;
+    repeated ingressResponseTable entry     = 4;
+    optional uint32 partitionId             = 5;
+};
+
+message switchPortResponseTable  
+{
+    optional uint32 switchPhysicalId          = 1;
+    repeated switchPortResponseTableInfo info = 2;
+};
+
+message switchPortGangedLinkTableInfo
+{
+    optional uint32 switchPhysicalId  = 1;
+    optional uint32 port              = 2;
+    optional gangedLinkTable table    = 3;
+};
+
+message switchPortGangedLinkTable 
+{
+    optional uint32  switchPhysicalId           = 1;
+    repeated switchPortGangedLinkTableInfo info = 2;
+};
+
+message switchDegraded
+{
+    optional uint32 physicalId                  = 1;
+    optional SwitchDegradedReason reason        = 2;
+}
+
+message switchDegradedInfo
+{
+    // message from GFM to LFM to notify about degraded LWSwitches
+    // so that LFM could write relevent info to OOB
+    repeated switchDegraded switchInfo          = 1;
+}
+
+message portRmapTableInfo 
+{
+    optional uint32 switchPhysicalId        = 1;
+    optional uint32 port                    = 2;
+    optional int32 firstIndex               = 3;
+    repeated rmapPolicyEntry entry          = 4;
+    optional uint32 partitionId             = 5;
+    optional RemapTable table               = 6;
+};
+
+message portRmapTableRequest  
+{
+    optional uint32 switchPhysicalId        = 1;
+    repeated portRmapTableInfo info         = 2;
+};
+
+message portRidTableInfo
+{
+    optional uint32 switchPhysicalId        = 1;
+    optional uint32 port                    = 2;
+    optional int32 firstIndex               = 3;
+    repeated ridRouteEntry entry            = 4;
+    optional uint32 partitionId             = 5;
+};
+
+message portRidTableRequest  
+{
+    optional uint32 switchPhysicalId        = 1;
+    repeated portRidTableInfo info          = 2;
+};
+
+message portRlanTableInfo
+{
+    optional uint32 switchPhysicalId        = 1;
+    optional uint32 port                    = 2;
+    optional int32 firstIndex               = 3;
+    repeated rlanRouteEntry entry           = 4;
+    optional uint32 partitionId             = 5;
+};
+
+message portRlanTableRequest  
+{
+    optional uint32 switchPhysicalId        = 1;
+    repeated portRlanTableInfo info         = 2;
+};
+
+
+// Messages to tell LFM to allow/stop peer access and set RM state accordingly.
+message configInitDoneReq
+{
+    // nothing as of now
+};
+
+message configInitDoneRsp
+{
+    optional configStatus status = 1;
+};
+
+message configDeInitReq
+{
+    // nothing as of now
+};
+
+message configDeInitRsp
+{
+    optional configStatus status  = 1;
+};
+
+// place-holder for now.  Need to decide what error conditions to check for and report.
+
+enum configStatus
+{
+    CONFIG_SUCCESS = 0;
+    CONFIG_FAILURE = 1;
+    
+    // Multicast return codes
+    FM_MC_ILWALID_GPU                = 200;
+    FM_MC_GPU_ILWALID_PARTITION      = 201;
+    FM_MC_RESOURCE_NOT_AVAILABLE     = 202;
+    FM_MC_SWITCH_CONFIG_ERROR        = 203;
+    FM_MC_SWITCH_FALTAL_ERROR        = 204;
+    FM_MC_SWITCH_NON_FALTAL_ERROR    = 205;
+    FM_MC_GENERIC_ERROR              = 206;
+    FM_MC_RM_ERROR                   = 207;
+    
+// skip some values to get to memory manager status
+};
+
+message configResponse
+{
+    optional uint32 devicePhysicalId  = 1; // switch or GPU physical Id
+    optional uint32 port              = 2;
+    optional configStatus status      = 3;
+    optional uint32 partitionId       = 4;
+    optional bytes uuid               = 5; // switch or GPU uuid
+}; 
+
+message gpuConfigResponse
+{
+    repeated configResponse response = 1;
+};
+
+message gpuAttachResponse
+{
+    repeated configResponse response = 1;
+};
+
+message gpuDetachResponse
+{
+    repeated configResponse response = 1;
+};    
+
+message gpuDegradedInfoAck
+{
+    repeated configResponse response = 1;
+}; 
+
+message nodeGlobalConfigResponse          
+{
+    optional configStatus status = 1;
+};
+
+message switchPortConfigResponse  
+{
+    repeated configResponse response = 1;
+};
+
+message switchPortRequestTableResponse  
+{
+    repeated configResponse response = 1;
+};
+
+message switchPortResponseTableResponse  
+{
+    repeated configResponse response = 1;
+};
+
+message switchPortGangedLinkTableResponse  
+{
+    repeated configResponse response = 1;
+};
+
+message switchDegradedInfoAck
+{
+    repeated configResponse response = 1;
+};
+
+message portConfigResponse  
+{
+    repeated configResponse response = 1;
+};
+
+message portRmapTableResponse  
+{
+    repeated configResponse response = 1;
+};
+
+message portRidTableResponse  
+{
+    repeated configResponse response = 1;
+};
+
+message portRlanTableResponse  
+{
+    repeated configResponse response = 1;
+};
+
+#ifdef BUILD_LS_TOPOLOGY
+message mcidTableSetResponse  
+{
+    repeated configResponse response = 1;
+};
+#endif
+
+message switchDisableLinkRequest
+{
+    optional uint32 switchPhysicalId  = 1;
+    repeated uint32 portNum           = 2;
+}
+
+message switchDisableLinkResponse
+{
+    optional configStatus status  = 1;
+}
+
+message gpuDisabledLinkMaskInfoMsg
+{
+    optional bytes uuid         = 1;
+    optional uint64 disableMask = 2;
+}
+
+message gpuSetDisabledLinkMaskRequest
+{
+    repeated gpuDisabledLinkMaskInfoMsg gpuInfo = 1;
+    optional uint32 partitionId                 = 2;
+}
+
+message gpuSetDisabledLinkMaskResponse
+{
+    optional configStatus status = 1;
+    optional bytes uuid          = 2; // indicate first failed GPU
+    optional uint32 partitionId  = 3;
+}
+
+message gpuGetGfidRequestInfo
+{
+    optional bytes uuid                     = 1; 
+    optional uint32 physicalId              = 2;
+    optional devicePciInfo vf               = 3;
+}
+
+message gpuGetGfidRequest
+{
+    repeated gpuGetGfidRequestInfo info     = 1;
+    optional uint32 partitionId             = 2;
+};
+
+message gpuGetGfidResponseInfo
+{
+    optional bytes uuid                     = 1; 
+    optional uint32 physicalId              = 2;
+    optional uint32 gfid                    = 3;
+    optional uint32 gfidMask                = 4;
+}
+
+message gpuGetGfidResponse
+{
+    repeated gpuGetGfidResponseInfo info    = 1;
+    optional uint32 partitionId             = 2;
+    optional configStatus status            = 3;
+};
+
+message gpuCfgGfidRequestInfo
+{
+    optional bytes uuid                     = 1; 
+    optional uint32 physicalId              = 2;
+    optional uint32 gfid                    = 3;
+}
+
+message gpuCfgGfidRequest
+{
+    repeated gpuCfgGfidRequestInfo info     = 1;
+    optional uint32 partitionId             = 2;
+    optional bool activate                  = 3;
+};
+
+message gpuCfgGfidResponse
+{
+    optional uint32 partitionId             = 1;
+    optional configStatus status            = 2;
+};
+
+#ifdef BUILD_LS_TOPOLOGY
+message lwlinkInbandPortInfo
+{
+    optional uint32    switchPhysicalId     = 1;
+    optional uint32    portIndex            = 2;
+}
+
+message fmLWLinkInbandMsg
+{
+    optional uint64                         requestId         = 1;
+    optional lwlinkInbandPortInfo           inbandPort        = 2;
+    optional uint32                         msgType           = 3; // LWLINK_INBAND_MSG_TYPE_XXX
+    optional uint32                         status            = 4; // LW_STATUS
+    optional bytes                          msgPayload        = 5;
+}
+#endif
+
+//
+// Heartbeat
+// Global Fabric Manager sends heartbeat. 
+// Local Fabric Manager sends heartbeatAck to Global Fabric Manager
+//
+//
+message heartbeat
+{
+    optional uint32 nodeId                  = 1; // LFM doesn't have its own node ID until configs are done
+                                                 // Hence GFM sends node ID along with heartbeat
+};
+
+
+message heartbeatAck
+{
+    optional uint32 nodeId                  = 1; // LFM doesn't have its own node ID until configs are done
+                                                 // Hence GFM sends node ID along with heartbeat
+};
+
+//
+// Node statistics
+// These messages record the latest and alwmulate totals for statistics that 
+// come in from Local Fabric Manager heartbeat acks.
+//
+//
+// The following query and response are sent when the application
+// calls lwFabricOpenMemHandle, to make a remote GPUs memory accessible
+//
+
+// stats for an individual node
+message nodeStats
+{
+    repeated switchLatencyHist   latestLatency         = 1;
+    repeated switchLatencyHist   aclwmulatedLatency    = 2;
+    repeated switchLwlinkCounter lwlinkCounter         = 3;
+};
+
+message getNodeStatsRequest
+{
+    repeated getSwitchLatencyHist   latestLatency      = 1;
+    repeated getSwitchLatencyHist   aclwmulatedLatency = 2;
+    repeated getSwitchLwlinkCounter lwlinkCounter      = 3;
+}
+
+//
+// The following messages are used by the performance and diagnostic library
+// to configure and request information from the switch.  The messages are
+// sent from the runtime to the Local or Global Fabric Manager, depending on 
+// whether the target node is the one making the request.
+//
+
+message targetSwitch
+{
+    optional int32 reqPID                   = 1;    // PID of requester
+    optional uint32 reqNodeId               = 2;    // handle of requesting node
+    optional uint32 targetSwitchPhysicalId  = 3;    // list of targeted switches
+};
+
+enum switchErrorSrc
+{
+// LWSWITCH_ERROR_SRC_TYPE
+
+    LWSWITCH_ERROR_SRC_NONE           = 0;
+    LWSWITCH_ERROR_SRC_SW             = 1;
+    LWSWITCH_ERROR_SRC_HW             = 2;
+};
+
+enum switchErrorSeverity
+{
+    LWSWITCH_ERROR_SEVERITY_NONFATAL    = 0;
+    LWSWITCH_ERROR_SEVERITY_FATAL       = 1;
+};
+
+enum switchErrorType
+{
+// LWSWITCH_ERR_TYPE
+    LWSWITCH_ERR_NO_ERROR               = 0x0;
+};
+
+message switchErrorInfo
+{
+    optional uint32                  errorValue     = 1; // LWSwitch Sxid value
+    optional switchErrorSeverity     severity       = 2;
+    optional switchErrorSrc          errorSrc       = 3;
+    optional uint32                  instance       = 4;
+    optional uint32                  subinstance    = 5;
+    optional uint64                  time           = 6;
+    optional bool                    resolved       = 7;
+}
+
+message getSwitchErrorRequest
+{
+    repeated targetSwitch targetSwitches      = 1;
+    optional uint32 errorMask                 = 2;    // LWSWITCH_ERROR_SEVERITY_INFO_* mask, filter based on severity
+};
+
+message switchError
+{
+    optional uint32 switchPhysicalId         = 1;
+    repeated switchErrorInfo errorInfo       = 2;    // error details
+};
+
+message switchFatalErrorScope
+{
+    optional uint32 switchPhysicalId         = 1;
+    optional bool   deviceScope              = 2;   // the fatal error on the switch requires device reset 
+    repeated uint32 switchPorts              = 3;   // the fatal error on the switch requires a list of port reset
+}
+    
+//
+// If the device interrupts with an error condition LWSWITCH_GET_ERRORS_FATAL, the Local Fabric Manager
+// informs Global.
+//
+// Local Fabric Manager reports all other errors periodically
+
+message switchErrorReport
+{
+    repeated switchError switchError        = 1;
+};
+
+message setSwitchLinkCountersResponse
+{
+    optional configResponse response        = 1;
+};
+
+message lwlinkCounter
+{
+    optional uint32 portNum                 = 1;
+    optional uint64 txCounter0              = 2;
+    optional uint64 rxCounter0              = 3;
+    optional uint64 txCounter1              = 4;
+    optional uint64 rxCounter1              = 5;
+};
+
+message switchLwlinkCounter
+{
+    optional uint32 switchPhysicalId        = 1;
+    repeated lwlinkCounter linkCounter      = 2;
+};
+
+message getSwitchLwlinkCounter
+{
+    repeated targetSwitch targetSwitches    = 1;
+};
+
+message portLatencyBin
+{
+    optional uint32 portNum                 = 1;
+    optional uint32 lowMark                 = 2;
+    optional uint32 medMark                 = 3;
+    optional uint32 hiMark                  = 4;
+    optional uint32 panicMark               = 5;
+};
+
+message getSwitchLatencyBins
+{
+    required int32 version                  = 1;
+    repeated targetSwitch targetSwitches    = 2;
+};
+
+message portLatencyHist
+{
+    optional uint32  portNum                = 1;
+    optional uint64 elapsedTimeMsec         = 2;
+    optional uint64 low                     = 3;
+    optional uint64 med                     = 4;
+    optional uint64 high                    = 5;
+    optional uint64 panic                   = 6;
+};
+
+message switchLatencyHist
+{
+    optional uint32  switchPhysicalId       = 1;
+    repeated portLatencyHist latencyHist    = 2;
+};
+
+message getSwitchLatencyHist
+{
+    repeated targetSwitch targetSwitches    = 1;
+}
+
+message nodeStatsAck
+{
+    // nothing as of now
+};
+
+// Used by GlobalFM to send all the available node's information to each Local FMs
+// nodeId here is other node's ID for multi-node systems. (ie not self nodeId)
+message nodeInfo
+{
+    optional uint32 nodeId     = 1;
+    optional string ipAddress  = 2;
+};
+
+message nodeInfoMsg
+{
+    repeated nodeInfo info    = 1;
+};
+
+message nodeInfoAck
+{
+    optional configStatus status = 1;
+};
+
+// All the device information request/response types
+
+message devicePciInfo
+{
+    optional uint32 domain   = 1;
+    optional uint32 bus      = 2;
+    optional uint32 device   = 3;
+    optional uint32 function = 4;
+}
+
+// request/response to query all the enumerated lwswitches on a node
+message lwswitchDeviceInfoReq
+{
+    // nothing
+}
+
+message lwswitchDeviceInfoMsg
+{
+    optional uint32 switchIndex     = 1; // driver index
+    optional uint32 physicalId      = 2; // GPIO based id
+    optional devicePciInfo pciInfo  = 3;
+    optional bytes  uuid            = 4;
+    optional uint64 enabledLinkMask = 5;
+    optional uint32 archType        = 6;
+    optional uint32 excludedReason  = 7; //excluded reason for device
+}
+
+message lwswitchDeviceInfoRsp
+{
+    repeated lwswitchDeviceInfoMsg switchInfo          = 1;
+    repeated lwswitchDeviceInfoMsg excludedSwitchInfo  = 2;
+}
+
+// request/response to query all the enumerated gpus on a node
+message gpuDeviceInfoReq
+{
+    // nothing
+}
+
+message gpuDeviceInfoMsg
+{
+    optional uint32 gpuIndex           = 1;
+    optional uint32 discoveredLinkMask = 2;
+    optional uint32 enabledLinkMask    = 3;
+    optional devicePciInfo pciInfo     = 4;
+    optional bytes uuid                = 5;
+    optional uint32 archType           = 6;
+ #ifdef BUILD_LS_TOPOLOGY
+    optional bool   isEgmCapable       = 7;
+    optional bool   isSpaCapable       = 8;
+    optional uint64 spaAddress         = 9;
+ #endif
+}
+
+message gpuDeviceInfoRsp
+{
+    repeated gpuDeviceInfoMsg gpuInfo          = 1;
+    repeated gpuDeviceInfoMsg excludedGpuInfo  = 2;
+}
+
+message lwlinkDeviceInfoReq
+{
+    // nothing
+}
+
+/* 
+ * detailed information about each lwlink device.
+ * deviceId information is used later to address each device
+ * within a node
+ */
+message lwlinkDeviceInfoMsg
+{
+    optional devicePciInfo pciInfo  = 1;
+    optional bytes  deviceName      = 2;
+    optional uint64 deviceId        = 3;
+    optional uint32 numLinks        = 4;
+    optional uint64 devType         = 5;
+    optional uint64 enabledLinkMask = 6;
+    optional bytes  uuid            = 7;
+}
+
+message lwlinkDeviceInfoRsp
+{
+    repeated lwlinkDeviceInfoMsg devInfo = 1;
+}
+
+message gpuLWLinkSpeedInfoReq
+{
+    // nothing
+}
+
+message lwLinkSpeedInfoMsg
+{
+    optional uint32 linkIndex          = 1;
+    optional uint32 linkLineRateMBps   = 2;
+    optional uint32 linkClockMhz       = 3;
+    optional uint32 linkClockType      = 4;
+    optional uint32 linkDataRateKiBps  = 5;
+}
+
+message gpuLWLinkSpeedInfoMsg
+{
+    optional bytes  uuid                   = 1;
+    repeated lwLinkSpeedInfoMsg  speedInfo = 2;
+}
+
+message gpuLWLinkSpeedInfoRsp
+{
+    repeated gpuLWLinkSpeedInfoMsg gpuLinkSpeedInfo = 1;
+}
+
+message nodeVersionInfoReq
+{
+    // nothing
+}
+
+message nodeVersionInfoRsp    
+{
+    required bytes versionString            = 1;
+}
+
+message deviceInfoRequestMsg
+{
+    required uint64                 infoReqId            = 1;
+    optional lwswitchDeviceInfoReq  switchDevReq         = 2;
+    optional gpuDeviceInfoReq       gpuDevReq            = 3;
+    optional lwlinkDeviceInfoReq    lwlinkDevReq         = 4;
+    optional gpuLWLinkSpeedInfoReq  gpuLinkSpeedReq      = 5;
+    optional nodeVersionInfoReq     versionInfoReq       = 6;
+};
+
+message deviceInfoResponseMsg
+{
+    required uint64                 infoReqId        = 1;
+    optional lwswitchDeviceInfoRsp  switchDevRsp     = 2;
+    optional gpuDeviceInfoRsp       gpuDevRsp        = 3;
+    optional lwlinkDeviceInfoRsp    lwlinkDevRsp     = 4;
+    optional gpuLWLinkSpeedInfoRsp  gpuLinkSpeedRsp  = 5;
+    optional nodeVersionInfoRsp     versionInfoRsp   = 6;
+};
+
+// End of all the device information request/response types
+
+// Note: nodeId here is the ID seen by LWLinKCoreLib driver.
+message lwlinkEndPointInfo
+{
+    optional uint32 nodeId          = 1; //uniquely identify a node in the system
+    optional uint64 gpuOrSwitchId   = 2; //unique gpu or switch id within a node
+    optional uint32 linkIndex       = 3; //lwlink port number within a switch or gpu
+    optional lwlinkStateInfo state  = 4; //state specified in reponses
+};
+
+// Note: nodeId here is the remote node's id as seen by LWLinKCoreLib driver.
+message lwlinkRemoteEndPointInfo
+{
+    optional uint32 nodeId          = 1;
+    optional uint32 linkIndex       = 2;
+    optional devicePciInfo pciInfo  = 3;
+    optional uint64 devType         = 4;
+    optional bytes  uuid            = 5;
+};
+
+message lwlinkConnectionInfo
+{
+    optional lwlinkEndPointInfo masterEnd = 1;
+    optional lwlinkEndPointInfo slaveEnd  = 2;
+};
+
+#ifdef BUILD_KT_MULTINODE
+message lwlinkInterNodeConnInfo
+{
+    optional lwlinkEndPointInfo       localEnd  = 1;
+    optional lwlinkRemoteEndPointInfo remoteEnd = 2;
+};
+#endif
+
+message lwlinkTrainParallelConnReqMsg
+{
+    repeated lwlinkConnectionInfo connInfo = 1;
+};
+
+message lwlinkTrainConnReqMsg
+{
+    optional lwlinkConnectionInfo connInfo = 1;
+};
+
+// this message is used for all the initilization related message group
+// like Common Mode, RX Cal, Data Enable, and Link Init
+message lwlinkNodeInitReqMsg
+{
+    // nothing as of now
+};
+
+message lwlinkNodeInitStatusReqMsg
+{
+    // nothing as of now
+};
+
+message lwlinkNodeInitResetSwitchLinksReqMsg
+{
+    optional uint32 switchPhysicalId = 1;
+    optional uint64 linkMask         = 2;
+};
+
+message lwlinkNodeInitResetAllSwitchLinksReqMsg
+{
+    // nothing as of now
+};
+
+message lwlinkDiscoverIntraNodeConnReqMsg
+{
+    // nothing as of now
+};
+
+message lwlinkWriteDiscoveryTokenReqMsg
+{
+    // nothing as of now
+};
+
+message lwlinkReadSidReqMsg
+{
+    // nothing as of now
+};
+
+message lwlinkReadDiscoveryTokenReqMsg
+{
+    // nothing as of now
+};
+
+message lwlinkGetIntraNodeConnReqMsg
+{
+    // nothing as of now
+};
+
+#ifdef BUILD_KT_MULTINODE
+message lwlinkAddInterNodeConnReqMsg
+{
+    optional lwlinkInterNodeConnInfo connInfo = 1;
+};
+#endif
+
+message lwlinkSwitchTrainingFailedReqMsg
+{
+    optional uint32 switchPhysicalId       = 1;
+    optional uint64 trainingAttemptedMask0 = 2;
+    optional uint64 trainingFailedMask0    = 3;
+};
+
+message lwlinkGetDeviceLwlinkStateReqMsg
+{
+    // nothing as of now
+};
+
+// All the lwlink related request messages.
+message lwlinkRequestMsg
+{
+    optional lwlinkNodeInitReqMsg                     nodeInitReqMsg                    = 1;
+    optional lwlinkNodeInitStatusReqMsg               nodeInitStatusReqMsg              = 2;
+    optional lwlinkNodeInitResetSwitchLinksReqMsg     nodeInitResetSwitchLinksReqMsg    = 3;
+    optional lwlinkNodeInitResetAllSwitchLinksReqMsg  nodeInitResetAllSwitchLinksReqMsg = 4;
+    optional lwlinkTrainConnReqMsg                    connTrainReqMsg                   = 5;
+    optional lwlinkDiscoverIntraNodeConnReqMsg        discoverIntraNodeConnReqMsg       = 6;
+    optional lwlinkReadDiscoveryTokenReqMsg           readDiscTokenReqMsg               = 7;
+    optional lwlinkWriteDiscoveryTokenReqMsg          writeDiscTokenReqMsg              = 8;
+#ifdef BUILD_KT_MULTINODE
+    optional lwlinkAddInterNodeConnReqMsg             addInterNodeConnReqMsg            = 9;
+#endif
+    optional lwlinkGetIntraNodeConnReqMsg             getIntraNodeConnReqMsg            = 10;
+    optional lwlinkTrainParallelConnReqMsg            connTrainParallelReqMsg           = 11;
+    optional lwlinkSwitchTrainingFailedReqMsg         switchTrainingFailedReqMsg        = 12;
+    optional lwlinkReadSidReqMsg                      readSidReqMsg                     = 13;
+    optional lwlinkGetDeviceLwlinkStateReqMsg         getDeviceLwlinkStateReqMsg        = 14;
+};
+
+#ifdef BUILD_KT_MULTINODE
+message lwlinkFomValues
+{
+    optional uint32     numLanes    = 1;
+    repeated uint32     fomValues   = 2;
+}
+
+message lwlinkGradingValues
+{
+    optional uint32     laneMask    = 1;
+    repeated uint32     txInit      = 2;
+    repeated uint32     rxInit      = 3;
+    repeated uint32     txMaint     = 4;
+    repeated uint32     rxMaint     = 5;
+}
+#endif
+
+message lwlinkQualityInfo
+{
+	optional bool eomLow = 1;
+};
+
+message lwlinkStateInfo
+{
+    optional uint32                 linkMode        = 1;
+    optional uint32                 txSubLinkMode   = 2;
+    optional uint32                 rxSubLinkMode   = 3;
+    optional lwlinkQualityInfo      qualityInfo     = 4;
+#ifdef BUILD_KT_MULTINODE
+    optional lwlinkFomValues        fomValues       = 5;
+    optional lwlinkGradingValues    gradingValues   = 6;
+#endif
+};
+
+message lwlinkTrainParallelConnRspMsg
+{
+    repeated lwlinkConnectionInfo connRspInfo = 1;
+};
+
+message lwlinkTrainConnRspMsg
+{
+    optional lwlinkStateInfo   masterState  = 1;
+    optional lwlinkStateInfo   slaveState   = 2;
+};
+
+message lwlinkNodeInitRspMsg
+{
+    // nothing as of now.
+};
+
+message lwlinkLinkInitStatus
+{
+    optional uint32 linkIndex  = 1;
+    optional bool status       = 2;
+};
+
+message lwlinkDeviceLinkInitStatus
+{
+    optional uint64 gpuOrSwitchId            = 1;
+    repeated lwlinkLinkInitStatus linkStatus = 2;
+};
+
+// Note: nodeId here is the ID seen by LWLinKCoreLib driver.
+message lwlinkNodeInitStatusRspMsg
+{
+    optional uint32 nodeId                         = 1;
+    repeated lwlinkDeviceLinkInitStatus initStatus = 2;
+};
+
+message lwlinkNodeInitResetSwitchLinksRspMsg
+{
+    // nothing as of now.
+};
+
+message lwlinkNodeInitResetAllSwitchLinksRspMsg 
+{
+    // nothing as of now.
+};
+
+message lwlinkDiscoverIntraNodeConnRspMsg
+{
+    // nothing as of now.
+};
+
+// Note: nodeId here is the ID seen by LWLinKCoreLib driver.
+message lwlinkDiscoveryTokenInfo
+{
+   optional uint32 nodeId          = 1;
+   optional uint64 gpuOrSwitchId   = 2;
+   optional uint32 linkIndex       = 3;
+   optional uint64 tokelwalue      = 4;
+};
+
+message lwlinkWriteDiscoveryTokenRspMsg
+{
+    repeated lwlinkDiscoveryTokenInfo tokenInfo = 1;
+};
+
+message lwlinkReadDiscoveryTokenRspMsg
+{
+    repeated lwlinkDiscoveryTokenInfo tokenInfo = 1;
+};
+
+// Note: nodeId here is the ID seen by LWLinKCoreLib driver.
+message lwlinkSidInfo
+{
+   optional uint32 nodeId               = 1;
+   optional uint64 gpuOrSwitchId        = 2;
+   optional uint32 nearSid              = 3;
+   optional uint32 nearLinkIndex        = 4;
+   optional uint32 farSid               = 5;
+   optional uint32 farLinkIndex         = 6;
+};
+
+message lwlinkReadSidRspMsg
+{
+    repeated lwlinkSidInfo sidInfo = 1;
+};
+
+#ifdef BUILD_KT_MULTINODE
+message lwlinkAddInterNodeConnRspMsg
+{
+    // nothing as of now.
+};
+#endif
+
+message lwlinkGetIntraNodeConnRspMsg
+{
+   repeated lwlinkConnectionInfo connInfo = 1;
+};
+
+message lwlinkSwitchTrainingFailedRspMsg
+{
+    // nothing as of now.
+};
+
+
+message lwlinkGetDeviceLwlinkStateRspMsg
+{
+   repeated lwlinkEndPointInfo lwEndInfo = 1;
+};
+
+// all the lwlink related config req/response messages.
+message lwlinkResponseMsg
+{
+    optional int32                                   status                            = 1;
+    optional lwlinkNodeInitRspMsg                    nodeInitRspMsg                    = 2;
+    optional lwlinkNodeInitStatusRspMsg              nodeInitStatusRspMsg              = 3;
+    optional lwlinkNodeInitResetSwitchLinksRspMsg    nodeInitResetSwitchLinksRspMsg    = 4;
+    optional lwlinkNodeInitResetAllSwitchLinksRspMsg nodeInitResetAllSwitchLinksRspMsg = 5;
+    optional lwlinkTrainConnRspMsg                   connTrainRspMsg                   = 6;
+    optional lwlinkDiscoverIntraNodeConnRspMsg       discoverIntraNodeConnRspMsg       = 7;
+    optional lwlinkReadDiscoveryTokenRspMsg          readDiscTokenRspMsg               = 8;
+    optional lwlinkWriteDiscoveryTokenRspMsg         writeDiscTokenRspMsg              = 9;
+#ifdef BUILD_KT_MULTINODE
+    optional lwlinkAddInterNodeConnRspMsg            addInterNodeConnRspMsg            = 10;
+#endif
+    optional lwlinkGetIntraNodeConnRspMsg            getIntraNodeConnRspMsg            = 11;
+    optional lwlinkTrainParallelConnRspMsg           connTrainParallelRspMsg           = 12;
+    optional lwlinkSwitchTrainingFailedRspMsg        switchTrainingFailedRspMsg        = 13;
+    optional lwlinkReadSidRspMsg                     readSidRspMsg                     = 14;
+    optional lwlinkGetDeviceLwlinkStateRspMsg        getDeviceLwlinkStateRspMsg        = 15;
+};
+
+// place holder for all the lwlink request and response.
+// will have either reqMsg or rspMsg depending on the actual message type.
+message lwlinkMsg
+{
+    required uint64 trainReqId               = 1;
+    optional lwlinkRequestMsg reqMsg         = 2;
+    optional lwlinkResponseMsg rspMsg        = 3;
+};
+
+message lwlinkErrorRecoveryMsg
+{
+    optional uint64 gpuOrSwitchId  = 1;
+    repeated uint32 linkIndex      = 2; //lwlink port number within a switch or gpu
+};
+
+message lwlinkErrorRecoveryAck
+{
+    // nothing as of now.
+};
+
+message lwlinkErrorGpuFatalMsg
+{
+    optional uint64 gpuOrSwitchId  = 1;
+    optional uint32 linkIndex      = 2; //lwlink port number within a gpu
+};
+
+message lwlinkErrorGpuFatalAck
+{
+    // nothing as of now.
+};
+
+// place holder for all the lwlink error request and response
+message lwlinkErrorMsg
+{
+    optional lwlinkErrorRecoveryMsg recoveryMsg  = 1;
+    optional lwlinkErrorRecoveryAck recoveryAck  = 2;
+    optional lwlinkErrorGpuFatalMsg gpuFatalMsg  = 3;
+    optional lwlinkErrorGpuFatalAck gpuFatalAck  = 4;
+};
+
+enum GpuDegradedReason
+{
+    GPU_FAILURE               = 1;  // GPU failure
+    LWLINK_FAILURE            = 2;  // Access link failure
+};
+
+enum SwitchDegradedReason
+{
+    LWSWITCH_FAILURE                              = 1;  // LWSwitch failure
+    LWSWITCH_PEER_FAILURE                         = 2;  // LWSwitch peer failure
+    TRUNK_LINK_FAILURE                            = 3;  // Trunk link failure
+    ACCESS_LINK_FAILURE                           = 4;  // Access link failure
+    LWSWITCH_EXPLICITLY_EXCLUDED                  = 5;  // LWSwitch is excluded explicitly  
+    PEER_LWSWITCH_DEGRADED_TRUNK_LINK             = 6;  // The peer LWSwitch connected by trunk links is degraded
+    PEER_LWSWITCH_DEGRADED_ACCESS_LINK            = 7;  // The peer LWSwitch is degraded due to access link failure
+    PEER_DEGRADE_EXPLICITLY_EXCLUDED_SWITCH       = 8;  // The peer LWSwitch is degraded due to manually excluded switch
+};
+
+#ifdef BUILD_LS_TOPOLOGY
+
+message InbandLwlinkPortInfo
+{
+	optional uint32    switchPhysicalId          = 1;
+	optional uint32    portIndex                 = 2;
+}
+
+enum MulticastMemoryMode
+{
+    MC_MEMORY_MODE_REFLECTIVE                     = 1; // reflective memory mode
+    MC_MEMORY_MODE_MULTICAST                      = 2; // regular multicast memory mode
+};
+
+message MulticastPort
+{
+    required uint32 portNum                       = 1;
+    optional uint32 vcHop                         = 2;
+}
+
+message MulticastPortList
+{
+    repeated MulticastPort ports                  = 1;    
+    optional bool          replicaValid           = 2;
+    optional uint32        replicaOffset          = 3;
+}
+
+message MulticastTableEntry
+{
+    optional uint32 index                         = 1;  // McId or extended McId table index;
+    optional bool   extendedTbl                   = 2;  // true if this is an extended McId table entry
+    optional bool   entryValid                    = 3;  // entry is valid or not
+    repeated MulticastPortList sprays             = 4;  // sprays of multicast port list
+    optional uint32 extendedTblIndex              = 5;  // This entry is extended to the coresponding extended MCID table index
+};  
+
+message PortMulticastTableInfo
+{
+    optional uint32 portNum                         = 1;  // multicast traffic ingress port 
+    optional MulticastTableEntry tableEntry         = 2;  // sprays of port list mcid table
+    optional MulticastTableEntry extendedTableEntry = 3;  // sprays of port list in the extended mcid table
+};
+
+message SwitchMultcastTableInfo
+{
+    optional uint32 nodeId                                  = 1;             
+    optional uint32 switchPhysicalId                        = 2;
+    repeated PortMulticastTableInfo portMulticastTable      = 3;
+};
+
+message MulticastGroupInfo
+{
+    optional uint32                  partitionId           = 1;  // the partition is multicast group is in, ILWALID_FABRIC_PARTITION_ID
+                                                                 // should be used for baremetal and full passthrough
+    optional uint32                  mcId                  = 2;  // unique multicast group Id
+    optional MulticastMemoryMode     mode                  = 3;  // multicast group mode
+    optional bool                    excludeSelf           = 4;  // if the request GPU itself should be excluded in the forwarding list
+    optional bool                    noDynRsp              = 5;  // no dynamic alt selection on MC responses
+    optional SwitchMultcastTableInfo switchMulticastTable  = 6;  // This multicast group could span multiple switches
+};
+
+message mcidTableSetRequest  
+{
+    optional uint32 switchPhysicalId      = 1;
+    repeated MulticastGroupInfo groupInfo = 2;
+};
+
+message multicastGroupCreateRequest
+{
+    optional InbandLwlinkPortInfo  rxPort    = 1;  // Indicate the inband port that this request is received from
+    optional uint32                numOfGpus = 2;  // Number of the GPUs in this group
+    optional uint32                memSize   = 3;  // memory size , unit TBD
+};
+
+message multicastGroupCreateResponse
+{
+    optional InbandLwlinkPortInfo  txPort        = 1;  // Indicate the inband port that this response should be sent to
+    optional uint64                mcHandle      = 2;  // unique handle used by LWCA and RM to identify the group
+    optional uint32                createNodeId  = 3;  // Node that initiates the group create req
+    optional configStatus          rspCode       = 4;
+};
+
+message multicastGroupBindRequest
+{
+    optional InbandLwlinkPortInfo  rxPort    = 1;  // Indicate the inband port that this request is received from
+    optional uint64  mcHandle                = 2;  // unique handle used by LWCA and RM to identify the group
+    repeated bytes   uuid                    = 3;  // GPUs who want to join the group
+};
+
+message multicastGroupBindResponse
+{
+    optional InbandLwlinkPortInfo  txPort    = 1;  // Indicate the inband port that this response should be sent to
+    optional uint64  mcHandle                = 2;  // unique handle used by LWCA and RM to identify the group
+    optional uint32  createNodeId            = 3;  // Node that initiates the group create req
+    optional configStatus rspCode            = 4;
+};
+
+message multicastGroupSetupCompleteRequest
+{
+    optional InbandLwlinkPortInfo  txPort    = 1;  // Indicate the inband port that this request should be sent to
+    optional uint64  mcHandle                = 2;  // unique handle used by LWCA and RM to identify the group
+    optional uint32  createNodeId            = 3;  // Node that initiates the group create req
+    repeated bytes   uuid                    = 4;  // GPUs who joined the group
+    optional bool    mcFlaAddrValid          = 5;  // true if the mcFlaAddrBase and Range are valid
+    optional uint64  mcFlaAddrBase           = 6;
+    optional uint64  mcFlaAddrRange          = 7;
+    optional bool    parentMcFlaAddrValid    = 8;  // true if the parentcFlaAddrBase and Range are valid
+    optional uint64  parentMcFlaAddrBase     = 9;
+    optional uint64  parentMcFlaAddrRange    = 10;
+    optional configStatus errCode            = 11;
+};
+
+message multicastGroupSetupCompleteAck
+{
+    optional InbandLwlinkPortInfo  rxPort    = 1;  // Indicate the inband port that this ack is received from
+    optional uint64  mcHandle                = 2;  // unique handle used by LWCA and RM to identify the group
+    optional configStatus rspCode            = 3;
+};
+
+message multicastGroupReleaseRequest
+{
+    optional InbandLwlinkPortInfo  rxPort    = 1;  // Indicate the inband port that this request is received from
+    optional uint64  mcHandle                = 2;  // unique handle used by LWCA and RM to identify the group
+    repeated bytes   uuid                    = 3;  // GPUs who want to leave the group
+};
+
+message multicastGroupReleaseResponse
+{
+    optional InbandLwlinkPortInfo  txPort    = 1;  // Indicate the inband port that this response should be sent to
+    optional uint64  mcHandle                = 2;  // unique handle used by LWCA and RM to identify the group
+    optional uint32  createNodeId            = 3;  // Node that initiates the group create req
+    optional configStatus rspCode            = 4;
+};
+
+message multicastGroupReleaseCompleteRequest
+{
+    optional InbandLwlinkPortInfo  txPort    = 1;  // Indicate the inband port that this request should be sent to
+    optional uint64  mcHandle                = 2;  // unique handle used by LWCA and RM to identify the group
+    repeated bytes   uuid                    = 3;  // GPUs who left the group
+    optional bool    mcFlaAddrValid          = 4;  // true if the mcFlaAddrBase and Range are valid
+    optional uint64  mcFlaAddrBase           = 5;
+    optional uint64  mcFlaAddrRange          = 6;
+    optional bool    parentMcFlaAddrValid    = 7;  // true if the parentcFlaAddrBase and Range are valid
+    optional uint64  parentMcFlaAddrBase     = 8;
+    optional uint64  parentMcFlaAddrRange    = 9;
+    optional configStatus errCode            = 10;
+};
+
+message multicastGroupReleaseCompleteAck
+{
+    optional InbandLwlinkPortInfo rxPort     = 1;  // Indicate the inband port that this ack is received from
+    optional uint64  mcHandle                = 2;  // unique handle used by LWCA and RM to identify the group
+    optional configStatus rspCode            = 3;
+};
+#endif
+

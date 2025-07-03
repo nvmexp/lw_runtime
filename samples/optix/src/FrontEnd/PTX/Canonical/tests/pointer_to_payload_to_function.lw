@@ -1,0 +1,47 @@
+#include <optix_world.h>
+
+// Pass a pointer to the payload to a function.
+// -----------------------------------------------------------------------------
+rtDeclareVariable( rtObject, topObject, , );
+rtDeclareVariable( uint2, launchIndex, rtLaunchIndex, );
+rtBuffer<float4, 2> outputBuffer;
+
+RT_PROGRAM void rayGen()
+{
+    float3 rayOrigin    = optix::make_float3( 0.f, 0.f, 0.f );
+    float3 rayDirection = optix::make_float3( 0.f, 1.f, 0.f );
+
+    optix::Ray ray = optix::make_Ray( rayOrigin, rayDirection, 0, 1.e-4f, RT_DEFAULT_MAX );
+
+    float3 payloadColor = optix::make_float3( 0.f, 0.f, 0.f );
+
+    rtTrace( topObject, ray, payloadColor );
+
+    outputBuffer[launchIndex] = optix::make_float4( payloadColor, 1.f );
+}
+
+RT_PROGRAM void intersection()
+{
+    // Always hit.
+    if( rtPotentialIntersection( 100.0f ) )
+    {
+        rtReportIntersection( 0 );
+    }
+}
+
+__device__ __noinline__ void setPayload( float3* ptr )
+{
+    *ptr = optix::make_float3( 1.f, 0.f, 0.f );
+}
+
+rtDeclareVariable( float3, rayPayload, rtPayload, );
+RT_PROGRAM void closestHit()
+{
+    setPayload( &rayPayload );
+}
+
+RT_PROGRAM void boundingBox( int, float result[6] )
+{
+    result[0] = result[1] = result[2] = -1.0;
+    result[3] = result[4] = result[5] = 1.0;
+}

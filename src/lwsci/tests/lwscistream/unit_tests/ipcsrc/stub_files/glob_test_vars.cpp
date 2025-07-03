@@ -1,0 +1,1 @@
+../../stubs/src/glob_test_vars.cpp

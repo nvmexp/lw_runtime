@@ -1,0 +1,160 @@
+// cg_eye.cg
+//   Originally:  ?? instructions -  ?? passes
+//   Lwrrently:  134 instructions - 124 passes - 4 R-regs, 8 H-4regs
+//   Optimal:     ?? instructions -  ?? passes
+
+/*********************************************************************LWMH3****
+Path:  E:\lwpu\devrel\LWSDK\Common\media\programs
+File:  cg_eye.cg
+
+Copyright LWPU Corporation 2002
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+*AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+
+Comments:
+    An example of how to do limited ray tracing directly in the pixel shader.
+
+******************************************************************************/
+
+// FRAGMENT PROGRAM
+
+//
+// funcs //////////////
+//
+
+// Assume ray direction is normalized.
+// Vector "planeEq" is encoded half3(A,B,C,D) where (Ax+By+Cz+D)=0
+//  and half3(A,B,C) has been normalized
+//
+half intersect_plane(half3 rayOrigin,half3 rayDir,half4 planeEq)
+{
+    half3 planeN = planeEq.xyz;
+    half denominator = dot(planeN,rayDir);
+    half result = -1.0h;    // if return value negative, ignore any ray (cause it's BEHIND the eye)
+    // d==0 -> parallel || d>0 -> faces away
+    if (denominator < 0.0h) {
+	half top = dot(planeN,rayOrigin) + planeEq.w;
+	result = -top/denominator;
+    }
+    return result;
+}
+
+//////////////////////////////////
+// Actual Fragment Program Here //
+//////////////////////////////////
+
+// channels in our material map:
+#define SPEC_STR x
+#define METALNESS y
+#define NORM_SPEC_EXPON z
+
+// subfields in "BallData"
+#define RADIUS x
+#define IRIS_DEPTH y
+#define ETA z
+#define LENS_DENSITY w
+
+// subfields in "SpecData"
+#define PHONG x
+#define GLOSS1 y
+#define GLOSS2 z
+#define DROP w
+
+// input -- same struct is the output from "cg_eyeVP.cg"
+struct EyeV2F {
+    float4 HPosition    : POSITION; // clip space pos for rasterizer. Not readable in frag prog
+    float3 OPosition    : TEXCOORD1; // Obj-coords location
+    float3 VPosition    : TEXCOORD3;    // viewer pos in obj coordinates
+    float3 N            : TEXCOORD6;    // normal in obj coordinates
+    float4 LightVecO    : TEXCOORD7; // light firection in obj coords
+};
+
+struct PixelOut {
+    half4 COL : COLOR;
+    half DEPR : DEPTH;
+};
+
+PixelOut main(
+    EyeV2F IN,
+    uniform sampler2D   ColorMap    : texunit0, // color
+    uniform float4 BallData,        // components: {radius,irisDepth,eta,lensDensity)
+    uniform float4 GlossData,       // components: {phongExp,gloss1,gloss2,drop)
+    uniform float3 AmbiColor,
+    uniform float3 DiffColor,
+    uniform float3 SpecColor,
+    uniform float3 LensColor,
+    uniform float3 BgColor
+) {
+    half3 baseTex = half3(1.0h,1.0h,1.0h);    // could be a param
+    half GRADE = 0.05h;         // could be a param
+    half3 yAxis = half3(0h,1h,0h);
+    half3 xAxis = half3(1h,0h,0h);
+    half3 ballCtr = half3(0h,0h,0h);
+    // all of these actually evaluate to constants - could be done in VP or on CPU
+    half irisSize = BallData.RADIUS * sqrt(1.0h-BallData.IRIS_DEPTH*BallData.IRIS_DEPTH); // radius of pupil disk
+    half irisScale = 0.3333h/max(0.01h,irisSize);
+    half irisDist = BallData.RADIUS*BallData.IRIS_DEPTH;
+    half3 pupilCenter = ballCtr + half3(irisDist,0h,0h);
+    half D = -dot(pupilCenter,xAxis);  // if x axis, returns simple -irisDist
+    half slice = IN.OPosition.x - irisDist;
+    half4 planeEquation = half4(xAxis.x,xAxis.y,xAxis.z,D);
+
+
+    // okay, now actual per-pixeldata enters the stage
+    half3 Vn = normalize(IN.OPosition - IN.VPosition);     // view vector TO surface
+    half3 Nf = normalize(IN.N);
+    half3 Ln = IN.LightVecO.xyz;   // already normalized by vertex program
+    half3 DiffLight = DiffColor * max(0h, dot(Nf, -Ln)).xxx;
+    half3 missColor = AmbiColor + baseTex * DiffLight;
+    half3 DiffPupil = AmbiColor + max(0h, dot(xAxis, -Ln)).xxx; // full-blast half3
+
+    half3 halfAng = normalize(-Ln-Vn);
+    half ndh = abs(dot(Nf,halfAng));
+    half spec1 = pow(ndh,GlossData.PHONG);
+    half s2 = smoothstep(GlossData.GLOSS1,GlossData.GLOSS2,spec1);
+    spec1 = spec1 * ((1.0h-GlossData.DROP) + GlossData.DROP*s2);     // params
+    half3 SpelwlarLight = SpecColor * spec1.xxx;
+
+
+    half3 hitColor = missColor;
+
+    if (slice >= 0.0h) {
+	half gradedEta = BallData.ETA;
+	gradedEta = 1.0h/gradedEta;  // test hack
+	half3 faceColor = BgColor; // blown out - go to BG color
+	half c1 = dot(-Vn,Nf);
+	half cs2 = 1.0h-gradedEta*gradedEta*(1.0h-c1*c1);
+	// faceColor = half3(cs2.x,-cs2.x,c1);
+	if (cs2 >= 0.0h) {
+	    half3 refVector = gradedEta*Vn+((gradedEta*c1-sqrt(cs2))*Nf);
+	    // now let's intersect with the iris plane
+	    half irisT = intersect_plane(IN.OPosition,refVector,planeEquation);
+	    half fadeT = irisT * BallData.LENS_DENSITY;
+	    fadeT = fadeT * fadeT;
+	    faceColor = DiffPupil.xxx;  // temporary (?)
+	    if (irisT > 0) {
+		half3 irisPoint = IN.OPosition + irisT*refVector;
+		half3 irisST = (irisScale*irisPoint) + half3(0.0h,0.5h,0.5h);
+		faceColor = h3tex2D(ColorMap,irisST.yz);
+	    }
+	    faceColor = lerp(faceColor,LensColor,fadeT);
+	    hitColor = lerp(missColor,faceColor,smoothstep(0.0h,GRADE,slice));
+	}
+    }
+
+    hitColor = hitColor + SpelwlarLight;
+    // hitColor = DiffLight + SpelwlarLight;
+    PixelOut OUT;
+    OUT.COL = half4(hitColor.x,hitColor.y,hitColor.z,1.0h);
+    return OUT;
+}
+
+// end

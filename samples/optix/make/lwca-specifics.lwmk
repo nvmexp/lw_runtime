@@ -1,0 +1,220 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+## lwca-rules and lwca patterns
+## WIP Implement the missing patterns from
+
+#==== General Config Section
+# This *must* be in the form major.minor, (yes, it needs to end in a comma, see ctVersion.c)
+# NOTE: When you update the LWCA toolkit in apps/optix/support,
+# make sure that the LWDA_VERSION below correctly reflects the toolkit version.
+LWDA_VERSION := 11.4,
+
+# We want Linux or Windows; LW_HOST_OS_FAMILY is "Unix" on Linux and LW_HOST_OS is "Linux".
+# However, LW_HOST_OS on Windows is something like "win7" and we don't want a LWCA toolkit
+# per flavor of Windows.  So replace "Unix" with "Linux"
+OPTIX_LWDA_TOOLKIT_OS_FAMILY = $(subst Unix,Linux,$(LW_HOST_OS_FAMILY))
+
+# When building for aarch64 or ppc64le, the LW_TARGET_ARCH represents the cross-compiling build target
+# and the LW_HOST_ARCH represents the local environment.
+OPTIX_LWDA_ARCH = $(LW_TARGET_ARCH)
+ifeq ($(OPTIX_LWDA_TOOLKIT_OS_FAMILY)_$(LW_TARGET_ARCH),Windows_aarch64)
+  # Windows on aarch64 doesn't use a distinct LWCA toolkit
+  OPTIX_LWDA_ARCH = amd64
+endif
+TARGET_LWDA_TOOLKIT_ROOT_DIR = $(LW_OPTIX)/support/lwca/$(OPTIX_LWDA_TOOLKIT_OS_FAMILY)_$(OPTIX_LWDA_ARCH)
+# Host toolkit is always amd64
+HOST_LWDA_TOOLKIT_ROOT_DIR = $(LW_OPTIX)/support/lwca/$(OPTIX_LWDA_TOOLKIT_OS_FAMILY)_amd64
+
+# We need both the LWCA host and target toolkits.  They will be the same when not cross-compiling.
+LW_REQUIRED_DIRS += $(HOST_LWDA_TOOLKIT_ROOT_DIR) $(TARGET_LWDA_TOOLKIT_ROOT_DIR)
+
+RTCORE_ADAPTIVE_ABI_ENABLED ?= 1
+ifeq ($(RTCORE_ADAPTIVE_ABI_ENABLED),1)
+  OPTIX_DEFINES += RTCORE_ADAPTIVE_ABI_ENABLED=1
+endif
+
+# fatal error C1189: error:  "not enough parameter registers to hold the entire state"
+OPTIX_DEFINES += PTXAS_NUM_ABI_PARAM_REGISTERS=128
+OPTIX_DEFINES += PTXAS_SCHEDULERS_MAXRREGCOUNT=128
+
+# Save the settings! Because only LWCA uses VS 2015. Later includes will set back the compiler and use other settings
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+  HOST_COMPILER     := $(MSVC_TARGET_BIN_DIR)
+  LWCC_LD_LIBRARY_PATH_SETUP :=
+  comma := ,
+  LWCC_FLAGS                 += $(if $(filter debug,$(LW_BUILD_TYPE)),--debug -Xcompiler -DEBUG$(comma)-MTd$(comma)-FS)
+
+  LWDA_RUNTIME_LIB = $(TARGET_LWDA_TOOLKIT_ROOT_DIR)/lib/x64/lwca.lib
+else ifeq ($(LW_TARGET_OS_FAMILY),Unix)
+  # See drivers/rtcore/makefile-lwca.lwmk
+  HOST_PREFIX = LWCC_HOST_
+  LW_$(HOST_PREFIX)BULLSEYE =
+
+  LWCC_LD_LIBRARY_PATH_SETUP := LD_LIBRARY_PATH=$(TARGET_LWDA_TOOLKIT_ROOT_DIR)/lwvm/lib64:$(LD_LIBRARY_PATH)
+  LWCC_FLAGS                 += -Xcompiler "$(filter -isystem%,$(CXX)) $(filter -I%,$(CXX))"
+  LWCC_FLAGS                 += -std=c++11 -Xcompiler "-std=c++11 -fPIC $(filter -B%,$(CXX)) $(if $(filter debug,$(LW_BUILD_TYPE)),--debug)"
+
+  LWDA_RUNTIME_LIB = $(TARGET_LWDA_TOOLKIT_ROOT_DIR)/lib64/stubs/liblwda.so
+else
+  $(error Unknown target OS family: $(LW_TARGET_OS_FAMILY))
+endif
+
+#  warning: LWB requires C++14.
+LWCC_FLAGS += -DLWB_IGNORE_DEPRECATED_CPP_DIALECT
+
+# --- LWCA Setup ---
+OPTIX_SM_VERSIONS ?=
+ifeq ($(OPTIX_SM_VERSIONS),)
+  OPTIX_SM_VERSIONS = 50 52 53 60 61 62 70 75
+  ifeq ($(LWCFG_GLOBAL_ARCH_AMPERE),1)
+    OPTIX_SM_VERSIONS += 80 86
+  endif
+endif
+ifneq ($(sort $(OPTIX_SM_VERSIONS)),$(OPTIX_SM_VERSIONS))
+  # We have to have a unique set to keep lwcc happy, so might as well enforce it here with this check.
+  $(error OPTIX_SM_VERSIONS is not sorted or contains duplicates; $(sort $(OPTIX_SM_VERSIONS))!=$(OPTIX_SM_VERSIONS). )
+endif
+
+OPTIX_SM_VERSION_FOR_PTX ?=
+ifeq ($(OPTIX_SM_VERSION_FOR_PTX),)
+  OPTIX_SM_VERSION_FOR_PTX = 50
+endif
+ifneq ($(words $(OPTIX_SM_VERSION_FOR_PTX)),1)
+  $(error OPTIX_SM_VERSION_FOR_PTX can only have a single value; OPTIX_SM_VERSION_FOR_PTX=$(OPTIX_SM_VERSION_FOR_PTX).)
+endif
+
+# For LWCA 11 toolkit.
+# To generate a real WARPSYNC instruction we need --force-aligned-sync-instrs
+LWCC_FLAGS += -Xptxas "--force-aligned-sync-instrs"
+
+# This flag allows us to still use the deprecated warp-level primitives without a .sync modifier.
+# This flag must be removed as soon as .sync version of the primitives have acceptable performance.
+# See: http://lwbugs/200387803
+LWCC_FLAGS += -Xptxas "-sw200387803=true"
+
+# The 'compute_32', 'compute_35', 'compute_37', 'compute_50', 'sm_32', 'sm_35', 'sm_37' and 'sm_50' architectures are deprecated, and may be removed in a future release.
+LWCC_FLAGS += -Wno-deprecated-gpu-targets
+
+# warning: Thrust requires C++14.
+LWCC_FLAGS += -DTHRUST_IGNORE_DEPRECATED_CPP_DIALECT
+
+SUPPORTED_GPU_ARCHS ?=
+ifneq ($(SUPPORTED_GPU_ARCHS),)
+  $(error SUPPORTED_GPU_ARCHS is defined elsewhere and will break OPTIX: SUPPORTED_GPU_ARCHS=$(SUPPORTED_GPU_ARCHS))
+endif
+SUPPORTED_GPU_ARCHS := $(foreach sm,$(OPTIX_SM_VERSIONS),-gencode arch=compute_$(sm),code=sm_$(sm))
+
+# LWCA tools run on the host, not the target
+LWDA_BIN_PATH :=  $(HOST_LWDA_TOOLKIT_ROOT_DIR)/bin
+LWCC  := $(LWCC_LD_LIBRARY_PATH_SETUP) $(LWDA_BIN_PATH)/lwcc
+LWASM := $(LWDA_BIN_PATH)/lwasm_internal
+
+# No DEBUG for developer builds
+
+LWCC_FLAGS += -Wno-deprecated-declarations -lwdart none --use-local-elw -ccbin $(if $(filter Windows,$(LW_TARGET_OS_FAMILY)),$(HOST_COMPILER),$(firstword $(filter %++,$(CXX)))) -use_fast_math -Xptxas=-knob -Xptxas=InsertYields=0 $(SUPPORTED_GPU_ARCHS)
+
+# Use the driver headers checked into the tree, so we can access features that
+# aren't yet public.
+OPTIX_LWDA_INCLUDES = \
+  $(LW_SOURCE)/drivers/gpgpu/lwca/inc \
+  $(TARGET_LWDA_TOOLKIT_ROOT_DIR)/include
+OPTIX_INCLUDES += $(OPTIX_LWDA_INCLUDES)
+
+# Check LWCC_INCLUDES=drivers\rtcore\rtcore\bvhtools\src\common
+LWCC_FLAGS += $(addprefix -I,$(LW_INCLUDES) $(OPTIX_INCLUDES))
+LWCC_FLAGS += $(addprefix -D,$(LW_DEFINES) $(OPTIX_DEFINES))
+
+# Link statically against the lwca runtime
+ifeq ($(LW_HOST_OS_FAMILY),Windows)
+  OPTIX_LWDA_LFLAGS := \
+    $(TARGET_LWDA_TOOLKIT_ROOT_DIR)/lib/x64/lwdart_static.lib \
+    $(LW_OPTIX)/support/lwapi/lwapi64.lib
+else
+  OPTIX_LWDA_LFLAGS := \
+    $(TARGET_LWDA_TOOLKIT_ROOT_DIR)/lib64/liblwdart_static.a \
+    -lrt
+endif
+OPTIX_LFLAGS += $(OPTIX_LWDA_LFLAGS)
+
+define LW_OPTIX_OBJ_FROM_LW_SOURCE
+LW_DIRS_TO_CREATE += $(dir $(2))
+$(2): $(1) $(LW_OPTIX)/make/lwca-specifics.lwmk | $(dir $(2))
+ifeq ($$(LW_VERBOSE),1)
+	$$(ECHO) "LW to OBJ $$(<) to $$(@)"
+endif
+ifeq ($$(LW_AUTO_DEPEND),1)
+	$$(file >$$(@)_dep_args.txt,--generate-dependencies --dependency-target-name $$(@) --disable-warnings $$(LWCC_FLAGS) $$(<))
+ifeq ($$(LW_VERBOSE),1)
+	@$$(ECHO) compiler dependency params $$(@)_dep_args.txt:
+	@$$(CAT) $$(@)_dep_args.txt
+endif
+	$$(LWCC) --options-file $$(@)_dep_args.txt -o $$(@)_dep.tmp
+	$$(PYTHON) $$(LW_OPTIX)/make/process-lwcc-dependencies.py $$(call DEPFILE_FROM_OBJECT,$$(@)) $$(<) < $$(@)_dep.tmp
+endif
+	$$(file >$$(@)_args.txt,-c $$(LWCC_FLAGS) -o $$(@) $$(<))
+ifeq ($$(LW_VERBOSE),1)
+	@$$(ECHO) compiler params $$(@)_args.txt
+	@$$(CAT) $$(@)_args.txt
+endif
+	$$(PYTHON) $$(LW_OPTIX)/make/filter-lwcc.py $$(LWCC) --options-file $$(@)_args.txt
+endef
+
+# Rule to generate PTX from LWCA source
+define LW_OPTIX_PTX_FROM_SOURCE
+LW_DIRS_TO_CREATE += $(dir $(2))
+$(2): $(1) $(LW_OPTIX)/make/lwca-specifics.lwmk $(LW_OPTIX)/make/ptxSquasher.py | $(dir $(2))
+	$$(ECHO) "Generate PTX $$(subst $$(LW_OPTIX)/,,$$(<))"
+	$$(file >$$(@)_args.txt,-ptx -arch=sm_$$(OPTIX_SM_VERSION_FOR_PTX) $$(filter-out $$(SUPPORTED_GPU_ARCHS),$$(LWCC_FLAGS)) $(if ifeq ($$(LW_AUTO_DEPEND),1),--generate-dependencies-with-compile --dependency-output $$(call DEPFILE_FROM_OBJECT,$$(@)) --generate-dependency-targets) -o $$(@) $$(<))
+ifeq ($$(LW_VERBOSE),1)
+	@$$(ECHO) compiler params $$(@)_args.txt
+	@$$(CAT) $$(@)_args.txt
+endif
+	$$(PYTHON) $$(LW_OPTIX)/make/filter-lwcc.py $$(LWCC) --options-file $$(@)_args.txt
+	$$(PYTHON) $$(LW_OPTIX)/make/ptxSquasher.py -i $$(@) -o $$(@)
+endef
+
+# Rule to generate a FATBIN from a LWCA source
+define LW_OPTIX_FATBIN_FROM_SOURCE
+LW_DIRS_TO_CREATE += $(dir $(2))
+$(2): $(1) $(LW_OPTIX)/make/lwca-specifics.lwmk | $(dir $(2))
+ifeq ($$(LW_VERBOSE),1)
+	$$(ECHO) "LW to FATBIN $$(<) to $$(@)"
+endif
+ifeq ($$(LW_AUTO_DEPEND),1)
+	$$(file >$$(@)_dep_args.txt,--generate-dependencies --dependency-target-name $$(@) --disable-warnings $$(LWCC_FLAGS) $$(<))
+ifeq ($$(LW_VERBOSE),1)
+	@$$(ECHO) compiler dependency params $$(@)_dep_args.txt:
+	@$$(CAT) $$(@)_dep_args.txt
+endif
+	$$(LWCC) --options-file $$(@)_dep_args.txt -o $$(@)_dep.tmp
+	$$(PYTHON) $$(LW_OPTIX)/make/process-lwcc-dependencies.py $$(call DEPFILE_FROM_OBJECT,$$(@)) $$(<) < $$(@)_dep.tmp
+endif
+	$$(file >$$(@)_args.txt,-fatbin $$(LWCC_FLAGS) -o $$(@) $$(<))
+ifeq ($$(LW_VERBOSE),1)
+	@$$(ECHO) compiler params $$(@)_args.txt
+	@$$(CAT) $$(@)_args.txt
+endif
+	$$(PYTHON) $$(LW_OPTIX)/make/filter-lwcc.py $$(LWCC) --options-file $$(@)_args.txt
+endef

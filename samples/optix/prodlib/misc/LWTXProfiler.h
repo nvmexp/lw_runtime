@@ -1,0 +1,112 @@
+// Copyright LWPU Corporation 2019
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#pragma once
+
+#include <lwtx3/lwToolsExt.h>
+
+#include <array>
+
+#include <g_lwconfig.h>
+
+#define SCOPED_LWTX_RANGE( profiler, string )                                                                          \
+    optix_exp::ScopedLWTXRange scopedLWTXRange_##__LINE__##__FILE__( profiler, string );
+
+// Identifiers for registered strings. To add a new registered string, add an
+// entry to the enum and update LWTXProfiler::getMessageString to return the
+// desired value.
+enum class LWTXRegisteredString
+{
+    PTX_ENCRYPTION_GET_OPTIX_SALT,
+    PTX_ENCRYPTION_SET_OPTIX_SALT,
+    PTX_ENCRYPTION_SET_VENDOR_SALT,
+    PTX_ENCRYPTION_SET_PUBLIC_VENDOR_KEY,
+    DEVICE_CONTEXT_GET_PROPERTY,
+    DEVICE_CONTEXT_SET_LOG_CALLBACK,
+    DEVICE_CONTEXT_SET_CACHE_ENABLED,
+    DEVICE_CONTEXT_SET_CACHE_LOCATION,
+    DEVICE_CONTEXT_GET_CACHE_ENABLED,
+    DEVICE_CONTEXT_GET_CACHE_LOCATION,
+    DEVICE_CONTEXT_GET_CACHE_DATABASE_SIZES,
+    DEVICE_CONTEXT_SET_CACHE_DATABASE_SIZES,
+    DENOISER_CREATE,
+    DENOISER_DESTROY,
+    DENOISER_ILWOKE,
+    DENOISER_COMPUTE_MEMORY_RESOURCES,
+    DENOISER_SETUP,
+    DENOISER_SET_MODEL,
+    DENOISER_COMPUTE_INTENSITY,
+    PROGRAM_GROUP_CREATE,
+    PROGRAM_GROUP_DESTROY,
+    SBT_RECORD_PACK_HEADER,
+    PROGRAM_GROUP_GET_STACK_SIZE,
+    PIPELINE_CREATE,
+    PIPELINE_DESTROY,
+    PIPELINE_SET_STACK_SIZE,
+    LAUNCH,
+    MODULE_CREATE_FROM_PTX,
+    MODULE_CREATE_FROM_PTX_WITH_TASKS,
+    MODULE_DESTROY,
+    MODULE_GET_COMPILATION_STATE,
+    TASK_EXELWTE,
+    BUILTIN_IS_MODULE_GET,
+    ACCEL_COMPUTE_MEMORY_USAGE,
+    ACCEL_BUILD,
+    ACCEL_GET_RELOCATION_INFO,
+    ACCEL_CHECK_RELOCATION_COMPATIBILITY,
+    ACCEL_RELOCATE,
+    ACCEL_COMPACT,
+    ACCEL_INSTANCE_AABBS_COMPUTE_MEMORY_USAGE,
+    ACCEL_INSTANCE_AABBS_COMPUTE,
+    COLWERT_POINTER_TO_TRAVERSABLE_HANDLE,
+#if LWCFG(GLOBAL_FEATURE_GR1354_MICROMESH)
+    VISIBILITY_MAP_ARRAY_COMPUTE_MEMORY_USAGE,
+    VISIBILITY_MAP_ARRAY_BUILD,
+    DISPLACED_MICROMESH_ARRAY_COMPUTE_MEMORY_USAGE,
+    DISPLACED_MICROMESH_ARRAY_BUILD,
+#endif  // LWCFG(GLOBAL_FEATURE_GR1354_MICROMESH)
+    MESSAGES_END
+};
+
+namespace optix_exp {
+
+class LWTXProfiler
+{
+  public:
+    LWTXProfiler( const char* contextIdentifier );
+    ~LWTXProfiler();
+
+    void pushRange( LWTXRegisteredString profileString );
+    void popRange();
+
+  private:
+    lwtxDomainHandle_t m_domain;
+    std::array<lwtxStringHandle_t, static_cast<int>( LWTXRegisteredString::MESSAGES_END )> m_messages = {nullptr};
+
+    const char* getMessageString( LWTXRegisteredString messageIdentifier );
+    lwtxStringHandle_t getMessage( LWTXRegisteredString messageIdentifier );
+};
+
+class ScopedLWTXRange
+{
+  public:
+    ScopedLWTXRange( LWTXProfiler* profiler, LWTXRegisteredString rangeMessage )
+        : m_profiler( profiler )
+    {
+        m_profiler->pushRange( rangeMessage );
+    }
+
+    ~ScopedLWTXRange() { m_profiler->popRange(); }
+
+  private:
+    LWTXProfiler* m_profiler = nullptr;
+};
+}

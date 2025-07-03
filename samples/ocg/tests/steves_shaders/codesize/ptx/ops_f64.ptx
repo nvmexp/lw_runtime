@@ -1,0 +1,65 @@
+	.version 3.1
+	.target sm_20
+
+        .global .f64 mem0;
+        .global .f64 mem1;
+        .global .u32 addrMem;
+        .local  .f64 mem2;
+
+	.entry main 
+	{
+           .reg .f64 a, b;
+           .reg .f32 f;
+           .reg .u32 addr;
+           .reg .pred p;
+           
+
+           ld.global.f64  a, [mem0];
+           ld.global.f64  b, [mem1];
+           min.f64        a, a, b;
+           max.f64        a, a, b;
+           mul.f64        a, a, b;
+           add.rz.f64     a, a, b;
+           mov.b64        b, 0x6556556556556565;
+           mad.rp.f64     a, a, 5.0, 6.777;
+           neg.f64        a, a;
+           and.b64        a, a, 567567;
+           abs.f64        b, b;
+           mul.f64.rm     a, a, b;
+
+           ld.global.u32  addr, [addrMem];
+           ld.shared.f64  b, [addr + 16];
+           max.f64        a, a, b;
+
+           ld.local.f64   b, [addr + 32];
+           max.f64        a, a, b;
+
+           ld.const.f64   b, [addr + 64];
+           max.f64        a, a, b;
+
+           max.f64        a, a, 45.75575575575;
+           max.f64        a, a, 1.0;
+           max.f64        b, 4345.565565, 3333.56556565;
+           max.f64        a, a, b;
+           add.f64        a, a, 3.0;
+           min.f64        a, a, 3.5;
+           mul.f64        a, a, 4.5;
+           st.global.f64  [mem0], a;
+
+           set.equ.u32.f64  addr, a, 4.5;
+           set.le.f32.f64   f, a, 5.66;
+           and.b32          addr, addr, f;
+           setp.ne.f64      p, b, a;
+      @p   st.global.u32    [addrMem], addr;
+      
+           min.f64          a, a, 0.0;
+           max.f64          a, a, 0.0;
+           mad.rz.f64       a, 0.0, a, 1.0;
+           add.f64          a, 0.0, a;
+           st.global.f64    [mem0], a;
+
+           testp.normal.f64 p, a;
+      @p   st.global.f64    [mem0], a; 
+           exit;
+        }
+

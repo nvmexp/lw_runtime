@@ -1,0 +1,86 @@
+// Lava1_ps.cg
+//
+//   Originally: ?? instructions - ?? passes
+//   Lwrrently:  68 instructions - 56 passes - 2 R-regs, 4 H-regs
+//   Optimal:    ?? instructions - ?? passes
+
+// Moving lava, animated via dependant texture reads
+
+// FRAGMENT PROGRAM
+
+struct FragIn /* : vertex2fragment */ {
+    float4 EyePos : WPOS; // can't read from HPOS
+    float4 TexCoords : TEX0;
+    float4 ObjPos : TEX1;
+    float4 Normal : TEX2;
+};
+
+struct PixelOut /* : fragment2framebuffer */ {
+    half4 COL : COLOR;
+    half DEPR : DEPTH;
+};
+
+//
+// Fragment program here
+//
+
+#pragma bind main.MaskImage = texunit 0
+#pragma bind main.HeatLwrve = texunit 2
+#pragma bind main.NoiseMap = texunit 3
+
+// #define MASK_ONLY
+
+PixelOut main(
+    FragIn IN,
+    uniform sampler2D MaskImage,	// Lava and chunks as HARD mask in ch0, soft mask in ch 1
+    uniform sampler2D HeatLwrve, // Lwrve describing heat glow, each scanline a slightly-varying distribution
+    uniform sampler3D NoiseMap, // Lwrve describing heat glow, each scanline a slightly-varying distribution
+    uniform float4 LavaAnimV,	// {LavaAnim,LavaBlur(8),LavaNoiseGain(0.05),LavaNoiseGain2(0.3)}
+#define TIMER LavaAnimV.x
+#define BLUR LavaAnimV.y	// ignored!!
+#define ST_NOISE_SCALE LavaAnimV.z
+#define LAVA_NOISE_DENSITY LavaAnimV.w
+    uniform float4 NoiseOff1,	// {NoiseOff1.xyz(-0.17,0,0.37),NoiseFreq1(0.75)}
+    uniform float4 NoiseOff2,	// {NoiseOff2.xyz(-0.17,0,0.37),NoiseFreq1(0.55)}
+    uniform float4 LightDir,	// {0,1,0,0}
+    uniform float4 BgColor	// for fog
+) {
+    PixelOut OUT;
+    half2 ActualST = 3.0h * IN.TexCoords.xy;	// repeat hack -- parameter!	- no fixed
+    fixed maskTex = x1tex2D(MaskImage,ActualST);
+    half3 noiseIndex1 = (IN.ObjPos.xyz*NoiseOff1.w)+half3(TIMER*NoiseOff1.x,NoiseOff1.y,TIMER*NoiseOff1.z);
+    fixed2 stOffsets = (x2tex3D(NoiseMap,noiseIndex1)-fixed2(0.5x,0.5x))*ST_NOISE_SCALE;
+    half2 blurIndex = ActualST + stOffsets ;
+    fixed3 mask2 = x3tex2D(MaskImage,blurIndex);
+    fixed blurredMask = max(0.0x,min(1.0x,((mask2.g-0.2x)*1.65x)));	// parameters!
+    half3 noiseIndex2 = (IN.ObjPos.xyz*NoiseOff2.w)+half3(NoiseOff2.x,TIMER*NoiseOff2.y,TIMER*NoiseOff2.z);
+    fixed texN = 1.0x - x1tex3D(NoiseMap,noiseIndex2)*LAVA_NOISE_DENSITY;
+
+    // half3 Vn = normalize(IN.EyePos.xyz);
+    half3 Vn = half3(0.0h,0.0h,1.0h);		// workaround for old errors - looks brighter with "fixed"
+    fixed3 Ln = normalize(LightDir.xyz);
+    half3 Hn = normalize(Vn+Ln);	// not happy being "fixed"
+    fixed3 Nn = normalize(IN.Normal.xyz);
+    fixed spec = (1.0x - maskTex) * pow(dot(Hn,Nn),8.0h) * 0.8x;	// parameter!	- note power func no "x"
+    // fixed diff = (1.0x-maskTex) * max(0.0x,dot(Ln,Nn)) * 0.3x;
+    fixed roll = dot(Vn,Nn);
+    fixed facing = 0.8x+roll*0.2x;
+
+#ifndef MASK_ONLY
+    fixed tex2 = texN * blurredMask;
+    tex2 = max(0.03x,tex2);	// parameter!
+    tex2 = min(0.97x,tex2);	// parameter!
+
+    fixed4 lavaColor = maskTex * facing * x4tex2D(HeatLwrve,half2(tex2,TIMER)) + spec.xxxx;
+    // fixed4 lavaColor2 = lerp(lavaColor,BgColor,IN.EyePos.z);
+    fixed4 lavaColor2 = lerp(BgColor,lavaColor,abs(roll));
+    lavaColor2.w = 1.0x;
+
+    OUT.COL = lavaColor2;
+#else /* MASK_ONLY */
+    // OUT.COL = half4(blurredMask.x,maskTex.x,texN.x,1.0x);
+    OUT.COL = half4(mask2.x,mask2.y,blurredMask.x,1.0x);
+#endif /* MASK_ONLY */
+    return OUT;
+}
+

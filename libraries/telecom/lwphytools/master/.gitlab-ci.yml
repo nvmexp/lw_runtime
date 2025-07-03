@@ -1,0 +1,94 @@
+image: gitlab-master.lwpu.com:5005/gputelecom/lwphytools
+
+stages:
+  - src package
+  - config
+  - build
+
+source_code_package:
+  stage: src package
+  script:
+    - mkdir .__tmppackage__
+    - cp -R * .__tmppackage__/
+    - mv .__tmppackage__ lwPHYTools_src
+  artifacts:
+    name: "lwPHYTools-${CI_COMMIT_SHA:0:8}-src"
+    paths:
+      - lwPHYTools_src/
+    expire_in: 4 hrs
+
+#Avoid my personal API token here...
+#cmd="trigger -a $API_TOKEN -p 0428cbc5ba5d6243720b0fc33db6b1 -t master -r 3718"
+config_x86:
+  stage: config
+  script: |
+    attempt=0
+    while [[ 1 == 1 ]]; do
+      lwrl --location --output artifacts_src.zip "https://gitlab-master.lwpu.com/api/v4/projects/3718/jobs/artifacts/master/download?job=source_code_package&job_token=$CI_JOB_TOKEN"
+      size_1=`du -b artifacts_src.zip | cut -f1`
+      lwrl --location --output artifacts_build.zip "https://gitlab-master.lwpu.com/api/v4/projects/3718/jobs/artifacts/master/download?job=build_dpdk_x86&job_token=$CI_JOB_TOKEN"
+      size_2=`du -b artifacts_build.zip | cut -f1`
+      if [ $size_1 -le 100 ] || [ $size_2 -le 100 ]
+      then
+        if [ $attempt -eq 0 ]; then
+          lwrl -X POST -F token=0428cbc5ba5d6243720b0fc33db6b1 -F ref=master "https://gitlab-master.lwpu.com/api/v4/projects/3718/trigger/pipeline"
+          attempt=$((attempt+1))
+        else
+          sleep 2
+        fi
+      else
+        unzip artifacts_src.zip -d LWRAN
+        rm artifacts_src.zip
+        unzip artifacts_build.zip -d LWRAN/gpu-dpdk
+        rm artifacts_build.zip
+        break
+      fi
+    done
+
+    attempt=0
+    while [[ 1 == 1 ]]; do
+      lwrl --location --output artifacts.zip "https://gitlab-master.lwpu.com/api/v4/projects/11261/jobs/artifacts/develop/download?job=build_x86&job_token=$CI_JOB_TOKEN"
+      size=`du -b artifacts.zip | cut -f1`
+      if [ $size -le 100 ]
+      then
+        if [ $attempt -eq 0 ]; then
+          lwrl -X POST -F token=15e2af3eef0c134ad2be5554d9f629 -F ref=develop "https://gitlab-master.lwpu.com/api/v4/projects/11261/trigger/pipeline"
+          attempt=$((attempt+1))
+        else
+          sleep 2
+        fi
+      else
+        unzip artifacts.zip -d LWRAN
+        rm artifacts.zip
+        break
+      fi
+    done
+    
+    ls -lh
+    ls -lh LWRAN
+  artifacts:
+    name: "lwPHYTools-${CI_COMMIT_SHA:0:8}-config"
+    paths:
+      - LWRAN/
+    expire_in: 36 hrs
+
+build_x86:
+  stage: build
+  dependencies:
+    - config_x86
+  script:
+    - export RTE_SDK=$(pwd)/LWRAN/gpu-dpdk
+    - export RTE_TARGET=x86_64-sandybridge-linuxapp-gcc
+    - export LWPHY_PATH=$(pwd)/LWRAN/lwPHY
+    - export LWPHYTOOLS_PATH=$(pwd)
+    - mkdir build
+    - mkdir lwPHYTools
+    - cd build
+    - cmake .. -DCMAKE_INSTALL_PREFIX=../lwPHYTools
+    - make
+    - make install
+  artifacts:
+    name: "lwPHYTools-${CI_COMMIT_SHA:0:8}-build"
+    paths:
+      - lwPHYTools/
+    expire_in: 36 hrs

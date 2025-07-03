@@ -1,0 +1,167 @@
+##############################################################################
+# Copyright (c) 2019-2021, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+##############################################################################
+
+##############################################################################
+# test_lwscistream_api makefile
+##############################################################################
+
+##############################################################################
+# Identify this module to lwCommon.lwmk so it can decide the build type
+##############################################################################
+
+LW_MODULE_BUILD_TYPE_ALIASES = lwscistream
+LW_MODULE_LOGGING_NAME = "test_lwscistream_api"
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+include $(LW_SOURCE)/drivers/lwsci/tests/gtest/gtest.lwmk
+
+##############################################################################
+# path shorthands
+##############################################################################
+
+LWSCI_PATH              := $(LW_SOURCE)/drivers/lwsci
+LWSCISTREAM_PATH        := $(LWSCI_PATH)/lwscistream
+LWSCI_TESTS_PATH        := $(LWSCI_PATH)/tests
+LWSCISTREAM_TESTS_PATH  := $(LWSCI_TESTS_PATH)/lwscistream/component_tests
+
+##############################################################################
+# build the appropriate LwSciStream stub libraries
+##############################################################################
+
+include $(LWSCISTREAM_PATH)/lwscistream-dso-stub.lwmk
+STUB_DSO_DEPENDS += $(LWSCISTREAM_DSO_STUB)
+STUB_LDFLAGS += -llwscistream-stub
+
+##############################################################################
+# build the appropriate LwSciSync stub libraries
+##############################################################################
+
+include $(LWSCI_PATH)/lwscisync/lwscisync-dso-stub.lwmk
+STUB_DSO_DEPENDS += $(LWSCISYNC_DSO_STUB)
+STUB_LDFLAGS += -llwscisync-stub
+
+##############################################################################
+# build the appropriate LwSciSync stub libraries
+##############################################################################
+
+include $(LWSCI_PATH)/lwscibuf/lwscibuf-dso-stub.lwmk
+STUB_DSO_DEPENDS += $(LWSCIBUF_DSO_STUB)
+STUB_LDFLAGS += -llwscibuf-stub
+
+##############################################################################
+# build the appropriate LwSciIpc stub libraries
+##############################################################################
+
+include $(LWSCI_PATH)/lwsciipc/lwsciipc-dso-stub.lwmk
+STUB_DSO_DEPENDS += $(LWSCIIPC_DSO_STUB)
+STUB_LDFLAGS += -llwsciipc-stub
+
+##############################################################################
+# build the appropriate LwSciEvent stub libraries
+##############################################################################
+
+include $(LWSCI_PATH)/lwscievent/lwscievent-dso-stub.lwmk
+STUB_DSO_DEPENDS += $(LWSCIEVENT_DSO_STUB)
+STUB_LDFLAGS += -llwscievent-stub
+
+##############################################################################
+# define SOURCES
+##############################################################################
+
+LWSCISTREAM_TEST_SOURCES := test_allocate_packet.cpp
+LWSCISTREAM_TEST_SOURCES += test_blocks_create.cpp
+LWSCISTREAM_TEST_SOURCES += test_blocks_connect.cpp
+LWSCISTREAM_TEST_SOURCES += test_buffer_setup.cpp
+LWSCISTREAM_TEST_SOURCES += test_ipc_streaming.cpp
+LWSCISTREAM_TEST_SOURCES += test_limiter_streaming.cpp
+LWSCISTREAM_TEST_SOURCES += test_misc.cpp
+LWSCISTREAM_TEST_SOURCES += test_negative.cpp
+LWSCISTREAM_TEST_SOURCES += test_packet_delete.cpp
+LWSCISTREAM_TEST_SOURCES += test_streaming.cpp
+LWSCISTREAM_TEST_SOURCES += test_stream_packet.cpp
+LWSCISTREAM_TEST_SOURCES += test_shutdown.cpp
+LWSCISTREAM_TEST_SOURCES += test_sync_setup.cpp
+LWSCISTREAM_TEST_SOURCES += test_event_based_streaming.cpp
+
+SOURCES += $(addprefix $(LWSCISTREAM_TESTS_PATH)/,$(LWSCISTREAM_TEST_SOURCES))
+
+##############################################################################
+# define LW_INCLUDES
+##############################################################################
+
+LW_INCLUDES += $(LWSCI_PATH)/inc/public
+LW_INCLUDES += $(LWSCISTREAM_TESTS_PATH)/inc
+LW_INCLUDES += $(OUTPUTDIR)
+
+ifdef LWCFG_GLOBAL_SAFETY_BUILD
+  include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+endif
+
+##############################################################################
+# define LW_DEFINES
+##############################################################################
+
+# For lwmake builds, lwcfg feature flags are available to LWSCI.
+ifdef LWCFG_INITIALIZED
+  LW_DEFINES += LWCFG_ENABLED
+endif
+
+# Embedded defines this on the command line for their builds.
+LW_BUILD_EMBEDDED ?= 0
+
+ifeq ($(LW_BUILD_EMBEDDED),1)
+    LW_DEFINES += LW_BUILD_EMBEDDED=1
+endif
+
+LW_NEEDS_UNSTRIPPED = 1
+LW_SUPPORTS_SEPARATE_DEBUG_INFO = 1
+
+##############################################################################
+# library flags
+##############################################################################
+
+LDFLAGS += $(PTHREAD_LDFLAGS)
+LDFLAGS += -lm
+ifneq ($(LW_TARGET_OS), QNX)
+  LDFLAGS += -lrt
+  LDFLAGS += -lstdc++
+else
+  LDFLAGS += -lc++
+endif
+LDFLAGS += -g
+LDFLAGS += -L $(OUTPUTDIR) $(STUB_LDFLAGS)
+LDFLAGS += $(BIN_LDFLAGS)
+
+##############################################################################
+# link the binary
+##############################################################################
+
+TESTAPP_BIN := test_lwscistream_api
+TESTAPP := $(OUTPUTDIR)/$(TESTAPP_BIN)
+
+TESTAPP_LD_TARGET = $(TESTAPP).unstripped
+TESTAPP_DEBUG_INFO = $(TESTAPP).debug
+$(eval $(call LW_DEBUG_INFO_CMD, \
+  $(TESTAPP_LD_TARGET), \
+  $(TESTAPP), \
+  $(TESTAPP_DEBUG_INFO)))
+
+build: $(TESTAPP)
+
+$(TESTAPP_LD_TARGET): $(OBJECTS) $(STUB_DSO_DEPENDS)
+	$(call quiet_cmd,LINK) $(OBJECTS) -o $(TESTAPP_LD_TARGET) $(LDFLAGS)
+
+##############################################################################
+# include definitions of tools and build rules
+##############################################################################
+
+include $(LW_COMMON)/build/lwCommonRules.lwmk
+

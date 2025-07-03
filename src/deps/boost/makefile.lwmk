@@ -1,0 +1,120 @@
+#
+# LWIDIA_COPYRIGHT_BEGIN
+#
+# Copyright 2016-2021 by LWPU Corporation.  All rights reserved.  All
+# information contained herein is proprietary and confidential to LWPU
+# Corporation.  Any use, reproduction, or disclosure without the written
+# permission of LWPU Corporation is prohibited.
+#
+# LWIDIA_COPYRIGHT_END
+#
+
+LW_MODS_MODULE := boost lib
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+BOOST_DIR := $(LW_TOOLS)/mods/boost2
+
+LW_INCLUDES += $(BOOST_DIR)
+LW_INCLUDES += $(LW_TOOLS)/zlib-1.2.11
+
+CFLAGS += -DBOOST_TEST_NO_MAIN
+CFLAGS += -DBOOST_TEST_ALTERNATIVE_INIT_API
+
+SOURCES += $(BOOST_DIR)/libs/date_time/src/posix_time/posix_time_types.cpp
+SOURCES += $(BOOST_DIR)/libs/date_time/src/gregorian/date_generators.cpp
+SOURCES += $(BOOST_DIR)/libs/date_time/src/gregorian/greg_month.cpp
+SOURCES += $(BOOST_DIR)/libs/date_time/src/gregorian/greg_weekday.cpp
+SOURCES += $(BOOST_DIR)/libs/date_time/src/gregorian/gregorian_types.cpp
+SOURCES += $(BOOST_DIR)/libs/filesystem/src/codecvt_error_category.cpp
+SOURCES += $(BOOST_DIR)/libs/filesystem/src/operations.cpp
+SOURCES += $(BOOST_DIR)/libs/filesystem/src/path.cpp
+SOURCES += $(BOOST_DIR)/libs/filesystem/src/path_traits.cpp
+SOURCES += $(BOOST_DIR)/libs/iostreams/src/gzip.cpp
+SOURCES += $(BOOST_DIR)/libs/iostreams/src/zlib.cpp
+ifeq ($(LW_TARGET_OS_FAMILY), Windows)
+    SOURCES += $(BOOST_DIR)/libs/filesystem/src/windows_file_codecvt.cpp
+endif
+SOURCES += $(BOOST_DIR)/libs/system/src/error_code.cpp
+SOURCES += $(BOOST_DIR)/libs/program_options/src/cmdline.cpp
+SOURCES += $(BOOST_DIR)/libs/program_options/src/colwert.cpp
+SOURCES += $(BOOST_DIR)/libs/program_options/src/options_description.cpp
+SOURCES += $(BOOST_DIR)/libs/program_options/src/positional_options.cpp
+SOURCES += $(BOOST_DIR)/libs/program_options/src/value_semantic.cpp
+SOURCES += $(BOOST_DIR)/libs/program_options/src/variables_map.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/basic_archive.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/basic_iarchive.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/basic_iserializer.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/basic_oarchive.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/basic_oserializer.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/basic_pointer_iserializer.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/basic_pointer_oserializer.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/basic_serializer_map.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/basic_text_iprimitive.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/basic_text_oprimitive.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/binary_iarchive.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/binary_oarchive.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/extended_type_info.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/extended_type_info_typeid.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/extended_type_info_no_rtti.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/polymorphic_iarchive.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/polymorphic_oarchive.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/stl_port.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/text_iarchive.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/text_oarchive.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/void_cast.cpp
+SOURCES += $(BOOST_DIR)/libs/serialization/src/archive_exception.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/compiler_log_formatter.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/debug.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/decorator.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/exelwtion_monitor.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/framework.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/junit_log_formatter.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/plain_report_formatter.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/progress_monitor.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/results_collector.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/results_reporter.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/test_framework_init_observer.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/test_tools.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/test_tree.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/unit_test_log.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/unit_test_main.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/unit_test_monitor.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/unit_test_parameters.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/xml_log_formatter.cpp
+SOURCES += $(BOOST_DIR)/libs/test/src/xml_report_formatter.cpp
+
+ifneq ($(filter Android Linux QNX, $(LW_TARGET_OS)),)
+    CFLAGS += -Wno-cast-qual
+    CFLAGS += -Wno-ignored-qualifiers
+    CFLAGS += -Wno-implicit-fallthrough
+    CFLAGS += -Wno-parentheses
+    CFLAGS += -Wno-unused-variable
+endif
+ifeq ($(LW_TARGET_OS_FAMILY), Windows)
+    CFLAGS += -wd4265
+    CFLAGS += -D_SILENCE_FPOS_SEEKPOS_DEPRECATION_WARNING 
+    CFLAGS += -UHAVE_UNISTD_H
+    CFLAGS += -U_LARGEFILE64_SOURCE
+endif
+
+define COPY_SOURCE
+GENERATED_SOURCES += $$(OUTPUTDIR)/$2$$(notdir $1)
+$$(OUTPUTDIR)/$2$$(notdir $1): $1
+	$$(COPY) $$^ $$@
+endef
+
+$(eval $(call COPY_SOURCE,$(BOOST_DIR)/libs/filesystem/src/utf8_codecvt_facet.cpp,filesystem_))
+$(eval $(call COPY_SOURCE,$(BOOST_DIR)/libs/program_options/src/utf8_codecvt_facet.cpp,program_options_))
+
+# boost requires exceptions and RTTI
+LW_CXX_EXCEPTIONS      := 1
+LW_CXX_RTTI            := 1
+LW_HOST_CXX_EXCEPTIONS := 1
+LW_HOST_CXX_RTTI       := 1
+
+LW_WARNINGS_AS_ERRORS := 1
+LW_AGGRESSIVE_WARNINGS := 1
+LW_MISSING_DECLARATIONS_WARNING =
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

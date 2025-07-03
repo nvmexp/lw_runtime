@@ -1,0 +1,42 @@
+# Component configuration template
+{
+  # Descriptive name for the component
+  "name"      : "DCGM installer",
+  # Component description
+  "desc"      : "Data Center GPU Manager RPM/DEB installer",
+  # Component owner's email
+  "owner"     : "ailes-staff@exchange.lwpu.com",
+  # the module of the component. Usually the same as the corresponding lwbugs module
+  "module"    : "GPU Management SW",
+  # Build timeout for component, in seconds
+  "buildtimeout" : "600",
+  # Define variables for this component that are available as environment variables 
+  # when building and installing this component
+  "elw"       : [
+                  "DCGM_P4DIR=${VULCAN_DRIVER_P4BASE}/apps/dcgm",
+                  "DCGM_DIR=p4${DCGM_P4DIR}"
+                ],
+  # The files included in this component specified by a comma-separated list of paths 
+  "files"     : [
+                  { "filter": { "os": "Linux", "arch": "x86_64" }},
+                  "dcgm_installer.vlcc",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/common/inc/lwUnixVersion.h",
+                  "installer.mk",
+                  "${DCGM_P4DIR}/packaging/...",
+                  "${DCGM_P4DIR}/dcgmlib/..."
+                ],
+  # Outputs produced by this component and the installation location for each output
+  "artifacts" : [
+                  { "filter": { "os": "Linux", "arch": "x86_64" }},
+                  { "${VULCAN_INSTALL_DIR}/gdk/packaging/DEBS/*.deb" : "gdk/dcgm_installer/." },
+                  { "${VULCAN_INSTALL_DIR}/gdk/packaging/RPMS/RPMS/x86_64/*.rpm" : "gdk/dcgm_installer/." }
+                ],
+  # The dependencies for this component
+  "depends"   : [ "dcgm" ],
+  # The agent responsible for performing actions for the component
+  "agent"     : [
+                  { "NONE": "none" },
+                  { "filter": { "os": "Linux", "arch": "x86_64" }},
+                  { "MAKE": "installer.mk", "build_target": "all" }
+                ]
+}

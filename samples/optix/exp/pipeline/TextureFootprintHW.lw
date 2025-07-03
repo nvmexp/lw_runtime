@@ -1,0 +1,138 @@
+//
+//  Copyright (c) 2020 LWPU Corporation.  All rights reserved.
+//
+//  LWPU Corporation and its licensors retain all intellectual property and proprietary
+//  rights in and to this software, related documentation and any modifications thereto.
+//  Any use, reproduction, disclosure or distribution of this software and related
+//  documentation without an express license agreement from LWPU Corporation is strictly
+//  prohibited.
+//
+//  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+//  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+//  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+//  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+//  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+//  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+//  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+//  SUCH DAMAGES
+//
+
+#include "TextureFootprint.h"
+
+#define __OPTIX_INCLUDE_INTERNAL_HEADERS__
+#define __LWDACC_RTC__
+#include "optixu/optixu_vector_types.h"
+#undef __LWDACC_RTC__
+#undef __OPTIX_INCLUDE_INTERNAL_HEADERS__
+
+extern "C" {
+
+__device__ optix::uint4 _lw_optix_lwstom_abi_optix_internal_tex_footprint_2d( unsigned long long tex,
+                                                                              float              x,
+                                                                              float              y,
+                                                                              unsigned int       granularity,
+                                                                              unsigned int*      singleMipLevelPtr );
+
+
+// lwcc compiles float parameters to .b32, and PTXtoLLVM introduces a function pointer cast at call sites to make the types work,
+// which interferes with inlining.  We work around this by using integer types and casting things ourselves.
+__device__ void _lw_optix_tex_footprint_2d( unsigned long long tex,
+                                            unsigned int       texInfo,
+                                            unsigned int       x,
+                                            unsigned int       y,
+                                            unsigned long long singleMipLevelPtr,
+                                            unsigned long long resultPtr )
+{
+    const TextureInfo& info        = *reinterpret_cast<TextureInfo*>( &texInfo );
+    unsigned int       granularity = info.logTileWidth + info.logTileHeight - 1;
+    *reinterpret_cast<optix::uint4*>( resultPtr ) =
+        _lw_optix_lwstom_abi_optix_internal_tex_footprint_2d( tex, __uint_as_float( x ), __uint_as_float( y ), granularity,
+                                                              reinterpret_cast<unsigned int*>( singleMipLevelPtr ) );
+}
+
+__device__ optix::uint4 _lw_optix_lwstom_abi_optix_internal_tex_footprint_2d_grad_coarse( unsigned long long tex,
+                                                                                          float              x,
+                                                                                          float              y,
+                                                                                          float              dPdx_x,
+                                                                                          float              dPdx_y,
+                                                                                          float              dPdy_x,
+                                                                                          float              dPdy_y,
+                                                                                          unsigned int  granularity,
+                                                                                          unsigned int* singleMipLevel );
+
+__device__ optix::uint4 _lw_optix_lwstom_abi_optix_internal_tex_footprint_2d_grad_fine( unsigned long long tex,
+                                                                                        float              x,
+                                                                                        float              y,
+                                                                                        float              dPdx_x,
+                                                                                        float              dPdx_y,
+                                                                                        float              dPdy_x,
+                                                                                        float              dPdy_y,
+                                                                                        unsigned int       granularity,
+                                                                                        unsigned int* singleMipLevel );
+
+
+// lwcc compiles float parameters to .b32, and PTXtoLLVM introduces a function pointer cast at call sites to make the types work,
+// which interferes with inlining.  We work around this by using integer types and casting things ourselves.
+__device__ void _lw_optix_tex_footprint_2d_grad( unsigned long long tex,
+                                                 unsigned int       texInfo,
+                                                 unsigned int       x,
+                                                 unsigned int       y,
+                                                 unsigned int       dPdx_x,
+                                                 unsigned int       dPdx_y,
+                                                 unsigned int       dPdy_x,
+                                                 unsigned int       dPdy_y,
+                                                 unsigned int       coarse,
+                                                 unsigned long long singleMipLevelPtr,
+                                                 unsigned long long resultPtr )
+{
+    const TextureInfo& info        = *reinterpret_cast<TextureInfo*>( &texInfo );
+    unsigned int       granularity = info.logTileWidth + info.logTileHeight - 1;
+    if( coarse )
+        *reinterpret_cast<optix::uint4*>( resultPtr ) = _lw_optix_lwstom_abi_optix_internal_tex_footprint_2d_grad_coarse(
+            tex, __uint_as_float( x ), __uint_as_float( y ), __uint_as_float( dPdx_x ), __uint_as_float( dPdx_y ),
+            __uint_as_float( dPdy_x ), __uint_as_float( dPdy_y ), granularity,
+            reinterpret_cast<unsigned int*>( singleMipLevelPtr ) );
+    else
+        *reinterpret_cast<optix::uint4*>( resultPtr ) = _lw_optix_lwstom_abi_optix_internal_tex_footprint_2d_grad_fine(
+            tex, __uint_as_float( x ), __uint_as_float( y ), __uint_as_float( dPdx_x ), __uint_as_float( dPdx_y ),
+            __uint_as_float( dPdy_x ), __uint_as_float( dPdy_y ), granularity,
+            reinterpret_cast<unsigned int*>( singleMipLevelPtr ) );
+}
+
+__device__ optix::uint4 _lw_optix_lwstom_abi_optix_internal_tex_footprint_2d_lod_coarse( unsigned long long tex,
+                                                                                         float              x,
+                                                                                         float              y,
+                                                                                         float              level,
+                                                                                         unsigned int       granularity,
+                                                                                         unsigned int* singleMipLevel );
+
+__device__ optix::uint4 _lw_optix_lwstom_abi_optix_internal_tex_footprint_2d_lod_fine( unsigned long long tex,
+                                                                                       float              x,
+                                                                                       float              y,
+                                                                                       float              level,
+                                                                                       unsigned int       granularity,
+                                                                                       unsigned int* singleMipLevel );
+
+// lwcc compiles float parameters to .b32, and PTXtoLLVM introduces a function pointer cast at call sites to make the types work,
+// which interferes with inlining.  We work around this by using integer types and casting things ourselves.
+__device__ void _lw_optix_tex_footprint_2d_lod( unsigned long long tex,
+                                                unsigned int       texInfo,
+                                                unsigned int       x,
+                                                unsigned int       y,
+                                                unsigned int       level,
+                                                unsigned int       coarse,
+                                                unsigned long long singleMipLevelPtr,
+                                                unsigned long long resultPtr )
+{
+    const TextureInfo& info        = *reinterpret_cast<TextureInfo*>( &texInfo );
+    unsigned int       granularity = info.logTileWidth + info.logTileHeight - 1;
+    if( coarse )
+        *reinterpret_cast<optix::uint4*>( resultPtr ) = _lw_optix_lwstom_abi_optix_internal_tex_footprint_2d_lod_coarse(
+            tex, __uint_as_float( x ), __uint_as_float( y ), __uint_as_float( level ), granularity, reinterpret_cast<unsigned int*>( singleMipLevelPtr ) );
+    else
+        *reinterpret_cast<optix::uint4*>( resultPtr ) = _lw_optix_lwstom_abi_optix_internal_tex_footprint_2d_lod_fine(
+            tex, __uint_as_float( x ), __uint_as_float( y ), __uint_as_float( level ), granularity, reinterpret_cast<unsigned int*>( singleMipLevelPtr ) );
+}
+
+}  // extern "C"

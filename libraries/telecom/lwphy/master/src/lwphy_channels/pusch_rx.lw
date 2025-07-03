@@ -1,0 +1,962 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include <string>
+#include "pusch_rx.hpp"
+#include "lwphy.hpp"
+
+#define EQ_COEF_APPLY_VER (2)
+
+void PuschRx::allocateBuffers()
+{
+    // allocate array of Transport Block Info structs and output
+    d_tbPrmsArray = lwphy::make_unique_device<PerTbParams>(MAX_N_TBS_SUPPORTED);
+    d_outputTBs   = lwphy::make_unique_device<uint8_t>(MAX_N_TBS_SUPPORTED * MAX_BYTES_PER_TRANSPORT_BLOCK);
+    d_cbCRCs      = lwphy::make_unique_device<uint32_t>(MAX_N_TBS_SUPPORTED * MAX_N_CBS_PER_TB_SUPPORTED);
+    d_tbCRCs      = lwphy::make_unique_device<uint32_t>(MAX_N_TBS_SUPPORTED);
+
+    m_cfgPrms.bePrms.ldpcPrms.KbArray.resize(MAX_N_TBS_SUPPORTED);
+    m_cfgPrms.bePrms.ldpcPrms.parityNodesArray.resize(MAX_N_TBS_SUPPORTED);
+
+    m_ldpcResults = DeviceResultsBuf_t(static_cast<int>(MAX_TOTAL_N_CBS_SUPPORTED));
+
+    // LDPC
+    // Allocate tensors in device memory
+    // Type of LLR values, FP16 or FP32, use FP32 for max static allocation
+    lwphyDataType_t LLR_type = LWPHY_R_32F;
+
+    // Allocate a workspace buffer. Query for the max workspace size, and use
+    // maximum base graph 1 values, since the returned values will be
+    // conservative (large enough for BG2).
+    m_ldpcWorkspaceSize = m_LDPCdecoder.get_workspace_size(1,                               // BG
+                                                           LWPHY_LDPC_BG1_INFO_NODES,       // Kb
+                                                           LWPHY_LDPC_MAX_BG1_PARITY_NODES, // mb
+                                                           LWPHY_LDPC_MAX_LIFTING_SIZE,     // Z
+                                                           MAX_N_CBS_PER_TB_SUPPORTED,      // num codewords
+                                                           LLR_type,                        // type
+                                                           -1);                              // query for max
+
+    m_ldpcWorkspaceBuffer = std::move(lwphy::buffer<char, lwphy::device_alloc>(m_ldpcWorkspaceSize));
+
+    m_tHEst = lwphy::tensor_device(lwphy::tensor_info(LWPHY_C_32F,
+                                                      {static_cast<int>(MAX_N_ANTENNAS_SUPPORTED),
+                                                       static_cast<int>(MAX_N_BBU_LAYERS_SUPPORTED),
+                                                       static_cast<int>(MAX_NF_SUPPORTED),
+                                                       static_cast<int>(MAX_NH_SUPPORTED)}),
+                                   LWPHY_TENSOR_ALIGN_TIGHT);
+
+    m_tChEstDbg = lwphy::tensor_device(lwphy::tensor_info(LWPHY_C_32F,
+                                                          {static_cast<int>(MAX_NF_SUPPORTED / 2),
+                                                           static_cast<int>(MAX_N_DMRSSYMS_SUPPORTED),
+                                                           static_cast<int>(1),
+                                                           static_cast<int>(1)}),
+                                       LWPHY_TENSOR_ALIGN_TIGHT);
+
+    m_tDataEq = lwphy::tensor_device(lwphy::tensor_info(LWPHY_C_32F,
+                                                        {static_cast<int>(MAX_N_BBU_LAYERS_SUPPORTED),
+                                                         static_cast<int>(MAX_NF_SUPPORTED),
+                                                         static_cast<int>(MAX_ND_SUPPORTED)}),
+                                     LWPHY_TENSOR_ALIGN_TIGHT);
+
+#if(EQ_COEF_APPLY_VER == 1)
+    m_tEqCoef = lwphy::tensor_device(lwphy::tensor_info(LWPHY_C_32F,
+                                                        {static_cast<int>(MAX_N_BBU_LAYERS_SUPPORTED),
+                                                         static_cast<int>(MAX_N_ANTENNAS_LAYERS_SUPPORTED),
+                                                         static_cast<int>(MAX_NF_SUPPORTED),
+                                                         static_cast<int>(MAX_NH_SUPPORTED)}),
+                                     LWPHY_TENSOR_ALIGN_TIGHT);
+
+    m_tReeDiag = lwphy::tensor_device(lwphy::tensor_info(LWPHY_R_32F,
+                                                         {static_cast<int>(MAX_N_BBU_LAYERS_SUPPORTED),
+                                                          static_cast<int>(MAX_NF_SUPPORTED),
+                                                          static_cast<int>(MAX_NH_SUPPORTED)}),
+                                      LWPHY_TENSOR_ALIGN_TIGHT);
+
+#elif(EQ_COEF_APPLY_VER == 2)
+    m_tEqCoef = lwphy::tensor_device(lwphy::tensor_info(LWPHY_C_32F,
+                                                        {static_cast<int>(MAX_N_ANTENNAS_SUPPORTED),
+                                                         static_cast<int>(LWPHY_N_TONES_PER_PRB),
+                                                         static_cast<int>(MAX_N_BBU_LAYERS_SUPPORTED),
+                                                         static_cast<int>(MAX_NF_SUPPORTED / LWPHY_N_TONES_PER_PRB)}),
+                                     LWPHY_TENSOR_ALIGN_TIGHT);
+
+    m_tReeDiag = lwphy::tensor_device(lwphy::tensor_info(LWPHY_R_32F,
+                                                         {static_cast<int>(LWPHY_N_TONES_PER_PRB),
+                                                          static_cast<int>(MAX_N_BBU_LAYERS_SUPPORTED),
+                                                          static_cast<int>(MAX_NF_SUPPORTED / LWPHY_N_TONES_PER_PRB)}),
+                                      LWPHY_TENSOR_ALIGN_TIGHT);
+#endif // EQ_COEF_APPLY_VER
+
+#ifdef LLR_FP16
+    m_tLLR = lwphy::tensor_device(lwphy::tensor_info(LWPHY_R_16F,
+                                                     {static_cast<int>(LWPHY_QAM_256),
+
+                                                      static_cast<int>(MAX_N_BBU_LAYERS_SUPPORTED),
+                                                      static_cast<int>(MAX_NF_SUPPORTED),
+                                                      static_cast<int>(MAX_ND_SUPPORTED)}),
+                                  LWPHY_TENSOR_ALIGN_TIGHT);
+#else
+    m_tLLR     = lwphy::tensor_device(lwphy::tensor_info(LWPHY_R_32F,
+                                                     {static_cast<int>(LWPHY_QAM_256),
+                                                      static_cast<int>(MAX_N_BBU_LAYERS_SUPPORTED),
+                                                      static_cast<int>(MAX_NF_SUPPORTED),
+                                                      static_cast<int>(MAX_ND_SUPPORTED)}),
+                                  LWPHY_TENSOR_ALIGN_TIGHT);
+#endif
+    m_tEqDbg = lwphy::tensor_device(lwphy::tensor_info(LWPHY_C_32F,
+                                                       {static_cast<int>(MAX_N_BBU_LAYERS_SUPPORTED + MAX_N_ANTENNAS_SUPPORTED),
+                                                        static_cast<int>(MAX_N_BBU_LAYERS_SUPPORTED),
+                                                        static_cast<int>(MAX_NF_SUPPORTED),
+                                                        static_cast<int>(MAX_NH_SUPPORTED)}),
+                                    LWPHY_TENSOR_ALIGN_TIGHT);
+
+    m_outputTBs = std::move(lwphy::buffer<uint8_t, lwphy::pinned_alloc>(MAX_N_TBS_SUPPORTED * MAX_BYTES_PER_TRANSPORT_BLOCK));
+    m_cbCRCs    = std::move(lwphy::buffer<uint32_t, lwphy::pinned_alloc>(MAX_N_TBS_SUPPORTED * MAX_N_CBS_PER_TB_SUPPORTED));
+    m_tbCRCs    = std::move(lwphy::buffer<uint32_t, lwphy::pinned_alloc>(MAX_N_TBS_SUPPORTED));
+
+    // output of rate matching
+    // Initial size is set to maximum dimensions and FP32 data type, but
+    // we may reset to a smaller size later.
+    m_tLLRExp = lwphy::tensor_buffer_device(LWPHY_R_32F,
+                                            {(int)MAX_ENCODED_CODE_BLOCK_BIT_SIZE,
+                                             (int)MAX_N_CBS_PER_TB_SUPPORTED},
+                                            LWPHY_TENSOR_ALIGN_TIGHT);
+
+    m_tDecode = lwphy::tensor_device(lwphy::tensor_info(LWPHY_BIT,
+                                                        {static_cast<int>(MAX_DECODED_CODE_BLOCK_BIT_SIZE),
+                                                         static_cast<int>(MAX_N_CBS_PER_TB_SUPPORTED)}),
+                                     // LWPHY_TENSOR_ALIGN_COALESCE)};
+                                     LWPHY_TENSOR_ALIGN_TIGHT);
+}
+
+PuschRx::PuschRx() :
+    m_ldpcWorkspaceSize(0),
+    m_LDPCdecoder(m_ctx)
+{
+    allocateBuffers();
+}
+
+// returns total number of encoded bits
+uint32_t PuschRx::expandParameters(lwphy::tensor_device const& wFreq, const std::vector<tb_pars>& tbPrmsArray, gnb_pars& gnb, lwdaStream_t lwStrm)
+{
+    // m_tWFreq = wFreq;
+    // equality operator on tensors ilwokes copy on default stream, instead use explicit copy with correct lwStrm argument
+    m_tWFreq.copy(wFreq, lwStrm);
+
+    double codeRateArray[MAX_N_TBS_SUPPORTED];
+
+    uint32_t K_cb, B_prime, K_prime, crcPolyByteSize;
+
+    // compute cinit seeds for descrambling
+    for(int i = 0; i < gnb.numTb; i++)
+    {
+        m_cfgPrms.cmnPrms.tbPrmsArray[i].cinit = ((tbPrmsArray[i].nRnti << 15) + gnb.cellId) & (0x7FFFFFFF);
+    }
+
+    // Fill out output parameter structure common to all TBs
+    // Common
+    m_cfgPrms.cmnPrms.nBBULayers = gnb.numBbuLayers;
+    m_cfgPrms.cmnPrms.cellId     = gnb.cellId;
+
+    // Front end
+    m_cfgPrms.fePrms.nBSAnts       = gnb.numBsAnt;
+    m_cfgPrms.fePrms.Nf            = gnb.Nf;
+    m_cfgPrms.fePrms.Nh            = 1; // NEEDS FIX
+    uint32_t nDmrsSymb             = (1 + tbPrmsArray[0].dmrsAddlPosition) * tbPrmsArray[0].dmrsMaxLength;
+    m_cfgPrms.fePrms.Nd            = tbPrmsArray[0].numSym - nDmrsSymb;
+    m_cfgPrms.fePrms.nTotalDataPRB = gnb.nPrb;
+
+    if((LWPHY_DMRS_CFG0 == tbPrmsArray[0].dmrsCfg) && (1 == m_cfgPrms.cmnPrms.nBBULayers))
+    {
+        m_fePrms.chEstPrms.nDMRSSyms                = 1;
+        m_fePrms.chEstPrms.activeDMRSGridBmsk       = 0b01;
+        m_cfgPrms.fePrms.chEstPrms.nDMRSGridsPerPRB = 2;
+    }
+    else if((LWPHY_DMRS_CFG1 == tbPrmsArray[0].dmrsCfg) && (2 == m_cmnPrms.nBBULayers))
+    {
+        m_fePrms.chEstPrms.nDMRSSyms                = 1;
+        m_fePrms.chEstPrms.activeDMRSGridBmsk       = 0b01;
+        m_cfgPrms.fePrms.chEstPrms.nDMRSGridsPerPRB = 2;
+    }
+    else if((LWPHY_DMRS_CFG2 == tbPrmsArray[0].dmrsCfg) && (4 == m_cmnPrms.nBBULayers))
+    {
+        m_fePrms.chEstPrms.nDMRSSyms                = 1;
+        m_fePrms.chEstPrms.activeDMRSGridBmsk       = 0b11;
+        m_cfgPrms.fePrms.chEstPrms.nDMRSGridsPerPRB = 2;
+    }
+    else if((LWPHY_DMRS_CFG3 == tbPrmsArray[0].dmrsCfg) && (8 == m_cmnPrms.nBBULayers))
+    {
+        m_fePrms.chEstPrms.nDMRSSyms                = 4;
+        m_fePrms.chEstPrms.activeDMRSGridBmsk       = 0b11;
+        m_cfgPrms.fePrms.chEstPrms.nDMRSGridsPerPRB = 2;
+    }
+    else
+    {
+        printf("Unsupported combination of DMRS config (%d) and layer count (%d)\n", tbPrmsArray[0].dmrsCfg, m_cmnPrms.nBBULayers);
+        m_fePrms.chEstPrms.nDMRSSyms                = 1;
+        m_fePrms.chEstPrms.activeDMRSGridBmsk       = 0b01;
+        m_cfgPrms.fePrms.chEstPrms.nDMRSGridsPerPRB = 2;
+    }
+
+    // Front-end
+    //  m_cfgPrms.fePrms.chEstPrms.nDMRSSyms     = nDmrsSymb;
+    m_cfgPrms.fePrms.chEstPrms.nTotalDMRSPRB = gnb.nPrb;
+
+    // Back end
+    m_cfgPrms.bePrms.nTb             = gnb.numTb;
+    m_cfgPrms.bePrms.maxNCBsPerTB    = 0;
+    m_cfgPrms.bePrms.totalTBByteSize = 0;
+    m_cfgPrms.bePrms.maxTBByteSize   = 0;
+
+    // Parameter recallwlation and expansion
+
+    // Front-end parameters
+
+    // de-rate-matching parameters
+
+    // Derive Qm
+    //      build MCS tables
+    uint32_t mcsTable_1[29] = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6};
+    uint32_t mcsTable_2[29] = {2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8, 8, 8, 8, 8, 8, 8, 0};
+
+    uint32_t mcsTable_3[29] = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6}; // 3GPP 38.214 Table 5.1.3.1-3
+
+    //      build code rate tables
+    double codeRateTable_1[29] = {
+        120.0 / 1024.0,
+        157.0 / 1024.0,
+        193.0 / 1024.0,
+        251.0 / 1024.0,
+        308.0 / 1024.0,
+        379.0 / 1024.0,
+        449.0 / 1024.0,
+        526.0 / 1024.0,
+        602.0 / 1024.0,
+        679.0 / 1024.0,
+        340.0 / 1024.0,
+        378.0 / 1024.0,
+        434.0 / 1024.0,
+        490.0 / 1024.0,
+        553.0 / 1024.0,
+        616.0 / 1024.0,
+        658.0 / 1024.0,
+        438.0 / 1024.0,
+        466.0 / 1024.0,
+        517.0 / 1024.0,
+        567.0 / 1024.0,
+        616.0 / 1024.0,
+        666.0 / 1024.0,
+        719.0 / 1024.0,
+        772.0 / 1024.0,
+        822.0 / 1024.0,
+        873.0 / 1024.0,
+        910.0 / 1024.0,
+        948.0 / 1024.0,
+    };
+
+    double codeRateTable_2[29] = {120.0 / 1024.0, 193.0 / 1024.0, 308.0 / 1024.0, 449.0 / 1024.0, 602.0 / 1024.0, 378.0 / 1024.0, 434.0 / 1024.0, 490.0 / 1024.0, 553.0 / 1024.0, 616.0 / 1024.0, 658.0 / 1024.0, 466.0 / 1024.0, 517.0 / 1024.0, 567.0 / 1024.0, 616.0 / 1024.0, 666.0 / 1024.0, 719.0 / 1024.0, 772.0 / 1024.0, 822.0 / 1024.0, 873.0 / 1024.0, 682.5 / 1024.0, 711.0 / 1024.0, 754.0 / 1024.0, 797.0 / 1024.0, 841.0 / 1024.0, 885.0 / 1024.0, 916.5 / 1024.0, 948.0 / 1024.0, 0};
+
+    double codeRateTable_3[29] = {30.0 / 1024.0, 40.0 / 1024.0, 50.0 / 1024.0, 64.0 / 1024.0, 78.0 / 1024.0, 99.0 / 1024.0, 120.0 / 1024.0, 157.0 / 1024.0, 193.0 / 1024.0, 251.0 / 1024.0, 308.0 / 1024.0, 379.0 / 1024.0, 449.0 / 1024.0, 526.0 / 1024.0, 602.0 / 1024.0, 340.0 / 1024.0, 378.0 / 1024.0, 434.0 / 1024.0, 490.0 / 1024.0, 553.0 / 1024.0, 616.0 / 1024.0, 438.0 / 1024.0, 466.0 / 1024.0, 517.0 / 1024.0, 567.0 / 1024.0, 616.0 / 1024.0, 666.0 / 1024.0, 719.0 / 1024.0, 772.0 / 1024.0}; // 3GPP 38.214 Table 5.1.3.1-3
+
+    uint32_t TBS_table[93] = {24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, 184, 192, 208, 224, 240, 256, 272, 288, 304, 320, 336, 352, 368, 384, 408, 432, 456, 480, 504, 528, 552, 576, 608, 640, 672, 704, 736, 768, 808, 848, 888, 928, 984, 1032, 1064, 1128, 1160, 1192, 1224, 1256, 1288, 1320, 1352, 1416, 1480, 1544, 1608, 1672, 1736, 1800, 1864, 1928, 2024, 2088, 2152, 2216, 2280, 2408, 2472, 2536, 2600, 2664, 2728, 2792, 2856, 2976, 3104, 3240, 3368, 3496, 3624, 3752, 3824};
+
+    m_cfgPrms.bePrms.CMax = 0;
+    m_cfgPrms.bePrms.EMax = 0;
+    m_cfgPrms.bePrms.CSum = 0;
+
+    m_cfgPrms.bePrms.codeBlockCRCOnly          = 0; // NEEDS FIX
+    m_cfgPrms.bePrms.ldpcPrms.nIterations      = gnb.ldpcnIterations;
+    m_cfgPrms.bePrms.ldpcPrms.earlyTermination = gnb.ldpcEarlyTermination;
+    m_cfgPrms.bePrms.ldpcPrms.algoIndex        = gnb.ldpcAlgoIndex;
+    m_cfgPrms.bePrms.ldpcPrms.flags            = gnb.ldpcFlags;
+    m_cfgPrms.bePrms.ldpcPrms.useHalf          = gnb.ldplwseHalf;
+
+    uint32_t totBitSize = 0;
+    //      find Qm and target code rate
+    for(int i = 0; i < gnb.numTb; i++)
+    {
+        uint32_t tbSize;
+        switch(tbPrmsArray[i].mcsTableIndex)
+        {
+        case 1:
+            m_cfgPrms.cmnPrms.tbPrmsArray[i].Qm = mcsTable_1[tbPrmsArray[i].mcsIndex];
+            codeRateArray[i]                    = codeRateTable_1[tbPrmsArray[i].mcsIndex];
+            break;
+        case 2:
+            m_cfgPrms.cmnPrms.tbPrmsArray[i].Qm = mcsTable_2[tbPrmsArray[i].mcsIndex];
+            codeRateArray[i]                    = codeRateTable_2[tbPrmsArray[i].mcsIndex];
+            break;
+        case 3:
+            m_cfgPrms.cmnPrms.tbPrmsArray[i].Qm = mcsTable_3[tbPrmsArray[i].mcsIndex];
+            codeRateArray[i]                    = codeRateTable_3[tbPrmsArray[i].mcsIndex];
+            break;
+        }
+        // Derive TB size and number of code blocks C(from derive_TB_size.m)
+
+        // Compute number of REs
+        uint32_t Ndata                               = 12 * tbPrmsArray[i].numPrb * m_cfgPrms.fePrms.Nd;
+        uint32_t Nre                                 = min(156, Ndata / tbPrmsArray[i].numPrb) * tbPrmsArray[i].numPrb;
+        m_cfgPrms.cmnPrms.tbPrmsArray[i].encodedSize = Nre * m_cfgPrms.cmnPrms.tbPrmsArray[i].Qm * tbPrmsArray[i].numLayers;
+        // Compute number of info bits
+        //uint32_t Ninfo = int(ceil(float(Nre) * codeRateArray[i] * float(m_cfgPrms.cmnPrms.qamArray[i]) * float(tbPrmsArray[i].numLayers)));
+        uint32_t Ninfo = ceil(Nre * codeRateArray[i] * m_cfgPrms.cmnPrms.tbPrmsArray[i].Qm * tbPrmsArray[i].numLayers);
+        uint32_t Ninfo_prime;
+
+        if(Ninfo < 3824)
+        {
+            // For "small" sizes, look up TBS in a table. First round the
+            // number of information bits.
+            uint32_t n  = max(3, int(floor(log2(static_cast<float>(Ninfo))) - 6));
+            Ninfo_prime = max(24, int(pow(2, n) * floor(Ninfo / pow(2, n))));
+
+            // Pick smallest TB from TBS_table which is larger than Ninfo_prime
+            for(int j = 0; j < 93; j++)
+            {
+                if(Ninfo_prime < TBS_table[j])
+                    tbSize = TBS_table[j];
+            }
+            m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs = 1;
+        }
+        else
+        {
+            // For "large" sizes, compute TBS. First round the number of
+            // information bits to a power of two.
+            uint32_t n  = floor(log2(static_cast<float>(Ninfo - 24))) - 5;
+            Ninfo_prime = max(3840, int(pow(2, n) * round((double(Ninfo - 24.0) / pow(2, n)))));
+            //printf("%d nre n %d, ninfo %d Ninfo_prime %d\n",Nre, n,Ninfo,Ninfo_prime);
+            // Next, compute the number of code words. For large code rates,
+            // use base-graph 1. For small code rate use base-graph 2.
+
+            if(codeRateArray[i] < 0.25)
+            {
+                m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs = ceil((Ninfo + 24) / 3816.0);
+                tbSize                                   = 8 * m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs * ceil((Ninfo_prime + 24) / (8 * m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs)) - 24;
+            }
+            else
+            {
+                if(Ninfo_prime > 8424)
+                {
+                    m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs = ceil((Ninfo_prime + 24) / 8424.0);
+                    tbSize                                   = 8 * m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs * ceil((Ninfo_prime + 24.0) / (8.0 * m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs)) - 24;
+                }
+                else
+                {
+                    m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs = 1;
+                    tbSize                                   = 8 * m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs * ceil((Ninfo_prime + 24) / (8 * m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs)) - 24;
+                }
+            }
+        }
+
+        // Derive BG (from derive_BGN.m)
+        if((tbSize <= 292) || ((tbSize <= 3824) && (codeRateArray[i] <= 0.67)) || (codeRateArray[i] <= 0.25))
+            m_cfgPrms.cmnPrms.tbPrmsArray[i].bg = 2;
+        else
+            m_cfgPrms.cmnPrms.tbPrmsArray[i].bg = 1;
+
+        // Derive codeblock size and number of filler bits
+
+        // Max number of bits per codeblock
+        if(m_cfgPrms.cmnPrms.tbPrmsArray[i].bg == 1)
+        {
+            K_cb            = 8448;
+            crcPolyByteSize = 3; // CRC-24
+        }
+        else
+        {
+            K_cb            = 3840;
+            crcPolyByteSize = 2; // CRC-16
+        }
+        // Number of codeblocks
+        if(tbSize <= K_cb)
+            B_prime = tbSize + 24;
+        else
+        {
+            uint32_t L = 24;
+            B_prime    = tbSize + 24 + m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs * L;
+        }
+        // Bits per code block
+        K_prime = B_prime / m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs;
+
+        // Derive lifting size
+        if(m_cfgPrms.cmnPrms.tbPrmsArray[i].bg == 1)
+            m_cfgPrms.bePrms.ldpcPrms.KbArray[i] = 22;
+        else if(tbSize > 640)
+            m_cfgPrms.bePrms.ldpcPrms.KbArray[i] = 10;
+        else if(tbSize > 540)
+            m_cfgPrms.bePrms.ldpcPrms.KbArray[i] = 9;
+        else if(tbSize > 192)
+            m_cfgPrms.bePrms.ldpcPrms.KbArray[i] = 8;
+        else
+            m_cfgPrms.bePrms.ldpcPrms.KbArray[i] = 6;
+        uint32_t Z[51] = {2, 4, 8, 16, 32, 64, 128, 256, 3, 6, 12, 24, 48, 96, 192, 384, 5, 10, 20, 40, 80, 160, 320, 7, 14, 28, 56, 112, 224, 9, 18, 36, 72, 144, 288, 11, 22, 44, 88, 176, 352, 13, 26, 52, 104, 208, 15, 30, 60, 120, 240};
+
+        // Derive ZcArray (from derive_lifting.m)
+        // find smallest Z such that Z*K_b >= K_prime:
+        uint32_t tmp1, tmp2 = 1000000;
+        for(int j = 0; j < 51; j++)
+        {
+            tmp1 = Z[j] * m_cfgPrms.bePrms.ldpcPrms.KbArray[i];
+            if((tmp1 >= K_prime) && (tmp1 < tmp2))
+            {
+                tmp2                                = tmp1;
+                m_cfgPrms.cmnPrms.tbPrmsArray[i].Zc = Z[j];
+            }
+        }
+
+        // Derive K (codeblock size) and F (number of filler bits)
+
+        if(m_cfgPrms.cmnPrms.tbPrmsArray[i].bg == 1)
+        {
+            m_cfgPrms.cmnPrms.tbPrmsArray[i].K = m_cfgPrms.cmnPrms.tbPrmsArray[i].Zc * 22;
+        }
+        else
+        {
+            m_cfgPrms.cmnPrms.tbPrmsArray[i].K = m_cfgPrms.cmnPrms.tbPrmsArray[i].Zc * 10;
+        }
+
+        m_cfgPrms.cmnPrms.tbPrmsArray[i].F = m_cfgPrms.cmnPrms.tbPrmsArray[i].K - K_prime;
+
+        // Derive startIdx
+
+        // Derive E_vec - rate-matched code block sizes
+
+        // Fill out output parameter structure TB-specific
+        // Back-end
+        m_cfgPrms.cmnPrms.tbPrmsArray[i].Ncb                 = (m_cfgPrms.cmnPrms.tbPrmsArray[i].K * 3);
+        m_cfgPrms.cmnPrms.tbPrmsArray[i].firstCodeBlockIndex = (0); //NEEDS FIX, input tbStructs will have to contain symbol-by-symbol processing info
+        m_cfgPrms.cmnPrms.tbPrmsArray[i].Nl                  = (tbPrmsArray[i].numLayers);
+
+        uint32_t my_l = 0;
+        for(int l = 0; l < m_cfgPrms.cmnPrms.nBBULayers; l++)
+        {
+            if((tbPrmsArray[i].layerMap >> l) & 1)
+            {
+                m_cfgPrms.cmnPrms.tbPrmsArray[i].layer_map_array[my_l] = l;
+                my_l++;
+            }
+            else
+                m_cfgPrms.cmnPrms.tbPrmsArray[i].layer_map_array[my_l] = m_cfgPrms.cmnPrms.nBBULayers; // arbitrary filler value
+        }
+
+        uint32_t Kd = m_cfgPrms.cmnPrms.tbPrmsArray[i].K - m_cfgPrms.cmnPrms.tbPrmsArray[i].F - 2 * m_cfgPrms.cmnPrms.tbPrmsArray[i].Zc;
+
+        m_cfgPrms.bePrms.ldpcPrms.parityNodesArray[i] = ((((m_cfgPrms.cmnPrms.tbPrmsArray[i].encodedSize) / m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs) - Kd + 1)) / m_cfgPrms.cmnPrms.tbPrmsArray[i].Zc + 1;
+
+        m_cfgPrms.bePrms.maxNCBsPerTB  = m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs > m_cfgPrms.bePrms.maxNCBsPerTB ? m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs : m_cfgPrms.bePrms.maxNCBsPerTB;
+        uint32_t codeBlockDataByteSize = (m_cfgPrms.cmnPrms.tbPrmsArray[i].K - crcPolyByteSize * 8 - m_cfgPrms.cmnPrms.tbPrmsArray[i].F + 8 - 1) / 8;
+
+        uint32_t decodedTbSize = codeBlockDataByteSize * m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs;
+
+        m_cfgPrms.bePrms.maxTBByteSize = decodedTbSize > m_cfgPrms.bePrms.maxTBByteSize ? decodedTbSize : m_cfgPrms.bePrms.maxTBByteSize;
+
+        totBitSize += decodedTbSize * 8;
+
+        m_cfgPrms.bePrms.totalTBByteSize += codeBlockDataByteSize * m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs - crcPolyByteSize;
+        m_cfgPrms.bePrms.CSum += m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs;
+        m_cfgPrms.bePrms.CMax = m_cfgPrms.bePrms.CMax < m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs ? m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs : m_cfgPrms.bePrms.CMax;
+        uint32_t Eh           = m_cfgPrms.cmnPrms.tbPrmsArray[i].Nl * m_cfgPrms.cmnPrms.tbPrmsArray[i].Qm * ceilf(float(m_cfgPrms.cmnPrms.tbPrmsArray[i].encodedSize) / float(m_cfgPrms.cmnPrms.tbPrmsArray[i].Nl * m_cfgPrms.cmnPrms.tbPrmsArray[i].Qm * m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs));
+        m_cfgPrms.bePrms.EMax = m_cfgPrms.bePrms.EMax < Eh ? Eh : m_cfgPrms.bePrms.EMax;
+    }
+
+    // m_tLLRExp: output of rate matching
+    // Update the descriptor (type and dimensions, without reallocating)
+    // based on the current configuration
+    m_tLLRExp.reset(m_cfgPrms.bePrms.ldpcPrms.useHalf ? LWPHY_R_16F : LWPHY_R_32F,
+                    {MAX_ENCODED_CODE_BLOCK_BIT_SIZE, (int)m_bePrms.CSum},
+                    LWPHY_TENSOR_ALIGN_TIGHT);
+
+    // Initalize rate-matching/descrambling
+
+    lwdaMemcpyAsync(d_tbPrmsArray.get(), m_cfgPrms.cmnPrms.tbPrmsArray.addr(), sizeof(PerTbParams) * gnb.numTb, lwdaMemcpyHostToDevice, lwStrm);
+    return totBitSize;
+}
+
+PuschRx::~PuschRx()
+{
+}
+
+void PuschRx::Init()
+{
+}
+
+void PuschRx::DeInit()
+{
+}
+
+void PuschRx::copyOutputToCPU(lwdaStream_t lwStrm, uint32_t* cbCRCs, uint32_t* tbCRCs, uint8_t* outputTBs)
+{
+    if(cbCRCs != nullptr)
+        lwdaMemcpyAsync(cbCRCs, d_cbCRCs.get(), sizeof(uint32_t) * m_bePrms.CSum, lwdaMemcpyDeviceToHost, lwStrm);
+    if(tbCRCs != nullptr)
+        lwdaMemcpyAsync(tbCRCs, d_tbCRCs.get(), sizeof(uint32_t) * m_bePrms.nTb, lwdaMemcpyDeviceToHost, lwStrm);
+    if(outputTBs != nullptr)
+        lwdaMemcpyAsync(outputTBs, d_outputTBs.get(), m_bePrms.totalTBByteSize, lwdaMemcpyDeviceToHost, lwStrm);
+}
+void PuschRx::copyOutputToCPU(lwdaStream_t lwStrm)
+{
+    lwdaMemcpyAsync(m_cbCRCs.addr(), d_cbCRCs.get(), sizeof(uint32_t) * m_bePrms.CSum, lwdaMemcpyDeviceToHost, lwStrm);
+    lwdaMemcpyAsync(m_tbCRCs.addr(), d_tbCRCs.get(), sizeof(uint32_t) * m_bePrms.nTb, lwdaMemcpyDeviceToHost, lwStrm);
+    lwdaMemcpyAsync(m_outputTBs.addr(), d_outputTBs.get(), m_bePrms.totalTBByteSize, lwdaMemcpyDeviceToHost, lwStrm);
+}
+
+void PuschRx::Run(lwdaStream_t&               lwStream,
+                  uint32_t                    slotNumber,
+                  lwphy::tensor_device const& tDataRx,
+                  lwphy::tensor_device const& tShiftSeq,
+                  lwphy::tensor_device const& tUnShiftSeq,
+                  lwphy::tensor_device const& tDataSymLoc,
+                  lwphy::tensor_device const& tQamInfo,
+                  lwphy::tensor_device const& tNoisePwr,
+                  int                         descramblingOn,
+                  hdf5hpp::hdf5_file*         debugOutput)
+{
+    //@todo: include per frame processing cost ?
+
+    if(debugOutput)
+    {
+        lwphy::write_HDF5_dataset(*debugOutput, tDataRx, "DataRx", lwStream);
+        lwphy::write_HDF5_dataset(*debugOutput, tShiftSeq, "ShiftSeq", lwStream);
+        lwphy::write_HDF5_dataset(*debugOutput, tUnShiftSeq, "UnShiftSeq", lwStream);
+        lwphy::write_HDF5_dataset(*debugOutput, tDataSymLoc, "DataSymLoc", lwStream);
+        lwphy::write_HDF5_dataset(*debugOutput, tQamInfo, "QamInfo", lwStream);
+        lwphy::write_HDF5_dataset(*debugOutput, tNoisePwr, "NoisePwr", lwStream);
+        lwphy::write_HDF5_dataset(*debugOutput, m_tWFreq, "WFreq", lwStream);
+    }
+
+    int dims[5];
+    int strides[5];
+
+    dims[0] = m_cfgPrms.fePrms.nBSAnts;
+    dims[1] = m_cfgPrms.cmnPrms.nBBULayers;
+    dims[2] = m_cfgPrms.fePrms.Nf;
+    dims[3] = m_cfgPrms.fePrms.Nh;
+
+    strides[0] = 1;
+    strides[1] = dims[0];
+    strides[2] = strides[1] * dims[1];
+    strides[3] = strides[2] * dims[2];
+
+    lwphy::tensor_layout tHEstL(m_tHEst.layout().rank(), dims, strides);
+
+    lwphy::tensor_info tHEstInfo(m_tHEst.type(), tHEstL);
+
+    lwphy::tensor_desc tHEstDesc(tHEstInfo);
+
+    dims[0] = m_cfgPrms.fePrms.Nf / 2;
+    dims[1] = m_chEstPrms.nDMRSSyms;
+    dims[2] = 1;
+    dims[3] = 1;
+
+    strides[0] = 1;
+    strides[1] = dims[0];
+    strides[2] = strides[1] * dims[1];
+    strides[3] = strides[2] * dims[2];
+
+    lwphy::tensor_layout tChEstDbgL(m_tChEstDbg.layout().rank(), dims, strides);
+
+    lwphy::tensor_info tChEstDbgInfo(m_tChEstDbg.type(), tChEstDbgL);
+
+    lwphy::tensor_desc tChEstDbgDesc(tChEstDbgInfo);
+
+#if(EQ_COEF_APPLY_VER == 1)
+
+    dims[0] = m_cmnPrms.nBBULayers;
+    dims[1] = m_fePrms.nBSAnts;
+    dims[2] = m_cfgPrms.fePrms.Nf;
+    dims[3] = m_cfgPrms.fePrms.Nh;
+
+    strides[0] = 1;
+    strides[1] = dims[0];
+    strides[2] = strides[1] * dims[1];
+    strides[3] = strides[2] * dims[2];
+
+    lwphy::tensor_layout tEqCoefL(m_tEqCoef.layout().rank(), dims, strides);
+
+    lwphy::tensor_info tEqCoefInfo(m_tEqCoef.type(), tEqCoefL);
+
+    lwphy::tensor_desc tEqCoefDesc(tEqCoefInfo);
+
+    dims[0] = m_cmnPrms.nBBULayers;
+    dims[1] = m_cfgPrms.fePrms.Nf;
+    dims[2] = m_cfgPrms.fePrms.Nh;
+
+    strides[0] = 1;
+    strides[1] = dims[0];
+    strides[2] = strides[1] * dims[1];
+
+    lwphy::tensor_layout tReeDiagL(m_tReeDiag.layout().rank(), dims, strides);
+
+    lwphy::tensor_info tReeDiagInfo(m_tReeDiag.type(), tReeDiagL);
+
+    lwphy::tensor_desc tReeDiagDesc(tReeDiagInfo);
+
+#elif(EQ_COEF_APPLY_VER == 2)
+
+    dims[0] = m_fePrms.nBSAnts;
+    dims[1] = LWPHY_N_TONES_PER_PRB;
+    dims[2] = m_cmnPrms.nBBULayers;
+    dims[3] = m_cfgPrms.fePrms.Nf / LWPHY_N_TONES_PER_PRB;
+
+    strides[0] = 1;
+    strides[1] = dims[0];
+    strides[2] = strides[1] * dims[1];
+    strides[3] = strides[2] * dims[2];
+
+    lwphy::tensor_layout tEqCoefL(m_tEqCoef.layout().rank(), dims, strides);
+
+    lwphy::tensor_info tEqCoefInfo(m_tEqCoef.type(), tEqCoefL);
+
+    lwphy::tensor_desc tEqCoefDesc(tEqCoefInfo);
+
+    dims[0] = LWPHY_N_TONES_PER_PRB;
+    dims[1] = m_cmnPrms.nBBULayers;
+    dims[2] = m_cfgPrms.fePrms.Nf / LWPHY_N_TONES_PER_PRB;
+
+    strides[0] = 1;
+    strides[1] = dims[0];
+    strides[2] = strides[1] * dims[1];
+
+    lwphy::tensor_layout tReeDiagL(m_tReeDiag.layout().rank(), dims, strides);
+
+    lwphy::tensor_info tReeDiagInfo(m_tReeDiag.type(), tReeDiagL);
+
+    lwphy::tensor_desc tReeDiagDesc(tReeDiagInfo);
+
+#endif // EQ_COEF_APPLY_VER
+
+    lwphy::tensor_desc tDataEqDesc(m_tDataEq.type(),
+                                   {(int)m_cmnPrms.nBBULayers,
+                                    (int)m_cfgPrms.fePrms.Nf,
+                                    (int)m_cfgPrms.fePrms.Nd},
+                                   LWPHY_TENSOR_ALIGN_TIGHT);
+
+    lwphy::tensor_desc tLLRDesc(m_tLLR.type(),
+                                {LWPHY_QAM_256,
+                                 (int)m_cmnPrms.nBBULayers,
+                                 (int)m_cfgPrms.fePrms.Nf,
+                                 (int)m_cfgPrms.fePrms.Nd},
+                                LWPHY_TENSOR_ALIGN_TIGHT);
+
+    lwphy::tensor_desc tDecodeDesc(m_tDecode.type(),
+                                   {MAX_DECODED_CODE_BLOCK_BIT_SIZE, (int)m_bePrms.CSum},
+                                   LWPHY_TENSOR_ALIGN_TIGHT);
+
+    dims[0] = m_cmnPrms.nBBULayers + m_fePrms.nBSAnts;
+    dims[1] = m_cmnPrms.nBBULayers;
+    dims[2] = m_cfgPrms.fePrms.Nf;
+    dims[3] = m_cfgPrms.fePrms.Nh;
+
+    strides[0] = 1;
+    strides[1] = dims[0];
+    strides[2] = strides[1] * dims[1];
+    strides[3] = strides[2] * dims[2];
+
+    lwphy::tensor_layout tEqDbgL(m_tEqDbg.layout().rank(), dims, strides);
+
+    lwphy::tensor_info tEqDbgInfo(m_tEqDbg.type(), tEqDbgL);
+
+    lwphy::tensor_desc tEqDbgDesc(tEqDbgInfo);
+
+    lwphyStatus_t chEstStat = lwphyChannelEst(m_cmnPrms.cellId,
+                                              slotNumber,
+                                              m_fePrms.nBSAnts,
+                                              m_cmnPrms.nBBULayers,
+                                              m_chEstPrms.nDMRSSyms,
+                                              m_chEstPrms.nDMRSGridsPerPRB,
+                                              m_chEstPrms.activeDMRSGridBmsk,
+                                              m_chEstPrms.nTotalDMRSPRB,
+                                              m_fePrms.nTotalDataPRB,
+                                              m_fePrms.Nh,
+                                              tDataRx.desc().handle(),
+                                              tDataRx.addr(),
+                                              m_tWFreq.desc().handle(),
+                                              m_tWFreq.addr(),
+                                              tShiftSeq.desc().handle(),
+                                              tShiftSeq.addr(),
+                                              tUnShiftSeq.desc().handle(),
+                                              tUnShiftSeq.addr(),
+                                              tHEstDesc.handle(),
+                                              m_tHEst.addr(),
+                                              tChEstDbgDesc.handle(),
+                                              m_tChEstDbg.addr(),
+                                              lwStream);
+
+    if(debugOutput)
+    {
+        lwphy::write_HDF5_dataset(*debugOutput, m_tHEst, tHEstDesc, "HEst", lwStream);
+        lwphy::write_HDF5_dataset(*debugOutput, m_tChEstDbg, tChEstDbgDesc, "ChEstDbg", lwStream);
+    }
+
+    lwphyStatus_t chEqCoefComputeStat = lwphyChannelEqCoefCompute(m_fePrms.nBSAnts,
+                                                                  m_cmnPrms.nBBULayers,
+                                                                  m_fePrms.Nh,
+                                                                  m_fePrms.Nf / LWPHY_N_TONES_PER_PRB,
+                                                                  tHEstDesc.handle(),
+                                                                  m_tHEst.addr(),
+                                                                  tNoisePwr.desc().handle(),
+                                                                  tNoisePwr.addr(),
+                                                                  tEqCoefDesc.handle(),
+                                                                  m_tEqCoef.addr(),
+                                                                  tReeDiagDesc.handle(),
+                                                                  m_tReeDiag.addr(),
+                                                                  tEqDbgDesc.handle(),
+                                                                  m_tEqDbg.addr(),
+                                                                  lwStream);
+
+    lwphyStatus_t chEqSoftDemapStat = lwphyChannelEqSoftDemap(m_fePrms.nBSAnts,
+                                                              m_cmnPrms.nBBULayers,
+                                                              m_fePrms.Nh,
+                                                              m_fePrms.Nd,
+                                                              m_fePrms.Nf / LWPHY_N_TONES_PER_PRB,
+                                                              tDataSymLoc.desc().handle(),
+                                                              tDataSymLoc.addr(),
+                                                              tQamInfo.desc().handle(),
+                                                              tQamInfo.addr(),
+                                                              tEqCoefDesc.handle(),
+                                                              m_tEqCoef.addr(),
+                                                              tReeDiagDesc.handle(),
+                                                              m_tReeDiag.addr(),
+                                                              tDataRx.desc().handle(),
+                                                              tDataRx.addr(),
+                                                              tDataEqDesc.handle(),
+                                                              m_tDataEq.addr(),
+                                                              tLLRDesc.handle(),
+                                                              m_tLLR.addr(),
+                                                              tEqDbgDesc.handle(),
+                                                              m_tEqDbg.addr(),
+                                                              lwStream);
+
+    if(debugOutput)
+    {
+        lwphy::write_HDF5_dataset(*debugOutput, m_tDataEq, tDataEqDesc, "DataEq", lwStream);
+        lwphy::write_HDF5_dataset(*debugOutput, m_tEqCoef, tEqCoefDesc, "Coef", lwStream);
+        lwphy::write_HDF5_dataset(*debugOutput, m_tReeDiag, tReeDiagDesc, "ReeDiagIlw", lwStream);
+        lwphy::write_HDF5_dataset(*debugOutput, m_tLLR, tLLRDesc, "LLR", lwStream);
+        lwphy::write_HDF5_dataset(*debugOutput, m_tEqDbg, tEqDbgDesc, "EqDbg", lwStream);
+    }
+
+    // Rate matching parameters
+    if(m_ldpcPrms.useHalf)
+        rate_matchingFP16(
+            m_cfgPrms.bePrms.CMax,
+            m_cfgPrms.bePrms.EMax,
+            m_bePrms.nTb,
+            m_cmnPrms.nBBULayers,
+            d_tbPrmsArray.get(),
+            (float*)m_tLLR.addr(),
+            (__half*)m_tLLRExp.addr(),
+            descramblingOn,
+            lwStream);
+    else
+        rate_matchingFP32(
+            m_cfgPrms.bePrms.CMax,
+            m_cfgPrms.bePrms.EMax,
+            m_bePrms.nTb,
+            m_cmnPrms.nBBULayers,
+            d_tbPrmsArray.get(),
+            (float*)m_tLLR.addr(),
+            (float*)m_tLLRExp.addr(),
+            descramblingOn,
+            lwStream);
+    if(debugOutput)
+    {
+        lwphy::write_HDF5_dataset(*debugOutput, m_tLLRExp, "LLRExp", lwStream);
+    }
+
+    uint32_t iBytes = 0;
+    uint32_t oBytes = 0;
+    uint32_t cs     = 0;
+
+#if PUSCH_RX_USE_LDPC_STREAM_POOL
+    // Do LDPC for each TB in a different stream using a "round-robin"
+    // distribution.
+    m_streamPool.fork(lwStream, std::min((size_t)m_bePrms.nTb, m_streamPool.max_size()));
+#endif
+
+    for(int i = 0; i < m_bePrms.nTb; i++)
+    {
+        int dims[2];
+        int strides[2];
+        dims[0]    = m_cfgPrms.cmnPrms.tbPrmsArray[i].Ncb;
+        dims[1]    = m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs;
+        strides[0] = 1;
+        strides[1] = m_cfgPrms.cmnPrms.tbPrmsArray[i].Ncb;
+
+        lwphy::tensor_layout tlTB(2, dims, strides);
+        lwphy::tensor_info   tiTB(m_tLLRExp.type(), tlTB);
+        lwphy::tensor_desc   tdTB(tiTB);
+
+        dims[0]    = MAX_DECODED_CODE_BLOCK_BIT_SIZE;
+        dims[1]    = m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs;
+        strides[0] = 1;
+        strides[1] = MAX_DECODED_CODE_BLOCK_BIT_SIZE;
+
+        lwphy::tensor_layout otlTB(2, dims, strides);
+        lwphy::tensor_info   otiTB(m_tDecode.type(), otlTB);
+        lwphy::tensor_desc   otdTB(otiTB);
+
+        int mb     = m_ldpcPrms.parityNodesArray[i];
+        m_LDPCdecoder.decode(otdTB.handle(),                                // output descriptor
+                             static_cast<char*>(m_tDecode.addr()) + oBytes, // output address
+                             tdTB.handle(),                                 // LLR descriptor
+                             static_cast<char*>(m_tLLRExp.addr()) + iBytes, // LLR address
+                             m_cfgPrms.cmnPrms.tbPrmsArray[i].bg,           // base graph
+                             m_ldpcPrms.KbArray[i],                         // info nodes
+                             m_cfgPrms.cmnPrms.tbPrmsArray[i].Zc,           // lifting value
+                             mb,                                            // parity nodes
+                             m_ldpcPrms.nIterations,                        // max iterations
+                             0.8125f,                                       // normalization
+                             m_ldpcPrms.earlyTermination ? 1 : 0,           // early termination
+                             m_ldpcResults.addr() + cs,                     // results output
+                             m_ldpcPrms.algoIndex,                          // algorithm index
+                             m_ldpcWorkspaceBuffer.addr(),                  // workspace
+                             m_ldpcPrms.flags,                              // internal flags
+#if PUSCH_RX_USE_LDPC_STREAM_POOL
+                             m_streamPool.lwrrent_stream().handle(),        // stream
+#else
+                             lwStream,                                      // stream
+#endif
+                             nullptr);                                      // reserved
+
+        iBytes += tdTB.get_size_in_bytes();
+        oBytes += otdTB.get_size_in_bytes();
+        cs += m_cfgPrms.cmnPrms.tbPrmsArray[i].num_CBs;
+#if PUSCH_RX_USE_LDPC_STREAM_POOL
+        m_streamPool.advance();
+#endif
+    }
+#if PUSCH_RX_USE_LDPC_STREAM_POOL
+    // Subsequent stream submissions to lwStream must wait for all of
+    // the LDPC kernels to complete
+    m_streamPool.join(lwStream);
+#endif
+
+    if(debugOutput)
+    {
+        lwphy::write_HDF5_dataset(*debugOutput, m_tDecode, tDecodeDesc, "Decode", lwStream);
+    }
+
+    lwphyStatus_t CRCStatus = lwphyCRCDecode(d_cbCRCs.get(), d_tbCRCs.get(), d_outputTBs.get(), static_cast<uint32_t*>(m_tDecode.addr()), d_tbPrmsArray.get(), m_bePrms.nTb, m_bePrms.maxNCBsPerTB, m_bePrms.maxTBByteSize, 1, 0, 10000, m_bePrms.codeBlockCRCOnly, lwStream);
+
+    if(LWPHY_STATUS_SUCCESS != chEqCoefComputeStat)
+    {
+        printf("chEqCoefCompute error %d\n", chEqCoefComputeStat);
+        throw lwphy::lwphy_exception(chEqCoefComputeStat);
+    }
+    if(LWPHY_STATUS_SUCCESS != chEqSoftDemapStat)
+    {
+        printf("chEqSoftDemap error %d\n", chEqSoftDemapStat);
+        throw lwphy::lwphy_exception(chEqSoftDemapStat);
+    }
+
+    if(LWPHY_STATUS_SUCCESS != CRCStatus)
+    {
+        printf("CRC error %d\n", CRCStatus);
+        throw lwphy::lwphy_exception(CRCStatus);
+    }
+}
+
+void PuschRx::printInfo() const
+{
+    printf("PUSCH config parameters:\n");
+
+    printf("---------------------------------------------------------------\n");
+    printf("nBBULayers         : %i\n", m_cmnPrms.nBBULayers);
+    printf("cellId             : %i\n", m_cmnPrms.cellId);
+    printf("nBSAnts            : %i\n", m_fePrms.nBSAnts);
+    printf("Nf                 : %i\n", m_fePrms.Nf); // # of estimates of H in frequency
+    printf("Nh                 : %i\n", m_fePrms.Nh); // # of estimates of H in time
+    printf("Nd                 : %i\n", m_fePrms.Nd); // # of data symbols
+    printf("nTotalDataPRB      : %i\n", m_fePrms.nTotalDataPRB);
+    printf("nDMRSSyms          : %i\n", m_chEstPrms.nDMRSSyms);
+    printf("nDMRSGridsPerPRB   : %i\n", m_chEstPrms.nDMRSGridsPerPRB);
+    printf("activeDMRSGridBmsk : 0x%x\n", m_chEstPrms.activeDMRSGridBmsk);
+    printf("nTotalDMRSPRB      : %i\n\n", m_chEstPrms.nTotalDMRSPRB);
+
+    printf("nTb                : %i\n", m_bePrms.nTb);
+    for(int i = 0; i < m_bePrms.nTb; i++)
+    {
+        printf("\n***TB %d***\n", i);
+        printf("QAM                : %i\n", m_cfgPrms.cmnPrms.tbPrmsArray.addr()[i].Qm);
+        printf("userInputSize      : %i\n", m_cfgPrms.cmnPrms.tbPrmsArray.addr()[i].encodedSize);
+        printf("N                  : %i\n", m_cfgPrms.cmnPrms.tbPrmsArray.addr()[i].Ncb);
+        printf("C                  : %i\n", m_cfgPrms.cmnPrms.tbPrmsArray.addr()[i].num_CBs); // # of estimates of H in frequency
+        printf("Zc                 : %i\n", m_cfgPrms.cmnPrms.tbPrmsArray.addr()[i].Zc);      // # of estimates of H in time
+        printf("rv                 : %i\n", m_cfgPrms.cmnPrms.tbPrmsArray.addr()[i].rv);
+        printf("Nl                 : %i\n", m_cfgPrms.cmnPrms.tbPrmsArray.addr()[i].Nl);
+        printf("K                  : %i\n", m_cfgPrms.cmnPrms.tbPrmsArray.addr()[i].K);
+        printf("F                  : %i\n", m_cfgPrms.cmnPrms.tbPrmsArray.addr()[i].F);
+        printf("mb                 : %i\n", m_cfgPrms.bePrms.ldpcPrms.parityNodesArray[i]);
+    }
+    printf("LDPC workspace size: %lu bytes\n", m_ldpcWorkspaceSize);
+    printf("LDPC precision:      %s\n", m_ldpcPrms.useHalf ? "fp16" : "fp32");
+    printf("Tensor layout:\n");
+    printf("---------------------------------------------------------------\n");
+    printf("tWFreq        : addr: %p, %s, size: %.1f kB\n",
+           m_tWFreq.addr(),
+           m_tWFreq.desc().get_info().to_string().c_str(),
+           m_tWFreq.desc().get_size_in_bytes() / 1024.0);
+    printf("tRxxIlw       : addr: %p, %s, size: %.1f kB\n",
+           m_tRxxIlw.addr(),
+           m_tRxxIlw.desc().get_info().to_string().c_str(),
+           m_tRxxIlw.desc().get_size_in_bytes() / 1024.0);
+    printf("tHEst         : addr: %p, %s, size: %.1f kB\n",
+           m_tHEst.addr(),
+           m_tHEst.desc().get_info().to_string().c_str(),
+           m_tHEst.desc().get_size_in_bytes() / 1024.0);
+    printf("tDataEq       : addr: %p, %s, size: %.1f kB\n",
+           m_tDataEq.addr(),
+           m_tDataEq.desc().get_info().to_string().c_str(),
+           m_tDataEq.desc().get_size_in_bytes() / 1024.0);
+    printf("tReeDiag      : addr: %p, %s, size: %.1f kB\n",
+           m_tReeDiag.addr(),
+           m_tReeDiag.desc().get_info().to_string().c_str(),
+           m_tReeDiag.desc().get_size_in_bytes() / 1024.0);
+    printf("tLLR          : addr: %p, %s, size: %.1f kB\n",
+           m_tLLR.addr(),
+           m_tLLR.desc().get_info().to_string().c_str(),
+           m_tLLR.desc().get_size_in_bytes() / 1024.0);
+    printf("tLLRExp       : addr: %p, %s, size: %.1f kB\n",
+           m_tLLRExp.addr(),
+           m_tLLRExp.desc().get_info().to_string().c_str(),
+           m_tLLRExp.desc().get_size_in_bytes() / 1024.0);
+    printf("tDecode       : addr: %p, %s, size: %.1f kB\n\n",
+           m_tDecode.addr(),
+           m_tDecode.desc().get_info().to_string().c_str(),
+           m_tDecode.desc().get_size_in_bytes() / 1024.0);
+}
+
+PuschRxDataset::PuschRxDataset(hdf5hpp::hdf5_file& fInput, uint32_t slotNum, const std::string& slotPostfix, lwphyDataType_t cplxTypeDataRx) :
+    slotNumber(slotNum),
+    tDataRx(lwphy::tensor_from_dataset(fInput.open_dataset(std::string("DataRx" + slotPostfix).c_str()), cplxTypeDataRx, LWPHY_TENSOR_ALIGN_TIGHT)),
+    tWFreq(lwphy::tensor_from_dataset(fInput.open_dataset(std::string("WFreq" + slotPostfix).c_str()), LWPHY_TENSOR_ALIGN_TIGHT)),
+    tShiftSeq(lwphy::tensor_from_dataset(fInput.open_dataset(std::string("ShiftSeq" + slotPostfix).c_str()), LWPHY_TENSOR_ALIGN_TIGHT)),
+    tUnShiftSeq(lwphy::tensor_from_dataset(fInput.open_dataset(std::string("UnShiftSeq" + slotPostfix).c_str()), LWPHY_TENSOR_ALIGN_TIGHT)),
+    tDataSymLoc(lwphy::tensor_from_dataset(fInput.open_dataset(std::string("Data_sym_loc" + slotPostfix).c_str()), LWPHY_TENSOR_ALIGN_TIGHT)),
+    tQamInfo(lwphy::tensor_from_dataset(fInput.open_dataset(std::string("QamInfo" + slotPostfix).c_str()), LWPHY_TENSOR_ALIGN_TIGHT)),
+
+    tRxxIlw(lwphy::tensor_from_dataset(fInput.open_dataset(std::string("RxxIlw" + slotPostfix).c_str()), LWPHY_TENSOR_ALIGN_TIGHT)),
+    tNoisePwr(lwphy::tensor_from_dataset(fInput.open_dataset(std::string("Noise_pwr" + slotPostfix).c_str()), LWPHY_TENSOR_ALIGN_TIGHT))
+{
+}
+
+void PuschRxDataset::printInfo(uint32_t slotId) const
+{
+    printf("Input tensors for slotId %d:\n", slotId);
+    printf("---------------------------------------------------------------\n");
+    printf("slotNumber     : %d\n", slotNumber);
+    printf("DataRx         : %s\n", tDataRx.desc().get_info().to_string(false).c_str());
+    printf("WFreq          : %s\n", tWFreq.desc().get_info().to_string(false).c_str());
+    printf("ShiftSeq       : %s\n", tShiftSeq.desc().get_info().to_string(false).c_str());
+    printf("UnShiftSeq     : %s\n", tUnShiftSeq.desc().get_info().to_string(false).c_str());
+    printf("Data_sym_loc   : %s\n", tDataSymLoc.desc().get_info().to_string(false).c_str());
+    printf("RxxIlw         : %s\n", tRxxIlw.desc().get_info().to_string(false).c_str());
+    printf("NoisePwr       : %s\n\n", tNoisePwr.desc().get_info().to_string(false).c_str());
+}

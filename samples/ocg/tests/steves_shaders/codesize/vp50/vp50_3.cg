@@ -1,0 +1,24 @@
+// vp50_3.cg
+
+uniform float3 lightDir : lightDir;
+uniform float4x4 mvp : MVP_MATRIX;
+
+void main(float4 opos : ATTR0,
+          float3 normal : ATTR2,
+          float4 dcolor : ATTR3,
+          out float4 hpos : HPOS,
+          out float4 color : COLOR)
+{
+    float dfactor;
+    float dotp;
+    float dotpilw;
+
+    hpos = mul(opos, mvp);
+    dotp = dot(normal, lightDir);
+    dotpilw = 1.0f/dotp; // Add something that needs to be scheduled.
+    dfactor = clamp(dotpilw, 0.0f, 1.0f);
+    color = float4(dcolor.xyz*dfactor, dcolor.w);
+} // main
+
+
+

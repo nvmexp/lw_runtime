@@ -1,0 +1,27 @@
+typedef float2 LW_DOUBLE;
+
+LW_DOUBLE gmem[1] : global;
+
+struct ctaInfo {
+    unsigned short ctaFlags;
+    unsigned short ctaDO;
+    unsigned short ctaD1;
+    unsigned short ctaD2;
+    unsigned short gridW;
+    unsigned short gridH;
+    unsigned short ctaX;
+    unsigned short ctaY;
+};
+
+#include "dblmul.h"
+
+void main (uniform struct ctaInfo ctx : shared,
+           uniform LW_DOUBLE xx       : shared,
+           uniform LW_DOUBLE yy       : shared,
+           uniform int threadCount    : shared,
+           varying int tid            : thread_id) 
+{   
+    if ((threadCount) && (tid == 0)) { 
+        gmem[0] = LwDblMul (xx, yy);
+    }
+}

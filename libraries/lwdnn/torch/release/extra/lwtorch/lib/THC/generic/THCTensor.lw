@@ -1,0 +1,36 @@
+#ifndef THC_GENERIC_FILE
+#define THC_GENERIC_FILE "generic/THCTensor.lw"
+#else
+
+lwdaTextureObject_t THCTensor_(getTextureObject)(THCState *state, THCTensor *self)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
+  lwdaTextureObject_t texObj;
+  struct lwdaResourceDesc resDesc;
+  memset(&resDesc, 0, sizeof(resDesc));
+  resDesc.resType = lwdaResourceTypeLinear;
+  resDesc.res.linear.devPtr = THCTensor_(data)(state, self);
+  resDesc.res.linear.sizeInBytes = THCTensor_(nElement)(state, self) * 4;
+  resDesc.res.linear.desc = lwdaCreateChannelDesc(32, 0, 0, 0,
+                                                  lwdaChannelFormatKindFloat);
+  struct lwdaTextureDesc texDesc;
+  memset(&texDesc, 0, sizeof(texDesc));
+  lwdaCreateTextureObject(&texObj, &resDesc, &texDesc, NULL);
+  lwdaError errcode = lwdaGetLastError();
+  if(errcode != lwdaSuccess) {
+    if (THCTensor_(nElement)(state, self) > 2>>27)
+      THError("Failed to create texture object, "
+              "nElement:%ld exceeds 27-bit addressing required for tex1Dfetch. Lwca Error: %s",
+              THCTensor_(nElement)(state, self), lwdaGetErrorString(errcode));
+    else
+      THError("Failed to create texture object: %s", lwdaGetErrorString(errcode));
+  }
+  return texObj;
+}
+
+THC_API int THCTensor_(getDevice)(THCState* state, const THCTensor* tensor) {
+  if (!tensor->storage) return -1;
+  return THCStorage_(getDevice)(state, tensor->storage);
+}
+
+#endif

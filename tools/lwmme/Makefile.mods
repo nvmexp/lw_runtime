@@ -1,0 +1,50 @@
+#/*
+# * LWIDIA_COPYRIGHT_BEGIN
+# *
+# * Copyright 2017-2018 by LWPU Corporation.  All rights reserved.  All
+# * information contained herein is proprietary and confidential to LWPU
+# * Corporation.  Any use, reproduction, or disclosure without the written
+# * permission of LWPU Corporation is prohibited.
+# *
+# * LWIDIA_COPYRIGHT_END
+# */
+
+#
+# Build MME64 Simulator
+#
+
+MODS_DIR ?= ../mods
+
+dll_build = false
+base_name = libmme64sim
+
+include $(MODS_DIR)/makedefs.inc
+
+ifeq ($(base_os),win32)
+   # Must turn on C++ exception handling when using the C++ standard library on windows.
+   CFLAGS += /EHsc
+endif
+
+# Include path
+include_dirs += .
+
+# Source files
+cpp_files += playback/mme2.cpp # primary for MME64
+cpp_files += playback/mme.cpp
+cpp_files += parser/llasm2.cpp
+
+# Required MME64 simulator defines
+CFLAGS += -DBUILD_VSIM=0
+
+#-------------------------------------------------------------------
+# Targets
+#-------------------------------------------------------------------
+
+all: build_install
+
+# Generic rules for a library build
+include $(MODS_DIR)/makerule.inc
+include $(MODS_DIR)/makelib.inc
+
+#include dependency information
+-include $(depend_files)

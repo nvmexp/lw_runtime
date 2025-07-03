@@ -1,0 +1,575 @@
+// Copyright LWPU Corporation 2013
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "MortonTriangleSplitterKernels.hpp"
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+// Compute priorities for each triangle and accumulate totalPriority
+
+static __global__ __launch_bounds__(MORTONSPLIT_INIT_WARPS_PER_BLOCK * 32, MORTONSPLIT_INIT_BLOCKS_PER_SM)
+void MortonSplitInit(MortonSplitInitParams p)
+{
+    INIT_SHUFFLE_EMULATION(MORTONSPLIT_INIT_WARPS_PER_BLOCK)
+    Range triRange = (p.triRange) ? *p.triRange : Range(0, p.maxInputTris);
+    float priority = 0.0f;
+
+    // Pick an output index.
+
+    int outputIdx = threadIdx.x + 32 * (threadIdx.y + MORTONSPLIT_INIT_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+
+    // First thread => initialize outPrimRange.
+
+    if (outputIdx == 0)
+        *p.outPrimRange = Range(0, triRange.span());
+
+    // Out of bounds => terminate.
+
+    if (outputIdx >= triRange.span())
+        return;
+
+    // Initialize outPrimIndices.
+
+    int inputIdx = outputIdx + triRange.start;
+    if (p.inTriOrder)
+        inputIdx = p.inTriOrder[inputIdx];
+    p.outPrimIndices[outputIdx] = inputIdx;
+
+    // No splits allowed => done.
+
+    if (p.splitBeta == 0.0f)
+        return;
+
+    // Fetch vertices and callwlate AABB.
+
+    float3 v0, v1, v2;
+    p.inModel.loadVertexPositions(v0, v1, v2, inputIdx);
+    float3 lo = min(min(v0, v1), v2);
+    float3 hi = max(max(v0, v1), v2);
+
+    // Fetch model AABB, and setup transform from world space to 20-bit fixed point.
+
+    AABB modelAABB = p.inApexPointMap->getAABB();
+    float scale = (float)(1 << 20) / fmaxf(fmaxf(modelAABB.hi.x - modelAABB.lo.x, modelAABB.hi.y - modelAABB.lo.y), modelAABB.hi.z - modelAABB.lo.z);
+    float originX = (float)(1 << 19) - (modelAABB.lo.x + modelAABB.hi.x) * (scale * 0.5f);
+    float originY = (float)(1 << 19) - (modelAABB.lo.y + modelAABB.hi.y) * (scale * 0.5f);
+    float originZ = (float)(1 << 19) - (modelAABB.lo.z + modelAABB.hi.z) * (scale * 0.5f);
+
+    // Find the most important spatial median plane intersected by the AABB.
+
+    float epsilonA = 1.0f - p.epsilon;
+    float epsilonB = p.epsilon;
+    int ilox = (int)((lo.x * epsilonA + hi.x * epsilonB) * scale + originX);
+    int iloy = (int)((lo.y * epsilonA + hi.y * epsilonB) * scale + originY);
+    int iloz = (int)((lo.z * epsilonA + hi.z * epsilonB) * scale + originZ);
+    int ihix = max((int)((hi.x * epsilonA + lo.x * epsilonB) * scale + originX) - 1, ilox);
+    int ihiy = max((int)((hi.y * epsilonA + lo.y * epsilonB) * scale + originY) - 1, iloy);
+    int ihiz = max((int)((hi.z * epsilonA + lo.z * epsilonB) * scale + originZ) - 1, iloz);
+    int importance = findLeadingOne((ilox ^ ihix) | (iloy ^ ihiy) | (iloz ^ ihiz));
+
+    // Callwlate ideal surface area assuming infinite number of splits.
+
+    float3 d1 = make_float3(v1.x - v0.x, v1.y - v0.y, v1.z - v0.z);
+    float3 d2 = make_float3(v2.x - v0.x, v2.y - v0.y, v2.z - v0.z);
+    float aabbArea = aabbHalfArea(hi.x - lo.x, hi.y - lo.y, hi.z - lo.z) * 2.0f;
+
+    float idealArea =
+        fabsf(d1.y * d2.z - d1.z * d2.y) +
+        fabsf(d1.z * d2.x - d1.x * d2.z) +
+        fabsf(d1.x * d2.y - d1.y * d2.x);
+
+    // Evaluate split priority (Equation 5),
+    // and ensure that it is finite an non-negative.
+
+    priority = exp2f((p.priorityLog2X * (float)importance + log2f(aabbArea - idealArea)) * p.priorityY);
+    if (!(priority == priority && priority >= 0.0f))
+        priority = 0.0f;
+    p.outPriorities[outputIdx] = priority;
+
+    // Accumulate totalPriority.
+
+    for (int i = 16; i >= 1; i /= 2)
+        priority += __shfl_xor_nosync(priority, i);
+    if (threadIdx.x == 0)
+        atomicAdd(&p.globals->totalPriority, priority);
+}
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(32, 1)
+void MortonSplitTuneA(MortonSplitTuneParams p)
+{
+    Range triRange = (p.triRange) ? *p.triRange : Range(0, p.maxInputTris);
+
+    // Fetch current state.
+
+    float lwrScaleFactor    = p.globals->lwrScaleFactor;
+    float lwrScaleInterval  = p.globals->lwrScaleInterval;
+    int   totalSplits1      = p.globals->totalSplits1;
+    int   totalSplits2      = p.globals->totalSplits2;
+    int   totalSplits3      = p.globals->totalSplits3;
+
+    // Before first round => set lwrScaleInterval to a lower bound, callwlated based on totalPriority.
+
+    int maxPrimsAfterSplit = triRange.span() + (triRange.span() * p.splitBeta);
+    maxPrimsAfterSplit = min(maxPrimsAfterSplit, p.maxOutputPrims);
+    int maxSplits = maxPrimsAfterSplit - triRange.span();
+
+    if (lwrScaleInterval == 0.0f)
+    {
+        float lowerBound = (float)maxSplits / p.globals->totalPriority;
+        p.globals->lwrScaleInterval = lowerBound;
+        return;
+    }
+
+    // Clear totalSplits for the next round.
+
+    p.globals->totalSplits1 = 0;
+    p.globals->totalSplits2 = 0;
+    p.globals->totalSplits3 = 0;
+
+    // After first round => determine tight lower and upper bound based on the results.
+
+    if (lwrScaleFactor == 0.0f)
+    {
+        // Lower bound.
+
+        float lowerBound = lwrScaleInterval;
+        int lowerSplits = totalSplits1;
+        if (totalSplits3 <= maxSplits)
+            lowerBound = lwrScaleInterval * 3.0f, lowerSplits = totalSplits3;
+        else if (totalSplits2 <= maxSplits)
+            lowerBound = lwrScaleInterval * 2.0f, lowerSplits = totalSplits2;
+
+        // Upper bound.
+
+        float upperBound = lowerBound * (float)maxSplits / (float)lowerSplits;
+        if (totalSplits2 > maxSplits)
+            upperBound = fminf(upperBound, lwrScaleInterval * 2.0f);
+        else if (totalSplits3 > maxSplits)
+            upperBound = fminf(upperBound, lwrScaleInterval * 3.0f);
+
+        // Bracket into 4 sub-intervals.
+
+        p.globals->lwrScaleFactor = lowerBound;
+        p.globals->lwrScaleInterval = (upperBound - lowerBound) * 0.25f;
+        return;
+    }
+
+    // After remaining rounds => choose the right sub-interval, and keep bracketing.
+
+    if (totalSplits3 <= maxSplits)
+        p.globals->lwrScaleFactor = lwrScaleFactor + lwrScaleInterval * 3.0f;
+    else if (totalSplits2 <= maxSplits)
+        p.globals->lwrScaleFactor = lwrScaleFactor + lwrScaleInterval * 2.0f;
+    else if (totalSplits1 <= maxSplits)
+        p.globals->lwrScaleFactor = lwrScaleFactor + lwrScaleInterval * 1.0f;
+    p.globals->lwrScaleInterval = lwrScaleInterval * 0.25f;
+}
+
+//------------------------------------------------------------------------
+// Callwlates how many splits we would end up performing using 3
+// different scale factors.
+
+static __global__ __launch_bounds__(MORTONSPLIT_TUNEB_WARPS_PER_BLOCK * 32, MORTONSPLIT_TUNEB_BLOCKS_PER_SM)
+void MortonSplitTuneB(MortonSplitTuneParams p)
+{
+    INIT_SHUFFLE_EMULATION(MORTONSPLIT_TUNEB_WARPS_PER_BLOCK)
+    Range triRange = (p.triRange) ? *p.triRange : Range(0, p.maxInputTris);
+
+    float scale1 = p.globals->lwrScaleFactor + p.globals->lwrScaleInterval * 1.0f;
+    float scale2 = p.globals->lwrScaleFactor + p.globals->lwrScaleInterval * 2.0f;
+    float scale3 = p.globals->lwrScaleFactor + p.globals->lwrScaleInterval * 3.0f;
+    float totalSplits1 = 0.0f;
+    float totalSplits2 = 0.0f;
+    float totalSplits3 = 0.0f;
+
+    // Accumulate over N input triangles.
+
+    int warpIdx = threadIdx.y + MORTONSPLIT_TUNEB_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y);
+    int triIdx = threadIdx.x + warpIdx * (MORTONSPLIT_TUNEB_TRIS_PER_THREAD * 32);
+
+    for (int i = 0; i < MORTONSPLIT_TUNEB_TRIS_PER_THREAD; i++)
+    {
+        if (triIdx < triRange.span())
+        {
+            float priority = LDG_OR_GLOBAL(&p.inPriorities[triIdx]);
+            totalSplits1 += fminf(floorf(priority * scale1), p.maxSplitsPerTriangle);
+            totalSplits2 += fminf(floorf(priority * scale2), p.maxSplitsPerTriangle);
+            totalSplits3 += fminf(floorf(priority * scale3), p.maxSplitsPerTriangle);
+        }
+        triIdx += 32;
+    }
+
+    // Accumulate over the warp.
+
+    for (int i = 16; i >= 1; i /= 2)
+    {
+        totalSplits1 += __shfl_xor_nosync(totalSplits1, i);
+        totalSplits2 += __shfl_xor_nosync(totalSplits2, i);
+        totalSplits3 += __shfl_xor_nosync(totalSplits3, i);
+    }
+
+    // Accumulate over all warps.
+
+    if (threadIdx.x < 3)
+    {
+        float v = (threadIdx.x == 0) ? totalSplits1 : (threadIdx.x == 1) ? totalSplits2 : totalSplits3;
+        atomicAdd(&p.globals->totalSplits1 + threadIdx.x, (int)v);
+    }
+}
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(MORTONSPLIT_EXEC_WARPS_PER_BLOCK * 32, MORTONSPLIT_EXEC_BLOCKS_PER_SM)
+void MortonSplitExec(MortonSplitExecParams p)
+{
+    INIT_SHUFFLE_EMULATION(MORTONSPLIT_EXEC_WARPS_PER_BLOCK)
+    Range triRange = (p.triRange) ? *p.triRange : Range(0, p.maxInputTris);
+
+    // Fetch model AABB, and setup transform from world space to 20-bit fixed point.
+
+    AABB modelAABB = p.inApexPointMap->getAABB();
+    float ilwScale = fmaxf(fmaxf(modelAABB.hi.x - modelAABB.lo.x, modelAABB.hi.y - modelAABB.lo.y), modelAABB.hi.z - modelAABB.lo.z) * (1.0f / (float)(1 << 20));
+    float scale = 1.0f / ilwScale;
+    float originX = (float)(1 << 19) - (modelAABB.lo.x + modelAABB.hi.x) * (scale * 0.5f);
+    float originY = (float)(1 << 19) - (modelAABB.lo.y + modelAABB.hi.y) * (scale * 0.5f);
+    float originZ = (float)(1 << 19) - (modelAABB.lo.z + modelAABB.hi.z) * (scale * 0.5f);
+
+    // Cache the vertices of one input triangle in registers.
+
+    float3 v0 = make_float3(0.0f, 0.0f, 0.0f);
+    float3 v1 = make_float3(0.0f, 0.0f, 0.0f);
+    float3 v2 = make_float3(0.0f, 0.0f, 0.0f);
+    int lwrInputIdx = -1;
+
+    // Maintain tasks to be processed in three places:
+    // - One current task per lane in registers.
+    // - Stack of postponed tasks per lane in local memory.
+    // - Pool of postponed tasks per warp in shared memory.
+
+    int lwrIdx = 0; // Index in p.splitTriangles. Complemented = fresh new task.
+    int lwrPieces = 0; // Number of pieces the triangle is to be split. Task is valid if pieces >= 2.
+    float3 lo = make_float3(0.0f, 0.0f, 0.0f); // lo.x = LWDART_MAX_NORMAL_F if the AABB is not known
+    float3 hi = make_float3(0.0f, 0.0f, 0.0f);
+
+    int2 stack[MORTONSPLIT_EXEC_MAX_PIECES_LOG2 - 1];
+    int stackSize = 0;
+
+    __shared__ volatile int s_poolIdx[MORTONSPLIT_EXEC_WARPS_PER_BLOCK][63];
+    __shared__ volatile int s_poolPieces[MORTONSPLIT_EXEC_WARPS_PER_BLOCK][63];
+    volatile int* poolIdx = s_poolIdx[threadIdx.y];
+    volatile int* poolPieces = s_poolPieces[threadIdx.y];
+    int poolSize = 0;
+
+    // Main processing loop.
+
+    for (;;)
+    {
+        // No current task => try to pop one from the stack.
+
+        if (lwrPieces < 2 && stackSize != 0)
+        {
+            int2 entry = stack[--stackSize];
+            lwrIdx = entry.x;
+            lwrPieces = entry.y;
+            lo.x = LWDART_MAX_NORMAL_F;
+        }
+
+        // Not enough work for all lanes => insert more tasks to the pool.
+
+        int numActive = __popc(__ballot(lwrPieces >= 2));
+        while (numActive + poolSize < 32)
+        {
+            int insertIdx = 0;
+            int insertPieces = 0;
+
+            // At least one lane has postponed tasks in its stack => move to the pool.
+
+            if (__any(stackSize != 0))
+            {
+                if (stackSize != 0)
+                {
+                    int2 entry = stack[--stackSize];
+                    insertIdx = entry.x;
+                    insertPieces = entry.y;
+                }
+            }
+
+            // Generate new work using the global work counter.
+
+            else
+            {
+                if (threadIdx.x == 0)
+                    insertIdx = atomicAdd(&p.globals->execWorkCounter, 32);
+                insertIdx = __shfl_nosync(insertIdx, 0);
+                if (insertIdx >= triRange.span())
+                    break;
+
+                // Callwlate the desired number of pieces based on priorities and lwrScaleFactor.
+
+                insertIdx += threadIdx.x;
+                if (insertIdx < triRange.span())
+                {
+                    insertPieces = (int)(LDG_OR_GLOBAL(&p.inPriorities[insertIdx]) * p.globals->lwrScaleFactor) + 1;
+                    insertPieces = min(insertPieces, p.maxAABBsPerTriangle);
+                    insertIdx = ~insertIdx;
+                }
+            }
+
+            // Insert to the pool.
+
+            unsigned int insertMask = __ballot(insertPieces >= 2);
+            if (insertPieces >= 2)
+            {
+                int slot = poolSize + __popc(insertMask & getLaneMaskLt());
+                poolIdx[slot] = insertIdx;
+                poolPieces[slot] = insertPieces;
+            }
+            poolSize += __popc(insertMask);
+        }
+
+        // No current task => try to remove one from the pool.
+
+        unsigned int removeMask = __ballot(lwrPieces < 2);
+        if (lwrPieces < 2)
+        {
+            int slot = poolSize - __popc(removeMask & getLaneMaskGe());
+            if (slot >= 0)
+            {
+                lwrIdx = poolIdx[slot];
+                lwrPieces = poolPieces[slot];
+                lo.x = LWDART_MAX_NORMAL_F;
+            }
+        }
+        poolSize = max(poolSize - __popc(removeMask), 0);
+
+        // Still no current task => terminate or skip.
+
+        if (__all(lwrPieces < 2))
+            break;
+
+        if (lwrPieces < 2)
+            continue;
+
+        // Triangle AABB not known => fetch it.
+
+        bool fetchAABB = (lo.x == LWDART_MAX_NORMAL_F);
+        if (fetchAABB && lwrIdx < 0) // fresh task, no splitAABB yet
+        {
+            // Load vertex positions and callwlate AABB.
+
+            int refIdx = ~lwrIdx;
+            lwrInputIdx = p.outPrimIndices[refIdx];
+
+            p.inModel.loadVertexPositions(v0, v1, v2, lwrInputIdx);
+            lo = min(min(v0, v1), v2);
+            hi = max(max(v0, v1), v2);
+        }
+        else if (fetchAABB) // old task, has splitAABB
+        {
+            // Load existing splitAABB.
+
+            PrimitiveAABB aabb = loadCachedAlign16(&p.outSplitAABBs[lwrIdx]);
+            lo = make_float3(aabb.lox, aabb.loy, aabb.loz);
+            hi = make_float3(aabb.hix, aabb.hiy, aabb.hiz);
+
+            // Load vertex positions if not already known.
+
+            if (lwrInputIdx != aabb.primitiveIdx)
+            {
+                lwrInputIdx = aabb.primitiveIdx;
+                p.inModel.loadVertexPositions(v0, v1, v2, lwrInputIdx);
+            }
+        }
+
+        // Find the most important spatial median plane intersected by the AABB.
+
+        float epsilonA = 1.0f - p.epsilon;
+        float epsilonB = p.epsilon;
+        int ilox = (int)((lo.x * epsilonA + hi.x * epsilonB) * scale + originX);
+        int iloy = (int)((lo.y * epsilonA + hi.y * epsilonB) * scale + originY);
+        int iloz = (int)((lo.z * epsilonA + hi.z * epsilonB) * scale + originZ);
+        int ihix = max((int)((hi.x * epsilonA + lo.x * epsilonB) * scale + originX) - 1, ilox);
+        int ihiy = max((int)((hi.y * epsilonA + lo.y * epsilonB) * scale + originY) - 1, iloy);
+        int ihiz = max((int)((hi.z * epsilonA + lo.z * epsilonB) * scale + originZ) - 1, iloz);
+        int importanceX = findLeadingOne(ilox ^ ihix);
+        int importanceY = findLeadingOne(iloy ^ ihiy);
+        int importanceZ = findLeadingOne(iloz ^ ihiz);
+
+        int planeAxis = (importanceZ >= importanceX && importanceZ >= importanceY) ? 2 : (importanceY >= importanceX) ? 1 : 0;
+        int iplanePos = chooseComponent(ihix, ihiy, ihiz, planeAxis) & (-1 << max(max(importanceX, importanceY), importanceZ));
+        float planePos = ((float)iplanePos - chooseComponent(originX, originY, originZ, planeAxis)) * ilwScale;
+
+        // The plane does not actually intersect the AABB (due to numerical inaclwracies) => skip.
+
+        if (planePos <= chooseComponent(lo, planeAxis) || planePos >= chooseComponent(hi, planeAxis))
+        {
+            // Current AABB originated from the previous round => we need to flush it to memory.
+
+            if (!fetchAABB)
+            {
+                *(float4*)&p.outSplitAABBs[lwrIdx].lox = make_float4(lo.x, lo.y, lo.z, hi.x);
+                *(float4*)&p.outSplitAABBs[lwrIdx].hiy = make_float4(hi.y, hi.z, __int_as_float(lwrInputIdx), 0.0f);
+            }
+            lwrPieces = 0;
+            continue;
+        }
+
+        // Allocate splitAABB and update outPrimIndices for fresh tasks.
+
+        if (fetchAABB && lwrIdx < 0)
+        {
+            int refIdx = ~lwrIdx;
+            unsigned int mask = __ballot(true);
+            int leader = findLeadingOne(mask);
+            int freshAABBCounter = 0;
+            if (threadIdx.x == leader)
+                freshAABBCounter = atomicAdd(&p.globals->freshAABBCounter, __popc(mask));
+            freshAABBCounter = __shfl_nosync(freshAABBCounter, leader) + __popc(mask & getLaneMaskLt());
+
+            lwrIdx = p.maxSplitAABBs - 1 - freshAABBCounter; // allocate from the end of the buffer
+            p.outPrimIndices[refIdx] = lwrIdx + (1 << 30);
+        }
+
+        // Classify vertices on either side of the split plane.
+
+        float w0 = chooseComponent(v0.x, v0.y, v0.z, planeAxis) - planePos;
+        float w1 = chooseComponent(v1.x, v1.y, v1.z, planeAxis) - planePos;
+        float w2 = chooseComponent(v2.x, v2.y, v2.z, planeAxis) - planePos;
+
+        // Swap vertices so that v1 and v2 are on the same side.
+
+        if (w1 * w2 < 0.0f)
+        {
+            float3 tv0 = v0;
+            float tw0 = w0;
+            if (w0 * w1 < 0.0f)
+                v0 = v1, w0 = w1, v1 = tv0, w1 = tw0;
+            else
+                v0 = v2, w0 = w2, v2 = tv0, w2 = tw0;
+        }
+
+        // Determine clip vertices.
+
+        float t01 = fminf(fmaxf(w0 / (w0 - w1), 0.0f), 1.0f);
+        float t02 = fminf(fmaxf(w0 / (w0 - w2), 0.0f), 1.0f);
+        float3 c01 = make_float3(v0.x + (v1.x - v0.x) * t01, v0.y + (v1.y - v0.y) * t01, v0.z + (v1.z - v0.z) * t01);
+        float3 c02 = make_float3(v0.x + (v2.x - v0.x) * t02, v0.y + (v2.y - v0.y) * t02, v0.z + (v2.z - v0.z) * t02);
+        if (planeAxis == 0) c01.x = c02.x = planePos;
+        if (planeAxis == 1) c01.y = c02.y = planePos;
+        if (planeAxis == 2) c01.z = c02.z = planePos;
+
+        // Callwlate the clipped AABBs.
+
+        float3 clo = min(c01, c02);
+        float3 chi = max(c01, c02);
+        float3 alo = max(lo, min(clo, v0));
+        float3 ahi = min(hi, max(chi, v0));
+        float3 blo = max(lo, min(clo, min(v1, v2)));
+        float3 bhi = min(hi, max(chi, max(v1, v2)));
+
+        // Allocate space for the results.
+
+        int idxA = lwrIdx;
+
+        unsigned int mask = __ballot(true);
+        int leader = findLeadingOne(mask);
+        int refB = 0;
+        if (threadIdx.x == leader)
+            refB = atomicAdd(&p.outPrimRange->end, __popc(mask));
+        refB = __shfl_nosync(refB, leader) + __popc(mask & getLaneMaskLt());
+
+        int idxB = refB - triRange.span(); // allocate from the beginning of the buffer
+        p.outPrimIndices[refB] = idxB + (1 << 30);
+
+        // Partition pieces between the resulting tasks.
+
+        float weightA = fmaxf(fmaxf(ahi.x - alo.x, ahi.y - alo.y), ahi.z - alo.z);
+        float weightB = fmaxf(fmaxf(bhi.x - blo.x, bhi.y - blo.y), bhi.z - blo.z);
+        int piecesA = min(max((int)((float)lwrPieces * weightA / (weightA + weightB) + 0.5f), 1), lwrPieces - 1);
+        int piecesB = lwrPieces - piecesA;
+
+        // Smaller task comes first.
+
+        if (piecesA < 2 || (piecesB >= 2 && piecesB < piecesA))
+        {
+            int t;
+            t = idxA, idxA = idxB, idxB = t;
+            t = piecesA, piecesA = piecesB, piecesB = t;
+
+            float3 tt;
+            tt = alo, alo = blo, blo = tt;
+            tt = ahi, ahi = bhi, bhi = tt;
+        }
+
+        // Proceed to task A, and push task B to the stack.
+
+        lwrIdx = idxA;
+        lwrPieces = piecesA;
+        lo = alo;
+        hi = ahi;
+
+        if (piecesB >= 2)
+            stack[stackSize++] = make_int2(idxB, piecesB);
+
+        // Flush AABBs to memory.
+        // Note: If task A is going to be processed in the next round, we do not need to write out its AABB yet.
+
+        if (piecesA < 2)
+        {
+            *(float4*)&p.outSplitAABBs[idxA].lox = make_float4(alo.x, alo.y, alo.z, ahi.x);
+            *(float4*)&p.outSplitAABBs[idxA].hiy = make_float4(ahi.y, ahi.z, __int_as_float(lwrInputIdx), 0.0f);
+        }
+
+        *(float4*)&p.outSplitAABBs[idxB].lox = make_float4(blo.x, blo.y, blo.z, bhi.x);
+        *(float4*)&p.outSplitAABBs[idxB].hiy = make_float4(bhi.y, bhi.z, __int_as_float(lwrInputIdx), 0.0f);
+    }
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchMortonSplitInit(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const MortonSplitInitParams& p)
+{
+    if (lwdaFuncSetCacheConfig(MortonSplitInit, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    MortonSplitInit<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchMortonSplitTuneA(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const MortonSplitTuneParams& p)
+{
+    if (lwdaFuncSetCacheConfig(MortonSplitTuneA, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    MortonSplitTuneA<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchMortonSplitTuneB(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const MortonSplitTuneParams& p)
+{
+    if (lwdaFuncSetCacheConfig(MortonSplitTuneB, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    MortonSplitTuneB<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchMortonSplitExec(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const MortonSplitExecParams& p)
+{
+    if (lwdaFuncSetCacheConfig(MortonSplitExec, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    MortonSplitExec<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

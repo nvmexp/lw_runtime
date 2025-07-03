@@ -1,0 +1,265 @@
+# -*- mode: perl; -*-
+
+# DPU Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $dpuHal = [
+
+    # per-GPU defaults for DPU engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, VOLTA_and_later, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+
+        GET_FALCON_BASE => [
+            DESCRIPTION     => "dpuGetFalconBase, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE     => "LwU32",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => ZERO,
+
+            _v02_01         => [ dMAXWELL_thru_dPASCAL, ],
+        ],
+
+        GET_FALCON_CORE_IFACE => [
+            DESCRIPTION     => "dpuGetFalconCoreIFace, it returns FLCN_CORE_IFACES*",
+            INTERFACE_TAG   => "dpuGetFalconCoreIFace",  #IFace instead of Iface
+            RETURN_TYPE     => "const FLCN_CORE_IFACES *",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => NULL,
+
+            _v02_01         => [ dMAXWELL_thru_dPASCAL, -GM20X, ],
+            _v02_05         => [ GM20X, ],
+        ],
+
+        GET_FALCON_ENGINE_IFACE => [
+            DESCRIPTION     => "dpuGetFalconEngineIFace, it returns FLCN_ENGINE_IFACES*",
+            INTERFACE_TAG   => "dpuGetFalconEngineIFace",  #IFace instead of Iface
+            RETURN_TYPE     => "const FLCN_ENGINE_IFACES *",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => NULL,
+
+            _v02_01         => [ dMAXWELL_thru_dPASCAL, -GM20X, ],
+            _v02_05         => [ GM20X, ],
+        ],
+
+        QUEUE_GET_NUM  => [
+            DESCRIPTION     => "dpuQueueGetNum, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE     => "LwU32",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => ZERO,
+
+            _v02_01         => [ dMAXWELL_thru_dPASCAL, ],
+        ],
+
+        QUEUE_READ  => [
+            DESCRIPTION     => "dpuQueueRead, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE     => "LwBool",
+            ARGUMENTS       => "LwU32 queueId, PFLCN_QUEUE pQueue",
+            STUB_RETURNS    => LW_FALSE,
+
+            LIKE_INTERFACE  => QUEUE_GET_NUM,
+        ],
+
+        UCODE_NAME  => [
+            DESCRIPTION     => "dpuUcodeName, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE     => "const char *",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => NULL,
+
+            _v02_01         => [ dMAXWELL_thru_dPASCAL, -GM20X, ],
+            _v02_05         => [ GM20X, ],
+        ],
+
+        GET_CMDQ_NUM  => [
+            DESCRIPTION     => "dpuUcodeName, member of FLCN_ENGINE_IFACES",
+            INTERFACE_TAG   => "dpuGetCmdQNum",  #CmdQ instead of Cmdq
+            RETURN_TYPE     => "LwU32",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => ZERO,
+
+            _v02_01         => [ dMAXWELL_thru_dPASCAL, ],
+        ],
+
+        GET_MSGQ_NUM  => [
+            DESCRIPTION     => "dpuUcodeName, member of FLCN_ENGINE_IFACES",
+            INTERFACE_TAG   => "dpuGetMsgQNum",  #MsgQ instead of Msgq
+            RETURN_TYPE     => "LwU32",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => ZERO,
+
+            _v02_01         => [ dMAXWELL_thru_dPASCAL, ],
+        ],
+
+        UCODE_GET_PATH  => [
+            DESCRIPTION   => "dpuUcodeGetPath, estimate the path to the ucode binary relative to kernel/inc from IP_VER_MAJOR/MINOR",
+            RETURN_TYPE   => "char *",
+            ARGUMENTS     => "",
+            STUB_RETURNS  => "NULL",
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+        ],
+
+        MUTEX_GET_NUM => [
+            DESCRIPTION   => "dpuMuteXGetNum, number of mutices",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _STUB         => [ ALL, ],
+        ],
+
+        MUTEX_READ => [
+            DESCRIPTION   => "dpuMuteXRead, read mutex",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32 muteXId, LwU32* pMuteX, BOOL* pFree",
+            STUB_RETURNS  => FALSE,
+
+            _STUB         => [ ALL, ],
+        ],
+
+        FLCNGDB_GET_REG_MAP => [
+            DESCRIPTION   => "Provides dpu register mapping for Falcon GDB",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "FLCNGDB_REGISTER_MAP* ",
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+        ],
+
+        RST => [
+            DESCRIPTION   => "dpuRst, resets DPU Falcon",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL,],
+        ],
+
+        SANITY_TEST_GET_ENTRY_TABLE  => [
+            DESCRIPTION   => "runs a chip specific basic test, useful for bringup/emulation checkout",
+            RETURN_TYPE   => "void *",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => NULL,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+        ],
+
+        SANITY_TEST_RUN  => [
+            DESCRIPTION   => "runs a chip specific basic test, useful for bringup/emulation checkout",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32, LwU32, char *",
+            STUB_RETURNS  => ERROR,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+        ],
+
+        SANITY_TEST_GET_NUM  => [
+            DESCRIPTION   => "returns the number of sanity tests",
+            RETURN_TYPE   => "LwU32",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+        ],
+
+        SANITY_TEST_GET_INFO  => [
+            DESCRIPTION   => "returns the description of a corresponding test",
+            RETURN_TYPE   => "const char *",
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => '"N/A"',
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+        ],
+
+        SANITY_TEST_GET_FLAGS  => [
+            DESCRIPTION   => "returns the flags of a corresponding test",
+            RETURN_TYPE   => "LwU32",
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+        ],
+
+        IS_DMEM_RANGE_ACCESSIBLE => [
+            DESCRIPTION    => "Check if the DMEM range is accessible",
+            RETURN_TYPE    => "LwBool",
+            ARGUMENTS      => "LwU32 blkLo, LwU32 blkHi",
+            STUB_RETURNS   => LW_TRUE, # All of DMEM is readable in pre-carveouts land
+
+            _v02_05        => [ GM20X_thru_dPASCAL, ],
+            _STUB          => [ pre_MAXWELL, GM10X, ],
+        ],
+
+        GET_DMEM_NUM_PRIV_RANGES => [
+            DESCRIPTION    => "Get the number of DMEM priv ranges (carveouts)",
+            RETURN_TYPE    =>  LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => IS_DMEM_RANGE_ACCESSIBLE,
+        ],
+
+        GET_DMEM_PRIV_RANGE => [
+            DESCRIPTION    => "DpuGetDmemPrivRange, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE    =>  void,
+            ARGUMENTS      => "LwU32 index, LwU32 *rangeStart, LwU32 *rangeEnd",
+
+            LIKE_INTERFACE => IS_DMEM_RANGE_ACCESSIBLE,
+        ],
+
+        EMEM_GET_SIZE => [
+            DESCRIPTION    => "Get the size of EMEM",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            _STUB          => [ ALL, ],
+        ],
+
+        EMEM_GET_OFFSET_IN_DMEM_VA_SPACE => [
+            DESCRIPTION    => "Get the offset off EMEM in DMEM VA space",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => EMEM_GET_SIZE,
+        ],
+
+        EMEM_GET_NUM_PORTS => [
+            DESCRIPTION    => "Get the number of EMEM ports",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => EMEM_GET_SIZE,
+        ],
+
+        EMEM_READ => [
+            DESCRIPTION    => "Read the EMEM carveout",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "LwU32 offset, LwU32 length, LwU32 port, LwU32 *pBuf",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => EMEM_GET_SIZE,
+        ],
+
+        EMEM_WRITE => [
+            DESCRIPTION    => "Write to the EMEM carveout",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "LwU32 offset, LwU32 val, LwU32 width, LwU32 length, LwU32 port",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => EMEM_GET_SIZE,
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $dpuHal;

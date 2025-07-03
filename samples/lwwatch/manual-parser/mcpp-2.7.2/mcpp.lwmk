@@ -1,0 +1,30 @@
+MCPP_SOURCE_FILES =  main.c
+MCPP_SOURCE_FILES += directive.c
+MCPP_SOURCE_FILES += eval.c
+MCPP_SOURCE_FILES += expand.c
+MCPP_SOURCE_FILES += support.c
+MCPP_SOURCE_FILES += system.c
+MCPP_SOURCE_FILES += mbchar.c
+
+MCPP_SOURCES = $(addprefix $(LW_SOURCE)/apps/lwwatch/manual-parser/mcpp-2.7.2/src/,$(MCPP_SOURCE_FILES))
+
+MCPP_INCLUDES = $(LW_SOURCE)/apps/lwwatch/manual-parser/mcpp-2.7.2/src
+MCPP_DEFINES = MCPP_LIB=1
+MCPP_CFLAGS =
+
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+  MCPP_DEFINES += _CRT_SELWRE_NO_WARNINGS
+  MCPP_DEFINES += _CRT_NONSTDC_NO_DEPRECATE
+  MCPP_DEFINES += MCPP_WINDOWS
+  MCPP_CFLAGS += -FI $(LW_SOURCE)/apps/lwwatch/manual-parser/mcpp-2.7.2/src/mcpp_windows.h
+  # Disable warning "colwersion from 'size_t' to 'unsigned int', possible loss of data"
+  MCPP_CFLAGS += -wd4267
+  # Disable warning "colwersion from '__int64' to 'uint32_t', possible loss of data"
+  MCPP_CFLAGS += -wd4244
+endif
+
+$(call BUILD_OBJECT_LIST,$(MCPP_SOURCES)): LW_INCLUDES += $(MCPP_INCLUDES)
+$(call BUILD_OBJECT_LIST,$(MCPP_SOURCES)): LW_DEFINES += $(MCPP_DEFINES)
+$(call BUILD_OBJECT_LIST,$(MCPP_SOURCES)): CFLAGS += $(MCPP_CFLAGS)
+
+SOURCES += $(MCPP_SOURCES)

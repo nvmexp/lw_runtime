@@ -1,0 +1,89 @@
+*Settings*
+Library	Process
+Library	OperatingSystem
+Library	Collections
+Library	String
+Library	${TESTROOTDIR}/tools/metrics.py
+Library	${TESTROOTDIR}/tools/utils.py
+Resource	${TESTROOTDIR}/config.tsv
+
+
+*Keywords*
+Run Unit	[Arguments]	${filename}	${testparms}=${EMPTY}	${timeout}=2 minutes
+	Set Knobs
+	Enable Metrics
+	${COMMAND} =	Detect Exelwtable	${UNITTESTDIR}	${filename}	${EXE_EXTENSION}
+	${result}	${testmsg} =	Run Command	${COMMAND} ${testparms} --gtest_output=xml:${OUTPUT_DIR}${/}test_xml${/}${TEST_NAME}.xml	cwd=${UNITTESTDIR}	timeout=${timeout}
+	Run Process	${COMMAND}	--gtest_list_tests	stdout=${OUTPUT DIR}${/}test_lists${/}${TEST_NAME}.txt
+	Should Be Equal As Integers	${result.rc}	0	${testmsg}	values=False
+	Set Test Message	${testmsg}
+
+
+Run Megakernel Unit	[Arguments]	${filename}	${testparms}=${EMPTY}	${timeout}=2 minutes
+	Set Megakernel Exelwtion Strategy
+	Run Unit	${filename}	${testparms}	${timeout}
+	[Teardown]	Unset Megakernel Exelwtion Strategy
+
+
+Run Command	[Arguments]	${cmd}	${timeout}=1 minute	${cwd}=${EMPTY}
+	@{split_cmd} =	Split String	${cmd}
+	Create Directory	${OUTPUT DIR}${/}console_output
+	Create Directory	${OUTPUT DIR}${/}metrics
+	Create Directory	${OUTPUT DIR}${/}test_lists
+	Create Directory	${OUTPUT DIR}${/}test_xml
+	Create File	${OUTPUT DIR}${/}console_output${/}${TEST_NAME}_cmdline.txt	${cmd}
+	Remove Files	timeviz.json
+	${result} =	Run Process	@{split_cmd}	stdout=${OUTPUT DIR}${/}console_output${/}${TEST_NAME}_stdout.txt	stderr=${OUTPUT DIR}${/}console_output${/}${TEST_NAME}_stderr.txt	timeout=${timeout}	on_timeout=terminate	cwd=${cwd}	 # launched with stdout/stderr set to files. This prevents hangs when a process writes large amounts of text to the console.
+	Process Metrics	metrics.json	${OUTPUT DIR}${/}metrics${/}${TEST_NAME}_metrics.json	True
+	Process Metrics	timeviz.json	${OUTPUT DIR}${/}metrics${/}${TEST_NAME}_timeviz.json	False
+	Log	${result.stdout}
+	Log	${result.stderr}
+	${testmsg} =	Get Output Links
+	${testmsg} =	Set Variable If	${result.rc} != 0	${testmsg} <div>Command exited with error code ${result.rc}.</div>	${testmsg}
+	${testmsg} =	Set Variable If	${result.rc} == -1073741510	"${testmsg} <div>Test likely timed out, check the 'Run Process' keyword log to confirm.</div>"	${testmsg}
+	[Return]	${result}	${testmsg}
+
+
+Get Output Links
+	${stdoutsz} =	Get File Size	${OUTPUT DIR}${/}console_output${/}${TEST_NAME}_stdout.txt
+	${stderrsz} =	Get File Size	${OUTPUT DIR}${/}console_output${/}${TEST_NAME}_stderr.txt
+	${metricssz} =	Get File Size	${OUTPUT DIR}${/}metrics${/}${TEST_NAME}_metrics.json
+	${ret} =	Set Variable	"*HTML* <div><a href=console_output/${TEST_NAME}_stdout.txt>stdout</a> (${stdoutsz} bytes), <a href=console_output/${TEST_NAME}_stderr.txt>stderr</a> (${stderrsz} bytes), <a href=metrics/${TEST_NAME}_metrics.json>metrics</a> (${metricssz} bytes), <a href=console_output/${TEST_NAME}_cmdline.txt>cmdline</a></div>"
+	[Return]	${ret}
+
+
+Blacklist	[Arguments]	${reason}
+	Fail	${reason}	blacklist
+
+
+Set Knobs
+	Set Environment Variable	optix.log.colored	0
+
+
+Enable Metrics
+	Set Environment Variable	optix.metrics.enable	1
+
+
+Set Entry Point Weights	[Arguments]	${weights}
+	Set Environment Variable	optix.metrics.runJson	"kernel_msec_weights":[${weights}]
+
+
+Require Log Message	[Arguments]	${message}	${stream}=err
+	${matches} = 	Grep File 	${OUTPUT DIR}${/}console_output${/}${TEST_NAME}_std${stream}.txt	${message}
+	Should Not Be Empty	${matches}	the required message: \"${message}\" could not be found in std${stream}
+
+
+Get Optix Build Type
+	${magicstring}=	Find Magic String	${OPTIXLIBDIR}/${DEFAULT_OPTIXLIB}	"~-~-~"
+	Should Not Be Equal	${magicstring}	${None}	could not find magicstring in \"${OPTIXLIBDIR}/${DEFAULT_OPTIXLIB}\". \"${DEFAULT_OPTIXLIB}\" is broken	False
+	${lines}=	Get Lines Containing String	${magicstring}	"DEV ~-~-~"
+	${result}=	Set Variable If	'${lines}'=='${magicstring}'	'OPTIX_DEV_BUILD'	'OPTIX_RELEASE_BUILD'
+	[Return]	${result}
+
+
+Set Megakernel Exelwtion Strategy
+	Set Environment Variable	optix.context.forceExelwtionStrategy	megakernel
+
+
+Unset Megakernel Exelwtion Strategy
+	Remove Environment Variable	optix.context.forceExelwtionStrategy	

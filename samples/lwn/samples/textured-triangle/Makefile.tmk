@@ -1,0 +1,83 @@
+################################## tell Emacs this is a -*- makefile-gmake -*-
+#
+# Copyright (c) 2015-2020 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+# tmake for SW Mobile component makefile
+#
+###############################################################################
+
+ifdef LW_COMPONENT_FLAG_DYNAMIC_EXELWTABLE_SECTION
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME := textured-triangle
+
+LW_COMPONENT_SOURCES := \
+	Simple_Triangle.cpp \
+	../common/lwnutil.cpp
+
+LW_COMPONENT_HAS_BROKEN_CODE := \
+	unused-variable \
+	redundant-decls
+
+LW_COMPONENT_INCLUDES := \
+	../../include \
+	../../common
+
+LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+	$(LW_INTERFACE_GPU_GRAPHICS_LWN) \
+	$(LW_INTERFACE_GPU_GRAPHICS_LWWINSYS_PRIVATE)
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_HOS),1)
+LW_COMPONENT_CFLAGS += \
+	-DLW_HOS
+
+LW_COMPONENT_SOURCES += \
+	main-hos.cpp
+
+LW_COMPONENT_NEEDED_INTERFACE_DIRS += \
+	$(LW_SOURCE)/core/utils/lwos
+endif
+
+ifeq ($(LW_BUILD_CONFIGURATION_LINUX_USERSPACE_IS_L4T),1)
+  LW_COMPONENT_CFLAGS += \
+	-DLW_LINUX
+
+LW_COMPONENT_SOURCES += \
+	main-wayland.cpp \
+	../../common/lwnWin/dmabuf-protocol.c \
+	../../common/lwnWin/synchronization-protocol.c \
+	../../common/lwnWin/lwn_win.cpp \
+	../../common/lwnWin/wayland_win.cpp \
+	../../common/lwnWin/lwwinsys_win.cpp
+
+LW_COMPONENT_INCLUDES += \
+	../../common
+
+  LW_COMPONENT_CODE_GENERATION := c++11
+  LW_COMPONENT_SYSTEM_SHARED_LIBRARIES := stdc++
+
+  LW_COMPONENT_NEEDED_INTERFACE_DIRS += \
+	$(LW_SOURCE)/gpu/drv/drivers/unix/dso-stubs/wayland/libwayland-dso-stubs/wayland-client \
+	$(LW_SOURCE)/gpu/drv/drivers/unix/dso-stubs/wayland/libwayland-dso-stubs/wayland-egl
+
+  LW_COMPONENT_INCLUDES += \
+	$(LW_TOOLS)/embedded/external-prebuilt/wayland-1.14.0/Linux-aarch64/include \
+	$(LW_TOOLS)/embedded/external-prebuilt/wayland-protocols-1.17/include \
+	$(LW_TOOLS)/embedded/external-prebuilt/wayland-protocols-1.17/src
+endif
+
+
+include $(LW_BUILD_DYNAMIC_EXELWTABLE)
+endif
+
+# Local Variables:
+# indent-tabs-mode: t
+# tab-width: 8
+# End:
+# vi: set tabstop=8 noexpandtab:

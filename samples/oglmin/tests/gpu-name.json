@@ -1,0 +1,51 @@
+[
+  {
+    "Type": "Control",
+    "OutputDirectory": "Info",
+    "TestDefinitions": [
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:gpu;q -o:[OutputDirectory]\\swak-gpu.txt"
+      },
+      {
+        "Command": "C:\\Windows\\System32\\cmd.exe",
+        "Arguments": "/C [bin]\\glRenderer.exe > [OutputDirectory]\\glRenderer.txt"
+      },
+      {
+        "Command": "C:\\Windows\\System32\\cmd.exe",
+        "Arguments": "/C C:\\Windows\\System32\\vulkaninfo.exe > [OutputDirectory]\\VulkanInfo.txt 2> [OutputDirectory]\\VulkanInfo-stderr.txt",
+        "ElwironmentVariable": "VK_LOADER_DEBUG=all"
+      }
+    ]
+  },
+  {
+    "Type": "API",
+    "SessionName": "GpuName",
+    "TestCase": "GpuName",
+    "OutputDirectory": "GpuName",
+    "Server": "hqlwoglsql01:8211",
+    "TestDefinitions": [
+      {
+        "Name": "SWAK_GPU_FullName",
+        "File": "[RootOutputDirectory]\\Info\\swak-gpu.txt",
+        "Regex": "Full Name: ([\\w\\-\\(\\)/\\\\ ]+)"
+      },
+      {
+        "Name": "SWAK_GPU_ShortName",
+        "File": "[RootOutputDirectory]\\Info\\swak-gpu.txt",
+        "Regex": "Short Name: ([\\w\\-\\(\\)/\\\\ ]+)"
+      },
+      {
+        "Name": "glRenderer",
+        "File": "[RootOutputDirectory]\\Info\\glRenderer.txt",
+        "Regex": "GL_RENDERER: ([\\w\\-\\(\\)/\\\\ ]+)"
+      },
+      {
+        "Name": "VulkanInfo_DeviceName",
+        "File": "[RootOutputDirectory]\\Info\\VulkanInfo.txt",
+        "Regex": "deviceName[ ]+= ([\\w\\-\\(\\)/\\\\ ]+)"
+      }
+    ]
+  }
+]
+

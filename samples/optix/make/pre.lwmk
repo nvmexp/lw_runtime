@@ -1,0 +1,199 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+# pre.lwmk - Include to get all project wide settings
+
+include $(LW_OPTIX)/make/pre$(LW_TARGET_OS_FAMILY).lwmk
+
+# These exelwtables are compiled at build time and then run at build time.
+# Define variables to the built exelwtable path early to allow other build
+# outputs to depend on the tool exelwtables.
+#
+ptxEncryptionBuildTool_EXE = $(OUTPUTDIR)/ptxEncryptionBuildTool$(EXESUFFIX)
+d2irWrapperGenerator_EXE = $(OUTPUTDIR)/d2irWrapperGenerator$(EXESUFFIX)
+
+# Includes for all OptiX subdirs:
+# drivers                                  <common/inc/...> includes
+# drivers/rtcore                           <rtcore/...>, <corelib/...> includes
+# apps/optix                               <src/...> includes
+# apps/optix/include                       optix SDK includes
+# apps/optix/src                           <Context/...>, etc. includes
+# OUTPUTDIR/include                        Generated includes
+# OUTPUTDIR                                <g_lwconfig.h>
+#
+OPTIX_INCLUDES := \
+  $(LW_SOURCE)/drivers \
+  $(LW_SOURCE)/drivers/rtcore \
+  $(LW_OPTIX) \
+  $(LW_OPTIX)/include \
+  $(LW_OPTIX)/src \
+  $(OUTPUTDIR)/include \
+  $(OUTPUTDIR)/optix-include \
+  $(OUTPUTDIR) \
+  $(LW_OPTIX)/support/lwpti/include
+
+# For lwtypes.h, which depends on g_lwconfig.h
+LWVM_LW_SDK_INCLUDES := \
+  $(OUTPUTDIR)
+
+ENABLE_BUILD_LWVM := 1
+export ENABLE_BUILD_LWVM
+LWVM_BUILD_TOOLS := 1
+export LWVM_BUILD_TOOLS
+include $(LW_OPTIX)/make/configure-lwvm.lwmk
+
+# find lwca
+include $(LW_OPTIX)/make/lwca-specifics.lwmk
+
+# Include other build template helpers
+include $(LW_OPTIX)/make/BinaryData.lwmk
+include $(LW_OPTIX)/make/BitCodeLibrary.lwmk
+include $(LW_OPTIX)/make/HostTool.lwmk
+include $(LW_OPTIX)/make/Module.lwmk
+include $(LW_OPTIX)/make/StaticLib.lwmk
+include $(LW_OPTIX)/make/Tool.lwmk
+include $(LW_OPTIX)/make/UnitTest.lwmk
+
+#=== Helper to build with a prefix.
+# $(1): Component Name
+# $(2): Source List
+BUILD_OPTIX_OBJECT_LIST = $(patsubst $(OUTPUTDIR)/%,$(OUTPUTDIR)/$(1)_%,$(call BUILD_OBJECT_LIST,$(2)))
+
+# Begin Settings for the Optix Build
+
+# FIXME. They might depend on the Buildtype
+NO_LWVM_DEFINES += _USE_MATH_DEFINES NOMINMAX
+OPTIX_DEFINES += LW_CONTRIB=1
+OPTIX_DEFINES += _LWISA
+OPTIX_DEFINES += LWVM_ADDRESS_SPACE_0_GENERIC
+OPTIX_DEFINES += __STDC_LIMIT_MACROS
+OPTIX_DEFINES += __STDC_CONSTANT_MACROS
+OPTIX_DEFINES += _VARIADIC_MAX=10
+OPTIX_DEFINES += LWDA_64_BIT_DEVICE_CODE
+
+
+# the list of input files that must be processed by cmake_configure or equivalent
+CMAKE_CONFIGURED_FILES :=
+
+LW_WARNINGS_AS_ERRORS = 1
+
+# File containing list of symbols exported by lwoptix
+LWOPTIX_EXPORTED_SYMBOL_FILE := $(LW_OPTIX)/src/c-api/exported_symbols.cmake
+
+# For places where we need a right parenthesis in make expressions
+right_paren := )
+
+# Sets LWOPTIX_EXPORTED_SYMBOLS to a space-separated list of symbols exported
+# from lwoptix as defined by exported_symbols.cmake
+#
+# Usage: $(eval $(call SET_LWOPTIX_EXPORTED_SYBMOLS))
+#
+define SET_LWOPTIX_EXPORTED_SYMBOLS
+  LWOPTIX_EXPORTED_SYMBOLS := $$(strip $$(shell $$(SED) -e '1,/set/d' -e '/$$(right_paren)/,$$$$d' $$(LWOPTIX_EXPORTED_SYMBOL_FILE)))
+endef
+
+# Extra LWVM libraries that may be needed for linking tools or tests
+OPTIX_EXTRA_LWVM_LIBS := \
+  LWVMCodeGen \
+  LWVMAnalysis \
+  LWVMTarget \
+  LWVMMC \
+  LWVMVendor \
+  LWVMSupport
+
+# SSE 4.1 support is assumed for Windows and Linux
+ifeq ($(LW_TARGET_ARCH),amd64)
+  SSE_41_AVAILABLE = 1
+else
+  SSE_41_AVAILABLE = 0
+endif
+
+# Preserve all intermediate files generated as a result of pattern rules;
+# See the GNU make documentation for more details.
+.SECONDARY:
+
+### Clang related variables
+
+ifeq ($(LW_HOST_OS_FAMILY),Windows)
+    CLANG_PATH = $(LW_OPTIX)/lwvm/llvm/bin/Release_precompiled_win
+else
+    CLANG_PATH = $(LW_TOOLS)/unix/hosts/Linux-x86_64/targets/Linux-x86_64/llvm-3.4.0/bin
+endif
+CLANG := $(CLANG_PATH)/clang$(EXESUFFIX)
+
+# Default LLVM opt arguments
+LLVM_OPT_ARGS := -always-inline -mem2reg -sroa -instcombine -gvn
+
+CLANG_ARGS_NO_OPT = \
+  -DOPTIX_BUILD_RUNTIME \
+  --target=lwptx64-lwpu-lwca \
+  -fno-unwind-tables \
+  -fno-sanitize-recover \
+  -fno-exceptions \
+  -c \
+  -emit-llvm \
+  -std=c++11 \
+  -Wno-return-type-c-linkage
+
+CLANG_ARGS = \
+  $(CLANG_ARGS_NO_OPT) \
+  -ffast-math \
+  -O3 \
+  $(addprefix -I,$(LW_SOURCE)/drivers/rtcore/support/lwvm/llvm/lib/clang/3.4.0/include/) \
+  $(addprefix -I,$(LW_INCLUDES)) \
+  $(addprefix -D,$(LW_DEFINES) $(OPTIX_DEFINES))
+
+ifeq ($(LW_TARGET_ARCH),amd64)
+  BITNESS = 64
+else ifeq ($(LW_TARGET_ARCH),aarch64)
+  BITNESS = 64
+else
+  BITNESS = 32
+endif
+
+# Identify the current makefile ilwoking a function.
+# - Ignore *_dep.lwmk, which might have been recently included from a template
+# - Ignore *.lwmk from outside $(LW_OPTIX), e.g. something from drivers/common/build
+# - Then grab the last word from the filtered list
+ILWOKING_MAKEFILE = $(lastword $(filter $(LW_OPTIX)/%.lwmk,$(filter-out %_dep.lwmk,$(MAKEFILE_LIST))))
+
+
+# inspired by //sw/dev/gpu_drv/module_compiler/drivers/compiler/gpgpucomp/gpgpucomp.lwmk
+ifeq ($(LW_TARGET_OS_FAMILY),Unix)
+  BISON_PKGDATADIR := $(LW_TOOLS)/unix/targets/common/bison
+  M4 := $(LW_TOOLS)/unix/hosts/Linux-x86/unix-build/bin/m4
+  BISON_EXE := $(LW_TOOLS)/unix/hosts/Linux-x86/unix-build/bin/bison
+  FLEX_EXE := $(LW_TOOLS)/unix/hosts/Linux-x86/unix-build/bin/flex
+  YACC := M4=$(M4) BISON_PKGDATADIR=$(BISON_PKGDATADIR) $(BISON_EXE)
+  LEX := M4=$(M4) $(FLEX_EXE)
+else ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+  export BISON_INSTALLDIR := $(LW_TOOLS)/win32/bison/bison_2_3
+  # BISON_PKGDATADIR path is required for bison to find m4sugar.m4
+  export BISON_PKGDATADIR := $(BISON_INSTALLDIR)/share/bison
+  # Use a native win32 binary that doesn't hit the usual msys problems.
+  export M4 := $(LW_TOOLS)/win32/bison/m4-1.4.14/m4.exe
+  BISON_EXE := $(BISON_INSTALLDIR)/bin/bison.exe
+  FLEX_EXE := $(LW_TOOLS)/win32/MiscBuildTools/flex_2_6_4.exe
+  YACC := $(BISON_EXE)
+  LEX := $(FLEX_EXE) --nounistd
+else
+  $(error Unsupported OS family)
+endif
+LW_REQUIRED_DIRS += $(BISON_PKGDATADIR) $(M4) $(BISON_EXE) $(FLEX_EXE)

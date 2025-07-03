@@ -1,0 +1,79 @@
+ps_4_0
+dcl_input v1.xyz, linear
+dcl_input v2.xyzw, linear
+dcl_input v3.xyzw, linear
+dcl_input v4.xyzw, linear
+dcl_input v5.xyz, linear
+dcl_input v6.xyz, linear
+dcl_input v7.xyz, linear
+dcl_input v8.xyzw, linear
+dcl_output o0.xyzw
+dcl_output o1.xyzw
+dcl_constantbuffer cb0[3].xyzw, immediateindexed
+dcl_constantbuffer cb1[22].xyzw, immediateindexed
+dcl_sampler s0, mode_comparison
+dcl_sampler s1, mode_default
+dcl_resource t0, texture2d, (float, float, float, float)
+dcl_resource t1, texture2d, (float, float, float, float)
+dcl_temps 6 
+sample r0.xyzw, v8.xyxx, t0.xyzw, s1
+ne r1.x, l(0.00000000, 0.00000000, 0.00000000, 0.00000000), cb0[2].w
+ge r1.y, cb0[2].x, r0.w
+and r1.x, r1.x, r1.y
+if_nz r1.x
+discard_sat l(0xffffffff)
+endif 
+dp3 r1.x, v6.xyzx, v6.xyzx
+rsq r1.x, r1.x
+mul r1.xyz, r1.xxxx, v6.xyzx
+dp3_sat r1.x, r1.xyzx, v3.xyzx
+log r1.x, r1.x
+mul r1.x, r1.x, l(7.00000000)
+exp r1.x, r1.x
+mul r1.xyz, r1.xxxx, cb1[5].xyzx
+ge r2.xy, v1.xyxx, l(0.00000000, 0.00000000, 0.00000000, 0.00000000)
+movc r2.xy, r2.xyxx, cb1[21].xyxx, cb1[21].zwzz
+mul r2.xy, r2.xyxx, v1.xyxx
+max r1.w, |r2.y|, |r2.x|
+ge r2.xyzw, cb1[20].yzwx, r1.wwww
+and r2.xyzw, r2.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+mul r3.xyzw, r2.yyyy, cb1[18].xyzw
+mad r3.xyzw, r2.xxxx, cb1[17].xyzw, r3.xyzw
+mad r3.xyzw, r2.zzzz, cb1[19].xyzw, r3.xyzw
+dp4 r1.w, r2.xyzw, l(0.50000000, 0.16666667, 0.33333334, 1.00000000)
+mad r2.xy, r3.xyxx, v1.xyxx, r3.zwzz
+mul r3.xy, r1.wwww, cb1[8].zwzz
+mad r2.z, -r3.x, l(2.00000000), r2.x
+mad r2.w, r3.x, l(2.00000000), r2.x
+mad r4.xy, -cb1[8].zwzz, r1.wwww, r2.xyxx
+mad r4.zw, cb1[8].zzzw, r1.wwww, r2.xxxy
+mad r3.x, -r3.y, l(2.00000000), r2.y
+mad r3.w, r3.y, l(2.00000000), r2.y
+sample_c_lz r5.x, r4.xyxx, t1.xxxx, s0, v1.z
+sample_c_lz r5.y, r4.zyzz, t1.xxxx, s0, v1.z
+sample_c_lz r5.z, r4.xwxx, t1.xxxx, s0, v1.z
+sample_c_lz r5.w, r4.zwzz, t1.xxxx, s0, v1.z
+sample_c_lz r4.x, r2.zyzz, t1.xxxx, s0, v1.z
+sample_c_lz r4.y, r2.wyww, t1.xxxx, s0, v1.z
+mov r3.z, r2.x
+sample_c_lz r4.z, r3.zxzz, t1.xxxx, s0, v1.z
+sample_c_lz r4.w, r3.zwzz, t1.xxxx, s0, v1.z
+dp4 r1.w, l(0.12500000, 0.12500000, 0.12500000, 0.12500000), r5.xyzw
+dp4 r2.x, l(0.12500000, 0.12500000, 0.12500000, 0.12500000), r4.xyzw
+add r1.w, r1.w, r2.x
+mad r1.w, r1.w, cb1[9].x, cb1[9].y
+add r2.xyz, v4.xyzx, l(-0.18000001, -0.18000001, -0.18000001, 0.00000000)
+dp3_sat r2.x, r2.xyzx, l(3.00000000, 5.90000010, 1.10000002, 0.00000000)
+add r2.x, -r1.w, r2.x
+mad r1.w, v4.w, r2.x, r1.w
+mul r2.xy, r1.wwww, v8.zwzz
+mad r3.xyz, v5.xyzx, r1.wwww, v4.xyzx
+mad r1.xyz, r1.xyzx, r2.yyyy, r3.xyzx
+mad r1.xyz, r1.xyzx, r2.xxxx, r1.xyzx
+mul r0.xyz, r0.xyzx, v7.xyzx
+mul r0.xyz, r1.xyzx, r0.xyzx
+mad o0.xyz, r0.xyzx, v2.wwww, v2.xyzx
+mul r0.x, r0.w, cb0[2].z
+movc o1.xyzw, cb0[1].xxxx, r0.xxxx, r0.wwww
+mov o0.w, v3.w
+ret 

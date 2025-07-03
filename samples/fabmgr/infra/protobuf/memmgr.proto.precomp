@@ -1,0 +1,121 @@
+
+//
+// Definitions for the protobufs for memory manager
+//
+
+// All FLA memory import/unimport req/rsp
+package lwswitch;
+
+message memoryFlaImportReq
+{
+    optional bytes          exportUuid              = 1;    // UUID of the export object
+    optional uint32         index                   = 2;    // Index of the export object 
+                                                            // to which the memory object is attached
+    optional uint32         exportGpuId        	    = 3;    // ID of the memory owner GPU
+    optional uint64         importEventId           = 4;    // Event ID of the import event
+};
+
+message memoryFlaImportRsp
+{
+    optional uint32         errCode                 = 1;
+    optional uint64         importEventId           = 2;    // Event ID of the import event
+    repeated uint32 	    pageFrameNumbers        = 3;    // Array of PFNs in memory allocation (2MB page size shifted)
+    optional uint32         kind                    = 4;    // Kind of memory allocation
+    optional uint32         pageSize                = 5;    // Page size of memory allocation
+    optional uint64         size                    = 6;    // total size of memory allocated
+    optional uint32         memFlags                = 7;    // Flags associated with memory allocation
+};
+
+message memoryFlaUnimportReq
+{
+    optional uint64         importEventId           = 1;    // Event ID of the import event
+    optional uint64         unimportEventId         = 2;    // Event ID of the unimport event
+};
+
+message memoryFlaUnimportRsp
+{
+    optional memoryReqErrors    errCode             = 1;
+    optional uint64             unimportEventId     = 2;    // Event ID of the unimport event
+};
+
+// All GPA memory import/unimport req/rsp
+
+// One Page Table Entry. Set of these is returned in the Memory Import Response message  ###KT specific message
+message ktPageTableEntries
+{
+    optional uint64 offset                          = 1;
+    repeated uint32 pageFrameNumberArray            = 2;
+};
+
+message memoryImportReq
+{
+    // Contains top 32-bits of addr. Used to get Node ID/GPU ID of exporting node
+    optional uint32         fabricAddrMsb           = 1;    
+    optional uint32         handleToExportClient    = 2;    // handle to exporting RM client
+    optional uint32         handleToExportObject    = 3;    // handle to exported RM memory Object
+    optional uint64         memorySize              = 4;
+    optional uint32         ktHandleToImportDup     = 5;    // handle to importing RM client ###KT specific
+    optional uint32         gpuId                   = 6;    // GPU ID of GPU on exporting node
+};
+
+message memoryImportRsp
+{
+    // Contains top 32-bits of addr. Used to get Node ID/GPU ID of exporting node
+    optional uint32             fabricAddrMsb           = 1;
+    optional uint32             handleToExportClient    = 2;    // handle to exporting RM client
+    optional uint32             handleToExportObject    = 3;    // handle to exported RM memory Object
+    optional uint32             ktHandleToImportDup     = 4;    // handle to importing RM client ###KT specific
+    optional uint32             errCode                 = 5;
+    optional ktPageTableEntries ktPtEntries             = 6;    // page table entries for memory object ###KT specific
+    optional uint32             gpuId                   = 7;    // GPU ID of GPU on exporting node
+};
+
+//###KT specific message
+message ktMemoryImportErr
+{
+    // Contains top 32-bits of addr. Used to get Node ID/GPU ID of exporting node
+    optional uint32         fabricAddrMsb           = 1;
+    optional uint32         handleToExportClient    = 2;    // handle to exporting RM client
+    optional uint32         handleToExportObject    = 3;    // handle to exported RM memory Object
+    optional uint32         errCode                 = 4;
+    optional uint32         gpuId                   = 5;    // GPU ID of GPU on exporting node
+};
+
+message memoryUnimportReq
+{
+    // Contains top 32-bits of addr. Used to get Node ID/GPU ID of exporting node
+    optional uint32         fabricAddrMsb           = 1; 
+    optional uint32         handleToExportClient    = 2;    // handle to exporting RM client
+    optional uint32         handleToExportObject    = 3;    // handle to exported RM memory Object
+    optional uint32         gpuId                   = 4;    // GPU ID of GPU on exporting node
+};
+
+message memoryUnimportRsp
+{
+    // Contains top 32-bits of addr. Used to get Node ID/GPU ID of exporting node
+    optional uint32             fabricAddrMsb           = 1;
+    optional uint32             handleToExportClient    = 2;    // handle to exporting RM client
+    optional uint32             handleToExportObject    = 3;    // handle to exported RM memory Object
+    optional uint32             errCode                 = 4;
+};
+
+message memoryFlaFatalErrorMsg
+{
+    optional memoryFlaFatalErrors       errCode       = 1;
+    optional string                     errMessage    = 2;
+}
+
+enum memoryReqErrors
+{
+    MEMORY_REQ_SUCCESS              = 0;
+    GPUD_ID_MISMATCH                = 1;
+    HANDLE_ALLOC_FAIL               = 2;
+    EXPORT_OBJECT_DUP_FAIL          = 3;
+    READ_PAGE_TABLE_ENTRIES_FAIL    = 4;
+    UNIMPORT_OBJECT_NOT_FOUND       = 5;
+}
+
+enum memoryFlaFatalErrors
+{
+   MEMORY_FLA_GENERIC_ERROR         = 1; 
+}

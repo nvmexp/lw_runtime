@@ -1,0 +1,259 @@
+# -*- mode: perl; -*-
+
+# VPR Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $vprHal = [
+
+    # per-GPU defaults for VPR for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+
+        IS_ACTIVE => [
+
+            DESCRIPTION   => "Determine if VPR is active",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_FALSE,
+
+            _TU102        => [ TU10X_thru_dADA, ],
+            _GH100        => [ dHOPPER_and_later, ],
+            _STUB         => [ pre_TU10X, CHEETAH, ],
+        ],
+
+        IS_SUPPORTED => [
+
+            DESCRIPTION   => "Determine if VPR is supported by the GPU",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_FALSE,
+
+            _GP102        => [ GP102_thru_dVOLTA, ],
+            _TU102        => [ dTURING, ],
+            _GA100        => [ GA100, USED_BY_GA10X, ],
+            _GA10X        => [ dAMPERE_and_later, -GA100, ],
+            _STUB         => [ pre_GP102, CHEETAH, ],
+        ],
+
+        MMU_LWRRENT_RANGE_INFO => [
+
+            DESCRIPTION   => "Prints current vpr range in mmu, if engine is enabled",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GP102        => [ GP102_thru_dVOLTA, ],
+            _TU10X        => [ TU10X_and_later, ],
+            _STUB         => [ pre_GP102, CHEETAH, ],
+        ],
+
+        BSI_MAX_RANGE_INFO => [
+
+            DESCRIPTION   => "Prints max vpr range in bsi, if engine is enabled",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GP102        => [ GP102_and_later, ],
+            _STUB         => [ pre_GP102, CHEETAH, ],
+        ],
+
+        BSI_LWRRENT_RANGE_INFO => [
+
+            DESCRIPTION   => "Prints current vpr range in bsi, if engine is enabled",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => BSI_MAX_RANGE_INFO,
+        ],
+
+        PRINT_MEM_LOCK_STATUS => [
+
+            DESCRIPTION   => "Prints global memory lock status, if engine is enabled",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => void,
+
+            _GP102        => [ GP102_thru_dVOLTA, ],
+            _TU10X        => [ TURING_thru_ADA, -tAMPERE_and_later],
+            _GH100        => [ dHOPPER_and_later, ],
+            _STUB         => [ pre_GP102, CHEETAH, tAMPERE_and_later],
+        ],
+
+        MEM_LOCK_RANGE_INFO => [
+
+            DESCRIPTION   => "Prints memory lock range, if engine is enabled",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => MMU_LWRRENT_RANGE_INFO,
+        ],
+
+        PRINT_BSI_TYPE1_LOCK_STATUS => [
+
+            DESCRIPTION   => "Prints type1 lock status of BSI Scratch, if engine is enabled",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => void,
+
+            _GP102        => [ dPASCAL, -GP100, ],
+            _GV100        => [ dVOLTA_and_later],
+            _STUB         => [ pre_GP102, CHEETAH, ],
+        ],
+
+        GET_FUSE_VERSION_ACR => [
+
+            DESCRIPTION   => "Prints HW fuse version for acr, if engine is enabled",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GP102        => [ GP102_thru_TURING, ],
+            _GA100        => [ dAMPERE_and_later, ],
+            _STUB         => [ pre_GP102, CHEETAH, ],
+        ],
+
+        GET_UCODE_VERSION_ACR => [
+
+            DESCRIPTION   => "Prints ucode version for acr, if engine is enabled",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => BSI_MAX_RANGE_INFO,
+        ],
+
+        GET_FUSE_VERSION_CTXSW => [
+
+            DESCRIPTION   => "Prints HW fuse version for ctxsw, if engine is enabled",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GP102        => [ GP102_thru_TURING, ],
+            _GA100        => [ GA100, ],
+            _GA10X        => [ dAMPERE_thru_dADA, -GA100,],
+            _GH100        => [ dHOPPER_and_later, ],
+            _STUB         => [ pre_GP102, CHEETAH, ],
+        ],
+
+        GET_FUSE_VERSION_LWDEC => [
+
+            DESCRIPTION   => "Prints HW fuse version for lwdec, if engine is enabled",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GP102        => [ GP102_thru_TURING, ],
+            _GA100        => [ dAMPERE_and_later, ],
+            _STUB         => [ pre_GP102, CHEETAH, ],
+        ],
+
+        GET_FUSE_VERSION_SCRUBBER => [
+
+            DESCRIPTION   => "Prints HW fuse version for scrubber, if engine is enabled",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GP102        => [ GP102_thru_dVOLTA, ],
+            _TU10X        => [ TU10X, ],
+            _GA100        => [ AMPERE_and_later, -tAMPERE_and_later, ],
+            _STUB         => [ pre_GP102, CHEETAH, ],
+        ],
+
+        GET_UCODE_VERSION_SCRUBBER => [
+
+            DESCRIPTION   => "Prints ucode version for scrubber, if engine is enabled",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => BSI_MAX_RANGE_INFO,
+        ],
+
+        GET_FUSE_VERSION_SEC2 => [
+
+            DESCRIPTION   => "Prints HW fuse version for SEC2, if engine is enabled",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => GET_FUSE_VERSION_SCRUBBER,
+        ],
+
+        GET_FUSE_VERSION_UDE => [
+
+            DESCRIPTION   => "Prints HW fuse version for ude, if engine is enabled",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GP102        => [ dPASCAL, -GP100, ],
+            _GV100        => [ dVOLTA, dTURING, ],
+            _GA100        => [ AMPERE_and_later, -tAMPERE_and_later, ],
+            _STUB         => [ pre_GP102, CHEETAH, ],
+        ],
+
+        GET_UCODE_VERSION_UDE => [
+
+            DESCRIPTION   => "Prints ucode version for ude, if engine is enabled",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => BSI_MAX_RANGE_INFO,
+        ],
+
+        GET_FUSE_VERSION_VPR_APP => [
+
+            DESCRIPTION   => "Prints HW fuse version for vpr app, if engine is enabled",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GP102        => [ dPASCAL, -GP100, ],
+            _GV100        => [ dVOLTA, ],
+            _TU10X        => [ dTURING, ],
+            _GA100        => [ AMPERE_and_later, -tAMPERE_and_later, ],
+            _STUB         => [ pre_GP102, CHEETAH, ],
+        ],
+
+        READ_VPR_INFO => [
+
+            DESCRIPTION   => "Reads VPR info, if engine is enabled",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GP102        => [ GP102_thru_dVOLTA, ],
+            _STUB         => [ pre_GP102, CHEETAH, TU10X_and_later, ],
+        ],
+
+        READ_WPR_INFO => [
+
+            DESCRIPTION   => "Reads WPR info, if engine is enabled",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GP102        => [ GP102_thru_dVOLTA, ],
+            _STUB         => [ pre_GP102, CHEETAH, TU10X_and_later, ],
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $vprHal;

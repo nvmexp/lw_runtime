@@ -1,0 +1,64 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+# link_static_library
+#
+# Generate rules to link a static library from objects.
+#
+# Arguments:
+# $(1)
+#   Library name (will be colwerted to platform-specific colwentions)
+# $(2)
+#   Objects to include in the library
+#
+# Related variables:
+# $(1)_ARFLAGS
+#   Any target specific linker flags; defaults to "-r -c -s".
+# $(1)_DEPS
+#   Any target specific dependencies; defaults to empty.
+#
+# On Unix, all the supplied objects are first linked into a single object file whose
+# name is the same as the static libray.  The static library is then created from this
+# single object.  Thus, the static library is recreated every time one of the dependent
+# object file changes instead of attempting to create the library when it doesn't exist
+# and updating it when object files change.
+#
+# Usage:
+#   # We need lwvm-build as an order dependency of this library
+#   foo_DEPS := |lwvm-build
+#   $(eval $(call link_static_library,foo,$(OUTPUTDIR)/foo.obj $(OUTPUTDIR)/bar.obj))
+#
+define link_static_library
+.PHONY: $(1)
+
+# The phony target depends on the built library.
+$(1): $$(OUTPUTDIR)/$(1)$(LIBSUFFIX)
+
+# Default AR flags for library; insert the single object and create the library.
+# Only change this if you really know what you're doing.
+$(1)_ARFLAGS ?= -r -c -s
+
+# Default library additional dependencies
+$(1)_DEPS ?=
+
+# The built library depends on object files and any extra dependencies
+$$(OUTPUTDIR)/$(1)$(LIBSUFFIX): $(2) $$($(1)_DEPS)
+	$$(call quiet_cmd,AR) $$($(1)_ARFLAGS) $$@ $(2)
+endef

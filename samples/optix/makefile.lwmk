@@ -1,0 +1,650 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+# Top level makefile for the OptiX driver module.
+#
+# The default goal of this makefile is 'build', which builds the lwoptix shared library
+# packaged with the driver.  On Windows, the test goal is also built.
+#
+# Outline of this documentation:
+# - Goal descriptions
+# - Useful make variables
+# - Common lwmake workflows
+#
+#
+# Goal descriptions:
+# ------------------
+# This list describes the 'phony' targets, or goals, used in the optix driver module.
+# Goals can be passed explicitly to lwmake as @<goal> arguments on the command-line.
+# Every file resulting from compilation is also a target, but we don't consider those
+# to be needing documentation.  The "Depends on" section lists other phony targets
+# and how they relate to the goal being described.
+#
+# build
+#     The default goal.
+#
+#     Depends on: lwoptix, test
+#
+# lwoptix
+#     This goal builds only the lwoptix shared library.
+#
+# lwvm-build
+#     This goal builds only the nested LWVM needed for lwoptix.
+#
+# compile-test
+#     This goal compiles, but does not link, all the white box unit tests for OptiX.
+#
+#     Depends on: optix_static, srcTests, compile-test_XXX
+#
+# test
+#     This goal builds all the white box unit tests for OptiX.
+#
+#     Depends on: optix_static, srcTests, test_XXX, test-data, test-scripts
+#
+# tools
+#     This goal compiles all the standalone tool exelwtables for OptiX.
+#
+#     Depends on: optix_static, XXX (tool targets)
+#
+# optix_static
+#     This goal builds the static library version of optix, with support for knob I/O.
+#     The lwoptix shared library does not support knob I/O, but knob I/O is needed for
+#     the white box unit tests.
+#
+# srcTests
+#     This goal builds the srcTests static library containing infrastructure and
+#     common code used by white box unit tests.
+#
+# compile-test_XXX
+#     Here, 'XXX' represents the name of a test case, e.g. 'Accels' for test_Accels.
+#     There is one goal per test case.  This goal only compiles the relevant C++
+#     and LW source files for this test case; it does not link the test case nor
+#     does it deploy any runtime data for the test case.
+#
+#     Depends on: optix_static, srcTests, test-data
+#
+# test_XXX
+#     Here, 'XXX' represents the name of a test case, e.g. 'Accels' for test_Accels.
+#     There is one goal per test case, allowing you to (re)build only a single test
+#     case.  Building an individual test case also deploys all necessary test runtime
+#     data so that the test case is ready for exelwtion.  PTX files needed at runtime
+#     for the test case are compiled from their corresponding LW files and copied to
+#     $(OUTPUTDIR)/srcTests/ptx.
+#
+#     Depends on: optix_static, srcTests, test-data
+#
+# test-data
+#     This goal copies global test runtime data and all the test-case specific runtime
+#     data to $(OUTPUTDIR)/srcTests/data.
+#
+# test-scripts
+#     This goal generates the robot framework helper scripts in $(OUTPUTDIR), e.g.
+#     test_all, test_smoke, etc.  Windows builds generate .bat batch scripts and Linux
+#     builds generate .sh bash scripts.
+#
+#     Depends on: test_XXX_script
+#
+# test_XXX_script
+#     Here 'XXX' is one of the script names, e.g. 'all' for the goal test_all_script.
+#     Each of these goals generates a single robot framework helper script, e.g.
+#     test_all_script generates the corresponding test_all.bat or test_all.sh script.
+#
+# run-build-tests
+#     Run all the tests that are necessary for a successful build.  These tests are
+#     exelwted by DVS builds as their failure is considered to result in a broken
+#     build of the driver component for OptiX, or the changes are considered to have
+#     introduced bugs that should be fixed before a submission is accepted.
+#
+#     Depends on: run-test_Exports, run-test-unique-symbols, run-test-doxygen-groups
+#
+# run-test_XXX
+#     Run the test exelwtable generated for test case 'XXX', e.g. run-test_Exports.
+#
+#     Depends on: test_XXX
+#
+# run-test-unique-symbols
+#     On Linux only, verifies that the generated shared object does not have any
+#     symbols exported that are marked unique.  This prevents dlclose from unloading
+#     the shared object.
+#
+# run-test-doxygen-groups
+#     Verifies that all @ingroup comments in the published headers have a corresponding
+#     @defgroup in include/doxygen/doxygen_hierarchy.h.  This ensures that new API
+#     functions are properly grouped in the generated documentation.
+#
+#
+# Useful make variables:
+# ----------------------
+#
+# LW_OPTIX_TESTS
+#     Valid values: 0/1
+#     Setting this to 0 on the command-line suppresses the building of the tests when
+#     the default build goal is used.  This is useful when building both rtcore and
+#     optix from a single lwmake command (see below).
+#
+#     Default value: 1
+#
+# LW_OPTIX_LINK_SEQUENTIALLY
+#     Valid values: 0/1
+#     Setting this to 0 on the command-line will cause the unit tests and tools to be
+#     linked in parallel, when LW_OPTIX_TESTS=1 and LW_OPTIX_TOOLS=1, respectively.
+#     Otherwise, when LW_OPTIX_TESTS is 1 or LW_OPTIX_TOOLS is 1, the exelwtables are
+#     linked sequentially to avoid resource exhaustion on DVS build machines.
+#
+#     Default value: 0
+#
+# LW_OPTIX_RUN_BUILD_TESTS
+#     Valid values: 0/1
+#     Setting this to 1 runs tests that validate the build outputs when LW_OPTIX_TESTS
+#     is also 1.  Lwrrently, this tests that the lwoptix shared library exported the
+#     necessary symbols.
+#
+#     Default value: 1
+#
+# LW_OPTIX_TOOLS
+#     Valid values: 0/1
+#     Setting this to 0 on the command-line suppresses the building of the tool
+#     exelwtables.
+#
+#     Default value: 1
+#
+# LW_OPTIX_VRL_PACKAGE
+#     Valid values: 0/1
+#     Setting this to 0 suppresses the building of the VRL test package.  This is gated
+#     by LW_OPTIX_TESTS, so you can only get the test package when you are building the
+#     tests.
+#
+#     Default value: 1
+#
+# LW_OPTIX_EMBED_DENOISER_WEIGHTS
+#     Valid values: 0/1
+#     Setting this to 1 embeds the weights into the dll as opposed to having them in a
+#     separate file.
+#
+#     Default value: 0 (windows), 1 (windows+aarch64,unix)
+#
+# LWDA_TOOLKIT_ROOT_DIR
+#     Valid values: <path to LWCA toolkit>
+#     This variable is used identically to the CMake build of OptiX; use it to specify
+#     the full path to a root directory for a different toolkit than that used by
+#     default.
+#
+# lwda_toolkit_version
+#     Valid values: <name of subdir under $(LW_TOOLS)/sdk/LWCA/rtcore/{win64,linux}>
+#     This variable is used to pick the particular LWCA toolkit from
+#     $(LW_TOOLS)/sdk/LWCA/rtcore as appropriate for your platform.  For instance,
+#     setting this to 'lwca-10.0-nightly-24221979-movfix' on Windows would select the LWCA
+#     toolkit root dir of $(LW_TOOLS)/sdk/LWCA/rtcore/win64/lwca-10.0-nightly-24221979-movfix.
+#
+# ENABLE_LWTX
+#     Valid values: 0/1
+#     Set this to 1 in order to enable LWTX functionality in OptiX.
+#
+#     Default value: 0
+#
+# OPTIX_ENABLE_STACK_TRACE
+#     Valid values: 0/1
+#     Set this to 1 to enable a stack trace dump with exceptions/errors.
+#
+#     Default value: 1
+#
+# Common lwmake workflows:
+# ------------------------
+#
+# - Build just the nested lwvm, e.g. skip building anything for OptiX
+#     lwmake optix amd64 develop wddm2 @lwvm-build (Windows)
+#     lwmake optix amd64 develop @lwvm-build (Linux)
+#
+# - Build optix and rtcore implementation only, e.g. skip building OptiX tests
+#     lwmake optix rtcore amd64 develop wddm2 LW_OPTIX_TESTS=0 (Windows)
+#     lwmake optix rtcore amd64 develop LW_OPTIX_TESTS=0 (Linux)
+#
+# - Build optix with developer asserts on a develop (optimized) build
+#     lwmake optix amd64 develop wddm2 (Windows)
+#     lwmake optix amd64 develop (Linux)
+#
+# - Build the single test case test_Accels
+#     lwmake optix amd64 develop wddm2 @test_Accels (Windows)
+#     lwmake optix amd64 develop @test_Accels (Linux)
+#
+# - Build only the optix driver shared library
+#     lwmake optix amd64 develop wddm2 @lwoptix (Windows)
+#     lwmake optix amd64 develop @lwoptix
+#
+
+LW_MODULE_LOGGING_NAME = optix
+LW_MODULE_BUILD_TYPE_ALIASES = optix
+
+# Set compilers used for host tools (e.g. clang). These must be set before
+# including lwCommon.lwmk, as it defaults to older versions if these are undefined.
+export LW_HOST_USE_VC141 = 1
+
+# Always the first thing. Don't include any more. It will reset all your LW_** VARIABLES
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+# Use these to avoid repeating this commonly used path in makefiles.
+LW_OPTIX := $(LW_SOURCE)/apps/optix
+LW_OPTIX_OUTPUTDIR := $(OUTPUTDIR)/apps/optix
+
+# Compile the unit tests by default.  To diasble this, add LW_OPTIX_TESTS=0 on the command-line.
+LW_OPTIX_TESTS ?= 1
+
+# Link the unit tests and tools sequentially?  On by default for DVS reasons.
+LW_OPTIX_LINK_SEQUENTIALLY ?= 0
+
+# Run build verification tests? On by default
+# Skip them for Bullseye Builds. They add data to the coverage file
+# which we were asked to keep clean in [B] 200649455 ARB RFE :[OptiX Code Coverage]: Need OptiX to be instrumented for Code Coverage in r455
+ifneq ($(LW_BULLSEYE),1)
+  LW_OPTIX_RUN_BUILD_TESTS ?= 1
+else
+  $(info Bullseye Build. Disabling build verification tests to keep the coverage file clean)
+  LW_OPTIX_RUN_BUILD_TESTS ?= 0
+endif
+
+# Compile and link the tools by default.
+LW_OPTIX_TOOLS ?= 1
+
+# Build the VRL test package by default.
+LW_OPTIX_VRL_PACKAGE ?= 1
+
+# Tells corelib headers that we are compiling for OptiX; since
+# corelib headers propagate up almost everywhere, set it globally.
+OPTIX_DEFINES += LW_MODULE_OPTIX=1
+
+# Colwerted Parameters from CMAKE
+
+RELEASE_USE_STATIC_CRT = 0
+ifeq ($(LW_HOST_OS_FAMILY),Windows)
+  RELEASE_USE_STATIC_CRT = 1
+endif
+
+# option( PTXPARSE_USE_SIMPLE_KERNEL "Turn on simple kernel threads/stdThreads.h" OFF )
+ifdef PTXPARSE_USE_SIMPLE_KERNEL
+  SIMPLE_KERNEL = 1
+else
+  SIMPLE_KERNEL = 0
+endif
+
+ifeq ($(LW_TARGET_ARCH),amd64)
+  OPTIX_BITNESS_DESCRIPTION = 64-bit
+else ifeq ($(LW_TARGET_ARCH),aarch64)
+  OPTIX_BITNESS_DESCRIPTION = 64-bit
+else
+  OPTIX_BITNESS_DESCRIPTION = 32-bit
+endif
+
+ifeq ($(LW_BUILD_TYPE),release)
+  OPTIX_RELEASE_TYPE_STRING =
+else
+  OPTIX_RELEASE_TYPE_STRING = DEV
+endif
+
+ifneq ($(findstring $(LW_BUILD_TYPE),"release"),)
+  # This is always off for release builds
+  OPTIX_ENABLE_STACK_TRACE := 0
+else
+  # Otherwise default to on
+  OPTIX_ENABLE_STACK_TRACE ?= 1
+endif
+
+ifndef OPTIX_CHANGELIST
+  ifdef DVS_SW_CHANGELIST
+    OPTIX_CHANGELIST := $(DVS_SW_CHANGELIST)
+    $(info Using Changelist number from DVS: $(DVS_SW_CHANGELIST))
+  else ifdef CHANGELIST
+      OPTIX_CHANGELIST := $(CHANGELIST)
+      $(info Using Changelist number from DVS: $(OPTIX_CHANGELIST))
+  else ifdef LW_BUILD_CHANGELIST_NUM
+      ifneq ($(LW_VERBOSE),0)
+        $(info Using CL Number from LW_BUILD_CHANGELIST_NUM: $(LW_BUILD_CHANGELIST_NUM))
+      endif
+      OPTIX_CHANGELIST := $(LW_BUILD_CHANGELIST_NUM)
+  else
+    # try P4
+    ifeq ($(LW_HOST_OS_FAMILY),Windows)
+      HAVE_CL := $(wordlist 2,2,$(shell "$(P4)" changes -m1 \#have))
+    else
+      # Make sure that the "#" is escaped when it reaches the shell.
+      # Otherwise it will be treated as comment, and we fetch the current
+      # version on the server instead (usually the wrong version and it
+      # changes all the time).
+      HAVE_CL := $(wordlist 2,2,$(shell "$(P4)" changes -m1 "\\\#have"))
+    endif
+    ifdef HAVE_CL
+      ifneq ($(LW_VERBOSE),0)
+        $(info Using CL from $(P4): $(HAVE_CL))
+      endif
+      OPTIX_CHANGELIST := $(HAVE_CL)
+    else
+      OPTIX_CHANGELIST := 12345
+      ifneq ($(LW_VERBOSE),0)
+        $(info Unable to determine perforce changelist, using 12345)
+      endif
+    endif
+  endif
+endif
+
+ifdef LW_SOURCE
+  # Extract bugfix_main or r400 from RELEASE_BRANCH if set,
+  # which something like dev\gpu_drv\bugfix_main or rel/r400_00/r400
+  ifdef RELEASE_BRANCH
+    OPTIX_BRANCH := $(notdir $(RELEASE_BRANCH))
+  else
+    OPTIX_BRANCH := $(notdir $(LW_SOURCE))
+  endif
+  ifeq ($(LW_VERBOSE),1)
+    $(info OptiX branch is $(OPTIX_BRANCH))
+  endif
+endif
+
+# Compute a numeric branch number that is used by the DLL selection mechanism
+# to distinguish branches. This branch number is 999 for all non-release
+# branches and needs to be adjusted if we create our own release branches for
+# the SDK.
+$(eval $(shell $(PYTHON) $(LW_OPTIX)/make/optixBranchNumeric.py $(LW_SOURCE)/drivers/common/inc/lwBldVer.h))
+ifeq ($(LW_VERBOSE),1)
+  $(info OPTIX Branch (numeric) is $(OPTIX_BRANCH_NUMERIC))
+endif
+
+## FIXME Description of the current build (can contain the branch and
+## date)
+OPTIX_BUILD_DESCRIPTION :=
+
+# Get an optix version define from a header file
+define get_optix_version_file
+  $(eval $(shell $(PYTHON) $(LW_OPTIX)/make/optixVersion.py $(1) $(2) $(3)))
+endef
+
+# As a sanity check compare OptiX 6 and OptiX Prime versions.  They should be the same.
+define get_optix6_version
+  $(call get_optix_version_file,$(1),$(LW_OPTIX)/include/o6/optix.h,OPTIX_VERSION)
+endef
+define get_optix_prime_version
+  $(call get_optix_version_file,$(1),$(LW_OPTIX)/include/optix_prime/optix_prime.h,OPTIX_PRIME_VERSION)
+endef
+$(call get_optix6_version,OPTIX6_VERSION_MAJOR)
+$(call get_optix6_version,OPTIX6_VERSION_MINOR)
+$(call get_optix6_version,OPTIX6_VERSION_MICRO)
+OPTIX6_VERSION = $(OPTIX6_VERSION_MAJOR).$(OPTIX6_VERSION_MINOR).$(OPTIX6_VERSION_MICRO)
+$(call get_optix_prime_version,OPTIX_PRIME_VERSION_MAJOR)
+$(call get_optix_prime_version,OPTIX_PRIME_VERSION_MINOR)
+$(call get_optix_prime_version,OPTIX_PRIME_VERSION_MICRO)
+OPTIX_PRIME_VERSION = $(OPTIX_PRIME_VERSION_MAJOR).$(OPTIX_PRIME_VERSION_MINOR).$(OPTIX_PRIME_VERSION_MICRO)
+ifneq ($(OPTIX6_VERSION),$(OPTIX_PRIME_VERSION))
+  $(error OptiX 6 version $(OPTIX6_VERSION) does not match OptiX Prime version $(OPTIX_PRIME_VERSION))
+endif
+
+# OptiX now has two versions. 1. OptiX 6 in include/o6/optix.h and 2. OptiX 7 in include/optix.h.
+# Use the OptiX 7 header for the driver version, since this one will be the largest version.
+define get_optix_version
+  $(call get_optix_version_file,$(1),$(LW_OPTIX)/include/optix.h,OPTIX_VERSION)
+endef
+$(call get_optix_version,OPTIX_VERSION_MAJOR)
+$(call get_optix_version,OPTIX_VERSION_MINOR)
+$(call get_optix_version,OPTIX_VERSION_MICRO)
+
+# Extract value of OPTIX_ABI_VERSION from $(LW_OPTIX)/include/optix_function_table.h.
+$(eval $(shell $(PYTHON) $(LW_OPTIX)/make/optixAbiVersion.py $(LW_OPTIX)/include/optix_function_table.h))
+ifeq ($(LW_VERBOSE),1)
+  $(info OPTIX ABI version is $(OPTIX_ABI_VERSION))
+endif
+
+#=========================================================================================================
+
+# In the driver build, we don't want any API functions decorated with declespec(dllexport).
+# The wrapper in the SDK build will take care of that.
+OPTIX_DEFINES += RTAPI=
+
+# Windows Specifics.
+ifeq ($(LW_TARGET_OS_FAMILY)-$(LW_TARGET_ARCH),Windows-amd64)
+  ifeq ($(LW_VERBOSE),1)
+    $(info Set amd64 specifics)
+  endif
+  # globally auto CRT usage see sw\dev\gpu_drv\bugfix_main\drivers\common\build\lwWindowsCRT.lwmk
+  LW_WIN_USES_CRT = 1
+
+  # We only build 64-bit exelwtables
+  LFLAGS += \
+    -machine:X64 \
+    -libpath:$(MSVC_COMPILER_DIR)/lib/amd64
+endif # ** Windows AMD64**
+
+#=========================================================================================================
+# This generates and includes LWCFG_* makefile vars and C #defines in g_lwconfig.h
+# NOTE FROM lwconfig.mk 144: This line will generate a warning about the file not existing before gmake restarts
+# NOTE FROM lwconfig.mk 144: and attempts to generate the makefile.  This warning is expected and can be ignored.
+
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+#=========================================================================================================
+
+ifeq ($(LW_TARGET_OS_FAMILY)_$(LW_TARGET_ARCH),Windows_aarch64)
+  BASE_NAME = lwoptixa
+else
+  BASE_NAME = lwoptix
+endif
+DRIVER_BASE_NAME = $(BASE_NAME)
+ifdef LW_CONTROLFLOWGUARD
+  DRIVER_BASE_NAME := $(addprefix $(DRIVER_BASE_NAME), _cfg)
+endif
+
+include $(LW_OPTIX)/make/lwcommonlwconfig.lwmk
+#=========================================================================================================
+
+ifdef LWCFG_INITIALIZED
+  # Hide everything here that is done on a real compile (after being configured)
+
+  # Global config
+  include $(LW_OPTIX)/make/pre.lwmk
+
+  # Code guard to make sure headers don't contain c++ constructs
+  include $(LW_OPTIX)/include/include.lwmk
+
+  # Keep before all unit-tests. These define references to static libs (gmock) references from the test_XX targets in <module>/test
+  include $(LW_OPTIX)/make/gmock.lwmk
+
+  # Code sections. Keep this list sorted and include optix/tests/tests.lwmk last.
+  include $(LW_OPTIX)/exp/accel/accel.lwmk
+  include $(LW_OPTIX)/exp/context/context.lwmk
+  include $(LW_OPTIX)/exp/denoise/denoise.lwmk
+  include $(LW_OPTIX)/exp/functionTable/functionTable.lwmk
+  include $(LW_OPTIX)/exp/pipeline/pipeline.lwmk
+  include $(LW_OPTIX)/exp/tools/ptxEncryptionBuildTool/makefile.lwmk
+  include $(LW_OPTIX)/make/corelib.lwmk
+  include $(LW_OPTIX)/prodlib/prodlib.lwmk
+  include $(LW_OPTIX)/src/AS/as.lwmk
+  include $(LW_OPTIX)/src/c-api/c-api.lwmk
+  include $(LW_OPTIX)/src/Compile/Compile.lwmk
+  include $(LW_OPTIX)/src/Context/Context.lwmk
+  include $(LW_OPTIX)/src/Control/Control.lwmk
+  include $(LW_OPTIX)/src/LWCA/LWCA.lwmk
+  include $(LW_OPTIX)/src/Device/Device.lwmk
+  include $(LW_OPTIX)/src/Exceptions/Exceptions.lwmk
+  include $(LW_OPTIX)/src/ExelwtionStrategy/Common/Common.lwmk
+  include $(LW_OPTIX)/src/ExelwtionStrategy/ExelwtionStrategy.lwmk
+  include $(LW_OPTIX)/src/ExelwtionStrategy/RTX/RTX.lwmk
+  include $(LW_OPTIX)/src/FrontEnd/PTX/FrontEnd_PTX.lwmk
+  # FrontEnd_PTX.lwmk defines variables used by FrontEnd.lwmk, so this order is important
+  include $(LW_OPTIX)/src/FrontEnd/FrontEnd.lwmk
+  include $(LW_OPTIX)/src/FrontEnd/PTX/Intrinsics/Intrinsics.lwmk
+  include $(LW_OPTIX)/src/Memory/Memory.lwmk
+  include $(LW_OPTIX)/src/Memory/DemandLoad/DemandLoad.lwmk
+  include $(LW_OPTIX)/src/Objects/objects.lwmk
+  include $(LW_OPTIX)/src/src.lwmk
+  include $(LW_OPTIX)/src/ThreadPool/ThreadPool.lwmk
+  include $(LW_OPTIX)/src/Util/util.lwmk
+  include $(LW_OPTIX)/tests/sanity/exptest/exptest.lwmk
+  include $(LW_OPTIX)/tests/sanity/sanity.lwmk
+  include $(LW_OPTIX)/tools/bitcodeStats/makefile.lwmk
+  include $(LW_OPTIX)/tools/d2irWrapperGenerator/makefile.lwmk
+  include $(LW_OPTIX)/tools/replayCompile/makefile.lwmk
+
+  # Keep after last included Unit Test to have all UnitTest Exelwtables in $(optix_test_exelwtables)
+  include $(LW_OPTIX)/tests/tests.lwmk
+
+  #=========================================================================================================
+
+  # Provide a phony target that just builds the driver shared object for OptiX.
+  .PHONY: lwoptix
+
+  # Default build target depends on the shared object target.
+  build: lwoptix
+
+  # Do we want to build the tests?
+  ifeq ($(LW_OPTIX_TESTS),1)
+
+    # Add tests to the default goal
+    build: test
+
+    # For the blackbox tests we need the lwoptix.dll/lib/so to be link against
+    test:: lwoptix
+
+    # Run build validation tests
+    ifeq ($(LW_OPTIX_RUN_BUILD_TESTS),1)
+      build: run-build-tests
+    endif
+
+    .PHONY: run-build-tests
+
+    # Validate symbol exports (we can only run this test as part of the build if
+    # we're not cross-compiling)
+    ifeq ($(LW_TARGET_ARCH),amd64)
+      run-build-tests: run-test_Exports
+    endif
+
+    # On Unix perform additional validation on hidden symbols
+    ifeq ($(LW_TARGET_OS_FAMILY),Unix)
+      run-build-tests: run-test-unique-symbols
+    endif
+
+    # Validate doxygen groups
+    run-build-tests: run-test-doxygen-groups
+
+    # Do we want to build the VRL test package?
+    ifeq ($(LW_OPTIX_VRL_PACKAGE),1)
+      build: vrl-test-package
+    endif
+  endif
+
+  # Do we want to build the tools?
+  ifeq ($(LW_OPTIX_TOOLS),1)
+    build: tools
+  endif
+
+  # Keep this list of objects in synch with the included code section makefiles.
+  # Use xxx_OBJECTS if you only need C++ host objects, use xxx_ALL_OBJECTS if you
+  # also need LWCA files compiled as host objects.
+  optix_OBJECTS := \
+    $(Include_OBJECTS) \
+    $(exp_accel_ALL_OBJECTS) \
+    $(exp_context_OBJECTS) \
+    $(exp_denoise_ALL_OBJECTS) \
+    $(exp_functionTable_OBJECTS) \
+    $(exp_pipeline_OBJECTS) \
+    $(Prodlib_OBJECTS) \
+    $(AS_ALL_OBJECTS) \
+    $(c-api_OBJECTS) \
+    $(Compile_ALL_OBJECTS) \
+    $(Context_ALL_OBJECTS) \
+    $(Control_OBJECTS) \
+    $(LWDA_OBJECTS) \
+    $(Device_OBJECTS) \
+    $(Exceptions_OBJECTS) \
+    $(Common_OBJECTS) \
+    $(ExelwtionStrategy_OBJECTS) \
+    $(RTX_OBJECTS) \
+    $(FrontEnd_OBJECTS) \
+    $(FrontEnd_PTX_OBJECTS) \
+    $(Intrinsics_OBJECTS) \
+    $(Memory_ALL_OBJECTS) \
+    $(DemandLoad_ALL_OBJECTS) \
+    $(Objects_ALL_OBJECTS) \
+    $(ThreadPool_OBJECTS) \
+    $(Util_OBJECTS) \
+    $(Uuid_OBJECTS)
+
+  ALL_OBJECTS := \
+    $(optix_OBJECTS) \
+    $(UtilDynamic_OBJECTS)
+
+  # The static library optix_static is used by white box unit tests
+  optix_static_OBJECTS := \
+    $(optix_OBJECTS) \
+    $(UtilStatic_OBJECTS)
+  optix_static_DEPS := | lwvm-build
+  $(eval $(call link_static_library,optix_static,$(optix_static_OBJECTS)))
+
+  # Include rules to generate a UUID which is re-generated whenever one other object file is rebuilt
+  include $(LW_OPTIX)/make/optixUuid.lwmk
+
+  # Device and LWCA build the same obj files.
+  $(LWDA_OBJECTS): $(Device_OBJECTS)
+
+  include $(LW_OPTIX)/make/optix$(LW_TARGET_OS_FAMILY).lwmk
+
+  # FIXME: this should go somewhere else
+  CMAKE_CONFIGURED_FILES += $(LW_OPTIX)/driver/CMake/sse_support.h.in
+
+  CMAKE_CONFIGURED_FILES += $(LW_OPTIX)/src/c-api/optix_version_string.cpp.in
+
+  # make sure all header files are created before any object is being built
+  $(ALL_OBJECTS): | $(addprefix $(OUTPUTDIR)/optix-include/,$(notdir $(filter %.h,$(CMAKE_CONFIGURED_FILES:%.in=%))))
+
+  include $(LW_OPTIX)/make/post.lwmk
+endif # LWCFG_INITIALIZED
+
+#----------------------------------------------------------------------------
+# perhaps there's another target for this, but having a blank target is a good way to get
+# configure to run for the first time without building additional targets. `lwmake ... @configure`
+.PHONY: configure
+configure:
+
+
+#----------------------------------------------------------------------------
+# These are removed on clean or clobber
+#
+# Assign to OTHER_FILES_TO_REMOVE outside of the check for
+# LWCFG_INITIALIZED
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/g_lwSelwrityBytecodeReplacement.cfg
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/linkParameters.txt
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/libParameters*
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/$(DRIVER_BASE_NAME).bsc
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/$(DRIVER_BASE_NAME).dll
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/$(DRIVER_BASE_NAME).exp
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/$(DRIVER_BASE_NAME).ilk
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/$(DRIVER_BASE_NAME).map
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/$(DRIVER_BASE_NAME).pdb
+OTHER_FILES_TO_REMOVE += $(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).pdb
+OTHER_FILES_TO_REMOVE += $(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).map
+OTHER_FILES_TO_REMOVE += $(LW_INSTALL_DIR)/$(DRIVER_BASE_NAME).dll
+OTHER_FILES_TO_REMOVE += $(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).bsc
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/trigger_*.txt
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/optix-include/*.h
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/generated-configure-files.lwmk
+
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/*LWVM*.lib
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/llvm-tblgen.exe
+
+# This needs to be the last thing done by a top-level makefile. It
+# needs to be outside of the check for LWCFG_INITIALIZED or else the
+# clean/clobber targets are broken.
+# it provides targets like show_config, clean and clobber
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

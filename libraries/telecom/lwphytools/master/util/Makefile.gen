@@ -1,0 +1,91 @@
+# Copyright (c) 2017-2019, LWPU CORPORATION.  All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without modification, are permitted
+# provided that the following conditions are met:
+#     * Redistributions of source code must retain the above copyright notice, this list of
+#       conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright notice, this list of
+#       conditions and the following disclaimer in the documentation and/or other materials
+#       provided with the distribution.
+#     * Neither the name of the LWPU CORPORATION nor the names of its contributors may be used
+#       to endorse or promote products derived from this software without specific prior written
+#       permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+# FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL LWPU CORPORATION BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+# STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Default target, can be overridden by command line or environment
+# Default target, can be overridden by command line or environment
+RTE_TARGET ?= x86_64-native-linuxapp-gcc
+LWPHY_PATH ?= $(HOME)/lwPHY
+LWPHYTOOLS_PATH ?= $(HOME)/lwPHYTools
+
+OS=$(shell lsb_release -si)
+ARCH=$(shell uname -m | sed 's/x86_//;s/i[3-6]86/32/')
+VER=$(shell lsb_release -sr)
+#$(info Ubuntu version ${VER})
+
+HDF5_HEADERS = /usr/include/hdf5/serial
+ifeq ("$(VER)", "16.04")
+HDF5_HEADERS = /usr/local/include
+endif
+
+LWPHY_HEADERS = -I$(HDF5_HEADERS) -I$(LWPHY_PATH)/include -I$(LWPHY_PATH)/examples/common -I$(LWPHY_PATH)/examples/pusch_rx_multi_pipe
+
+.SUFFIXES: .cpp .c .o .lw
+
+APP = lwPHYTools_generator
+
+ifeq ($(RTE_SDK),)
+$(error "Please define RTE_SDK environment variable")
+endif
+
+include $(RTE_SDK)/mk/rte.vars.mk
+
+######################## CFLAGS ########################
+# workaround for a gcc bug with noreturn attribute
+# http://gcc.gnu.org/bugzilla/show_bug.cgi?id=12603
+ifeq ($(CONFIG_RTE_TOOLCHAIN_GCC),y)
+CFLAGS_main.o += -Wno-return-type
+endif
+
+CFLAGS += -O3 -g3 
+# Required by lwPHY (all C++)
+CFLAGS += -std=c++11
+# Can't use it for lwPHY: signed/unsigned warnings
+#CFLAGS += $(WERROR_FLAGS)
+CFLAGS += -DALLOW_EXPERIMENTAL_API
+#CFLAGS += -DORAN_STRICT_COMPLIANT
+# Include lwPHYTools headers
+CFLAGS += -I$(LWPHYTOOLS_PATH)/common/include
+# Include lwPHY stuff -- Temporary paths
+CFLAGS += $(LWPHY_HEADERS)
+CFLAGS += -Werror=return-type
+# C++ files
+CPPFLAGS := $(CFLAGS)
+
+######################## LDFLAGS ########################
+LDFLAGS += -L. -L$(LD_LIBRARY_PATH)
+# required to parse the HD5 test vector
+LDLIBS += -ljsoncpp
+LDLIBS += /usr/local/lib/libhdf5.a -lz -ldl -lm
+
+######################## SOURCES ########################
+SRCS-y := $(LWPHYTOOLS_PATH)/generator/generator.cpp
+SRCS-y += $(LWPHYTOOLS_PATH)/generator/generator_impl.cpp
+SRCS-y += $(LWPHYTOOLS_PATH)/common/src/oran.cpp
+SRCS-y += $(LWPHYTOOLS_PATH)/common/src/tv_parser.cpp
+
+CC=g++
+CPP=g++
+
+include $(RTE_SDK)/mk/rte.extapp.mk
+
+cclean:
+	rm -rf $(RTE_OUTPUT)

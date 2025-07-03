@@ -1,0 +1,260 @@
+/*
+ * Copyright (c) 2021, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU Corporation and its licensors retain all intellectual property and proprietary
+ * rights in and to this software, related documentation and any modifications thereto.
+ * Any use, reproduction, disclosure or distribution of this software and related
+ * documentation without an express license agreement from LWPU Corporation is strictly
+ * prohibited.
+ *
+ * TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+ * AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+ * SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+ * LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+ * BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+ * INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGES
+ */
+
+#include <optix_types.h>
+
+#include <corelib/math/MathUtil.h>
+#include <corelib/system/LwdaDriver.h>
+#include <rtcore/interface/types.h>
+
+#include <vector_functions.h>
+#include <vector_types.h>
+
+#include "SphereKernels.h"
+
+namespace optix_exp {
+
+// AABB computation.
+
+static __global__ void kernel_sphereBB( unsigned int numPrimitives,
+                                        char*        vertices,
+                                        unsigned int vertexStrideInBytes,
+                                        char*        radii,
+                                        unsigned int radiusStrideInBytes,
+                                        char*        aabbs,
+                                        unsigned int aabbStrideInBytes )
+{
+    unsigned int primIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( primIdx >= numPrimitives )
+        return;
+
+    // Get vertex and radius.
+
+    const float3 p = *reinterpret_cast<float3*>( vertices + primIdx * vertexStrideInBytes );
+    const float  r = fabsf( *reinterpret_cast<float*>( radii + primIdx * radiusStrideInBytes ) );
+
+    OptixAabb lwrAabb;
+
+    lwrAabb.minX = __fadd_rd( p.x, -r );
+    lwrAabb.minY = __fadd_rd( p.y, -r );
+    lwrAabb.minZ = __fadd_rd( p.z, -r );
+    lwrAabb.maxX = __fadd_ru( p.x, r );
+    lwrAabb.maxY = __fadd_ru( p.y, r );
+    lwrAabb.maxZ = __fadd_ru( p.z, r );
+
+    OptixAabb* aabb = reinterpret_cast<OptixAabb*>( aabbs + primIdx * aabbStrideInBytes );
+    *aabb           = lwrAabb;
+}
+
+static __global__ void kernel_sphereBB_singleRadius( unsigned int numPrimitives,
+                                                     char*        vertices,
+                                                     unsigned int vertexStrideInBytes,
+                                                     char*        radii,
+                                                     char*        aabbs,
+                                                     unsigned int aabbStrideInBytes )
+{
+    unsigned int primIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( primIdx >= numPrimitives )
+        return;
+
+    // Get vertex and radius.
+
+    const float3 p = *reinterpret_cast<float3*>( vertices + primIdx * vertexStrideInBytes );
+    const float  r = fabsf( *reinterpret_cast<float*>( radii ) );
+
+    OptixAabb lwrAabb;
+
+    lwrAabb.minX = __fadd_rd( p.x, -r );
+    lwrAabb.minY = __fadd_rd( p.y, -r );
+    lwrAabb.minZ = __fadd_rd( p.z, -r );
+    lwrAabb.maxX = __fadd_ru( p.x, r );
+    lwrAabb.maxY = __fadd_ru( p.y, r );
+    lwrAabb.maxZ = __fadd_ru( p.z, r );
+
+    OptixAabb* aabb = reinterpret_cast<OptixAabb*>( aabbs + primIdx * aabbStrideInBytes );
+    *aabb           = lwrAabb;
+}
+
+static __host__ void sphereAabbs( LWstream     stream,
+                                  unsigned int numPrimitives,
+                                  char*        vertices,
+                                  unsigned int vertexStrideInBytes,
+                                  char*        radii,
+                                  unsigned int radiusStrideInBytes,
+                                  bool         singleRadius,
+                                  char*        aabbs,
+                                  unsigned int aabbStrideInBytes )
+{
+    if( singleRadius )
+    {
+        kernel_sphereBB_singleRadius<<<( numPrimitives + 63 ) / 64, 64, 0, stream>>>( numPrimitives, vertices, vertexStrideInBytes,
+                                                                                      radii, aabbs, aabbStrideInBytes );
+    }
+    else
+    {
+        kernel_sphereBB<<<( numPrimitives + 63 ) / 64, 64, 0, stream>>>( numPrimitives, vertices, vertexStrideInBytes, radii,
+                                                                         radiusStrideInBytes, aabbs, aabbStrideInBytes );
+    }
+}
+
+void makeSphereAabbs( LWstream stream, const OptixBuildInput& bi, unsigned int motionStep, LWdeviceptr aabbs, size_t aabbStrideInBytes )
+{
+    unsigned int vertexStrideInBytes =
+        bi.sphereArray.vertexStrideInBytes > 0 ? bi.sphereArray.vertexStrideInBytes : sizeof( float3 );
+    unsigned int radiusStrideInBytes =
+        bi.sphereArray.radiusStrideInBytes > 0 ? bi.sphereArray.radiusStrideInBytes : sizeof( float );
+
+    unsigned int numPrimitives = bi.sphereArray.numVertices;
+    if( numPrimitives )
+    {
+        sphereAabbs( stream, numPrimitives, reinterpret_cast<char*>( bi.sphereArray.vertexBuffers[motionStep] ),
+                     vertexStrideInBytes, reinterpret_cast<char*>( bi.sphereArray.radiusBuffers[motionStep] ),
+                     radiusStrideInBytes, bi.sphereArray.singleRadius, reinterpret_cast<char*>( aabbs ), aabbStrideInBytes );
+    }
+}
+
+// Store sphere vertex data.
+
+static __global__ void kernel_copySphereVertices( unsigned int numVertices,
+                                                  unsigned int vertexStrideInBytes,
+                                                  char*        vertices,
+                                                  unsigned int radiusStrideInBytes,
+                                                  char*        radii,
+                                                  LWdeviceptr  outputBuffer,
+                                                  size_t       vertexOffsetInBytes,
+                                                  unsigned int numMotionSteps,
+                                                  unsigned int motionStep )
+{
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( idx >= numVertices )
+        return;
+
+    ExtendedAccelHeader* header     = (ExtendedAccelHeader*)( outputBuffer );
+    LWdeviceptr          data       = outputBuffer + EXTENDED_ACCEL_HEADER_SIZE + header->dataOffset;
+    LWdeviceptr          vertexData = data + vertexOffsetInBytes;
+
+    float3 v = *reinterpret_cast<float3*>( vertices + (size_t)idx * vertexStrideInBytes );
+    float  r = *reinterpret_cast<float*>( radii + (size_t)idx * radiusStrideInBytes );
+
+    reinterpret_cast<float4*>( vertexData )[idx * numMotionSteps + motionStep] = make_float4( v.x, v.y, v.z, r );
+}
+
+static __global__ void kernel_copySphereVerticesSingleRadius( unsigned int numVertices,
+                                                              unsigned int vertexStrideInBytes,
+                                                              char*        vertices,
+                                                              char*        radii,
+                                                              LWdeviceptr  outputBuffer,
+                                                              size_t       vertexOffsetInBytes,
+                                                              unsigned int numMotionSteps,
+                                                              unsigned int motionStep )
+{
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( idx >= numVertices )
+        return;
+
+    ExtendedAccelHeader* header     = (ExtendedAccelHeader*)( outputBuffer );
+    LWdeviceptr          data       = outputBuffer + EXTENDED_ACCEL_HEADER_SIZE + header->dataOffset;
+    LWdeviceptr          vertexData = data + vertexOffsetInBytes;
+
+    float3 v = *reinterpret_cast<float3*>( vertices + (size_t)idx * vertexStrideInBytes );
+    float  r = *reinterpret_cast<float*>( radii );
+
+    reinterpret_cast<float4*>( vertexData )[idx * numMotionSteps + motionStep] = make_float4( v.x, v.y, v.z, r );
+}
+
+static __global__ void kernel_storeSphereData( unsigned int numPrimitives, LWdeviceptr dataBuffer, unsigned int vertexOffset, unsigned int numMotionSteps )
+{
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( idx >= numPrimitives )
+        return;
+
+    unsigned int c0_idx = idx + vertexOffset;
+
+    SphereIntersectorData* data = (SphereIntersectorData*)( dataBuffer );
+    data[idx].encodeSphereData( c0_idx, numMotionSteps );
+}
+
+static __global__ void kernel_storeSphereSbtMapping( unsigned int numSbtRecords, unsigned int bi_idx, LWdeviceptr outputBuffer, size_t sbtMappingOffsetInBytes )
+{
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( idx >= numSbtRecords )
+        return;
+
+    ExtendedAccelHeader* header         = (ExtendedAccelHeader*)( outputBuffer );
+    LWdeviceptr          data           = outputBuffer + EXTENDED_ACCEL_HEADER_SIZE + header->dataOffset;
+    LWdeviceptr          sbtMappingData = data + sbtMappingOffsetInBytes;
+
+    reinterpret_cast<unsigned int*>( sbtMappingData )[idx] = bi_idx;
+}
+
+
+void copySphereVertices( LWstream stream, const OptixBuildInput& bi, LWdeviceptr outputBuffer, size_t vertexOffsetInBytes, unsigned int numMotionSteps )
+{
+    unsigned int vertexStrideInBytes =
+        bi.sphereArray.vertexStrideInBytes > 0 ? bi.sphereArray.vertexStrideInBytes : sizeof( float3 );
+    unsigned int radiusStrideInBytes =
+        bi.sphereArray.radiusStrideInBytes > 0 ? bi.sphereArray.radiusStrideInBytes : sizeof( float );
+
+    if( bi.sphereArray.numVertices )
+    {
+        for( unsigned int motionStep = 0; motionStep < numMotionSteps; motionStep++ )
+        {
+            if( bi.sphereArray.singleRadius )
+            {
+                kernel_copySphereVerticesSingleRadius<<<( bi.sphereArray.numVertices + 63 ) / 64, 64, 0, stream>>>(
+                    bi.sphereArray.numVertices, vertexStrideInBytes,
+                    reinterpret_cast<char*>( bi.sphereArray.vertexBuffers[motionStep] ),
+                    reinterpret_cast<char*>( bi.sphereArray.radiusBuffers[motionStep] ), outputBuffer,
+                    vertexOffsetInBytes, numMotionSteps, motionStep );
+            }
+            else
+            {
+                kernel_copySphereVertices<<<( bi.sphereArray.numVertices + 63 ) / 64, 64, 0, stream>>>(
+                    bi.sphereArray.numVertices, vertexStrideInBytes,
+                    reinterpret_cast<char*>( bi.sphereArray.vertexBuffers[motionStep] ), radiusStrideInBytes,
+                    reinterpret_cast<char*>( bi.sphereArray.radiusBuffers[motionStep] ), outputBuffer,
+                    vertexOffsetInBytes, numMotionSteps, motionStep );
+            }
+        }
+    }
+}
+
+void storeSphereData( LWstream stream, unsigned int numPrimitives, LWdeviceptr dataBuffer, unsigned int vertexOffset, unsigned int numMotionSteps )
+{
+    if( numPrimitives )
+        kernel_storeSphereData<<<( numPrimitives + 63 ) / 64, 64, 0, stream>>>( numPrimitives, dataBuffer, vertexOffset, numMotionSteps );
+}
+
+void storeSphereSbtMapping( LWstream stream, const OptixBuildInput& bi, unsigned int bi_idx, LWdeviceptr outputBuffer, size_t sbtMappingOffsetInBytes )
+{
+    if( bi.sphereArray.numVertices )
+    {
+        kernel_storeSphereSbtMapping<<<( bi.sphereArray.numSbtRecords + 63 ) / 64, 64, 0, stream>>>(
+            bi.sphereArray.numSbtRecords, bi_idx, outputBuffer, sbtMappingOffsetInBytes );
+    }
+}
+
+}  // namespace optix_exp

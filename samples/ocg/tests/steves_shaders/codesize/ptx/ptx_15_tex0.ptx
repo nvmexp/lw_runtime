@@ -1,0 +1,49 @@
+.version 3.1
+.target sm_20
+.target texmode_independent
+
+.global .texref        mytex = { height = 64, width = 32, depth = 1 };
+.global .samplerref    mysamp = { addr_mode_0 = wrap, filter_mode = nearest, normalized_coords = 1 };
+.global .surfref       mysurf = { width = 20, height = 30, depth = 4 };
+
+.global .f32 g;
+.global .u32 y;
+
+.entry main (.param .texref mytexparam)
+{
+    .reg .f32  %f<8>;
+    .reg .u32 w, t;
+
+    mov.f32 %f0, 3.0;
+
+    tex.1d.v4.f32.f32 {%f1, %f2, %f3, %f4}, [mytex, mysamp], {%f0};
+    st.global.v4.f32  [g], {%f1, %f2, %f3, %f4};
+
+    tex.1d.v4.f32.f32 {%f1, %f2, %f3, %f4}, [mytexparam, mysamp], {%f0};
+    st.global.v4.f32  [g], {%f1, %f2, %f3, %f4};
+
+    txq.b32.width                 t, [mytex];
+    txq.b32.height                w, [mytex];
+    add.u32                       t, t, w;
+    txq.b32.depth                 w, [mytex];
+    add.u32                       t, t, w;
+    txq.b32.normalized_coords     w, [mysamp];
+    add.u32           t, t, w;
+    txq.b32.addr_mode_0           w, [mysamp];
+    add.u32           t, t, w;
+    txq.b32.addr_mode_1           w, [mysamp];
+    add.u32           t, t, w;
+    txq.b32.addr_mode_2           w, [mysamp];
+    add.u32           t, t, w;
+    txq.b32.filter_mode           w, [mysamp];
+    add.u32           t, t, w;
+
+    suq.b32.width     w, [mysurf];
+    add.u32           t, t, w;
+    suq.b32.height    w, [mysurf];
+    add.u32           t, t, w;
+
+    st.global.u32     [y], t;    
+    exit;
+}
+

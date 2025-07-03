@@ -1,0 +1,25 @@
+!!LWfp5.0
+
+# dmul.fp5
+
+OPTION LW_gpu_program_fp64;
+LONG TEMP t;
+LONG TEMP u;
+FLAT ATTRIB a0 = fragment.attrib[0];
+CBUFFER cb[] = { program.buffer[0] };
+CBUFFER cb2[] = { program.buffer[1] };
+
+
+#### LOAD.F64 t.x, t.x;              # load a second fp64 value from global memory
+
+LDC.F64X4  t, cb[0];
+
+MUL.F64    t.x, t.x, t.y;
+MUL.F64    t.z, -t.z, t.w;
+MUL.F64    t.w, t.x, |t.z|;
+
+MOV        result.color, t;
+
+END
+
+

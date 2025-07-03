@@ -1,0 +1,63 @@
+gs_4_1
+dcl_globalflags refactoringAllowed
+dcl_constantbuffer cb0[1].xyzw, immediateIndexed
+dcl_constantbuffer cb1[4].xyzw, immediateIndexed
+dcl_sampler s0, mode_default
+dcl_resource t0, texture3d, (float, float, float, float)
+dcl_input_siv v1[0].xy, position
+dcl_input v1[1].xy
+dcl_temps 6 
+dcl_inputprimitive point 
+dcl_outputtopology pointlist 
+dcl_output o0.xyzw
+dcl_output_siv o1.xyzw, position
+dcl_maxout 1 
+mul r0.x, cb0[0].z, v0[1].x
+mul r0.z, -cb0[0].w, v0[1].y
+mul r0.yw, r0.xxxz, l(0.00000000, 0.50000000, 0.00000000, 0.50000000)
+mad r0.x, -r0.x, l(0.50000000), l(1.00000000)
+mul r1.xyz, r0.yyyy, cb1[1].xyzx
+mad r1.xyz, cb1[0].xyzx, r0.xxxx, r1.xyzx
+mul r2.xyz, r0.yyyy, cb1[2].xyzx
+mad r2.xyz, cb1[3].xyzx, r0.xxxx, r2.xyzx
+mad r0.x, -r0.z, l(0.50000000), l(1.00000000)
+mul r3.xyz, r0.wwww, r2.xyzx
+mad r3.xyz, r1.xyzx, r0.xxxx, r3.xyzx
+add r0.yz, l(0.00000000, 1.00000000, 1.00000000, 0.00000000), v0[1].xxyx
+mul r0.y, r0.y, cb0[0].z
+mul r1.w, r0.y, l(0.50000000)
+mad r0.y, -r0.y, l(0.50000000), l(1.00000000)
+mul r4.xyz, r1.wwww, cb1[1].xyzx
+mad r4.xyz, cb1[0].xyzx, r0.yyyy, r4.xyzx
+mul r5.xyz, r1.wwww, cb1[2].xyzx
+mad r5.xyz, cb1[3].xyzx, r0.yyyy, r5.xyzx
+mul r5.xyz, r0.wwww, r5.xyzx
+mad r0.xyw, r4.xyxz, r0.xxxx, r5.xyxz
+add r0.xyw, -r3.xyxz, r0.xyxw
+mul r0.z, r0.z, -cb0[0].w
+mul r1.w, r0.z, l(0.50000000)
+mad r0.z, -r0.z, l(0.50000000), l(1.00000000)
+mul r2.xyz, r1.wwww, r2.xyzx
+mad r1.xyz, r1.xyzx, r0.zzzz, r2.xyzx
+add r1.xyz, -r3.xyzx, r1.xyzx
+lt r0.z, v0[0].x, l(0.00000000)
+if_nz r0.z
+  lt r0.z, l(0.00000000), v0[0].y
+  if_nz r0.z
+    sample_d aoffimmi(-1, 0, -1) r2.xyzw, r3.xyzx, t0.xyzw, s0, r0.xywx, r1.xyzx
+  else 
+    sample_d aoffimmi(0, -1, 0) r2.xyzw, r3.xyzx, t0.xyzw, s0, r0.xywx, r1.xyzx
+  endif 
+else 
+  lt r0.z, l(0.00000000), v0[0].y
+  if_nz r0.z
+    sample_d aoffimmi(1, 1, 2) r2.xyzw, r3.xyzx, t0.xyzw, s0, r0.xywx, r1.xyzx
+  else 
+    sample_d aoffimmi(0, 2, 1) r2.xyzw, r3.xyzx, t0.xyzw, s0, r0.xywx, r1.xyzx
+  endif 
+endif 
+mov o0.xyzw, r2.xyzw
+mov o1.xy, v0[0].xyxx
+mov o1.zw, l(0, 0, 0, 0x3f800000)
+emit 
+ret

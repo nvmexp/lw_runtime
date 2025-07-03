@@ -1,0 +1,94 @@
+# File should be included in main lwcm/makefile.lwmk
+
+##############################################################################
+# define SOURCES
+##############################################################################
+LWRRENT_DIR := $(DCGM_DIR)/dcgm_loader
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += dcgm_loader.c
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_SOURCES += $(LWML_DIR)/common/lwml_lwos_wrapper.c
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+  # LOCAL_SOURCES += $(LWIDSTRING)
+  LOCAL_SOURCES += $(LWML_DIR)/common/Linux/lwosLinux.c
+  LOCAL_SOURCES += $(LWML_DIR)/common/lwos_common_posix.c
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+  LOCAL_SOURCES += $(LWML_DIR)/common/win32/lwoswin32.c
+  LOCAL_SOURCES += $(LW_SOURCE)/drivers/common/src/lwSelwreLoadLibrary.c
+endif
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+##############################################################################
+# define LOCAL_CFLAGS
+##############################################################################
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib
+LOCAL_INCLUDES += $(DCGM_DIR)/common
+LOCAL_INCLUDES += $(LW_SOURCE)/apps/lwml/common/
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/
+
+#ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+#  LOCAL_INCLUDES += $(PLATFORMSDK_DIR)/Include
+#endif
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+# LWCM needs to define functions for all versions
+# Disable versioning for the build
+LOCAL_CFLAGS += -D__LWCM_API_VERSION_INTERNAL
+LOCAL_CFLAGS += -DLWCM_STATIC_IMPORT=1
+
+# PIC is needed for cases where dcgm_loader.a is linked into shared library
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+ LOCAL_CFLAGS += -fPIC
+endif
+
+# Need to prevent LIBC library directive from being inserted into the
+# the lwcm_loader.obj file so it can be linked against all different types
+# of LIBC (LIBCMT, LIBCMTD, DLLs).  Otherwise, we get warnings and errors.
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+  LOCAL_CFLAGS += /Zl
+endif
+
+##############################################################################
+# define LOCAL_LDFLAGS
+##############################################################################
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+
+##############################################################################
+# build
+##############################################################################
+
+LWCM_LOADER_LIB := dcgm_loader$(STATIC_LIBSUFFIX)
+
+dcgm_loader_TARGET  := $(OUTPUTDIR)/$(LWCM_LOADER_LIB)
+dcgm_loader_OBJECTS := $(LOCAL_OBJECTS)
+dcgm_loader_CFLAGS  := $(LOCAL_CFLAGS)
+dcgm_loader_LDFLAGS := $(LOCAL_LDFLAGS)
+dcgm_loader_DEPENDS ?= $(LWML_H_OUT) $(LWML_GRID_H_OUT)
+
+build: $(dcgm_loader_TARGET)
+dcgmbuildsyncpoint:: $(dcgm_loader_TARGET)
+$(eval $(call MAKE_STATIC_LIBRARY,dcgm_loader))
+build: $(dcgm_loader_TARGET).guardwords
+
+clean:
+
+##############################################################################
+# export directory
+##############################################################################
+
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

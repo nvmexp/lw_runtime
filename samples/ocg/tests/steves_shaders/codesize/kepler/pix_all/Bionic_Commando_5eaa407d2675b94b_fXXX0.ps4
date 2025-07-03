@@ -1,0 +1,58 @@
+ps_4_0
+dcl_input_ps_siv v0.xy, position, linear noperspective
+dcl_input_ps v2.xy, linear
+dcl_output o0.xyzw
+dcl_constantbuffer cb0[24].xyzw, dynamicindexed
+dcl_sampler s0, mode_comparison
+dcl_resource t0, texture2d, (float, float, float, float)
+dcl_resource t1, texture2d, (float, float, float, float)
+dcl_temps 3 
+ftoi r0.xy, v0.xyxx
+mov r0.zw, l(0, 0, 0, 0)
+ld r0.xyzw, r0.xyzw, t1.xyzw
+mul r1.xy, v2.xyxx, cb0[22].xyxx
+mov r1.z, r0.x
+mov r1.w, l(0x3f800000)
+mul r1.xyz, r1.xyzx, r1.zzwz
+mov r1.w, l(0x3f800000)
+dp4 r2.x, r1.xyzw, cb0[18].xyzw
+dp4 r2.y, r1.xyzw, cb0[19].xyzw
+dp4 r2.z, r1.xyzw, cb0[20].xyzw
+dp4 r2.w, r1.xyzw, cb0[21].xyzw
+lt r1.xyzw, l(0.00000000, 810.00000000, 1610.00000000, 5510.00000000), r0.xxxx
+and r1.xyzw, r1.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+dp4 r0.y, r1.xyzw, l(1.00000000, 1.00000000, 1.00000000, 1.00000000)
+ftou r0.y, r0.y
+iadd r0.y, r0.y, l(0xffffffff)
+umul null, r0.y, r0.y, l(0x4)
+dp4 r0.z, r2.xyzw, cb0[r0.y+1].xyzw
+dp4 r0.w, r2.xyzw, cb0[r0.y+2].xyzw
+dp4 r0.y, r2.xyzw, cb0[r0.y+3].xyzw
+div r1.xy, l(1.00000000, 1.00000000, 1.00000000, 1.00000000), cb0[23].xyxx
+mov r1.zw, l(0, 0, 0, 0xbf000000)
+loop 
+lt r2.x, l(0.50000000), r1.w
+breakc_nz r2.x
+mov r2.x, r1.w
+mov r2.z, l(0xbf000000)
+loop 
+lt r2.w, l(0.50000000), r2.z
+breakc_nz r2.w
+mov r2.y, r2.z
+mad r2.yw, r2.xxxy, r1.xxxy, r0.zzzw
+sample_c_lz r2.y, r2.ywyy, t0.xxxx, s0, r0.y
+add r1.z, r1.z, r2.y
+add r2.z, r2.z, l(1.00000000)
+endloop 
+add r1.w, r1.w, l(1.00000000)
+endloop 
+mul r0.y, r1.z, l(0.25000000)
+lt r0.zw, r0.xxxx, l(0.00000000, 0.00000000, 16000.00000000, 17500.00000000)
+add r0.x, r0.x, l(-16000.00000000)
+mul r0.x, r0.x, l(0.00066667)
+mad r1.x, -r1.z, l(0.25000000), cb0[22].w
+mad r0.x, r0.x, r1.x, r0.y
+movc r0.x, r0.w, r0.x, cb0[22].w
+movc o0.x, r0.z, r0.y, r0.x
+mov o0.yzw, l(0, 0x3f800000, 0x3f800000, 0x3f800000)
+ret 

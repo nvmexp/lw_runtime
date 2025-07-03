@@ -1,0 +1,91 @@
+#
+#  Copyright (c) 2020 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *Objects IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+# BitCodeLibrary.lwmk
+#
+# Functions to generate rules and targets to compile and link an LLVM IR bitcode
+# library and embed it into an OptiX module
+#
+
+# optix_bitcode_library
+#
+# $(1) bitcode library base name, excluding _linked_opt_.bc
+#
+# Input variables:
+#
+# $(1)_SOURCES        C++ source files to be compiled to LLVM IR with clang
+# $(1)_LLVM_SOURCES   LLVM IR source files to be linked into the bitcode library
+# $(1)_CFLAGS         Additional C++ compile flags when compiling $(1)_SOURCES
+# $(1)_DEFINES        Additional macro definitions when compiling $(1)_SOURCES
+# $(1)_INCLUDES       Additional include directories when compiling $(1)_SOURCES
+# $(1)_LFLAGS         Additional link flags when linking the bitcode library
+# $(1)_OPTFLAGS       Additional opt flags when optimizing the linked bitcode library
+#
+define optix_bitcode_library_impl
+  ifeq ($(1),)
+    $$(error No bitcode library name given: 1='$(1)')
+  endif
+  $(1)_SOURCES ?=
+  $(1)_LLVM_SOURCES ?=
+  $(1)_CFLAGS ?=
+  $(1)_DEFINES ?=
+  $(1)_INCLUDES ?=
+  $(1)_LFLAGS ?=
+  $(1)_OPTFLAGS ?=
+
+  # The makefile that called optix_bitcode_library
+  $(1)_MAKEFILE ?= $$(call ILWOKING_MAKEFILE)
+
+  # The resulting linked bitcode library
+  $(1)_BITCODE = $$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$(dir $$($(1)_MAKEFILE)))$(1)_linked.bc
+
+  # The result of running opt on the linked bitcode library
+  $(1)_OPT_BITCODE = $$($(1)_BITCODE:.bc=_opt.bc)
+
+  # LLVM IR objects resulting from C++ compilation with clang
+  $(1)_OBJECTS = $$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$($(1)_SOURCES:.cpp=.bc))
+
+  $(1)_LLVM_OBJECTS = $$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$($(1)_LLVM_SOURCES:.ll=.bc))
+
+  # Include OPTIX_CFLAGS, OPTIX_DEFINES and OPTIX_INCLUDES by default.
+  $$($(1)_OBJECTS): private CFLAGS += $$(OPTIX_CFLAGS) $$($(1)_CFLAGS)
+  $$($(1)_OBJECTS): private LW_DEFINES += $$(OPTIX_DEFINES) $$($(1)_DEFINES)
+  $$($(1)_OBJECTS): private LW_INCLUDES += $$(OPTIX_INCLUDES) $$($(1)_INCLUDES)
+
+  ifeq ($$(LW_AUTO_DEPEND),1)
+    # Include generated dependency files for C++ source files compiled with clang.
+    $$(foreach f,$$($(1)_OBJECTS),$$(eval $$(call INCLUDE_DEPFILE_RULE,$$(f))))
+  endif
+
+  # Bitcode is linked from compiled C++ file objects and raw LLVM IR sources
+  $$($(1)_BITCODE): $$($(1)_OBJECTS) $$($(1)_LLVM_OBJECTS) $$(LLVM_LINK)
+  ifeq ($$(LW_VERBOSE),0)
+	$$(ECHO) llvm-link $$(@F)
+  endif
+	$$(MKDIR) $$(@D)
+	$$(LLVM_LINK) -o $$(@) $$($(1)_LFLAGS) $$(filter %.bc,$$(^))
+
+  # Optimized bitcode uses optional arguments to opt
+  $$($(1)_OPT_BITCODE): LLVM_OPT_ARGS += $$($(1)_OPTFLAGS)
+
+  # Recompile objects if calling makefile changed or BitCodeLibrary.lwmk changed.
+  $$($(1)_OBJECTS): $$($(1)_MAKEFILE) $$(LW_OPTIX)/make/BitCodeLibrary.lwmk
+endef
+optix_bitcode_library = $(eval $(call optix_bitcode_library_impl,$(1)))

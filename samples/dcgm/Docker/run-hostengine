@@ -1,0 +1,45 @@
+#! /bin/bash
+
+set -u
+
+QUITTING=
+ret=0
+
+trap "QUITTING=YES" SIGTERM
+
+echo "Starting LWPU host engine..."
+lw-hostengine -b 0.0.0.0
+
+while [ -z "$QUITTING" ]; do
+    sleep 0.5
+done
+
+echo "Stopping LWPU host engine..."
+lw-hostengine --term
+
+if [ -f /run/lwhostengine.pid ]; then
+    pid=$(< /run/lwhostengine.pid)
+
+    kill -SIGTERM "${pid}"
+
+    # For some reason, we can't break from this for loop. So we use a state
+    # variable as a poor man's break
+
+    i=0
+    do_break=
+
+    while [ "$i" -lt 50 -a -z "$do_break" ]; do
+        kill -0 "${pid}" 2> /dev/null || do_break=1
+        (( i++ ))
+        sleep 0.1
+    done
+    if [ $i -eq 50 ]; then
+        echo "Could not stop LWPU host engine" >&2
+        kill -9 "${pid}" 2> /dev/null
+        ret=1
+    fi
+    rm -f /run/lwhostengine.pid
+fi
+
+echo "Done"
+exit "$ret"

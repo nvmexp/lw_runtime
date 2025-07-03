@@ -1,0 +1,612 @@
+#ifndef VECTOR_OPERATORS_H__
+#define VECTOR_OPERATORS_H__
+
+
+
+template<typename T>
+ __device__
+T clamp(T in, T low, T high)
+{
+  if (in <= low)
+    return low;
+  else if (in >= high)
+    return high;
+  else
+    return in;
+}
+
+//a la wikipedia
+template<typename T>
+ __device__
+T smoothstep(T a, T b, T x)
+{
+  T t = clamp((x - a) / (b - a), (T)0, (T)1);
+  return t * t * (3 - 2 * t);
+}
+
+
+template<typename T>
+ __device__
+T mix(T a, T b, float x)
+{
+  return a + (b - a) * x;
+}
+
+ __device__
+static inline
+float3 sqrt3(const float3 &a)
+{
+    return make_float3(sqrtf(a.x), sqrtf(a.y), sqrtf(a.z));
+}
+
+static __inline__ __device__ float4 abs(float4 v)
+{
+    float4 t; t.x = abs(v.x); t.y = abs(v.y); t.z = abs(v.z);  t.w = abs(v.w);  return t;
+}
+
+static __inline__ __device__ float2 floor(float2 v)
+{
+    float2 t; t.x = floor(v.x); t.y = floor(v.y); return t;
+}
+
+static __inline__ __device__ float2 sin(float2 v)
+{
+    float2 t; t.x = __sinf(v.x); t.y = __sinf(v.y); return t;
+}
+
+static __inline__  __device__ float2 cos(float2 v)
+{
+    float2 t; t.x = __cosf(v.x); t.y = __cosf(v.y); return t;
+}
+
+static __inline__  __device__ float2 make_float2(float x)
+{
+  float2 t; t.x = t.y = x; return t;
+}
+
+static __inline__  __device__ float2 make_float2(float4 x)
+{
+    float2 t; t.x = x.x; t.y = x.y; return t;
+}
+
+static __inline__  __device__ float2 make_float2(float3 x)
+{
+    float2 t; t.x = x.x; t.y = x.y; return t;
+}
+
+static __inline__  __device__ float3 make_float3(float x)
+{
+  float3 t; t.x = t.y = t.z = x; return t;
+}
+
+static __inline__  __device__ float3 make_float3(float4 x)
+{
+    float3 t; t.x = x.x; t.y = x.y; t.z = x.z; return t;
+}
+
+static __inline__  __device__ float4 make_float4(float w)
+{
+  float4 t; t.x = t.y = t.z = t.w = w; return t;
+}
+
+static __inline__  __device__ float4 make_float4(float3 a, float w)
+{
+    float4 t; t.x = a.x; t.y = a.y; t.z = a.z; t.w = w; return t;
+}
+
+ __device__
+static inline
+float3 operator /(const float3 first, const float second)
+{
+    float3 ret;
+    ret.x = (first.x / second);
+    ret.y = (first.y / second);
+    ret.z = (first.z / second);
+    return ret;
+}
+
+ __device__
+static inline
+float2 operator /(const float2 first, const float2 second)
+{
+  float2 ret;
+  ret.x = (first.x / second.x);
+  ret.y = (first.y / second.y);
+  return ret;
+}
+
+ __device__
+static inline
+float2 operator /(const float2 first, const float second)
+{
+    float2 ret;
+    ret.x = (first.x / second);
+    ret.y = (first.y / second);
+    return ret;
+}
+
+ __device__
+static inline
+float2 operator *(const float2 first, const float2 second)
+{
+    float2 ret;
+    ret.x = first.x * second.x;
+    ret.y = first.y * second.y;
+    return ret;
+}
+
+ __device__
+static inline
+float2 operator *(const float2 first, const float second)
+{
+  float2 ret;
+  ret.x = first.x * second;
+  ret.y = first.y * second;
+  return ret;
+}
+
+ __device__
+static inline
+float2 operator *(const float second,const float2 first)
+{
+  float2 ret;
+  ret.x = first.x * second;
+  ret.y = first.y * second;
+  return ret;
+}
+
+ __device__
+static inline
+float2 operator +(const float2 first, const float2 second)
+{
+  float2 ret;
+  ret.x = first.x + second.x;
+  ret.y = first.y + second.y;
+  return ret;
+}
+
+ __device__
+static inline
+float2 operator -(const float2 first, const float2 second)
+{
+  float2 ret;
+  ret.x = first.x - second.x;
+  ret.y = first.y - second.y;
+  return ret;
+}
+
+ __device__
+static inline
+float dot(const float2 &a, const float2 &b)
+{
+  return a.x*b.x + a.y*b.y;
+}
+
+ __device__
+static inline
+float dot(const float3 &a, const float3 &b)
+{
+    return a.x*b.x + a.y*b.y + a.z*b.z;
+}
+
+ __device__
+static inline
+float dot(const float4 &a, const float4 &b)
+{
+    return a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
+}
+
+ __device__
+static inline
+float2 normalize(const float2 &a)
+{
+  float m = sqrtf(a.x*a.x+a.y*a.y) + 1e-10f;
+  return make_float2(a.x/m,a.y/m);
+}
+
+ __device__
+static inline
+float magnitude(const float2 &a)
+{
+  return sqrtf(a.x*a.x+a.y*a.y);
+}
+
+ __device__
+static inline
+float3 cross(const float3 &a, const float3 &b)
+{
+  return make_float3(a.y*b.z - a.z*b.y,
+
+                     a.z*b.x - a.x*b.z,
+
+                     a.x*b.y - a.y*b.x);
+}
+
+ __device__
+static inline
+float3 normalize(const float3 &a)
+{
+  float m = sqrtf(a.x*a.x+a.y*a.y+a.z*a.z) + 1e-10f;
+  return make_float3(a.x/m,a.y/m,a.z/m);
+}
+
+//float4-float4 and float4-float operations is useful shorthand
+ __device__
+static inline
+float4 operator -(const float4 first)
+{
+  float4 ret;
+  ret.x = -first.x;
+  ret.y = -first.y;
+  ret.z = -first.z;
+  ret.w = -first.w;
+  return ret;
+}
+
+ __device__
+static inline
+float4 operator *(const float4 first, const float4 second)
+{
+  float4 ret;
+  ret.x = first.x * second.x;
+  ret.y = first.y * second.y;
+  ret.z = first.z * second.z;
+  ret.w = first.w * second.w;
+  return ret;
+}
+
+
+ __device__
+static inline
+float4 operator +(const float4 first, const float4 second)
+{
+  float4 ret;
+  ret.x = first.x + second.x;
+  ret.y = first.y + second.y;
+  ret.z = first.z + second.z;
+  ret.w = first.w + second.w;
+  return ret;
+}
+
+
+ __device__
+static inline
+float4 operator -(const float4 first, const float4 second)
+{
+  float4 ret;
+  ret.x = first.x - second.x;
+  ret.y = first.y - second.y;
+  ret.z = first.z - second.z;
+  ret.w = first.w - second.w;
+  return ret;
+}
+
+// float3
+
+__device__
+static inline
+float3 operator -(const float3 first)
+{
+    float3 ret;
+    ret.x = -first.x;
+    ret.y = -first.y;
+    ret.z = -first.z;    
+    return ret;
+}
+
+ __device__
+static inline
+float3 operator *(const float3 first, const float3 second)
+{
+    float3 ret;
+    ret.x = first.x * second.x;
+    ret.y = first.y * second.y;
+    ret.z = first.z * second.z;    
+    return ret;
+}
+
+ __device__
+static inline
+float3 operator /(const float3 first, const float3 second)
+{
+    float3 ret;
+    ret.x = first.x / second.x;
+    ret.y = first.y / second.y;
+    ret.z = first.z / second.z;
+    return ret;
+}
+
+ __device__
+static inline
+float3 operator +(const float second, const float3 first)
+{
+    float3 ret;
+    ret.x = first.x + second;
+    ret.y = first.y + second;
+    ret.z = first.z + second;
+    return ret;
+}
+
+__device__
+static inline
+float3 operator -(const float first, const float3 second)
+{
+    float3 ret;
+    ret.x = first - second.x;
+    ret.y = first - second.y;
+    ret.z = first - second.z;
+    return ret;
+}
+
+ __device__
+static inline
+float3 operator +(const float3 first, const float second)
+{
+    float3 ret;
+    ret.x = first.x + second;
+    ret.y = first.y + second;
+    ret.z = first.z + second;
+    return ret;
+}
+
+ __device__
+static inline
+float3 operator +(const float3 first, const float3 second)
+{
+    float3 ret;
+    ret.x = first.x + second.x;
+    ret.y = first.y + second.y;
+    ret.z = first.z + second.z;
+    return ret;
+}
+
+
+ __device__
+static inline
+float3 operator -(const float3 first, const float3 second)
+{
+    float3 ret;
+    ret.x = first.x - second.x;
+    ret.y = first.y - second.y;
+    ret.z = first.z - second.z;    
+    return ret;
+}
+
+//
+
+ __device__
+static inline
+float4 operator *(const float4 first, const float second)
+{
+  float4 ret;
+  ret.x = first.x * second;
+  ret.y = first.y * second;
+  ret.z = first.z * second;
+  ret.w = first.w * second;
+  return ret;
+}
+
+ __device__
+static inline
+float3 operator *(const float3 first, const float second)
+{
+    float3 ret;
+    ret.x = first.x * second;
+    ret.y = first.y * second;
+    ret.z = first.z * second;    
+    return ret;
+}
+
+ __device__
+static inline
+float4 operator *(const float first, const float4 second)
+{
+  return second * first;
+}
+
+ __device__
+static inline
+float3 operator *(const float first, const float3 second)
+{
+    return second * first;
+}
+
+
+ __device__
+static inline
+float4 colwert_float4(const float in)
+{
+  float4 ret;
+  ret.x = in;
+  ret.y = in;
+  ret.z = in;
+  ret.w = in;
+  return ret;  
+}
+
+
+ __device__
+static inline
+float4 operator +(const float4 first, const float second)
+{
+  float4 ret;
+  ret.x = first.x + second;
+  ret.y = first.y + second;
+  ret.z = first.z + second;
+  ret.w = first.w + second;
+  return ret;
+}
+
+ __device__
+static inline
+float4 operator +(const float first, const float4 second)
+{
+  return second + first;
+}
+
+
+ __device__
+static inline
+float4 operator -(const float4 first, const float second)
+{
+  return first + (-second);
+}
+
+ __device__
+static inline
+float3 operator -(const float3 first, const float second)
+{
+    return first + (-second);
+}
+
+ __device__
+static inline
+float4 operator -(const float first, const float4 second)
+{
+  float4 ret = second - first;
+  ret.x = -ret.x;
+  ret.y = -ret.y;
+  ret.z = -ret.z;
+  ret.w = -ret.w;
+  return ret;
+}
+
+
+ __device__
+static inline
+float hsum(const float4 in)
+{
+  return in.x + in.y + in.z + in.w;
+}
+
+
+ __device__
+static inline
+float hmin(const float4 in)
+{
+  return min(min(in.x, in.y), min(in.z, in.w));
+}
+
+
+ __device__
+static inline
+float4 clamp4(const float4 in, const float low, const float high)
+{
+  float4 ret;
+  ret.x = clamp(in.x, low, high);
+  ret.y = clamp(in.y, low, high);
+  ret.z = clamp(in.z, low, high);
+  ret.w = clamp(in.w, low, high);
+  return ret;
+}
+
+ __device__
+static inline
+float4 min4(const float4 &a, const float4 &b)
+{
+  return make_float4(min(a.x, b.x)
+                   , min(a.y, b.y)
+                   , min(a.z, b.z)
+                   , min(a.w, b.w));
+}
+
+ __device__
+static inline
+float4 min4(const float4 &a, const float &b)
+{
+  return make_float4(min(a.x, b)
+                   , min(a.y, b)
+                   , min(a.z, b)
+                   , min(a.w, b));
+}
+
+ __device__
+static inline
+float4 max4(const float4 &a, const float4 &b)
+{
+  return make_float4(max(a.x, b.x)
+                   , max(a.y, b.y)
+                   , max(a.z, b.z)
+                   , max(a.w, b.w));
+}
+
+ __device__
+static inline
+float4 max4(const float4 &a, const float &b)
+{
+  return make_float4(max(a.x, b)
+                   , max(a.y, b)
+                   , max(a.z, b)
+                   , max(a.w, b));
+}
+
+__device__
+static inline
+float3 min3(const float3 &a, const float &b)
+{
+    return make_float3(min(a.x, b)
+        , min(a.y, b)
+        , min(a.z, b));
+}
+
+__device__
+static inline
+float3 min3(const float3 &a, const float3 &b)
+{
+    return make_float3(min(a.x, b.x)
+        , min(a.y, b.y)
+        , min(a.z, b.z));
+}
+
+ __device__
+static inline
+float3 max3(const float3 &a, const float &b)
+{
+    return make_float3(max(a.x, b)
+        , max(a.y, b)
+        , max(a.z, b));
+}
+
+ __device__
+static inline
+float3 max3(const float3 &a, const float3 &b)
+{
+    return make_float3(max(a.x, b.x)
+        , max(a.y, b.y)
+        , max(a.z, b.z));
+}
+
+ __device__
+static inline
+float3 pow3(const float3 &a, const float &b)
+{
+    return make_float3(__powf(a.x, b)
+        , __powf(a.y, b)
+        , __powf(a.z, b));
+}
+
+ __device__
+static inline
+uchar4 operator *(const uchar4 first, const uchar4 second)
+{
+  uchar4 ret;
+  ret.x = first.x * second.x;
+  ret.y = first.y * second.y;
+  ret.z = first.z * second.z;
+  ret.w = first.w * second.w;
+  return ret;
+}
+
+ __device__
+static inline
+uchar4 operator +(const uchar4 first, const uchar4 second)
+{
+  uchar4 ret;
+  ret.x = first.x + second.x;
+  ret.y = first.y + second.y;
+  ret.z = first.z + second.z;
+  ret.w = first.w + second.w;
+  return ret;
+}
+
+#endif

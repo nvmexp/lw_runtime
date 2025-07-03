@@ -1,0 +1,74 @@
+gs_5_0
+
+; File: wgf11streamout_1.gs5
+; Bug: 582398
+
+dcl_globalFlags refactoringAllowed
+dcl_constantbuffer cb0[2], immediateIndexed
+dcl_input v[7][0].xyzw
+dcl_input v[7][1].x
+dcl_temps 5
+dcl_indexableTemp x0[64], 4
+dcl_inputprimitive patch7
+dcl_stream m0
+dcl_outputtopology trianglestrip
+dcl_output o0.xyzw
+dcl_output o1.xyzw
+dcl_output o2.xyzw
+dcl_output o3.x
+dcl_output o4.xyzw
+dcl_output o5.xyzw
+dcl_maxout 6
+mov x0[0].xy, v0[0].xyxx
+mov x0[1].x, v0[1].x
+mov x0[2].xy, v1[0].xyxx
+mov x0[3].x, v1[1].x
+mov x0[4].xy, v2[0].xyxx
+mov x0[5].x, v2[1].x
+mov x0[6].xy, v3[0].xyxx
+mov x0[7].x, v3[1].x
+mov x0[8].xy, v4[0].xyxx
+mov x0[9].x, v4[1].x
+mov x0[10].xy, v5[0].xyxx
+mov x0[11].x, v5[1].x
+mov x0[12].xy, v6[0].xyxx
+mov x0[13].x, v6[1].x
+mov x0[14].xy, l(0, 0, 0, 0)
+mov r0.x, l(0)
+loop
+  uge r0.y, r0.x, cb0[0].x
+  breakc_nz r0.y
+  imul null, r0.y, r0.x, l(0x11)
+  udiv null, r0.y, r0.y, l(0x7)
+  ishl r0.y, r0.y, l(0x1)
+  mov r0.z, x0[r0.y].x
+  utof r0.w, r0.x
+  add r0.z, r0.w, r0.z
+  mov r0.w, x0[r0.y].y
+  and r1.x, r0.x, l(0x1)
+  utof r1.x, r1.x
+  add r0.w, r0.w, r1.x
+  iadd r1.x, cb0[1].x, r0.x
+  mov r0.y, x0[r0.y+1].x
+  iadd r0.y, r1.x, r0.y
+  iadd r1.xyzw, r0.yyyy, l(0x1, 0x2, 0x3, 0x4)
+  iadd r2.xyzw, r0.yyyy, l(0x5, 0x6, 0x7, 0x8)
+  iadd r3.xyzw, r0.yyyy, l(0x9, 0xa, 0xb, 0xc)
+  iadd r4.xyz, r0.yyyy, l(0xd, 0xe, 0xf, 0)
+  mov o0.x, r0.z
+  mov o0.y, r0.w
+  mov o0.zw, v0[0].zzzw
+  mov o1.x, r0.y
+  mov o1.yzw, r1.xxyz
+  mov o2.x, r1.w
+  mov o2.yzw, r2.xxyz
+  mov o3.x, l(0x3)
+  mov o4.x, r2.w
+  mov o4.yzw, r3.xxyz
+  mov o5.x, r3.w
+  mov o5.yzw, r4.xxyz
+  emit_stream m0
+  iadd r0.x, r0.x, l(0x1)
+endloop
+ret
+

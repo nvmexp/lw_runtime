@@ -1,0 +1,25 @@
+ps_4_0
+dcl_input v1.xy, linear
+dcl_output o0.xyzw
+dcl_constantbuffer cb0[159].xyzw, dynamicindexed
+dcl_sampler s0, mode_default
+dcl_sampler s1, mode_default
+dcl_resource t0, texture2d, (float, float, float, float)
+dcl_resource t1, texture2d, (float, float, float, float)
+dcl_temps 3 
+mul r0.xy, v1.xyxx, cb0[158].xyxx
+sample r0.xyzw, r0.xyxx, t1.xzyw, s1
+div r0.xy, r0.xyxx, cb0[158].zzzz
+mov r1.xyzw, l(0, 0, 0, 0)
+loop 
+ige r2.x, r1.w, l(0x4f)
+breakc_nz r2.x
+mad r2.xy, cb0[r1.w].xxxx, r0.xzxx, v1.xyxx
+mad r2.xy, cb0[r1.w].yyyy, r0.ywyy, r2.xyxx
+sample_l r2.xyzw, r2.xyxx, t0.xyzw, s0, cb0[158].w
+mad r1.xyz, r2.xyzx, cb0[r1.w+79].xyzx, r1.xyzx
+iadd r1.w, r1.w, l(0x1)
+endloop 
+mov o0.xyz, r1.xyzx
+mov o0.w, l(0x3f800000)
+ret 

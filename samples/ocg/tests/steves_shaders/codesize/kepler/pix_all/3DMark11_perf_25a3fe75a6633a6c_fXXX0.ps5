@@ -1,0 +1,688 @@
+// BEGIN_SHADER
+//     BEGIN_SECTION SHADER_ID
+//         DIRECTX: 11.0
+//         TYPE: PIXEL 
+//         SHADER_HASH: 0x25a3fe75a6633a6c
+//         FINGERPRINTER_HASH: 0x0000000000000000
+//         UCODE_HASH: 0xd7cf13503611b4a5
+//         POOL: APP
+//         VERSION: 20
+//         # USES: 105
+//         # Constant Folding: 1
+//         # Disable 595261: 0
+//         # Reduction Hack: 1
+//         # Tex / Tld vectorized: 1
+//         # Dual Src Blending Opt: 0
+//         # Texture Filtering: 0
+//         # Blend Opt: 0
+//         # Lentilwlar Halo: 0
+//     END_SECTION
+//     BEGIN_SECTION CHIP_ID
+//         CLASS: FERMI
+//         CHIP_ID: GF104
+//         SM_VERSION: SMQuick  // SM 2.1
+//     END_SECTION
+//     BEGIN_SECTION RESOURCES
+//         REGISTER_COUNT: 24
+//         TEXTURE_SLOTS: 3
+//         SAMPLER_SLOTS: 1
+//     END_SECTION
+//     BEGIN_SECTION FERMI_SHADER_HEADER
+//         SPHType: TYPE_02_PS
+//         Version: 3
+//         ShaderType: PIXEL
+//         SassVersion: 3
+//         PROPERTIES:
+//             MRT_ENABLE
+//         IMAP:
+//             POSITION_X
+//             POSITION_Y
+//             POSITION_W
+//             GENERIC01_X          PERSPECTIVE
+//             GENERIC01_Y          PERSPECTIVE
+//         OMAP:
+//             TARGET00_R
+//     END_SECTION
+//     BEGIN_SECTION APP_SHADER_INFO
+        ps_5_0
+        dcl_globalflags refactoringAllowed
+        dcl_constantbuffer cb0[13].xyzw, immediateIndexed
+        dcl_sampler s0, mode_default
+        dcl_resource t0, texture2d, (float, float, float, float)
+        dcl_resource t1, texture2d, (float, float, float, float)
+        dcl_resource t2, texture2d, (float, float, float, float)
+        dcl_input_ps_siv v0.xy, position, linear noperspective
+        dcl_input_ps v1.xy, linear
+        dcl_output o0.x
+        dcl_temps 7 
+        ftoi r0.xy, v0.xyxx
+        mov r0.zw, l(0, 0, 0, 0)
+        ld (texture2d) (float,float,float,float) r1.x, r0.xyww, t0.xyzw
+        add r1.z, r1.x, l(-0.00010000)
+        ld (texture2d) (float,float,float,float) r0.xyz, r0.xyzw, t1.xyzw
+        mad r0.xyz, r0.xyzx, l(2.00000000, 2.00000000, 2.00000000, 0.00000000), l(-1.00000000, -1.00000000, -1.00000000, 0.00000000)
+        dp3 r0.w, r0.xyzx, r0.xyzx
+        rsq r0.w, r0.w
+        mul r0.xyz, r0.wwww, r0.xyzx
+        mov r1.xy, v0.xyxx
+        mov r1.w, l(0x3f800000)
+        dp4 r2.x, cb0[0].xyzw, r1.xyzw
+        dp4 r2.y, cb0[1].xyzw, r1.xyzw
+        dp4 r2.z, cb0[2].xyzw, r1.xyzw
+        dp4 r0.w, cb0[3].xyzw, r1.xyzw
+        div r2.xyz, r2.xyzx, r0.wwww
+        add r1.xy, v1.xyxx, cb0[12].xyxx
+        dp4 r3.x, cb0[8].xyzw, r1.xyzw
+        dp4 r3.y, cb0[9].xyzw, r1.xyzw
+        dp4 r3.z, cb0[10].xyzw, r1.xyzw
+        dp4 r0.w, cb0[11].xyzw, r1.xyzw
+        div r1.xyz, r3.xyzx, r0.wwww
+        add r1.xyz, -r2.xyzx, r1.xyzx
+        dp3 r0.w, r1.xyzx, r1.xyzx
+        mul r0.w, r0.w, l(0.50000000)
+        ftou r1.xy, v0.xyxx
+        and r1.xy, r1.xyxx, l(0x3, 0x3, 0, 0)
+        mov r1.zw, l(0, 0, 0, 0)
+        ld (texture2d) (float,float,float,float) r3.x, r1.xyzw, t2.xyzw
+        xor r1.xy, r1.yxyy, l(0x3, 0x3, 0, 0)
+        mov r1.zw, l(0, 0, 0, 0)
+        ld (texture2d) (float,float,float,float) r1.x, r1.xyzw, t2.xyzw
+        mov r4.w, l(0x3f800000)
+        mov r1.yz, l(0, 0, 0, 0)
+        loop 
+          ige r1.w, r1.z, l(0x6)
+          breakc_nz r1.w
+          itof r1.w, r1.z
+          add r1.w, r3.x, r1.w
+          mul r1.w, r1.w, l(1.04719758)
+          sincos r5.x, r6.x, r1.w
+          mov r6.y, r5.x
+          mul r3.yz, r6.xxyx, cb0[12].xxyx
+          mov r5.x, r1.y
+          mov r5.y, l(0)
+          mov r1.w, l(0)
+          loop 
+            ige r2.w, r1.w, l(0x6)
+            breakc_nz r2.w
+            itof r2.w, r1.w
+            add r2.w, r1.x, r2.w
+            mul r2.w, r2.w, l(0.16666667)
+            mul r2.w, r2.w, r2.w
+            mad r4.xy, r3.yzyy, r2.wwww, v1.xyxx
+            sample_l (texture2d) (float,float,float,float) r2.w, r4.xyxx, t0.yzwx, s0, l(0)
+            mov r4.z, r2.w
+            dp4 r6.x, cb0[8].xyzw, r4.xyzw
+            dp4 r6.y, cb0[9].xyzw, r4.xyzw
+            dp4 r6.z, cb0[10].xyzw, r4.xyzw
+            dp4 r2.w, cb0[11].xyzw, r4.xyzw
+            div r4.xyz, r6.xyzx, r2.wwww
+            add r4.xyz, -r2.xyzx, r4.xyzx
+            dp3 r2.w, r4.xyzx, r4.xyzx
+            lt r3.w, r2.w, r0.w
+            div r5.z, r2.w, r0.w
+            rsq r2.w, r2.w
+            mul r4.xyz, r2.wwww, r4.xyzx
+            dp3 r2.w, r4.xyzx, r0.xyzx
+            add r4.x, -r5.y, r2.w
+            max r4.x, r4.x, l(0.00000000)
+            add r4.y, -r5.z, l(1.00000000)
+            mad r4.x, r4.x, r4.y, r5.x
+            max r4.y, r2.w, r5.y
+            movc r5.xy, r3.wwww, r4.xyxx, r5.xyxx
+            iadd r1.w, r1.w, l(0x1)
+          endloop 
+          mov r1.y, r5.x
+          iadd r1.z, r1.z, l(0x1)
+        endloop 
+        mad_sat r0.x, -r1.y, l(0.16666667), l(1.00000000)
+        log r0.x, r0.x
+        mul r0.x, r0.x, cb0[12].z
+        exp o0.x, r0.x
+        ret 
+//     END_SECTION
+//     BEGIN_SECTION COP_CONSTANTS
+//         COP_CONST[0]: 0x3a9d2608 // 0.001199
+//         COP_CONST[1]: 0xba9d2609 // -0.001199
+//         COP_CONST[2]: 0xc11fdf3c // -9.992001
+//         COP_CONST[3]: 0x3fc46f8a // 1.534654
+//         COP_CONST[4]: 0xbf5cfd7c // -0.863243
+//         COP_CONST[5]: 0x3f800000 // 1.000000
+//         COP_CONST[6]: 0x3e2aaaab // 0.166667
+//     END_SECTION
+//     BEGIN_SECTION USER_CONSTANTS
+//         USER_CONST: c[0][0] = 0x3a9d2608 // 0.001199
+//         USER_CONST: c[0][1] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][2] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][3] = 0xbf446f8a // -0.767327
+//         USER_CONST: c[0][4] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][5] = 0xba9d2609 // -0.001199
+//         USER_CONST: c[0][6] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][7] = 0x3edcfd7c // 0.431621
+//         USER_CONST: c[0][8] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][9] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][10] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][11] = 0xbf800000 // -1.000000
+//         USER_CONST: c[0][12] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][13] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][14] = 0xc11fdf3c // -9.992001
+//         USER_CONST: c[0][15] = 0x411fffff // 9.999999
+//         USER_CONST: c[0][32] = 0x3fc46f8a // 1.534654
+//         USER_CONST: c[0][33] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][34] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][35] = 0xbf446f8a // -0.767327
+//         USER_CONST: c[0][36] = 0x80000000 // -0.000000
+//         USER_CONST: c[0][37] = 0xbf5cfd7c // -0.863243
+//         USER_CONST: c[0][38] = 0x80000000 // -0.000000
+//         USER_CONST: c[0][39] = 0x3edcfd7c // 0.431621
+//         USER_CONST: c[0][40] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][41] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][42] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][43] = 0xbf800000 // -1.000000
+//         USER_CONST: c[0][44] = 0x80000000 // -0.000000
+//         USER_CONST: c[0][45] = 0x80000000 // -0.000000
+//         USER_CONST: c[0][46] = 0xc11fdf3c // -9.992001
+//         USER_CONST: c[0][47] = 0x411fffff // 9.999999
+//         USER_CONST: c[0][48] = 0x3e100000 // 0.140625
+//         USER_CONST: c[0][49] = 0x3e800000 // 0.250000
+//         USER_CONST: c[0][50] = 0x3fe00000 // 1.750000
+//     END_SECTION
+//     # Exelwtion Time: 1143.784ms [10.199 percent]
+//     BEGIN_SECTION COP_ARGS_INFO
+//         shaderType: pixel
+//         inputRegUsage: 45:
+//         (0x3 0 4 "POS" 28)
+//         (0x4 0 0 "PID" 24)
+//         (0x0 0 0 "CLIPLWLL0" 176)
+//         (0x0 0 0 "CLIPLWLL1" 180)
+//         (0x4 0 0 "RTIDX" 25)
+//         (0x4 0 0 "VPIDX" 26)
+//         (0x4 0 0 "SSA" 255)
+//         (0x0 0 0 "DEPTH" 65535)
+//         (0x0 0 0 "ATTR00" 32)
+//         (0x0 0 2 "ATTR01" 36)
+//         (0x0 0 0 "ATTR02" 40)
+//         (0x0 0 0 "ATTR03" 44)
+//         (0x0 0 0 "ATTR04" 48)
+//         (0x0 0 0 "ATTR05" 52)
+//         (0x0 0 0 "ATTR06" 56)
+//         (0x0 0 0 "ATTR07" 60)
+//         (0x0 0 0 "ATTR08" 64)
+//         (0x0 0 0 "ATTR09" 68)
+//         (0x0 0 0 "ATTR10" 72)
+//         (0x0 0 0 "ATTR11" 76)
+//         (0x0 0 0 "ATTR12" 80)
+//         (0x0 0 0 "ATTR13" 84)
+//         (0x0 0 0 "ATTR14" 88)
+//         (0x0 0 0 "ATTR15" 92)
+//         (0x0 0 0 "ATTR16" 96)
+//         (0x0 0 0 "ATTR17" 100)
+//         (0x0 0 0 "ATTR18" 104)
+//         (0x0 0 0 "ATTR19" 108)
+//         (0x0 0 0 "ATTR20" 112)
+//         (0x0 0 0 "ATTR21" 116)
+//         (0x0 0 0 "ATTR22" 120)
+//         (0x0 0 0 "ATTR23" 124)
+//         (0x0 0 0 "ATTR24" 128)
+//         (0x0 0 0 "ATTR25" 132)
+//         (0x0 0 0 "ATTR26" 136)
+//         (0x0 0 0 "ATTR27" 140)
+//         (0x0 0 0 "ATTR28" 144)
+//         (0x0 0 0 "ATTR29" 148)
+//         (0x0 0 0 "ATTR30" 152)
+//         (0x0 0 0 "ATTR31" 156)
+//         (0x0 0 0 "VID" 191)
+//         (0x0 0 0 "IID" 190)
+//         (0x4 0 0 "SID" 65535)
+//         (0x0 0 0 "COVERAGE" 65535)
+//         (0x0 0 0 "UV" 188)
+//         outputRegUsage: 45:
+//         (0x0 0 0 "POS" 28)
+//         (0x0 0 0 "PID" 24)
+//         (0x0 0 0 "CLIPLWLL0" 176)
+//         (0x0 0 0 "CLIPLWLL1" 180)
+//         (0x0 0 0 "RTIDX" 25)
+//         (0x0 0 0 "VPIDX" 26)
+//         (0x0 0 0 "SSA" 255)
+//         (0x0 0 0 "DEPTH" 65535)
+//         (0x0 0 1 "ATTR00" 32)
+//         (0x0 0 0 "ATTR01" 36)
+//         (0x0 0 0 "ATTR02" 40)
+//         (0x0 0 0 "ATTR03" 44)
+//         (0x0 0 0 "ATTR04" 48)
+//         (0x0 0 0 "ATTR05" 52)
+//         (0x0 0 0 "ATTR06" 56)
+//         (0x0 0 0 "ATTR07" 60)
+//         (0x0 0 0 "ATTR08" 64)
+//         (0x0 0 0 "ATTR09" 68)
+//         (0x0 0 0 "ATTR10" 72)
+//         (0x0 0 0 "ATTR11" 76)
+//         (0x0 0 0 "ATTR12" 80)
+//         (0x0 0 0 "ATTR13" 84)
+//         (0x0 0 0 "ATTR14" 88)
+//         (0x0 0 0 "ATTR15" 92)
+//         (0x0 0 0 "ATTR16" 96)
+//         (0x0 0 0 "ATTR17" 100)
+//         (0x0 0 0 "ATTR18" 104)
+//         (0x0 0 0 "ATTR19" 108)
+//         (0x0 0 0 "ATTR20" 112)
+//         (0x0 0 0 "ATTR21" 116)
+//         (0x0 0 0 "ATTR22" 120)
+//         (0x0 0 0 "ATTR23" 124)
+//         (0x0 0 0 "ATTR24" 128)
+//         (0x0 0 0 "ATTR25" 132)
+//         (0x0 0 0 "ATTR26" 136)
+//         (0x0 0 0 "ATTR27" 140)
+//         (0x0 0 0 "ATTR28" 144)
+//         (0x0 0 0 "ATTR29" 148)
+//         (0x0 0 0 "ATTR30" 152)
+//         (0x0 0 0 "ATTR31" 156)
+//         (0x0 0 0 "VID" 191)
+//         (0x0 0 0 "IID" 190)
+//         (0x0 0 0 "SID" 65535)
+//         (0x0 0 0 "COVERAGE" 65535)
+//         (0x0 0 0 "UV" 188)
+//         numCtaRegTargets: 0:
+//         optFlags: 0x5
+//         optLevel: 0
+//         oriControl: 0
+//         bAssume0: 0
+//         bInitOutputs: 0
+//         bCanPromoteFixed: 0
+//         bCanPromoteHalf: 0
+//         bCanReorderFixedWithCheck: 1
+//         bCanReorderHalf: 1
+//         bCanReorderFloat: 1
+//         bCanIgnoreNan: 0
+//         bCanDemoteNonFP32Targets: 0
+//         bCanUseNrmhAlways: 0
+//         bCanFudgeSqrtSign: 0
+//         eOutputMode: R0
+//         dwOutputMask: 0x1
+//         bUseDepth: 0
+//         bUseCoverage: 0
+//         dwNumCombiners: 0
+//         dwLevel: 0
+//         dwSupportsSignedRemap: 0x0
+//         dwTextureRange: 0x0
+//         dwPartialTexType: 0x0
+//         wTextureRemap: 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210
+//         normalizationLwbemap: 0 0 0 
+//         bUsingLRPD: 0
+//         dwConstIsInZeroOneRange: 0x0
+//         bNeedsFogHoist: 0
+//         bAssumeDemotedTXP: 0
+//         bOptimizeBranches: 1
+//         bUseDX10SAT: 0
+//         bUseDX10AddressInRange: 1
+//         maxCallDepthAllowed: 0
+//         maxDivergenceLevelAllowed: 0
+//         regAllocationMode: 2
+//         ApplyTXLLODWar: 1
+//         AddDummyCRead: 0
+//         fmtFlags: 0x0
+//         IsOGL: 0
+//         paramFlags: 0x0
+//         optimizerConstBank: 16
+//         deadOutputMask: 0x0 0x0
+//         mrtMask: 0x0
+//         maxRRegsAllowed: 0x0
+//                 indexableRanges: 1 :  (null 0 0 0)
+//         samplerProperties:         (0 0)        
+//         numTextures: 3
+//         textureProperties:         (1 1 1)         (1 1 1)         (1 1 1)        
+//         Force2IBUFSlots: 0
+//         NoFloatMAD: 0
+//         SFUFloatMUL: 0
+//         InhibitBRXGeneration: 0
+//     END_SECTION
+//     BEGIN_SECTION LWINST_INFO
+//         movr (s32) r9.xy, (r) v0.xyxx  //   0 SHD
+//         movu32 (u32) r9.zw, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         movu32 (u32) r4106, (u32) r9.w  //   0 SHD
+//         txgu32 (r) r4105, (u32) r9.xyww, (u32) r4106, #0, #0, 2D, LOAD  //   0 SHD
+//         movr (r) r10.x, (r) r4105  // 147288464 SHD
+//         addr (r) r10.z, (r) r10.x, (r) constant(-0.00010000, 0.00000000, 0.00000000, 0.00000000).x  // 147288464 SHD
+//         movu32 (u32) r4106, (u32) r9.w  //   0 SHD
+//         txgu32 (r) r4105, (u32) r9, (u32) r4106, #1, #0, 2D, LOAD  //   0 SHD
+//         movr (r) r9.xyz, (r) r4105  //   0 SHD
+//         movu32 (u32) r4105, (u32) constant(3212836864, 3212836864, 3212836864, 0)  //   0 SHD
+//         madr (r) r9.xyz, (r) r9.xyzx, (r) constant(2.00000000, 2.00000000, 2.00000000, 0.00000000), (r) r4105  //   0 SHD
+//         dp3r (r) r9.w, (r) r9.xyzx, (r) r9.xyzx  //   0 SHD
+//         rsqr (r) r4105.w, (r) r9.w  //   0 SHD
+//         movr (r) r9.w, (r) r4105  //   0 SHD
+//         mulr (r) r9.xyz, (r) r9.w, (r) r9.xyzx  //   0 SHD
+//         movu32 (u32) r10.xy, (u32) v0.xyxx  //   0 SHDOPT
+//         movu32 (u32) r10.w, (u32) constant(1065353216, 0, 0, 0).x  //   1 SHDOPT
+//         movr (r) r4108, (r) c[0][0]  //   1 SHDOPT
+//         movr (r) r4108.x, (r) constant(0.00119895, 0.00000000, 0.00000000, 0.00000000).x  //   8 SHD
+//         movr (r) r4108.y, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(-0.76732695, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         dp4r (r) r11.x, (r) r4108, (r) r10  //   0 SHD
+//         movr (r) r4108, (r) c[0][1]  //   0 SHD
+//         movr (r) r4108.x, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(-0.00119895, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(0.43162143, 0.00000000, 0.00000000, 0.00000000).x  //   0 
+//         dp4r (r) r11.y, (r) r4108, (r) r10  //   0 SHD
+//         movr (r) r4108, (r) c[0][2]  //   0 SHD
+//         movr (r) r4108.x, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHDOPT
+//         movr (r) r4108.y, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   1 SHD
+//         movr (r) r4108.z, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(-1.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   8 SHD
+//         dp4r (r) r11.z, (r) r4108, (r) r10  //   0 SHD
+//         movr (r) r4108, (r) c[0][3]  //   0 SHD
+//         movr (r) r4108.x, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(-9.99200058, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(9.99999905, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         dp4r (r) r9.w, (r) r4108, (r) r10  //   0 SHD
+//         divr (r) r4105.x, (r) r11.x, (r) r9.w  // 147568480 SHD
+//         divr (r) r4105.y, (r) r11.y, (r) r9.w  //   0 SHD
+//         divr (r) r4105.z, (r) r11.z, (r) r9.w  //   0 SHD
+//         movr (r) r11.xyz, (r) r4105  // 147267168 SHD
+//         movr (r) r4109, (r) c[0][12].xyxx  // 147267168 SHD
+//         movr (r) r4109.x, (r) constant(0.14062500, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4109.y, (r) constant(0.25000000, 0.00000000, 0.00000000, 0.00000000).x  // 147269984 SHD
+//         movr (r) r4109.z, (r) constant(0.14062500, 0.00000000, 0.00000000, 0.00000000).x  //   2 SHD
+//         movr (r) r4109.w, (r) constant(0.14062500, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         addr (r) r10.xy, (r) v9.xyxx, (r) r4109  //   0 SHD
+//         movr (r) r4108, (r) c[0][8]  //   0 SHD
+//         movr (r) r4108.x, (r) constant(1.53465390, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 186 SHDOPT
+//         movr (r) r4108.w, (r) constant(-0.76732695, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         dp4r (r) r12.x, (r) r4108, (r) r10  //   0 SHD
+//         movr (r) r4108, (r) c[0][9]  //   0 SHD
+//         movr (r) r4108.x, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(-0.86324286, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(0.43162143, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         dp4r (r) r12.y, (r) r4108, (r) r10  //   0 SHDOPT
+//         movr (r) r4108, (r) c[0][10]  //   0 SHD
+//         movr (r) r4108.x, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHDOPT
+//         movr (r) r4108.z, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   2 SHD
+//         movr (r) r4108.w, (r) constant(-1.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         dp4r (r) r12.z, (r) r4108, (r) r10  //   8 SHD
+//         movr (r) r4108, (r) c[0][11]  //   0 SHD
+//         movr (r) r4108.x, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(-9.99200058, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(9.99999905, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         dp4r (r) r9.w, (r) r4108, (r) r10  //   0 SHD
+//         divr (r) r4105.x, (r) r12.x, (r) r9.w  //   0 SHD
+//         divr (r) r4105.y, (r) r12.y, (r) r9.w  //   0 SHD
+//         divr (r) r4105.z, (r) r12.z, (r) r9.w  //   0 SHD
+//         movr (r) r10.xyz, (r) r4105  //   0 SHD
+//         addr (r) r10.xyz, (r) -r11.xyzx, (r) r10.xyzx  //   0 SHD
+//         dp3r (r) r9.w, (r) r10.xyzx, (r) r10.xyzx  //   0 SHD
+//         mulr (r) r9.w, (r) r9.w, (r) constant(0.50000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (u32) r10.xy, (r) v0.xyxx  // 170 
+//         andu32 (u32) r10.xy, (u32) r10.xyxx, (u32) constant(3, 3, 0, 0)  //   0 SHD
+//         movu32 (u32) r10.zw, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         movu32 (u32) r4106, (u32) r10.w  //   0 SHDOPT
+//         txgu32 (r) r4105, (u32) r10, (u32) r4106, #2, #0, 2D, LOAD  //   1 SHD
+//         movr (r) r12.x, (r) r4105  //   0 SHD
+//         xoru32 (u32) r10.xy, (u32) r10.yxyy, (u32) constant(3, 3, 0, 0)  //   8 SHD
+//         movu32 (u32) r10.zw, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         movu32 (u32) r4106, (u32) r10.w  //   0 SHD
+//         txgu32 (r) r4105, (u32) r10, (u32) r4106, #2, #0, 2D, LOAD  //   0 SHD
+//         movr (r) r10.x, (r) r4105  //   0 SHD
+//         movu32 (u32) r13.w, (u32) constant(1065353216, 0, 0, 0).x  //   0 SHD
+//         movu32 (u32) r10.yz, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         rep l0  //   0 SHD
+//         set_ges32.c (s32) r10.w, (s32) r10.z, (s32) constant(6, 0, 0, 0).x  //   0 SHD
+//         movs32.c (s32) hc, (s32) r10.w  //   0 SHD
+//         brk NE.x  //   0 SHD
+//         movs32 (r) r10.w, (s32) r10.z  //   0 SHD
+//         addr (r) r10.w, (r) r12.x, (r) r10.w  //   0 SHD
+//         mulr (r) r10.w, (r) r10.w, (r) constant(1.04719758, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4105, (r) r10.w  //   0 FPB0
+//         sinr (r) r4106.x, (r) r4105.x  //   0 FPB0
+//         movr (r) r14.x, (r) r4106  //   0 FPB0
+//         cosr (r) r4107.x, (r) r4105.x  //   0 FPB0
+//         movr (r) r15.x, (r) r4107  //   0 FPB0
+//         movu32 (u32) r15.y, (u32) r14.x  //   0 FPB0
+//         movr (r) r4109, (r) c[0][12].xxyx  // 147237752 SHD
+//         movr (r) r4109.x, (r) constant(0.14062500, 0.00000000, 0.00000000, 0.00000000).x  // 147237752 SHD
+//         movr (r) r4109.y, (r) constant(0.14062500, 0.00000000, 0.00000000, 0.00000000).x  // 147237752 SHD
+//         movr (r) r4109.z, (r) constant(0.25000000, 0.00000000, 0.00000000, 0.00000000).x  // 147237752 SHD
+//         movr (r) r4109.w, (r) constant(0.14062500, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         mulr (r) r12.yz, (r) r15.xxyx, (r) r4109  //   0 SHD
+//         movu32 (u32) r14.x, (u32) r10.y  //  23 SHD
+//         movu32 (u32) r14.y, (u32) constant(0, 0, 0, 0).x  //   0 SHD
+//         movu32 (u32) r10.w, (u32) constant(0, 0, 0, 0).x  //   0 SHD
+//         rep l1  //   0 SHD
+//         set_ges32.c (s32) r11.w, (s32) r10.w, (s32) constant(6, 0, 0, 0).x  //   0 SHD
+//         movs32.c (s32) hc, (s32) r11.w  //   0 SHD
+//         brk NE.x  // 163 SHD
+//         movs32 (r) r11.w, (s32) r10.w  // 163 SHD
+//         addr (r) r11.w, (r) r10.x, (r) r11.w  //   0 SHD
+//         mulr (r) r11.w, (r) r11.w, (r) constant(0.16666667, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         mulr (r) r11.w, (r) r11.w, (r) r11.w  //   0 SHD
+//         madr (r) r13.xy, (r) r12.yzyy, (r) r11.w, (r) v9.xyxx  //   2 SHD
+//         txgr (r) r4105, (r) r13.xyxx, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x, #0, #0, 2D, LOD  //   2 SHD
+//         movr (r) r11.w, (r) r4105.yzwx  //   2 SHD
+//         movu32 (u32) r13.z, (u32) r11.w  //   2 SHD
+//         movr (r) r4108, (r) c[0][8]  //   0 SHD
+//         movr (r) r4108.x, (r) constant(1.53465390, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(-0.76732695, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         dp4r (r) r15.x, (r) r4108, (r) r13  //   0 SHD
+//         movr (r) r4108, (r) c[0][9]  //   0 SHD
+//         movr (r) r4108.x, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(-0.86324286, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHDOPT
+//         movr (r) r4108.z, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(0.43162143, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         dp4r (r) r15.y, (r) r4108, (r) r13  //   0 SHD
+//         movr (r) r4108, (r) c[0][10]  //   0 SHD
+//         movr (r) r4108.x, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 136 
+//         movr (r) r4108.z, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 135 
+//         movr (r) r4108.w, (r) constant(-1.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         dp4r (r) r15.z, (r) r4108, (r) r13  // 131 
+//         movr (r) r4108, (r) c[0][11]  // 131 
+//         movr (r) r4108.x, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 131 
+//         movr (r) r4108.y, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 131 
+//         movr (r) r4108.z, (r) constant(-9.99200058, 0.00000000, 0.00000000, 0.00000000).x  // 131 
+//         movr (r) r4108.w, (r) constant(9.99999905, 0.00000000, 0.00000000, 0.00000000).x  // 131 
+//         dp4r (r) r11.w, (r) r4108, (r) r13  // 131 
+//         divr (r) r4105.x, (r) r15.x, (r) r11.w  // 127 
+//         divr (r) r4105.y, (r) r15.y, (r) r11.w  //   0 SHD
+//         divr (r) r4105.z, (r) r15.z, (r) r11.w  //   0 SHD
+//         movr (r) r13.xyz, (r) r4105  //   0 SHD
+//         addr (r) r13.xyz, (r) -r11.xyzx, (r) r13.xyzx  //   0 SHD
+//         dp3r (r) r11.w, (r) r13.xyzx, (r) r13.xyzx  //   0 SHD
+//         set_ltr.c (s32) r12.w, (r) r11.w, (r) r9.w  //   0 SHD
+//         divr (r) r4105.z, (r) r11.w, (r) r9.w  //   0 SHD
+//         movr (r) r14.z, (r) r4105  // 120 SHDOPT
+//         rsqr (r) r4105.w, (r) r11.w  //   0 SHD
+//         movr (r) r11.w, (r) r4105  // 116 SHDOPT
+//         mulr (r) r13.xyz, (r) r11.w, (r) r13.xyzx  //   0 SHD
+//         dp3r (r) r11.w, (r) r13.xyzx, (r) r9.xyzx  //   0 SHD
+//         addr (r) r13.x, (r) -r14.y, (r) r11.w  // 112 SHDOPT
+//         maxr (r) r13.x, (r) r13.x, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         addr (r) r13.y, (r) -r14.z, (r) constant(1.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         madr (r) r13.x, (r) r13.x, (r) r13.y, (r) r14.x  //   0 SHDOPT
+//         maxr (r) r13.y, (r) r11.w, (r) r14.y  //   0 SHD
+//         movs32.c (s32) hc, (s32) r12.w  //   0 SHD
+//         movr (r) r4105, (r) r13.xyxx  //   0 SHD
+//         movr (r) r4105(EQ), (r) r14.xyxx  //   0 SHD
+//         movr (r) r14.xy, (r) r4105  //   0 SHD
+//         adds32 (s32) r10.w, (s32) r10.w, (s32) constant(1, 0, 0, 0).x  // 101 
+//         l1:  //   0 SHD
+//         movu32 (u32) r10.y, (u32) r14.x  //   0 SHD
+//         adds32 (s32) r10.z, (s32) r10.z, (s32) constant(1, 0, 0, 0).x  //   0 SHD
+//         l0:  //   0 SHD
+//         movu32 (u32) r4105, (u32) constant(1065353216, 0, 0, 0).x  //  45 SHD
+//         madr_sat (r) r9.x, (r) -r10.y, (r) constant(0.16666667, 0.00000000, 0.00000000, 0.00000000).x, (r) r4105  //   0 SHD
+//         lg2r (r) r4105.x, (r) r9.x  //   0 SHD
+//         movr (r) r9.x, (r) r4105  // 614058 SHD
+//         movr (r) r4109, (r) c[0][12].z  // 614058 SHD
+//         movr (r) r4109.x, (r) constant(1.75000000, 0.00000000, 0.00000000, 0.00000000).x  // 614058 SHD
+//         movr (r) r4109.y, (r) constant(1.75000000, 0.00000000, 0.00000000, 0.00000000).x  // 614058 SHD
+//         movr (r) r4109.z, (r) constant(1.75000000, 0.00000000, 0.00000000, 0.00000000).x  // 614058 SHD
+//         movr (r) r4109.w, (r) constant(1.75000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         mulr (r) r9.x, (r) r9.x, (r) r4109  //   0 SHD
+//         ex2r (r) r4105.x, (r) r9.x  //   0 SHD
+//         movr (r) r0.x, (r) r4105  //   0 SHD
+//         ret   //   0 SHD
+//     END_SECTION
+//     BEGIN_SECTION UCODE
+//     	!!SPA2.3
+//     	.THREAD_TYPE pixel
+//     	IPA.PASS R1, a[0x70];            # [  0][000000] POSITION_X
+//     	F2I.TRUNC R4, R1;                # [  1][000008]
+//     	IPA.PASS R2, a[0x74];            # [  2][000010] POSITION_Y
+//     	F2I.TRUNC R5, R2;                # [  3][000018]
+//     	F2I.U32.TRUNC R3, R2;            # [  4][000020]
+//     	F2I.U32.TRUNC R1, R1;            # [  5][000028]
+//     	TLD.LZ.NODEP.T R0, R4, 0x0, 2D, 0x1; # [  6][000030]
+//     	TLD.LZ.NODEP.P R8, R4, 0x1, 2D, 0x7; # [  7][000038]
+//     	LOP.AND R3, R3, 0x3;             # [  8][000040]
+//     	LOP.AND R2, R1, 0x3;             # [  9][000048]
+//     	LOP.XOR R4, R3, 0x3;             # [ 10][000050]
+//     	LOP.XOR R5, R2, 0x3;             # [ 11][000058]
+//     	TLD.LZ R3, R2, 0x2, 2D, 0x1;     # [ 12][000060]
+//     	TLD.LZ.P R4, R4, 0x2, 2D, 0x1;   # [ 13][000068]
+//     	IPA.PASS R1, a[0x7c];            # [ 14][000070] POSITION_W
+//     	IPA.PASS R13, a[0x74];           # [ 15][000078] POSITION_Y
+//     	MUFU.RCP R2, R1;                 # [ 16][000080]
+//     	IPA.PASS R6, a[0x70];            # [ 17][000088] POSITION_X
+//     	FMUL.FTZ R15, RZ, R13;           # [ 18][000090]
+//     	IPA R1, a[0x90], R2;             # [ 19][000098] ATTR1
+//     	FMUL.FTZ R14, RZ, R6;            # [ 20][0000a0]
+//     	IPA R5, a[0x94], R2;             # [ 21][0000a8] GENERIC_ATTRIBUTE_01_Y
+//     	FADD.FTZ R7, R1, 0.140625;       # [ 22][0000b0]
+//     	FFMA.FTZ R16, R6, c[0x10][0x0], R15; # [ 23][0000b8]
+//     	FMUL.FTZ R12, R7, 0x80000;       # [ 24][0000c0]
+//     	FADD.FTZ R11, R5, 0.25;          # [ 25][0000c8]
+//     	FADD.FTZ R5, R14, R15;           # [ 26][0000d0]
+//     	FFMA.FTZ R18, R11, 0x80000, R12; # [ 27][0000d8]
+//     	FFMA.FTZ R15, R13, c[0x10][0x4], R14; # [ 28][0000e0]
+//     	FMUL.FTZ R17, RZ, R11;           # [ 29][0000e8]
+//     	FFMA.FTZ R13, R11, c[0x10][0x10], R12; # [ 30][0000f0]
+//     	FFMA.FTZ R6, R7, c[0x10][0xc], R17; # [ 31][0000f8]
+//     	FFMA.FTZ R7, RZ, R7, R17;        # [ 32][000100]
+//     	FADD32I.FTZ R1, R0, -0.0001;     # [ 33][000108]
+//     	FFMA.FTZ R14, R1, c[0x10][0x8], R5; # [ 34][000110]
+//     	FFMA.FTZ R12, RZ, R1, R16;       # [ 35][000118]
+//     	FFMA.FTZ R16, R1, c[0x10][0x8], R18; # [ 36][000120]
+//     	FFMA.FTZ R15, RZ, R1, R15;       # [ 37][000128]
+//     	FADD32I.FTZ R11, R14, 0x411fffff; # [ 38][000130]
+//     	MOV32I R0, -0x40800000;          # [ 39][000138]
+//     	FFMA.FTZ R14, RZ, R1, R5;        # [ 40][000140]
+//     	FADD32I.FTZ R17, R16, 0x411fffff; # [ 41][000148]
+//     	FFMA.FTZ R5, RZ, R1, R6;         # [ 42][000150]
+//     	MUFU.RCP R11, R11;               # [ 43][000158]
+//     	FADD32I.FTZ R6, R12, 0xbf446f8a; # [ 44][000160]
+//     	FFMA.FTZ R7, RZ, R1, R7;         # [ 45][000168]
+//     	FFMA.FTZ R13, R1, 0x80000, R13;  # [ 46][000170]
+//     	FADD32I.FTZ R16, R15, 0x3edcfd7c; # [ 47][000178]
+//     	MUFU.RCP R12, R17;               # [ 48][000180]
+//     	FFMA.FTZ R1, R8, 2, R0;          # [ 49][000188]
+//     	FADD32I.FTZ R17, R5, 0xbf446f8a; # [ 50][000190]
+//     	FMUL.FTZ R6, R6, R11;            # [ 51][000198]
+//     	FADD32I.FTZ R15, R13, 0x3edcfd7c; # [ 52][0001a0]
+//     	FMUL.FTZ R5, R16, R11;           # [ 53][0001a8]
+//     	FFMA.FTZ R13, R9, 2, R0;         # [ 54][0001b0]
+//     	FMUL.FTZ R16, R1, R1;            # [ 55][0001b8]
+//     	FADD.FTZ R14, R14, -1;           # [ 56][0001c0]
+//     	FFMA.FTZ R0, R10, 2, R0;         # [ 57][0001c8]
+//     	FFMA.FTZ R9, R17, R12, -R6;      # [ 58][0001d0]
+//     	FADD.FTZ R8, R7, -1;             # [ 59][0001d8]
+//     	FFMA.FTZ R10, R13, R13, R16;     # [ 60][0001e0]
+//     	FMUL.FTZ R7, R14, R11;           # [ 61][0001e8]
+//     	FFMA.FTZ R11, R15, R12, -R5;     # [ 62][0001f0]
+//     	FMUL.FTZ R9, R9, R9;             # [ 63][0001f8]
+//     	FFMA.FTZ R14, R0, R0, R10;       # [ 64][000200]
+//     	FFMA.FTZ R10, R8, R12, -R7;      # [ 65][000208]
+//     	MUFU.RSQ R14, R14;               # [ 66][000210]
+//     	FFMA.FTZ R8, R11, R11, R9;       # [ 67][000218]
+//     	FMUL.FTZ R12, R14, R13;          # [ 68][000220]
+//     	FFMA.FTZ R9, R10, R10, R8;       # [ 69][000228]
+//     	FMUL.FTZ R11, R14, R1;           # [ 70][000230]
+//     	MOV R8, RZ;                      # [ 71][000238]
+//     	MOV R10, RZ;                     # [ 72][000240]
+//     	FMUL.FTZ R13, R14, R0;           # [ 73][000248]
+//     	FMUL.FTZ R9, R9, 0.5;            # [ 74][000250]
+//     	NOP;                             # [ 75][000258]
+//     L0260:
+//     	I2F R0, R8;                      # [ 76][000260]
+//     	MOV R17, RZ;                     # [ 77][000268]
+//     	FADD.FTZ R0, R3, R0;             # [ 78][000270]
+//     	MOV R14, RZ;                     # [ 79][000278]
+//     	FMUL32I.FTZ R0, R0, 0x3f860a92;  # [ 80][000280]
+//     	RRO.SINCOS R0, R0;               # [ 81][000288]
+//     	MUFU.SIN R1, R0;                 # [ 82][000290]
+//     	MUFU.COS R0, R0;                 # [ 83][000298]
+//     	FMUL.FTZ R15, R1, 0.25;          # [ 84][0002a0]
+//     	FMUL.FTZ R16, R0, 0.140625;      # [ 85][0002a8]
+//     	NOP;                             # [ 86][0002b0]
+//     L02b8:
+//     	I2F R0, R14;                     # [ 87][0002b8]
+//     	FADD.FTZ R0, R4, R0;             # [ 88][0002c0]
+//     	IPA R18, a[0x90], R2;            # [ 89][0002c8] ATTR1
+//     	FMUL32I.FTZ R0, R0, 0x3e2aaaab;  # [ 90][0002d0]
+//     	IPA R19, a[0x94], R2;            # [ 91][0002d8] GENERIC_ATTRIBUTE_01_Y
+//     	FMUL.FTZ R1, R0, R0;             # [ 92][0002e0]
+//     	IADD R14, R14, 0x1;              # [ 93][0002e8]
+//     	FFMA.FTZ R0, R16, R1, R18;       # [ 94][0002f0]
+//     	ISETP.GE.AND P1, PT, R14, 0x6, PT; # [ 95][0002f8]
+//     	FFMA.FTZ R1, R15, R1, R19;       # [ 96][000300]
+//     	NOP;                             # [ 97][000308]
+//     	FMUL.FTZ R20, R0, 0x80000;       # [ 98][000310]
+//     	TEX.LZ.NODEP.P R18, R0, 0x0, 0x0, 2D, 0x1; # [ 99][000318]
+//     	FMUL.FTZ R19, RZ, R1;            # [100][000320]
+//     	FFMA.FTZ R21, R1, 0x80000, R20;  # [101][000328]
+//     	FFMA.FTZ R22, R0, c[0x10][0xc], R19; # [102][000330]
+//     	FFMA.FTZ R19, RZ, R0, R19;       # [103][000338]
+//     	FFMA.FTZ R23, R18, c[0x10][0x8], R21; # [104][000340]
+//     	FFMA.FTZ R21, R1, c[0x10][0x10], R20; # [105][000348]
+//     	FADD32I.FTZ R20, R23, 0x411fffff; # [106][000350]
+//     	FFMA.FTZ R1, RZ, R18, R22;       # [107][000358]
+//     	FFMA.FTZ R21, R18, 0x80000, R21; # [108][000360]
+//     	MUFU.RCP R0, R20;                # [109][000368]
+//     	FADD32I.FTZ R1, R1, 0xbf446f8a;  # [110][000370]
+//     	FFMA.FTZ R18, RZ, R18, R19;      # [111][000378]
+//     	FADD32I.FTZ R20, R21, 0x3edcfd7c; # [112][000380]
+//     	FFMA.FTZ R1, R1, R0, -R6;        # [113][000388]
+//     	FADD.FTZ R19, R18, -1;           # [114][000390]
+//     	FFMA.FTZ R18, R20, R0, -R5;      # [115][000398]
+//     	FMUL.FTZ R20, R1, R1;            # [116][0003a0]
+//     	FFMA.FTZ R0, R19, R0, -R7;       # [117][0003a8]
+//     	FFMA.FTZ R19, R18, R18, R20;     # [118][0003b0]
+//     	FFMA.FTZ R19, R0, R0, R19;       # [119][0003b8]
+//     	MUFU.RSQ R20, R19;               # [120][0003c0]
+//     	FSETP.LT.FTZ.AND P0, PT, R19, R9, PT; # [121][0003c8]
+//     	FMUL.FTZ R1, R20, R1;            # [122][0003d0]
+//     	FMUL.FTZ R18, R20, R18;          # [123][0003d8]
+//     	FMUL.FTZ R20, R20, R0;           # [124][0003e0]
+//     	FMUL.FTZ R1, R1, R11;            # [125][0003e8]
+//     	FFMA.FTZ R0, R18, R12, R1;       # [126][0003f0]
+//     	FFMA.FTZ R1, R20, R13, R0;       # [127][0003f8]
+//     	MUFU.RCP R0, R9;                 # [128][000400]
+//     	FADD.FTZ R18, -R17, R1;          # [129][000408]
+//     	FMNMX.FTZ R18, R18, RZ, !PT;     # [130][000410]
+//     	FFMA.FTZ R20, R19, -R0, c[0x10][0x14]; # [131][000418]
+//     	FMNMX.FTZ R0, R1, R17, !PT;      # [132][000420]
+//     	FFMA.FTZ R1, R18, R20, R10;      # [133][000428]
+//     	SEL R17, R17, R0, !P0;           # [134][000430]
+//     	SEL R10, R10, R1, !P0;           # [135][000438]
+//     	@!P1 BRA L02b8;                  # [136][000440]
+//     	IADD R8, R8, 0x1;                # [137][000448]
+//     	ISETP.GE.AND P0, PT, R8, 0x6, PT; # [138][000450]
+//     	@!P0 BRA L0260;                  # [139][000458]
+//     	MOV32I R0, 0x3f800000;           # [140][000460]
+//     	FFMA.FTZ.SAT R0, R10, -c[0x10][0x18], R0; # [141][000468]
+//     	MUFU.LG2 R0, R0;                 # [142][000470]
+//     	FMUL.FTZ R0, R0, 1.75;           # [143][000478]
+//     	RRO.EX2 R0, R0;                  # [144][000480]
+//     	MUFU.EX2 R0, R0;                 # [145][000488]
+//     	EXIT;                            # [146][000490]
+//     	END
+//     END_SECTION
+// END_SHADER
+// 

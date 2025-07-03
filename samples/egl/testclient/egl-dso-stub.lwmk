@@ -1,0 +1,24 @@
+##############################################################################
+# makefile fragment for generating a libEGL.so DSO stub
+#
+# includers should declare dependence on $(LIBEGL_DSO_STUB), and
+# then link with "-L $(OUTPUTDIR) -lEGL-stub"
+##############################################################################
+
+LIBEGL_DSO_STUB_1 = $(OUTPUTDIR)/libEGL-stub.so.1
+LIBEGL_DSO_STUB = $(OUTPUTDIR)/libEGL-stub.so
+
+EGL_TEGRA_EXPORTS = $(LW_SOURCE)/drivers/khronos/egl/egl/libEGL.export
+EGL_EXPORTS = $(OUTPUTDIR)/egl-exports.txt
+
+$(EGL_EXPORTS): $(EGL_TEGRA_EXPORTS)
+	$(SED) -e 's/@[0-9]\+//' \
+	-e 's/^\([^#].\+\)$$/\1 func/' \
+	$(EGL_TEGRA_EXPORTS) > \
+	$(EGL_EXPORTS)
+
+$(eval $(call GEN_DSO_STUB_RULE, \
+  $(LIBEGL_DSO_STUB_1),$(EGL_EXPORTS),libEGL.so.1,,))
+
+$(LIBEGL_DSO_STUB): $(LIBEGL_DSO_STUB_1)
+	$(SYMLINK) $(notdir $<) $@

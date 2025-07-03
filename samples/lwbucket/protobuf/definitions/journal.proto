@@ -1,0 +1,156 @@
+// _LWRM_COPYRIGHT_BEGIN_
+//
+// Copyright 2009-2017 by LWPU Corporation.  All rights reserved.  All
+// information contained herein is proprietary and confidential to LWPU
+// Corporation.  Any use, reproduction, or disclosure without the written
+// permission of LWPU Corporation is prohibited.
+//
+// _LWRM_COPYRIGHT_END_
+//
+
+package Journal;
+
+// Include Common in all new journal records
+//
+message Common
+{
+    optional uint32 gpu_tag              = 1 [default = 0];
+    optional uint64 cpu_tag              = 2 [default = 0];
+    optional uint64 time_stamp           = 3 [default = 0];
+    optional uint64 state_mask           = 4 [default = 0];
+};
+
+message Assert
+{
+    enum RecTyp
+    {
+        ASSERT              = 120;
+        TIMEOUT             = 121;
+        DEBUG_BREAKPOINT    = 124;
+        ASSERT_V3           = 139;
+        TIMEOUT_V3          = 140;
+        DEBUG_BREAKPOINT_V3 = 141;
+    };
+
+    optional RecTyp type                  = 1;
+    optional Common common_obsolete       = 9 [deprecated = true];
+    optional uint64 last_time_stamp      = 10 [default = 0];
+    optional uint64 first_time            = 2 [deprecated = true];
+    optional uint64 last_time             = 3 [deprecated = true, default = 0];
+    optional uint64 breakpoint_addr_hint  = 4;
+    optional uint32 gpu_tag               = 5 [deprecated = true, default = 0];
+    optional uint32 count                 = 6 [default = 1];
+    optional uint32 level                 = 7 [default = 1];
+    repeated uint64 call_stack            = 8;
+};
+
+message RvaHeader
+{
+    optional uint64 driver_start         = 1;
+    optional uint32 offset               = 2;
+    optional uint32 pointer_size         = 3;
+    optional uint64 unique_id_high       = 4;
+    optional uint64 unique_id_low        = 5;
+    optional uint32 age                  = 6;
+};
+
+message BadRead
+{
+    enum MemSpace
+    {
+        BAR0     = 1;
+        FB       = 2;
+        INSTANCE = 3;
+        PCI      = 4;
+    };
+
+    enum Reason
+    {
+        GPU_OFF_BUS         = 1;
+        LOW_POWER           = 2;
+        PCI_DEVICE_DISABLED = 3;
+        GPU_RESET           = 4;
+        DWORD_SHIFT         = 5;
+        UNKNOWN             = 6;
+    };
+
+    optional MemSpace memory_space       = 1;
+    optional uint32 offset               = 2;
+    optional uint32 mask                 = 3;
+    optional uint32 value                = 4;
+    optional Reason reason               = 5;
+    optional Common common_obsolete      = 6 [deprecated = true];
+};
+
+message SurpriseRemoval
+{
+    enum Reason
+    {
+        GPU_OFF_BUS        = 1;
+        SSID_MISMATCH      = 2;
+        SYSTEMBIOS_NO_LOAD = 3;
+        PROM_CHECKSUM      = 4;
+        UNKNOWN            = 5;
+    };
+
+    optional Reason reason                = 1;
+    optional uint32 exp_pci_device_id     = 2;
+    optional uint32 exp_pci_sub_device_id = 3;
+    optional uint32 lwr_pci_device_id     = 4;
+    optional uint32 lwr_pci_sub_device_id = 5;
+    optional uint32 ssid_bios             = 6;
+    optional uint32 debug_reg             = 7;
+    optional bytes  system_image          = 8;
+    optional Common common_obsolete       = 9 [deprecated = true];
+};
+
+message BugCheck
+{
+    optional uint32 code                 = 1;
+    optional uint32 gpu_tag              = 2 [deprecated = true, default = 0];
+    optional uint64 time_stamp           = 3 [deprecated = true];
+    optional Common common_obsolete      = 4 [deprecated = true];
+};
+
+message RmDiagWrapBuff_RECORD
+{
+    enum PowerEventEnum
+    {
+        LW_POWER_EVENT_SET_POWER_ENTRY      = 0x00000001; //
+        LW_POWER_EVENT_SET_POWER_EXIT       = 0x00000002; //
+    };
+
+    enum PowerStateEnum
+    {
+        LW_POWER_ADAPTER_STATE_0            = 0x00000001; // full on
+        LW_POWER_ADAPTER_STATE_1            = 0x00000002; // slowed clocks
+        LW_POWER_ADAPTER_STATE_2            = 0x00000004; // slowed clocks, mobile style *** not all devices supported ***
+        LW_POWER_ADAPTER_STATE_3            = 0x00000008; // very slow clocks, state saved (regs & instance memory)
+        LW_POWER_ADAPTER_STATE_4            = 0x00000010; // adapter shutdown
+        LW_POWER_ADAPTER_FEATURE_CTXSAVED   = 0x00000100; // lowest power consumption state saves device context
+        LW_POWER_ADAPTER_STATE_HIBERNATE    = 0x00000200; // adapter hibernate
+        LW_POWER_ADAPTER_OPTIMUS_GOLD       = 0x00000400; // Optimus GOLD state
+        LW_POWER_MONITOR_STATE_0            = 0x00010000; // full on
+        LW_POWER_MONITOR_STATE_1            = 0x00020000; // no VSYNC nor HSYNC
+        LW_POWER_MONITOR_STATE_2            = 0x00040000; // checks for !DPMS and falls into _1
+        LW_POWER_MONITOR_STATE_HIBERNATE    = 0x01000000; // monitor hibernate
+
+        LW2080_CTRL_GPU_POWER_ON_OFF__OFFSET             = 0x02000000;
+        LW2080_CTRL_GPU_POWER_ON_OFF_RG_SAVE             = 0x02000001;
+        LW2080_CTRL_GPU_POWER_ON_OFF_RG_RESTORE          = 0x02000002;
+        LW2080_CTRL_GPU_POWER_ON_OFF_GC6_ENTER           = 0x02000003;
+        LW2080_CTRL_GPU_POWER_ON_OFF_GC6_EXIT            = 0x02000004;
+        LW2080_CTRL_GPU_POWER_ON_OFF_GC5_ENTER           = 0x02000005;
+        LW2080_CTRL_GPU_POWER_ON_OFF_GC5_EXIT            = 0x02000006;
+        LW2080_CTRL_GPU_POWER_ON_OFF_GC5_ACTIVATE        = 0x02000007;
+        LW2080_CTRL_GPU_POWER_ON_OFF_GC5_DEACTIVATE      = 0x02000008;
+        LW2080_CTRL_GPU_POWER_ON_OFF_MSHYBRID_GC6_ENTER  = 0x02000009;
+        LW2080_CTRL_GPU_POWER_ON_OFF_MSHYBRID_GC6_EXIT   = 0x0200000A;
+
+        LW_POWER_ADAPTER_D3HOT    = 0x02001001; // monitor hibernate
+    };
+
+    optional PowerEventEnum power_event  = 1;
+    optional PowerStateEnum state        = 2;
+    optional Common common_obsolete      = 3 [deprecated = true];
+};

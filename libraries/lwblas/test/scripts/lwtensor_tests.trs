@@ -1,0 +1,106 @@
+# lwtensor test suite configuration.
+{ 
+  "name"        : "lwtensor Test Suite",
+  "version"     : "2",
+  "extrapath"   : [
+                    "{TR_INSTALL_DIR}/lwca/bin",
+                    "{TR_INSTALL_DIR}/liblwtensor/bin",
+                    { "filter" : { "os" : "Windows" }},
+                    "{TR_INSTALL_DIR}/lwca/lib64"
+                  ],
+  "owner"       : "pspringer@lwpu.com",
+  "elw"         : [ 
+                    "LWTENSOR_DVS_OUTPUT=1"
+                  ],
+  "cwd"         : "{TR_INSTALL_DIR}/liblwtensor",
+  "timeout"     : "54000",
+  "testtimeout" : "21600",
+  "librarypath" : [ 
+                    "{TR_INSTALL_DIR}/lwca/lib64",
+                    "{TR_INSTALL_DIR}/liblwtensor/lib"
+                  ],
+  "tests"       : [
+                    # 
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/coretest_testsuits.sh" },
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorGemvBenchmark.sh" },
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtlass.sh" },
+
+                    # L0 coverage
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorElementwiseL0.sh" },
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL0.sh" },
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorReductionL0.sh" },
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionCacheL0.sh" },
+
+                    # L1 coverage
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorElementwiseL1.sh" },
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL1.sh" },
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorReductionL1.sh" },
+
+                    # Graph Mode - Bug 200684410
+                    { "exe" : "lwtensorTest -showFailureOnly -graphMode -file ./test/lwtensorElementwiseL0.sh" },
+                    { "exe" : "lwtensorTest -showFailureOnly -graphMode -file ./test/lwtensorContractionL0.sh" },
+                    { "exe" : "lwtensorTest -showFailureOnly -graphMode -file ./test/lwtensorReductionL0.sh" },
+                    
+                    # CONTRACTION_DESCRIPTOR_TAG - Bug 200696624
+                    { "filter": { "gpu": "Pascal,Volta,Turing,Ampere" } },
+                    {
+                      "name": "Contraction Descriptor Tag (0)", 
+                      "exe" : "lwtensorTest -showFailureOnly -numRuns7 -numCachelines64 -cacheFile ./cache.tmp -Rcontraction  -extent0=40,1=14,2=22, -strideB1,14, -strideA1,40,560, -strideC1,40, -modeB1,2, -modeA0,1,2, -modeC0,2, -Pac -Pbc -Pcc -Pcomps  -alpha1.10  -beta2000000.20  -opA1  -opB1  -opC1  -alignmentA128  -alignmentB128  -alignmentC128  -alignmentD128  -alignmentReqA16  -alignmentReqB16  -alignmentReqC16  -alignmentReqD16 -algo-4" 
+                   	},
+                   	{
+                      "name": "Contraction Descriptor Tag (1)", 
+                      "exe" : "lwtensorTest -showFailureOnly -numRuns7 -numCachelines64 -cacheFile ./cache.tmp -Rcontraction  -extent0=40,1=14,2=22, -strideB1,14, -strideA1,40,560, -strideC1,40, -modeB1,2, -modeA0,1,2, -modeC0,2, -Pac -Pbc -Pcc -Pcomps  -alpha1.10  -beta2000000.20  -opA1  -opB1  -opC1  -alignmentA128  -alignmentB128  -alignmentC128  -alignmentD128  -alignmentReqA16  -alignmentReqB16  -alignmentReqC16  -alignmentReqD16 -algo-4 -contractionDescTag" 
+                   	},
+                   	{
+                      "name": "Contraction Descriptor Tag (2)", 
+                      "exe" : "lwtensorTest -showFailureOnly -numRuns7 -numCachelines64 -cacheFile ./cache.tmp -Rcontraction  -extent0=40,1=14,2=22, -strideB1,14, -strideA1,40,560, -strideC1,40, -modeB1,2, -modeA0,1,2, -modeC0,2, -Pac -Pbc -Pcc -Pcomps  -alpha1.10  -beta2000000.20  -opA1  -opB1  -opC1  -alignmentA128  -alignmentB128  -alignmentC128  -alignmentD128  -alignmentReqA16  -alignmentReqB16  -alignmentReqC16  -alignmentReqD16 -algo-4" 
+                 	  },
+
+                    # MIN and RECOMMEND - Bug 200699715
+                    { "filter": { "gpu": "Pascal,Volta,Turing,Ampere" } },
+                    { "name": "MIN", "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL0.sh -workspacePref1 -algo-4" },
+                    { "name": "RECOMMEND", "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL0.sh -workspacePref2 -algo-4" },
+
+                    # linear initialization for lwtensor - Bug 200703230
+                    { "filter": { "gpu": "Pascal,Volta,Turing,Ampere" } },
+                    { 
+                      "name": "Contraction with linear initialization", 
+                      "exe": "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL0.sh -pCl -pDl"
+                    },
+                    { 
+                      "name": "Reduction with linear initialization", 
+                      "exe": "lwtensorTest -showFailureOnly -file ./test/lwtensorReductionL0.sh -pCl -pDl"
+                    },
+                    { 
+                      "name": "Elementwise with linear initialization", 
+                      "exe": "lwtensorTest -showFailureOnly -file ./test/lwtensorElementwiseL0.sh -pCl -pDl"
+                    },
+
+                    # LWIDIA_TF32_OVERRIDE - Bug 200697015
+                    { "filter": { "gpu": "Ampere" } },
+                    { "name": "ContractionL0 TF32 Enabled", "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL0.sh", "elw" : [ "LWIDIA_TF32_OVERRIDE=1" ] },
+                    { "name": "ContractionL1 TF32 Enabled", "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL1.sh", "elw" : [ "LWIDIA_TF32_OVERRIDE=1" ] },
+                    { "filter": {} },
+                    { "name": "ContractionL0 TF32 Disabled", "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL0.sh", "elw" : [ "LWIDIA_TF32_OVERRIDE=0" ] },
+                    { "name": "ContractionL1 TF32 Disabled", "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL1.sh", "elw" : [ "LWIDIA_TF32_OVERRIDE=0" ] },
+
+                    # higher-dimensional tensor computing - Bug 200712128
+                    { "exe": "lwtensorTest -showFailureOnly -file ./test/lwtensorReductionHighDimensionalL0.sh" },
+                    { "exe": "lwtensorTest -showFailureOnly -file ./test/lwtensorElementwiseHighDimensionalL0.sh" },
+                    { "exe": "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionHighDimensionalL0.sh" },
+                    { "exe": "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionHighDimensionalL1.sh" },
+
+                    # check runs smoothly with unaligned workspace - Bug 200735012
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL0.sh -offsetWorkSpace111 -testIdBegin1 -testIdEnd10"},
+
+                    # OS Filtered
+                    { "filter": { "os": "Linux" } },
+                    { "exe" : "apiTest" },
+                    { "exe" : "unitTest" },
+                    { "exe" : "compute-sanitizer --report-api-errors no --error-exitcode 1 lwtensorTest -showFailureOnly -file ./test/memcheck.sh" },
+                    { "filter": { "os": "Windows" } },
+                    { "exe" : "apiTest_static" },
+                    { "exe" : "unitTest_static" },
+                    { "filter": {} }
+                  ]       
+}

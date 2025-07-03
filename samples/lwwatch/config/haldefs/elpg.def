@@ -1,0 +1,254 @@
+# -*- mode: perl; -*-
+
+# ELPG Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $elpgHal = [
+
+    # per-GPU defaults for ELPG engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+        START => [
+
+            DESCRIPTION   => "elpgStart",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 elpgId",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL, T234_and_later, GP100, ],
+            _GP10X        => [ dPASCAL, -GP100, ],
+            _TU10X        => [ dTURING_thru_dAMPERE, ],
+            _AD102        => [ dADA_and_later, -GH100, -G00X, -GB100, ],
+            _STUB         => [ dVOLTA, GH100, G00X, GB100, ],
+        ],
+
+        STOP => [
+
+            DESCRIPTION   => "elpgStop",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 elpgId",
+            STUB_RETURNS  => ERROR,
+
+            LIKE_INTERFACE => START,
+        ],
+
+        POWER_UP => [
+
+            DESCRIPTION   => "Power up the controller",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 elpgId",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL, T234_and_later, GP100, ],
+            _STUB         => [ dPASCAL_and_later, -GP100, ],
+        ],
+
+        IS_ENGINE_SUPPORTED => [
+
+            DESCRIPTION   => "check if PG for the engine/controller is supported",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "LwU32 elpgId",
+            STUB_RETURNS  => LW_FALSE,
+
+            _GK104        => [ dMAXWELL, T234_and_later, GP100, ],
+            _GP10X        => [ dPASCAL_thru_dVOLTA, -GP100, ],
+            _TU10X        => [ dTURING_and_later, ],
+        ],
+
+        DISPLAY_PRIV_ACCESS_CONFIG  => [
+            DESCRIPTION   => "Display/Print PG STATUS for the given controller",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 elpgId, LwU32 *regVal",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL_thru_dPASCAL, T234_and_later, ],
+            _STUB         => [ dVOLTA_and_later, ],
+        ],
+
+        DISPLAY_PG_INTR_EN => [
+
+            DESCRIPTION   => "Display/Print Interrupt Enable/Disable for the given controller",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 elpgId, LwU32 *regVal",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL, T234_and_later, GP100, ],
+            _GP10X        => [ dPASCAL_and_later, -GP100, ],
+        ],
+
+        DISPLAY_PG_INTR_STAT => [
+
+            DESCRIPTION   => "Display/Print Interrupt Stat for the given controller",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 elpgId, LwU32 *regVal",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL, T234_and_later, GP100, ],
+            _GP10X        => [ dPASCAL_thru_dVOLTA, -GP100, ],
+            _TU10X        => [ dTURING_thru_dAMPERE, GH100, ],
+            _AD102        => [ dADA_and_later, -GH100, ],
+        ],
+
+        DISPLAY_PG_OFF => [
+
+            DESCRIPTION   => "Display/Print PG_OFF for the given controller",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 elpgId, LwU32 *regVal",
+            STUB_RETURNS  => ERROR,
+
+            LIKE_INTERFACE => DISPLAY_PRIV_ACCESS_CONFIG,
+        ],
+
+        DISPLAY_PG_STAT => [
+
+            DESCRIPTION   => "Display/Print PG STATUS for the given controller",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 elpgId, LwU32 *regVal",
+            STUB_RETURNS  => ERROR,
+
+            LIKE_INTERFACE => DISPLAY_PG_INTR_EN,
+        ],
+
+        # We need to update for future chip once mannual are updated. 
+        DISPLAY_PMU_INTR1 => [
+
+            DESCRIPTION   => "Display/Print PMU interrupt status",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 *regVal",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ MAXWELL_and_later, -dPASCAL_and_later, GP100, ],
+            _GP10X        => [ dPASCAL_thru_dVOLTA, -GP100, ],
+            _TU10X        => [ dTURING_and_later, -ADA ],
+            _AD102        => [ ADA, ],
+        ],
+
+        DISPLAY_PG_ENG_CONFIG => [
+
+            DESCRIPTION   => "Display/Print the PG Ctrl configuration",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_OK,
+
+            _TU10X        => [ dTURING_and_later, -ADA, ],
+            _AD102        => [ ADA, ],
+            _STUB         => [ pre_dTURING, ],
+        ],
+
+        DISPLAY_SW_CLIENT_STATUS => [
+
+            DESCRIPTION   => "Display/Print the LPWR Ctrl SW client status",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 elpgId",
+            STUB_RETURNS  => LW_OK,
+
+            _TU10X        => [ dTURING_and_later, ],
+            _STUB         => [ pre_dTURING, ],
+        ],
+
+        DISPLAY_SEQUENCER_STATE => [
+
+            DESCRIPTION   => "Display/Print the sequencer state",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 elpgId",
+            STUB_RETURNS  => LW_OK,
+
+            _TU10X        => [ dTURING, ],
+            _GA10X        => [ dAMPERE_and_later, ],
+            _STUB         => [ pre_dTURING, ],
+        ],
+
+        DISPLAY_PMU_PG_IDLE_SIGNAL => [
+
+            DESCRIPTION   => "Display/Print PMU PG Idle signal status",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => LW_OK,
+
+            _GP10X        => [ dPASCAL, -GP100, ],
+            _TU10X        => [ dTURING_and_later, ],
+            _STUB         => [ ALL, -dPASCAL, -dTURING_and_later, GP100, ],
+        ],
+
+        DISPLAY_ENG_HOLDOFF_ENABLE_STATUS => [
+
+            DESCRIPTION   => "Display/Print the holdoff enabled state of underlying host engines associated with the controller",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 elpgId, LwU32 *regVal",
+            STUB_RETURNS  => ERROR,
+
+            LIKE_INTERFACE => DISPLAY_PRIV_ACCESS_CONFIG,
+        ],
+
+        DISPLAY_ENG_HOLDOFF_PENDING_STATUS => [
+
+            DESCRIPTION   => "Display/Print the holdoff pending status of underlying host engines associated with the controller",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 elpgId, LwU32 *regVal",
+            STUB_RETURNS  => ERROR,
+
+            LIKE_INTERFACE => DISPLAY_PRIV_ACCESS_CONFIG,
+        ],
+
+        DISPLAY_ENG_HOLDOFF_STATUS => [
+
+            DESCRIPTION   => "Display/Print the holdoff state of underlying host engines associated with the controller",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 *regVal",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL_and_later, T234_and_later, ],
+            _STUB         => [ ],
+        ],
+
+        BSI_RAM_READ => [
+            DESCRIPTION   => "Read BSI Ram",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32 addr, LwU32 length, LwU32* pRam",
+            STUB_RETURNS  => ZERO,
+
+            _GM107        => [ MAXWELL, PASCAL, -GM200, ],
+            _GV100        => [ VOLTA, ],
+            _TU10X        => [ TURING_and_later, ],
+            _STUB         => [ pre_MAXWELL, GM200, ],
+        ],
+
+        BSI_RAM_SIZE => [
+            DESCRIPTION   => "Get BSI RAM size",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => ZERO,
+
+            _GM107        => [ MAXWELL_thru_VOLTA, -GM200, ],
+            _TU10X        => [ TURING_and_later, ],
+            _STUB         => [ pre_MAXWELL, GM200, ],
+        ],
+
+        DISPLAY_MS_BLOCKER_AND_INTERRUPT_STATE => [
+            DESCRIPTION   => "Display the MS Blockers and Interrupt status",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => LW_OK,
+
+            _GP10X        => [ PASCAL, ],
+            _TU10X        => [ TURING, ],
+            _GA10X        => [ dAMPERE_thru_ADA, ],
+            _GH100        => [ HOPPER_and_later, ],
+            _STUB         => [ pre_PASCAL, VOLTA, ],
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $elpgHal;

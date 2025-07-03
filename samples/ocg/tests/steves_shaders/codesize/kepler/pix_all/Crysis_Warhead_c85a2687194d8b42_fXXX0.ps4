@@ -1,0 +1,29 @@
+ps_4_0
+dcl_input_ps v1.xyzw, linear centroid
+dcl_input_ps v2.xyw, linear
+dcl_output o0.xyzw
+dcl_constantbuffer cb0[9].xyzw, immediateindexed
+dcl_sampler s0, mode_default
+dcl_resource t0, texture2d, (float, float, float, float)
+dcl_temps 2 
+add r0.xyz, v1.yzwy, -cb0[1].xyzx
+mul r0.w, r0.z, cb0[2].x
+mul r1.x, r0.w, l(-1.44269502)
+exp r1.x, r1.x
+add r1.x, -r1.x, l(1.00000000)
+div r0.w, r1.x, r0.w
+lt r1.x, l(0.01000000), |r0.z|
+dp3 r0.x, r0.xyzx, r0.xyzx
+movc r0.y, r1.x, r0.w, l(0x3f800000)
+sqrt r0.x, r0.x
+mul r0.x, r0.x, cb0[2].y
+mad r0.x, r0.y, r0.x, -cb0[2].w
+exp_sat o0.y, -r0.x
+sample r0.xyzw, v2.xyxx, t0.xyzw, s0
+sqrt r0.x, r0.w
+add r0.y, r0.w, -v2.w
+mul o0.w, r0.x, l(1.10000002)
+mov o0.xz, v1.xxxx
+ult r0.x, l(0x80000000), r0.y
+discard_sat r0.x
+ret 

@@ -1,0 +1,100 @@
+#
+# Copyright (c) 2016-2017, LWPU CORPORATION. All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+
+LW_MODULE_BUILD_TYPE_ALIASES = egl
+LW_MODULE_LOGGING_NAME = "egltest"
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+EGL_APPS_DIR = $(LW_SOURCE)/apps/egl
+EGL_TEST_DIR = $(EGL_APPS_DIR)/egltest
+
+include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+
+include $(EGL_APPS_DIR)/testclient/egl-dso-stub.lwmk
+include $(EGL_APPS_DIR)/testclient/testclient-dso-stub.lwmk
+include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwrm_mem.lwmk
+include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwrm_surface.lwmk
+include $(EGL_TEST_DIR)/lwglsi-dso-stub.lwmk
+
+STUB_DSO_DEPENDS += $(LIBEGL_DSO_STUB)
+STUB_DSO_DEPENDS += $(LIBTESTCLIENT_DSO_STUB)
+STUB_DSO_DEPENDS += $(LWRM_MEM_DSO_STUB)
+STUB_DSO_DEPENDS += $(LWRM_SURFACE_DSO_STUB)
+STUB_DSO_DEPENDS += $(LWGLSI_DSO_STUB)
+
+STUB_LDFLAGS += \
+  -lEGL-stub \
+  -ltestclient-stub \
+  -llwrm_mem-stub \
+  -llwrm_surface-stub \
+  -llwidia-glsi-stub
+
+SOURCES += $(EGL_APPS_DIR)/utils/socket.cpp
+SOURCES += $(EGL_TEST_DIR)/egltest.cpp
+SOURCES += $(EGL_TEST_DIR)/eglstream.cpp
+SOURCES += $(EGL_TEST_DIR)/eglteststream.cpp
+SOURCES += $(EGL_TEST_DIR)/consumer.cpp
+SOURCES += $(EGL_TEST_DIR)/consumerStream1.cpp
+SOURCES += $(EGL_TEST_DIR)/consumerStream2.cpp
+SOURCES += $(EGL_TEST_DIR)/producer.cpp
+SOURCES += $(EGL_TEST_DIR)/producerStream1.cpp
+SOURCES += $(EGL_TEST_DIR)/producerStream2.cpp
+SOURCES += $(EGL_TEST_DIR)/surface.cpp
+SOURCES += $(EGL_TEST_DIR)/tests/test1.cpp
+SOURCES += $(EGL_TEST_DIR)/tests/test2.cpp
+SOURCES += $(EGL_TEST_DIR)/tests/test3.cpp
+
+LW_DEFINES += LW_EGL_DESKTOP_COMPATIBLE_HEADERS
+LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc
+LW_INCLUDES += $(LW_SOURCE)/drivers/OpenGL/interface
+LW_INCLUDES += $(LW_SOURCE)/drivers/khronos/egl/egl
+LW_INCLUDES += $(LW_SOURCE)/drivers/khronos/egl/interface/partner
+LW_INCLUDES += $(LW_SOURCE)/drivers/khronos/egl/interface
+LW_INCLUDES += $(LW_SOURCE)/drivers/khronos/interface/apps-mirror
+LW_INCLUDES += $(EGL_TEST_DIR)
+LW_INCLUDES += $(EGL_TEST_DIR)/tests
+LW_INCLUDES += $(EGL_APPS_DIR)/testclient
+LW_INCLUDES += $(EGL_APPS_DIR)/utils
+
+include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+
+# Tell eglplatform.h not to try to deduce the target platform/window system
+LW_DEFINES += WIN_INTERFACE_LWSTOM
+
+# library flags
+LDFLAGS += -lm
+LDFLAGS += -ldl
+LDFLAGS += -lrt
+LDFLAGS += -lpthread
+LDFLAGS += -lstdc++
+LDFLAGS += -L $(OUTPUTDIR) $(STUB_LDFLAGS)
+LDFLAGS += $(BIN_LDFLAGS)
+
+TESTAPP := $(OUTPUTDIR)/egltest
+
+LW_SUPPORTS_SEPARATE_DEBUG_INFO = 1
+TESTAPP_LD_TARGET = $(TESTAPP).unstripped
+TESTAPP_DEBUG_INFO = $(TESTAPP).debug
+$(eval $(call LW_DEBUG_INFO_CMD, \
+  $(TESTAPP_LD_TARGET), \
+  $(TESTAPP), \
+  $(TESTAPP_DEBUG_INFO)))
+
+build: $(TESTAPP)
+
+$(TESTAPP_LD_TARGET): $(OBJECTS) $(STUB_DSO_DEPENDS)
+	$(call quiet_cmd,LINK) $(OBJECTS) -o $(TESTAPP_LD_TARGET) $(LDFLAGS)
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

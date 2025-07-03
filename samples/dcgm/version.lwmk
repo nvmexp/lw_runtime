@@ -1,0 +1,61 @@
+#
+# Generate versioning information based on current CL and environment
+#
+
+ifndef LW_DVS_BLD
+	USE_P4_FOR_CL = 1
+else ifneq (${LW_DVS_BLD}, 1)
+	USE_P4_FOR_CL = 2
+else
+	USE_P4_FOR_CL = 0
+endif
+
+ifdef CHANGELIST
+	CL_NUM = ${CHANGELIST}
+else ifdef LW_BUILD_CL
+	CL_NUM = ${LW_BUILD_CL}
+else ifdef DVS_SW_CHANGELIST
+	CL_NUM = ${DVS_SW_CHANGELIST}
+else ifneq ($(USE_P4_FOR_CL),0)
+	P4_REV         = $(shell $(P4) changes -m1 "$(realpath $(DCGM_DIR))/...\#have" 2>/dev/null )
+	CL_NUM         = $(word 2,$(P4_REV))
+endif
+
+ifndef BUILD_DATE
+	BUILD_DATE := $(shell /usr/bin/elw date -u)
+endif
+
+UNAME          := $(LW_UNIX_BUILD_CHROOT)/bin/uname
+BUILD_PLATFORM := $(shell $(UNAME) -srvm)
+
+DVS_SW_CHANGELIST ?=
+CHANGELIST ?=
+LW_DVS_BLD ?=
+LW_BUILD_CL ?=
+P4_REV ?=
+BUILD_DATE ?=
+
+define print_gen_version_info
+	$(ECHO) "LW_DVS_BLD=${LW_DVS_BLD}"
+	$(ECHO) "USE_P4_FOR_CL=$(USE_P4_FOR_CL)"
+	$(ECHO) "P4_REV=$(P4_REV)"
+	$(if ifdef DVS_SW_CHANGELIST endif, $(ECHO) "DVS_SW_CHANGELIST=$(DVS_SW_CHANGELIST)")
+	$(if ifdef LW_BUILD_CL endif, $(ECHO) "LW_BUILD_CL=$(LW_BUILD_CL)" )
+	$(if ifdef CHANGELIST endif, $(ECHO) "CHANGELIST=$(CHANGELIST)" )
+	$(ECHO) "CL=$(CL_NUM)"
+	$(ECHO) "BUILDPLATFORM=$(BUILD_PLATFORM)"
+	$(ECHO) "BUILD_BRANCH=$(BUILD_BRANCH)"
+	$(ECHO) "DRIVER_VERSION=$(DRIVER_VERSION)"
+	$(ECHO) "BUILD_DATE=$(BUILD_DATE)"
+	$(shell export)
+endef
+
+define gen_version_file
+	$(ECHO) gen_verion_file for $(2) using $(1)
+	$(shell $(SED) -e 's|$${CHANGELIST}|$(CL_NUM)|' \
+		-e 's|$${BUILDPLATFORM}|$(BUILD_PLATFORM)|' \
+		-e 's|$${BUILDBRANCH}|$(BUILD_BRANCH)|'     \
+		-e 's|$${DRIVERVERSION}|$(DRIVER_VERSION)|' \
+		-e 's|$${BUILDDATE}|$(BUILD_DATE)|'         \
+		$(1) > $(2))
+endef

@@ -1,0 +1,57 @@
+# File should be included in main lwcm/makefile.lwmk
+
+##############################################################################
+# define SOURCES
+##############################################################################
+SDK_DIR := sdk_samples
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += c_src/field_value_sample/field_value_sample.cpp
+
+LOCAL_SOURCES := $(addprefix $(SDK_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+LWMLCOMMON_DIR = $(LW_SOURCE)/apps/lwml/common
+
+##############################################################################
+# define LOCAL_CFLAGS
+##############################################################################
+
+LOCAL_INCLUDES := $(SDK_DIR)
+LOCAL_INCLUDES += .
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/
+LOCAL_INCLUDES += $(LWML_DIR)/
+
+# Do not modify CFLAGS because it will be global
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+##############################################################################
+# define LOCAL_LDFLAGS
+##############################################################################
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+LOCAL_LDFLAGS += -L$(OUTPUTDIR) -ldcgm -lstdc++ -lgcc_s
+
+##############################################################################
+# builds
+##############################################################################
+
+field_value_TARGET  := $(OUTPUTDIR)/field_value_sample
+field_value_OBJECTS := $(LOCAL_OBJECTS)
+field_value_CFLAGS  := $(LOCAL_CFLAGS)
+field_value_LDFLAGS := $(LOCAL_LDFLAGS)
+field_value_DEPENDS := $(dcgm_TARGET)
+
+build: $(field_value_TARGET)
+dcgmbuildsyncpoint:: $(field_value_TARGET)
+$(eval $(call MAKE_EXELWTABLE,field_value))
+build: $(field_value_TARGET).guardwords
+
+
+#################################################################################
+# End of nested lwmk
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

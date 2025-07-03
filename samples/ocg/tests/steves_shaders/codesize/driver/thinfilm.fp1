@@ -1,0 +1,446 @@
+!!FP1.0
+# cgc version 1.2.0001, build date Jan 30 2004 11:49:51
+# command line args: -profile fp40
+# source file: ..\thinfilm.cg
+#vendor LWPU Corporation
+#version 1.0.02
+#profile fp40
+#program main
+#semantic main.elwironment_map
+#semantic main.film_thickness
+#semantic main.Film_Material_Kr
+#semantic main.etas
+#semantic main.ILW_VIEWX
+#semantic main.ILW_VIEWY
+#semantic main.ILW_VIEWZ
+#var float4 In.HPOS : $vin.<null atom> :  : 0 : 0
+#var float4 In.WPOS : $vin.<null atom> :  : 0 : 0
+#var float4 In.COL0 : $vin.<null atom> :  : 0 : 0
+#var float4 In.COL1 : $vin.<null atom> :  : 0 : 0
+#var float4 In.BCOL0 : $vin.<null atom> :  : 0 : 0
+#var float4 In.BCOL1 : $vin.<null atom> :  : 0 : 0
+#var float In.FOGP : $vin.<null atom> :  : 0 : 0
+#var float In.FOGC : $vin.<null atom> :  : 0 : 0
+#var float In.PSIZ : $vin.<null atom> :  : 0 : 0
+#var float4 In.TEX0 : $vin.<null atom> :  : 0 : 0
+#var float4 In.TEX1 : $vin.<null atom> :  : 0 : 0
+#var float4 In.TEX2 : $vin.TEX0 : TEX0 : 0 : 1
+#var float4 In.TEX3 : $vin.TEX1 : TEX1 : 0 : 1
+#var float4 In.TEX4 : $vin.<null atom> :  : 0 : 0
+#var float4 In.TEX5 : $vin.<null atom> :  : 0 : 0
+#var float4 In.TEX6 : $vin.<null atom> :  : 0 : 0
+#var float4 In.TEX7 : $vin.TEX2 : TEX2 : 0 : 1
+#var samplerLWBE elwironment_map :  : texunit 0 : 1 : 1
+#var float film_thickness :  :  : 2 : 1
+#var float2 Film_Material_Kr :  :  : 3 : 1
+#var float3 etas :  :  : 4 : 1
+#var float3 ILW_VIEWX :  :  : 5 : 1
+#var float3 ILW_VIEWY :  :  : 6 : 1
+#var float3 ILW_VIEWZ :  :  : 7 : 1
+#var float4 main.COL : $vout.COL : COL : -1 : 1
+DECLARE etas;
+DECLARE ILW_VIEWX;
+DECLARE ILW_VIEWY;
+DECLARE ILW_VIEWZ;
+DECLARE film_thickness;
+DECLARE Film_Material_Kr;
+MOVR  R0.xyz, f[TEX2];
+MOVR  R11.w, Film_Material_Kr.y;
+DP3R  R0.x, f[TEX0], R0;
+MULR  R0.z, R0.x, R0.x;
+MULR  R0.y, etas.z, etas.z;
+ADDR  R0.z, -R0, {1, 0, 0, 0}.x;
+MULR  R1.x, etas.z, R0;
+MULR  R0.w, R0.y, R0.z;
+ADDR  R0.y, -R0.w, {1, 0, 0, 0}.x;
+RSQR  R0.y, R0.y;
+RCPR  R1.y, R0.y;
+ADDR  R1.x, R1, -R1.y;
+MULR  R1.xyz, R1.x, f[TEX2];
+MULR  R0.xyz, etas.z, -f[TEX0];
+SGER  H0.x, -R0.w, {-1, 0, 0, 0};
+ADDR  R0.xyz, R0, R1;
+MULR  R0.xyz, H0.x, R0;
+TEX   R0.xyz, R0, TEX0, LWBE;
+MULR  R0.xyz, R0, {0.9479, 0, 0, 0}.x;
+ADDR  R0.xyz, R0, {0.05213, 0, 0, 0}.x;
+POWR  R0.x, R0.x, {2.4, 0, 0, 0}.x;
+POWR  R0.y, R0.y, {2.4, 0, 0, 0}.x;
+ADDR  R0.w, R0.x, {0, -0.001, 0, 0}.y;
+SEQR  H0.x, R0, R0.y;
+MOVXC HC.x, H0;
+MOVR  R0.x(GT), R0.w;
+POWR  R0.w, R0.z, {2.4, 0, 0, 0}.x;
+SEQR  H0.x, R0.y, R0.w;
+ADDR  R0.z, R0.y, {0.001, 0, 0, 0}.x;
+MOVXC HC.x, H0;
+SEQR  H0.x, R0.w, R0;
+MOVR  R0.y(GT.x), R0.z;
+MOVR  R0.z, R0.w;
+ADDR  R0.w, R0, {-0.001, 0, 0, 0}.x;
+MOVXC HC.x, H0;
+MOVR  R0.z(GT.x), R0.w;
+SLTR  H0.xyz, R0, R0.zxyw;
+MULR  R1.xyz, H0.yzxw, H0;
+SGTR  H1.xyz, R0, R0.zxyw;
+MULR  R9.xyz, H1, H0.yzxw;
+DP3R  R0.w, R9, R0;
+MULR  R10.xyz, H0, H1.yzxw;
+DP3R  R12.x, R10, R0;
+MULR  R2.xyz, H1.yzxw, H1;
+MAXR  R1.xyz, R1, R2;
+MULR  R2, R9.y, {0, 0.0273, 0.7937, 0}.xxyz;
+DP3R  R0.xy, R1, R0;
+MOVR  R12.y, R0;
+MOVR  R0.z, R0.y;
+MULR  R1, R10.y, {1, 0.9685, 0.2229, 0}.xxyz;
+ADDR  R11.xy, R0.zwzw, -R12;
+MULR  R0, R10.x, {0.971, 0.9426, 1.0007, 0}.xyzz;
+ADDR  R0, R0, R1;
+MULR  R1, R10.z, {0.0001, 0, 0.1088, 0.6651};
+ADDR  R0, R0, R1;
+MULR  R1, R0, R11.x;
+MULR  R0, R12.x, {1, 0.9999, 0.9993, 0}.xxyz;
+ADDR  R0, R0, R1;
+MULR  R1, R9.x, {0.1012, 0.0515, 0, 0}.xyzz;
+ADDR  R1, R1, R2;
+MULR  R2, R9.z, {1, 0.8916, 0.3323, 0}.xxyz;
+ADDR  R1, R1, R2;
+MULR  R1, R1, R11.y;
+ADDR  R0, R0, R1;
+MOVR  R1.xyz, f[TEX1];
+ADDR  R1.xyz, f[TEX0], R1;
+DP3R  R1.w, R1, R1;
+RSQR  R1.w, R1.w;
+MULR  R1.xyz, R1.w, R1;
+DP3R  R1.x, R1, f[TEX2];
+MAXR  R1.x, R1, {1e-005, 0, 0, 0};
+POWR  R1.x, R1.x, {12, 0, 0, 0}.x;
+MULR  R11.z, Film_Material_Kr.x, R1.x;
+ADDR  R3.xy, -R11.zwzw, {1, 0, 0, 0}.x;
+MOVR  R1.xyz, f[TEX2];
+MULR  R11.w, R3.x, R3.y;
+MULR  R10.w, Film_Material_Kr.y, R3.x;
+DP3R  R1.x, f[TEX1], R1;
+MULR  R2, R0, R11.w;
+MAXR  R9.w, R1.x, {0, 0, 0, 0}.x;
+MULR  R1, R9.w, {1, 0.9999, 0.9993, 0}.xxyz;
+MULR  R0, R10.w, R1;
+MULR  R1, R1, R11.z;
+ADDR  R2, R0, R2;
+MULR  R0.y, f[TEX1].z, f[TEX1].z;
+MULR  R0.x, etas.y, etas.y;
+ADDR  R0.y, -R0, {1, 0, 0, 0}.x;
+MULR  R0.w, R0.x, R0.y;
+ADDR  R0.x, -R0.w, {1, 0, 0, 0};
+MULR  R2, R2, {1, 0.75, 0.45, 0.23};
+RSQR  R0.x, R0.x;
+RCPR  R0.y, R0.x;
+SGER  H0.x, -R0.w, {-1, 0, 0, 0};
+MULR  R0.x, etas.y, f[TEX1].z;
+ADDR  R3.x, R0, -R0.y;
+MULR  R0.xyz, etas.y, -f[TEX1];
+MULR  R3.xyz, R3.x, {0, 1, 0, 0}.xxyw;
+ADDR  R0.xyz, R0, R3;
+MULR  R0.xyz, H0.x, R0;
+SGER  H0.xy, etas.yzzw, etas;
+DP3R  R0.x, R0, f[TEX2];
+MAXR  R0.x, |R0|, {0.0001, 0, 0, 0};
+RCPR  R0.z, R0.x;
+MULR  R0.xy, H0, {0, 0.5, 0, 0}.y;
+MULR  R0.z, film_thickness.x, R0;
+MULR  R12.z, R0, {2, 0, 0, 0}.x;
+ADDR  R12.y, R0.x, R0;
+MULR  R0, R12.z, {2.631, 2.415, 2.232, 2.0747};
+FRCR  R0, R0;
+ADDR  R0, R12.y, R0;
+MULR  R3, R0, {6.28318, 0, 0, 0}.x;
+COSR  R0.x, R3.x;
+COSR  R0.y, R3.y;
+COSR  R0.z, R3.z;
+COSR  R0.w, R3.w;
+MULR  R0, R2, R0;
+SINR  R3.x, R3.x;
+SINR  R3.y, R3.y;
+SINR  R3.z, R3.z;
+SINR  R3.w, R3.w;
+MULR  R4, R2, R3;
+ADDR  R3, R1, R0;
+RCPR  R0.x, R4.x;
+RCPR  R0.y, R4.y;
+RCPR  R0.z, R4.z;
+RCPR  R0.w, R4.w;
+MULR  R0, R3, R0;
+MINR  R1, R0, {-0.0001, 0, 0, 0}.x;
+SGTR  H0, R0, {0, 0, 0, 0}.x;
+MOVXC HC, H0;
+MINR  R0, R0, {999999, 0, 0, 0}.x;
+MAXR  R2, R1, {-99999, 0, 0, 0}.x;
+MAXR  R0, R0, {0.0001, 0, 0, 0}.x;
+MOVR  R2(GT), R0;
+SGTR  H0, |R2|, {1, 0, 0, 0}.x;
+RCPR  R1.x, |R2.x|;
+MOVXC HC, H0;
+RCPR  R1.y, |R2.y|;
+MOVR  R0, |R2|;
+RCPR  R1.z, |R2.z|;
+SGTR  H0, H0, {0, 0, 0, 0}.x;
+RCPR  R1.w, |R2.w|;
+MOVR  R0(GT), R1;
+MULR  R1, R0, R0;
+MULR  R5.z, R0.w, R1.w;
+MULR  R5.xy, R5.z, R1.w;
+MULR  R5.w, R5.y, R1;
+MOVR  R5.y, R5.z;
+MOVR  R5.z, R5.x;
+MOVR  R5.x, R0.w;
+DP4R  R0.w, R5, {1, -0.333333, 0.2, -0.142857};
+MULR  R1.w, R0.z, R1.z;
+MULR  R5.xy, R1.w, R1.z;
+MULR  R5.w, R5.y, R1.z;
+MOVR  R5.z, R5.x;
+MOVR  R5.y, R1.w;
+MOVR  R5.x, R0.z;
+DP4R  R0.z, R5, {1, -0.333333, 0.2, -0.142857};
+MULR  R5.x, R0.y, R1.y;
+MULR  R1.zw, R5.x, R1.y;
+MOVR  R5.y, R5.x;
+MULR  R5.w, R1, R1.y;
+MULR  R1.y, R0.x, R1.x;
+MOVR  R5.z, R1;
+MOVR  R5.x, R0.y;
+MULR  R1.zw, R1.y, R1.x;
+MULR  R1.w, R1, R1.x;
+MOVR  R1.x, R0;
+MOVXC HC, H0;
+DP4R  R0.y, R5, {1, -0.333333, 0.2, -0.142857};
+MULR  R5, R9.y, {1, 0.9418, 0.1719, 0};
+DP4R  R0.x, R1, {1, -0.333333, 0.2, -0.142857};
+MOVR  R1, R0;
+SLTR  H0, R2, {0, 0, 0, 0}.x;
+MULR  R2, R10.y, {0, 0.0458, 0.8369, 1};
+ADDR  R0, -R0, {1.5708, 0, 0, 0}.x;
+MOVR  R1(GT), R0;
+SGTR  H0, H0, {0, 0, 0, 0}.x;
+MOVR  R0, R1;
+MOVXC HC, H0;
+MOVR  R0(GT), -R1;
+MULR  R1, R10.x, {1.0007, 0.1564, 0, 0}.xxyz;
+ADDR  R1, R1, R2;
+MULR  R2, R10.z, {1, 0.9996, 0.9586, 0}.xxyz;
+ADDR  R1, R1, R2;
+MULR  R2, R1, R11.x;
+MULR  R1, R12.x, {0.9992, 0.9998, 1, 0}.xyzz;
+ADDR  R1, R1, R2;
+MULR  R2, R9.x, {0, 0.8325, 1.0149, 0}.xxyz;
+ADDR  R2, R2, R5;
+MULR  R5, R9.z, {0, 0.0003, 0.0369, 0}.xxyz;
+ADDR  R2, R2, R5;
+MULR  R2, R2, R11.y;
+ADDR  R1, R1, R2;
+MULR  R5, R1, R11.w;
+MULR  R2, R9.w, {0.9992, 0.9998, 1, 0}.xyzz;
+MULR  R1, R10.w, R2;
+MULR  R2, R2, R11.z;
+ADDR  R5, R1, R5;
+MULR  R5, R5, {0.16, 0.2, 0.1, 0.05};
+MULR  R1, R12.z, {1.938, 1.818, 1.712, 1.618};
+FRCR  R1, R1;
+ADDR  R1, R12.y, R1;
+MULR  R6, R1, {6.28318, 0, 0, 0}.x;
+COSR  R1.x, R6.x;
+COSR  R1.y, R6.y;
+COSR  R1.z, R6.z;
+COSR  R1.w, R6.w;
+SINR  R6.x, R6.x;
+SINR  R6.y, R6.y;
+SINR  R6.z, R6.z;
+SINR  R6.w, R6.w;
+MULR  R6, R5, R6;
+MULR  R1, R5, R1;
+ADDR  R5, R2, R1;
+RCPR  R1.x, R6.x;
+RCPR  R1.y, R6.y;
+RCPR  R1.z, R6.z;
+RCPR  R1.w, R6.w;
+MULR  R1, R5, R1;
+SGTR  H0, R1, {0, 0, 0, 0}.x;
+MOVXC HC, H0;
+MINR  R2, R1, {-0.0001, 0, 0, 0}.x;
+MINR  R1, R1, {999999, 0, 0, 0}.x;
+MAXR  R2, R2, {-99999, 0, 0, 0}.x;
+MAXR  R1, R1, {0.0001, 0, 0, 0}.x;
+MOVR  R2(GT), R1;
+SGTR  H0, |R2|, {1, 0, 0, 0}.x;
+RCPR  R7.x, |R2.x|;
+MOVXC HC, H0;
+RCPR  R7.y, |R2.y|;
+MOVR  R1, |R2|;
+RCPR  R7.z, |R2.z|;
+SGTR  H0, H0, {0, 0, 0, 0}.x;
+RCPR  R7.w, |R2.w|;
+MOVR  R1(GT), R7;
+MULR  R7, R1, R1;
+MULR  R8.z, R1.w, R7.w;
+MOVXC HC, H0;
+MULR  R8.xy, R8.z, R7.w;
+MULR  R8.w, R8.y, R7;
+MOVR  R8.y, R8.z;
+MOVR  R8.z, R8.x;
+MOVR  R8.x, R1.w;
+DP4R  R1.w, R8, {1, -0.333333, 0.2, -0.142857};
+MULR  R7.w, R1.z, R7.z;
+MULR  R8.xy, R7.w, R7.z;
+MULR  R8.w, R8.y, R7.z;
+MOVR  R8.z, R8.x;
+MOVR  R8.y, R7.w;
+MOVR  R8.x, R1.z;
+DP4R  R1.z, R8, {1, -0.333333, 0.2, -0.142857};
+MULR  R8.x, R1.y, R7.y;
+MULR  R7.zw, R8.x, R7.y;
+MOVR  R8.y, R8.x;
+MULR  R8.w, R7, R7.y;
+MOVR  R8.z, R7;
+MULR  R7.y, R1.x, R7.x;
+MULR  R7.zw, R7.y, R7.x;
+MOVR  R8.x, R1.y;
+MULR  R7.w, R7, R7.x;
+MOVR  R7.x, R1;
+DP4R  R1.y, R8, {1, -0.333333, 0.2, -0.142857};
+DP4R  R1.x, R7, {1, -0.333333, 0.2, -0.142857};
+MOVR  R7, R1;
+SLTR  H0, R2, {0, 0, 0, 0}.x;
+MULR  R2.zw, R10.z, {0.9685, 0.984, 0, 0}.xyxy;
+MULR  R2.xy, R10.y, {0, 0, 1, 0.9959}.zwzw;
+ADDR  R1, -R1, {1.5708, 0, 0, 0}.x;
+MOVR  R7(GT), R1;
+SGTR  H0, H0, {0, 0, 0, 0}.x;
+MOVR  R1, R7;
+ADDR  R2.xy, R2, R2.zwzw;
+MULR  R2.zw, R9.x, {1.0149, 0, 0, 0}.x;
+MOVXC HC, H0;
+MOVR  R1(GT), -R7;
+MULR  R7.xy, R9.y, {0, 0.0025, 0, 0};
+ADDR  R2.zw, R2, R7.xyxy;
+MULR  R7.xy, R9.z, {0.0483, 0.0496, 0, 0};
+ADDR  R2.zw, R2, R7.xyxy;
+MULR  R2.xy, R2, R11.x;
+MULR  R2.zw, R2, R11.y;
+ADDR  R2.xy, R12.x, R2;
+ADDR  R2.xy, R2, R2.zwzw;
+MULR  R2.xy, R2, R11.w;
+MULR  R2.z, R10.w, R9.w;
+ADDR  R2.zw, R2.z, R2.xyxy;
+MULR  R2.xy, R12.z, {1.5337, 1.4577, 0, 0};
+MULR  R2.zw, R2, {0.1, 0.05, 0, 0}.xyxy;
+FRCR  R2.xy, R2;
+ADDR  R2.xy, R12.y, R2;
+MULR  R7.zw, R2.xyxy, {6.28318, 0, 0, 0}.x;
+COSR  R2.x, R7.z;
+COSR  R2.y, R7.w;
+MULR  R2.xy, R2.zwzw, R2;
+SINR  R7.x, R7.z;
+SINR  R7.y, R7.w;
+MULR  R7.xy, R2.zwzw, R7;
+MULR  R2.z, R9.w, R11;
+ADDR  R7.zw, R2.z, R2.xyxy;
+RCPR  R2.x, R7.x;
+RCPR  R2.y, R7.y;
+MULR  R2.xy, R7.zwzw, R2;
+MINR  R2.zw, R2.xyxy, {-0.0001, 0, 0, 0}.x;
+SGTR  H0.xy, R2, {0, 0, 0, 0}.y;
+MOVXC HC.xy, H0;
+MINR  R2.xy, R2, {999999, 0, 0, 0}.x;
+MAXR  R8.xy, R2.zwzw, {-99999, 0, 0, 0}.x;
+MAXR  R2.xy, R2, {0.0001, 0, 0, 0}.x;
+MOVR  R8.xy(GT), R2;
+SGTR  H0.xy, |R8|, {1, 0, 0, 0}.x;
+MOVR  R8.zw, |R8.xyxy|;
+RCPR  R2.x, |R8.x|;
+MOVXC HC.xy, H0;
+RCPR  R2.y, |R8.y|;
+MOVR  R8.zw(GT.xyxy), R2.xyxy;
+SGTR  H0.xy, H0, {0, 0, 0, 0}.x;
+MULR  R9.xy, R8.zwzw, R8.zwzw;
+MULR  R2.z, R8.w, R9.y;
+MOVXC HC.xy, H0;
+MULR  R2.xy, R2.z, R9.y;
+MULR  R2.w, R2.y, R9.y;
+MOVR  R2.y, R2.z;
+MOVR  R2.z, R2.x;
+MOVR  R2.x, R8.w;
+DP4R  R8.w, R2, {1, -0.333333, 0.2, -0.142857};
+MULR  R2.z, R8, R9.x;
+MULR  R2.xy, R2.z, R9.x;
+MULR  R2.w, R2.y, R9.x;
+MOVR  R2.y, R2.z;
+MOVR  R2.z, R2.x;
+MOVR  R2.x, R8.z;
+DP4R  R8.z, R2, {1, -0.333333, 0.2, -0.142857};
+MOVR  R2.xy, R8.zwzw;
+ADDR  R2.zw, -R8, {1.5708, 0, 0, 0}.x;
+SLTR  H0.xy, R8, {0, 0, 0, 0}.y;
+MOVR  R2.xy(GT), R2.zwzw;
+SGTR  H0.xy, H0, {0, 0, 0, 0}.x;
+SINR  R2.z, R1.z;
+MOVR  R8.xy, R2;
+MOVXC HC.xy, H0;
+SINR  R2.w, R1.w;
+MOVR  R8.xy(GT), -R2;
+SINR  R2.x, R1.x;
+SINR  R2.y, R1.y;
+COSR  R1.x, R1.x;
+COSR  R1.y, R1.y;
+COSR  R1.z, R1.z;
+COSR  R1.w, R1.w;
+MULR  R1, R6, R1;
+MULR  R2, R5, R2;
+ADDR  R2, R2, R1;
+SINR  R1.x, R0.x;
+SINR  R1.y, R0.y;
+SINR  R1.z, R0.z;
+SINR  R1.w, R0.w;
+MULR  R1, R3, R1;
+COSR  R0.x, R0.x;
+COSR  R0.y, R0.y;
+COSR  R0.z, R0.z;
+COSR  R0.w, R0.w;
+MULR  R0, R4, R0;
+ADDR  R0, R1, R0;
+DP4R  R1.x, |R0|, {0.22667, 1.64681, 6.03117, 16.5257};
+DP4R  R1.y, |R0|, {2.2035, 8.61168, 7.51136, 2.47128};
+DP4R  R0.y, |R0|, {10.2678, 44.3884, 45.8884, 13.0807};
+DP4R  R0.w, |R2|, {10.3778, 27.0657, 33.2579, 19.3255};
+DP4R  R1.z, |R2|, {28.7749, 31.0428, 21.3835, 8.85058};
+DP4R  R1.w, |R2|, {1.39278, 0.0678, 0, 0}.xyzz;
+ADDR  R1.y, R1, R0.w;
+ADDR  R2.z, R0.y, R1.w;
+COSR  R0.x, R8.x;
+ADDR  R1.x, R1, R1.z;
+COSR  R0.y, R8.y;
+SINR  R0.z, R8.x;
+SINR  R0.w, R8.y;
+MULR  R0.zw, R7, R0;
+MULR  R0.xy, R7, R0;
+ADDR  R0.xy, R0.zwzw, R0;
+MULR  R0.zw, |R0.xyxy|, {2.107, 0.47146, 0, 0}.xyxy;
+MULR  R0.xy, |R0|, {0, 0, 4.58327, 0.49405}.zwzw;
+ADDR  R0.x, R0, R0.y;
+ADDR  R0.y, R0.z, R0.w;
+ADDR  R2.y, R1.x, R0;
+ADDR  R2.x, R1.y, R0;
+MULR  R1.xyz, R2, {0.0085426, 0, 0, 0}.x;
+DP3R  R0.z, R1, {0.0556, -0.204, 1.057, 0};
+DP3R  R0.y, R1, {-0.9692, 1.876, 0.0416, 0};
+DP3R  R0.x, R1, {3.241, -1.5374, -0.4986, 0};
+MAXR_SAT R0.xyz, R0, {0.0001, 0, 0, 0}.x;
+POWR  R0.x, R0.x, {0.41667, 0, 0, 0}.x;
+POWR  R0.z, R0.z, {0.41667, 0, 0, 0}.x;
+POWR  R0.y, R0.y, {0.41667, 0, 0, 0}.x;
+MULR  R0.xyz, R0, {0.98115, 1.06555, 1.1183, 0};
+ADDR  o[COLR], R0.xyzx, {-0.05115, -0.0555, -0.0583, 0}.xyzx;
+END
+# 395 instructions, 13 R-regs, 2 H-regs
+# 395 inst, (42 mov, 1 tex, 73 complex, 279 math)
+# non-mov args: 0 139 62 33 119
+# mov args:     0 30 3 3 6

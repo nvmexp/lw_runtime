@@ -1,0 +1,123 @@
+shaderType: pixel
+optFlags: 0x1
+optLevel: 4
+oriControl: 0
+debugOutputMask: 0
+bAssume0: 0
+bInitOutputs: 0
+bCanPromoteFixed: 0
+bCanPromoteHalf: 1
+bCanReorderFixedWithCheck: 0
+bCanReorderHalf: 1
+bCanReorderFloat: 1
+bCanIgnoreNan: 0
+bCanDemoteNonFP32Targets: 0
+bCanUseNrmhAlways: 0
+bCanFudgeSqrtSign: 0
+eOutputMode: R0
+dwOutputMask: 0xf
+bUseDepth: 0
+bUseCoverage: 0
+dwNumCombiners: 0
+dwLevel: 0
+dwSupportsSignedRemap: 0x0
+dwTextureRange: 0x0
+dwPartialTexType: 0x0
+wTextureRemap: 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210
+numTextures: 16
+normalizationLwbemap: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
+bUsingLRPD: 0
+dwConstIsInZeroOneRange: 0x0
+bUseDX10SAT: 0
+maxCallDepthAllowed: 128
+maxDivergenceLevelAllowed: 32
+regAllocationMode: 0
+ApplyTXLLODWar: 1
+iStartInst: 0
+fmtFlags: 0x0
+paramFlags: 0x0
+optimizerConstBank: 4
+deadOutputMask: 0x0 0x0
+mrtMask: 0x0
+l0:
+// Test CVT instructions with various types
+// For small integer types and half types, we don't have small sized
+// registers in lwInst. So reads/writes to these need to reference
+// a bigger registers. Half allows only a 32-bit register to be
+// referenced instead. 
+movr (r) r1.x, (r) c[1][0]
+movr (r) r2.x, (r) c[1][1]
+cvt_rounds64 (s64) q1.x, (s32) r1
+
+cvt_rounds64 (s64) q2.x, (s16) r2
+xors64  (s64) q1.x, (s64) q1.x, (s64) q2.x
+xors64  (s64) q1.x, (s64) q1.x, (s64) constant(1,1,1,1)
+
+cvt_rounds64 (s64) q2.x, (s8) r2
+xors64  (s64) q1.x, (s64) q1.x, (s64) q2.x
+xors64  (s64) q1.x, (s64) q1.x, (s64) constant(2,2,2,2)
+
+cvt_rounds64 (s64) q2.x, (u32) r2
+xors64  (s64) q1.x, (s64) q1.x, (s64) q2.x
+xors64  (s64) q1.x, (s64) q1.x, (s64) constant(3,3,3,3)
+
+cvt_rounds64 (s64) q2.x, (u16) r2
+xors64  (s64) q1.x, (s64) q1.x, (s64) q2.x
+xors64  (s64) q1.x, (s64) q1.x, (s64) constant(4,4,4,4)
+
+cvt_rounds64 (s64) q2.x, (u8) r2
+xors64  (s64) q1.x, (s64) q1.x, (s64) q2.x
+xors64  (s64) q1.x, (s64) q1.x, (s64) constant(5,5,5,5)
+
+up64r   (u32) r3.xy, (u64) q1.x
+addu32  (u32) r3.x, (u32) r3.x, (u32) r3.y
+xoru32  (u32) r3.x, (u32) r3.x, (u32) constant(6,6,6,6)
+
+cvt_roundh  (h) r3.y, (r) r2.x
+addu32  (u32) r3.x, (u32) r3.x, (u32) r3.y
+xoru32  (u32) r3.x, (u32) r3.x, (u32) constant(7,7,7,7)
+
+cvt_roundh  (h) r3.y, (h) r2.x
+addu32  (u32) r3.x, (u32) r3.x, (u32) r3.y
+xoru32  (u32) r3.x, (u32) r3.x, (u32) constant(8,8,8,8)
+
+cvt_roundr  (r) r3.y, (h) r2.x
+addu32  (u32) r3.x, (u32) r3.x, (u32) r3.y
+xoru32  (u32) r3.x, (u32) r3.x, (u32) constant(9,9,9,9)
+
+// referencing a 64-bit reg as a half is now allowed
+//cvt_roundh  (r) r3.y, (h) q1.x
+//addu32  (u32) r3.x, (u32) r3.x, (u32) r3.y
+//xoru32  (u32) r3.x, (u32) r3.x, (u32) constant(10,10,10,10)
+
+cvt_roundh  (h) r3.y, (f64) q1.x
+addu32  (u32) r3.x, (u32) r3.x, (u32) r3.y
+xoru32  (u32) r3.x, (u32) r3.x, (u32) constant(11,11,11,11)
+
+// rererencing 64-bit registers as 8/16 bit reg is not allowed
+//cvt_roundh  (h) r3.y, (s8) q1.x
+//addu32  (u32) r3.x, (u32) r3.x, (u32) r3.y
+//xoru32  (u32) r3.x, (u32) r3.x, (u32) constant(12,12,12,12)
+
+cvt_roundh  (h) r3.y, (u16) r3.x
+addu32  (u32) r3.x, (u32) r3.x, (u32) r3.y
+xoru32  (u32) r3.x, (u32) r3.x, (u32) constant(13,13,13,13)
+
+cvt_roundf64  (f64) q3.x, (u32) r3.x
+up64r   (u32) r4.xy, (u64) q3.x
+addu32  (u32) r3.y, (u32) r4.x, (u32) r4.y
+addu32  (u32) r3.x, (u32) r3.x, (u32) r3.y
+xoru32  (u32) r3.x, (u32) r3.x, (u32) constant(14,14,14,14)
+
+cvt_roundu16  (u16) r3.y, (f64) q3.x
+addu32  (u32) r3.x, (u32) r3.x, (u32) r3.y
+xoru32  (u32) r3.x, (u32) r3.x, (u32) constant(15,15,15,15)
+
+cvt_roundu16  (s8) r3.y, (f64) q3.x
+addu32  (u32) r3.x, (u32) r3.x, (u32) r3.y
+xoru32  (u32) r3.x, (u32) r3.x, (u32) constant(15,15,15,15)
+
+
+i2fs32 (r) r0, (s32) r3.x
+ret 
+end

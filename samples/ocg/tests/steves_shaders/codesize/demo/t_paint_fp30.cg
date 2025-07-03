@@ -1,0 +1,189 @@
+//  this value has been renormalized to fit within X precision
+#define __BleachSpeedFactors fixed2(.41176, 1.0)
+#define __BleachMaxes fixed2(0.8, 0.9)
+
+struct v2fConnector : vertex2fragment {
+  float4 WPos                   : WPOS;
+  float2 texture                : TEX0;
+  float4 winCoord_depthtarget   : TEX1;   //  NOTE:  for performance reasons (dual-texture mode), this should be passed down as stqr, not strq!!!!
+  float3 worldReflectVec            : TEX2;
+  float3 spotLight0Talwec       : TEX3;   //  NOTE:  we will not take care of dual-cone problems with spotlight textures in this shader --
+  float3 spotLight0TanHalfAngle : TEX4;   //  assuming that the spotlight is _never_ in front of the truck!
+  float3 worldTanMatrixX        : TEX5;   //  ( [ Tx, Bx, Nx ] )
+  float3 worldTanMatrixY        : TEX6;   //  ( [ Ty, By, Ny ] )
+  float3 worldTanMatrixZ        : TEX7;   //  ( [ Tz, Bz, Nz ] )
+  fixed2 fresnel                : COL0;
+};
+
+struct f2fConnector : fragment2framebuffer {
+  half4 color : COL;
+};
+
+/////////////////////////////////////////////////////////////////////////////
+//  define functions for each effect layer                                 //
+/////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////
+//  reflection -- sample from 2 lwbe maps, lerp between them to generate a blurry reflection.  lwbe maps should be pre-exponentiated
+//  1 pass
+
+fixed4 aged_reflect(fixed3 R, fixed paint_bleach_time, uniform samplerLWBE elwironment_new, uniform samplerLWBE elwironment_old) {
+  fixed4 s0 = x4texLWBE(elwironment_new, R);
+  fixed4 s1 = x4texLWBE(elwironment_old, R);
+  return lerp(s0, s1, paint_bleach_time);
+}
+
+/////////////////////////////////////////////////
+//  lighting -- does simple spelwlar lighting for shadow maps and spotlights  -- 2 passes
+//    uses per-pixel ndotl and ndoth
+
+fixed2 aged_lighting(fixed n_dot_l, fixed n_dot_h, fixed Ks, fixed spec_exp, float4 spotlight_stqr,
+                     uniform sampler2D shadowMap, uniform sampler2D spotlightMap, uniform sampler2D exponent_map) {
+  fixed2 lookup;
+  fixed2 result;
+  lookup.x = n_dot_h;
+  lookup.y = spec_exp;
+  fixed spotlight_effect = x1tex2Dproj(spotlightMap, spotlight_stqr.xyw);    
+  fixed spelwlar_term    = Ks*x1tex2D(exponent_map, lookup);
+  result.x = max(0,n_dot_l);
+  result.y = max(0,spelwlar_term);
+//  result = result * spotlight_effect;
+  fixed shadow_effect = x1texcompare2D(shadowMap, spotlight_stqr);
+  //result = result * shadow_effect;
+  return result;
+}
+
+///////////////////////////////////////////////////////////////////////
+//  aged_color  -- 5 passes
+//  this uses the object ndh and ndl to lookup into the flipflop texture
+//  this isn't necessarily correct, but its wrong
+//  the reveal texture is only used in color selection
+fixed4 aged_color(float2 tex_uv, fixed n_dot_l, fixed n_dot_h,
+                  //RSG//float4  RUST_TIMES,                          // controls aging (x = rust time, z = hole time)
+                  fixed4  RUST_TIMES,                          // controls aging (x = rust time, z = hole time)
+                  uniform sampler2D rust_surfaceColor,
+                  uniform sampler2D rust_deepColor,
+                  uniform sampler2D paint_shift,
+                  uniform sampler2D rust_lut) {
+  fixed4 surfaceColor  = x4tex2D(rust_surfaceColor, tex_uv);   // local reveal time is in w
+  fixed4 deepRustColor = x4tex2D(rust_deepColor,    tex_uv);   // bleach speed is in w (0 = no bleach)
+  fixed2 paintPos;
+  paintPos.x = n_dot_l;
+  paintPos.y = n_dot_h;
+  fixed4 result;
+  result.w = deepRustColor.w;
+  fixed3 paintColor    = x3tex2D(paint_shift, paintPos);
+  fixed  rust_lerp_coefficient;
+
+  rust_lerp_coefficient = x1tex2D(rust_lut, half2((half)surfaceColor.w, (half)RUST_TIMES.w));
+
+  fixed3 rust_color = lerp(surfaceColor.xyz, deepRustColor.xyz, rust_lerp_coefficient);  // combiner 2
+  result.xyz = (RUST_TIMES.x>surfaceColor.w)?rust_color:paintColor;
+  result.w   = (RUST_TIMES.x>surfaceColor.w)?-1:result.w;      // no bleaching if the paint has already rusted (-1 so that we can do fresnel properly)
+  result.xyz = ((fixed)(RUST_TIMES.z<=surfaceColor.w)) * result.xyz;
+  return result;
+}
+
+//////////////////////////////////////////////
+//  aged_normal -- generates a normal given height information -- 3 passes
+
+half3 aged_normal(float2 tex_uv, fixed4 PAINT_TIMES, fixed4 RUST_TIMES,
+                     uniform sampler2D revealSurround,
+                     uniform sampler2D bubbleSurroundTex,
+                     uniform sampler2D rustGrowth) {
+  fixed4 revealTimes = x4tex2D(revealSurround, tex_uv);
+  fixed4 bubbleSurround = x4tex2D(bubbleSurroundTex, tex_uv);
+
+  fixed4 bubbleHeight = clamp(2.0*(PAINT_TIMES.yyyy-revealTimes), 0.0.xxxx, bubbleSurround);
+  fixed4 bubbleDecay  = clamp(1.65*(PAINT_TIMES.zzzz-revealTimes), 0.0.xxxx, bubbleSurround);
+
+  bubbleHeight = bubbleHeight-2*bubbleDecay;
+
+  half3 result;
+  result.xy = bubbleHeight.zx - bubbleHeight.wy;
+  result.z = 0.5;
+  return result;
+}
+
+/////////////////////////////////////////////////////////////////////////////
+//  aged_bleach
+//    compute how bleached the surface of the paint is
+
+fixed2 aged_bleach(fixed bleachSpeed, fixed4 PAINT_TIMES) {
+  fixed bleachSpeedt = bleachSpeed * PAINT_TIMES.x;
+  fixed2 factors = clamp(bleachSpeedt.xx * __BleachSpeedFactors, 0.0.xx, 1.0.xx);
+  factors.y = factors.y*2.0;
+  return factors*__BleachMaxes;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+//  aged_fresnel
+//    bleach the fresnel term (or clamp to 0 if rusted)
+
+fixed aged_fresnel(fixed spelwlarBleachTerm, fixed hasRusted, fixed2 fresnel_terms) {
+  fixed result = lerp(fresnel_terms.x, fresnel_terms.y, spelwlarBleachTerm);
+  result = (hasRusted<0)?0:result;
+  return result;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+//  main
+//    combine all the pieces
+
+f2fConnector main(v2fConnector v2f,
+                  uniform sampler2D paintColorShift,
+                  uniform sampler2D surroundBubbleHeights,
+                  uniform sampler2D surroundRevealTimes,
+                  uniform sampler2D deepRustColor_bleachSpeed,
+                  uniform sampler2D globalIllumination,
+                  uniform sampler2D surfaceRustColor_localReveal,
+                  uniform sampler2D surroundRustHeights,
+                  uniform sampler2D powerLUT,           
+                  uniform sampler2D rustLUT,                         
+                  uniform sampler2D spotmask,
+                  uniform samplerLWBE elwironment_new,
+                  uniform samplerLWBE elwironment_old,
+                  uniform samplerLWBE vectorizeLUT,
+                  uniform sampler2D depthtarget,                                    
+                  uniform float4 PAINT_TIMES, 
+                  uniform float4 RUST_TIMES) {
+
+  fixed3  normal = aged_normal(v2f.texture, PAINT_TIMES, RUST_TIMES,
+                              surroundRevealTimes,
+                              surroundBubbleHeights,
+                              surroundRustHeights);
+  normal = x3texLWBE(vectorizeLUT, normal);
+  fixed ndl = dot(normal, v2f.spotLight0Talwec);
+  fixed ndh = dot(normal, v2f.spotLight0TanHalfAngle);
+
+  fixed4 color = aged_color(v2f.texture, ndl, ndh, RUST_TIMES, 
+                            surfaceRustColor_localReveal,
+                            deepRustColor_bleachSpeed,
+                            paintColorShift,
+                            rustLUT);
+  fixed2 bleaching = aged_bleach(color.w, PAINT_TIMES);
+  color.xyz = lerp(color.xyz, 1.0.xxx, bleaching.x);
+  fixed Ks_exp = 1.0 - bleaching.y;
+
+  fixed2 lighting = aged_lighting(ndl, ndh, Ks_exp, Ks_exp, v2f.winCoord_depthtarget,
+                                  depthtarget,
+                                  spotmask,
+                                  powerLUT);
+ fixed4 colR = aged_reflect(v2f.worldReflectVec, bleaching.y, elwironment_new, elwironment_old);
+  fixed ambient = 0.0;//f1tex2D(globalIllumination, v2f.texture);
+  fixed F = (color.w<0)?0:aged_fresnel(bleaching.y, color.w, v2f.fresnel);
+
+  fixed lum = dot(fixed3(.299, .587, .114), colR.xyz);
+  lum = lum*lum;
+  F = F*lum;
+
+  
+  fixed3 result = ambient*color.xyz + lighting.x*color.xyz;
+  result = lerp(result, colR.xyz, F);
+  fixed spelwlar_term = (color.w>=0)?lighting.y:0;
+  result = result+spelwlar_term.xxx;
+
+  f2fConnector f2f;
+  f2f.color = result.xyzz;
+  return f2f;
+}

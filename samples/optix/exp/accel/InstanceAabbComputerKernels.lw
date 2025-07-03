@@ -1,0 +1,668 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU Corporation and its licensors retain all intellectual property and proprietary
+ * rights in and to this software, related documentation and any modifications thereto.
+ * Any use, reproduction, disclosure or distribution of this software and related
+ * documentation without an express license agreement from LWPU Corporation is strictly
+ * prohibited.
+ *
+ * TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+ * AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+ * SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+ * LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+ * BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+ * INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGES
+ */
+
+#include <exp/accel/InstanceAabbComputerKernels.h>
+#include <optix_types.h>
+
+#include <rtcore/interface/rtcore.h>
+#include <rtcore/interface/types.h>
+
+// TODO: remove dependency on BvhHeader and TraversableHandle!
+#include <rtcore/bvhtools/include/Types.hpp>
+#include <rtcore/bvhtools/include/TraversableHandle.hpp>
+
+#include <exp/accel/InstanceAabbComputer.h>
+#include <exp/accel/motion/motionAabb.h>
+#include <exp/accel/motion/motionImpl.h>
+//#include <exp/accel/motion/motionImpl.hpp>
+#include <exp/accel/motion/resampleMotionAabb.hpp>
+
+
+namespace optix_exp {
+
+using namespace motion;
+
+enum {
+    //MAX_TRANSFORM_CHAIN = 1, // MAX_TRAVERSABLE_GRAPH_DEPTH - 1 for the instance
+    MAX_TRANSFORM_CHAIN = 30, // MAX_TRAVERSABLE_GRAPH_DEPTH - 1 for the instance
+    MAX_TRAVERSABLE_GRAPH_DEPTH = 31
+};
+
+namespace {
+
+// count trailing zeros
+__device__ __inline__ unsigned int ctz( unsigned int x )
+{
+    return __clz( __brev( x ) );
+}
+
+// function to callwlate
+// gcd of two numbers.
+__device__ __inline__ unsigned int gcd(unsigned int u, unsigned int v)
+{
+    int shift;
+    if (u == 0) return v;
+    if (v == 0) return u;
+    shift = ctz(u | v);
+    u >>= ctz(u);
+    do {
+        v >>= ctz(v);
+        if (u > v) {
+            unsigned int t = v;
+            v = u;
+            u = t;
+        }  
+        v = v - u;
+    } while (v != 0);
+    return u << shift;
+}
+
+// function to callwlate 
+// lcm of two numbers. 
+__device__ __inline__ int lcm(int a, int b)
+{
+    return (a * b) / gcd(a, b); 
+}
+
+
+
+__device__ __inline__ RtcResult rtcColwertTraversableHandleToPointer( RtcTraversableHandle traversableHandle,
+                                                                      void*&               pointer,
+                                                                      RtcTraversableType&  traversableType,
+                                                                      RtcAccelType&        accelType )
+{
+    size_t bits = traversableHandle & UT_OPCODE_MASK;
+    size_t address = (traversableHandle & (~UT_OPCODE_MASK));
+
+    RtcAccelType handleAccelType = RTC_ACCEL_TYPE_NOACCEL;
+    RtcTraversableType handleTraversableType;
+
+    switch(bits)
+    {
+    case UT_TRAV_BVH2:
+        handleAccelType = RTC_ACCEL_TYPE_BVH2;
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_TOP_LEVEL_ACCEL;
+        break;
+    case UT_TRAV_BVH2_BLAS:
+        handleAccelType = RTC_ACCEL_TYPE_BVH2;
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_BOTTOM_LEVEL_ACCEL;
+        break;
+    case UT_TRAV_TTU:
+        handleAccelType = RTC_ACCEL_TYPE_TTU;
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_TOP_LEVEL_ACCEL;
+        break;
+    case UT_TRAV_TTU_BLAS:
+        handleAccelType = RTC_ACCEL_TYPE_TTU;
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_BOTTOM_LEVEL_ACCEL;
+        break;
+    case UT_TRAV_MOTION_BVH2:
+        handleAccelType = RTC_ACCEL_TYPE_MBVH2;
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_TOP_LEVEL_ACCEL;
+        break;
+    case UT_TRAV_MOTION_BVH2_BLAS:
+        handleAccelType = RTC_ACCEL_TYPE_MBVH2;
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_BOTTOM_LEVEL_ACCEL;
+        break;
+    case UT_TRAV_MOTION_TTU:
+        handleAccelType = RTC_ACCEL_TYPE_MTTU;
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_TOP_LEVEL_ACCEL;
+        break;
+    case UT_TRAV_MOTION_TTU_BLAS:
+        handleAccelType = RTC_ACCEL_TYPE_MTTU;
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_TOP_LEVEL_ACCEL;
+        break;
+    case UT_TRAV_BOTTOM_LEVEL_INSTANCE:
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_BOTTOM_LEVEL_INSTANCE;
+        break;
+    case UT_TRAV_SELECTOR:
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_SELECTOR;
+        break;
+    case UT_TRAV_STATIC_TRANSFORM:
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_STATIC_TRANSFORM;
+        break;
+    case UT_TRAV_MATRIX_MOTION_TRANSFORM:
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_MATRIX_MOTION_TRANSFORM;
+        break;
+    case UT_TRAV_SRT_MOTION_TRANSFORM:
+        handleTraversableType = RTC_TRAVERSABLE_TYPE_SRT_MOTION_TRANSFORM;
+        break;
+    default:
+        return RTC_ERROR_ILWALID_VALUE;
+    }
+
+    if( handleTraversableType == RTC_TRAVERSABLE_TYPE_BOTTOM_LEVEL_ACCEL )
+    {
+        if( address & UT_EXTENDED_BLAS_BIT )
+        {
+            handleTraversableType = RTC_TRAVERSABLE_TYPE_EXTENDED_BOTTOM_LEVEL_ACCEL;
+            address &= (~UT_EXTENDED_BLAS_BIT);
+        }
+    }
+
+    pointer = (void*)address;
+    traversableType = handleTraversableType;
+    accelType = handleAccelType;
+
+    return RTC_SUCCESS;
+}
+
+__device__ __inline__ void rtcReadBvhMotionOptions( const void* bvh, MotionOptions& motionOptions )
+{
+    const bvhtools::BvhHeader* bvhH = reinterpret_cast<const bvhtools::BvhHeader*>( bvh );
+    motionOptions.numKeys           = ::max( 1u, bvhH->numKeys );
+    motionOptions.flags             = bvhH->motionFlags;
+    motionOptions.timeBegin         = bvhH->timeBegin;
+    motionOptions.timeEnd           = bvhH->timeEnd;
+}
+
+__device__ __inline__ unsigned int getLaneMaskLt( void )
+{
+    unsigned int r;
+    asm( "mov.u32 %0, %lanemask_lt;" : "=r"( r ) );
+    return r;
+}
+__device__ __inline__ unsigned int getLaneMaskGt( void )
+{
+    unsigned int r;
+    asm( "mov.u32 %0, %lanemask_gt;" : "=r"( r ) );
+    return r;
+}
+
+__device__ __inline__ unsigned int warpPrefixSum( unsigned int activemask, unsigned int value )
+{
+    unsigned int laneId = __popc( getLaneMaskLt() & activemask );
+    for( int offset = 1; offset <= 16; offset *= 2 )
+    {
+        unsigned int n = __shfl_up_sync( activemask, value, offset );
+        if( laneId >= offset )
+            value += n;
+    }
+    return value;
+}
+
+struct ComputeMemoryUsageKernelParams
+{
+    MotionOptions iasMotionOptions;
+    const OptixInstance* instances;
+    unsigned int numInstances;
+    unsigned long long int* outTempBufferSize;
+    char* tempBuffer;
+};
+
+struct ComputeInstanceAabbsKernelParams
+{
+    MotionOptions iasMotionOptions;
+    const OptixInstance* instances;
+    unsigned int numInstances;
+    InstanceNode* tempBufferInstanceNodes;
+    Aabb* tempBufferAabbs;
+    Aabb* instanceAabbs;
+};
+
+struct Traversable {
+    __host__ __device__ __inline__ bool isTransform() const
+    {
+        return type == RTC_TRAVERSABLE_TYPE_MATRIX_MOTION_TRANSFORM || type == RTC_TRAVERSABLE_TYPE_SRT_MOTION_TRANSFORM || type == RTC_TRAVERSABLE_TYPE_STATIC_TRANSFORM;
+    }
+    __host__ __device__ __inline__ bool isMotionTransform() const
+    {
+        return type == RTC_TRAVERSABLE_TYPE_MATRIX_MOTION_TRANSFORM || type == RTC_TRAVERSABLE_TYPE_SRT_MOTION_TRANSFORM;
+    }
+
+    __host__ __device__ __inline__ const OptixSRTMotionTransform* getSrtMotionTransform()
+    {
+        assert( type == RTC_TRAVERSABLE_TYPE_SRT_MOTION_TRANSFORM );
+        return reinterpret_cast<const OptixSRTMotionTransform*>( thisP );
+    }
+
+    __host__ __device__ __inline__ const OptixMatrixMotionTransform* getMatrixMotionTransform()
+    {
+        assert( type == RTC_TRAVERSABLE_TYPE_MATRIX_MOTION_TRANSFORM );
+        return reinterpret_cast<const OptixMatrixMotionTransform*>( thisP );
+    }
+
+    __host__ __device__ __inline__ const OptixStaticTransform* getStaticTransform()
+    {
+        assert( type == RTC_TRAVERSABLE_TYPE_STATIC_TRANSFORM );
+        return reinterpret_cast<const OptixStaticTransform*>( thisP );
+    }
+
+    unsigned int numIrregularKeys = 0;
+    bool         merged           = false;
+
+    void*                thisP;
+    RtcTraversableType   type;
+    RtcTraversableHandle childTraversable;
+    MotionOptions        motionOptions;
+};
+
+// Base (i.e., beginning) of RtcMatrixMotionTransform, RtcSRTMotionTransform
+struct MotionTransformBase
+{
+    RtcTraversableHandle child;
+    Rtlw16               numKeys;
+    Rtlw16               flags;
+    RtcF32               timeBegin;
+    RtcF32               timeEnd;
+};
+
+__device__ __inline__ bool getTraversableFromHandle( const RtcTraversableHandle& childHandle, Traversable& trav )
+{
+    if( childHandle == 0 )
+        return false;
+
+    RtcAccelType accelType;
+    rtcColwertTraversableHandleToPointer( childHandle, trav.thisP, trav.type, accelType );
+
+    if( trav.isMotionTransform() )
+    {
+        MotionTransformBase* mb = reinterpret_cast<MotionTransformBase*>( trav.thisP );
+        trav.childTraversable   = mb->child;
+        trav.motionOptions      = {mb->numKeys, mb->flags, mb->timeBegin, mb->timeEnd};
+    }
+    else if( trav.isTransform() )
+    {
+        trav.childTraversable = *reinterpret_cast<RtcTraversableHandle*>( trav.thisP );
+        trav.motionOptions    = {1, 0, 0, 0};
+    }
+    else
+    {
+        assert( trav.type == RTC_TRAVERSABLE_TYPE_BOTTOM_LEVEL_ACCEL || trav.type == RTC_TRAVERSABLE_TYPE_TOP_LEVEL_ACCEL );
+        rtcReadBvhMotionOptions( trav.thisP, trav.motionOptions );
+        trav.childTraversable = 0;
+    }
+
+    return true;
+}
+
+__device__ __inline__ void getTraversableChain( RtcTraversableHandle instTraversableHandle,
+                                                Traversable outTraversables[MAX_TRANSFORM_CHAIN],
+                                                int&        outTraversableCount )
+{
+    outTraversableCount              = 0;
+    RtcTraversableHandle childHandle = instTraversableHandle;
+
+    while( getTraversableFromHandle( childHandle, outTraversables[outTraversableCount] ) )
+    {
+        childHandle = outTraversables[outTraversableCount].childTraversable;
+        outTraversableCount++;
+    }
+}
+
+__global__ void kernel_ComputeInstanceAabbs( const ComputeInstanceAabbsKernelParams p )
+{
+    const unsigned int i = threadIdx.x + blockDim.x * ( threadIdx.y + blockDim.y * ( blockIdx.x + gridDim.x * blockIdx.y ) );
+    if( i >= p.numInstances )
+        return;
+
+    unsigned int iasNumKeys = ::max( 1u, p.iasMotionOptions.numKeys );
+
+    InstanceNode* instNodes = p.tempBufferInstanceNodes;
+    if( instNodes[i].cas == 0 )
+        return;
+
+    char* aabbTempMem = reinterpret_cast<char*>( p.tempBufferAabbs );
+
+    Traversable traversables[MAX_TRANSFORM_CHAIN];
+    int traversableCount = 0;
+
+    getTraversableChain( p.instances[i].traversableHandle, traversables, traversableCount );
+
+    Aabb* iasBuildAabbs = &p.instanceAabbs[i * iasNumKeys];
+    unsigned int maxKeys = instNodes[i].maxKeys;
+
+    unsigned long long int tmpAddress = instNodes[i].tmpAddress;
+
+    Aabb* outKeyAabbs = reinterpret_cast<Aabb*>( aabbTempMem + tmpAddress );
+    tmpAddress += sizeof( Aabb ) * ( maxKeys );
+    Aabb* inKeyAabbs  = reinterpret_cast<Aabb*>( aabbTempMem + tmpAddress );
+
+    if( instNodes[i].usesOutputAsTmp )
+    {
+        // we can use the output buffer as temp memory as the max number of keys never exceeds the output key count.
+        inKeyAabbs = iasBuildAabbs;
+
+        // make sure the out buffer is not used as input to the resampling step.
+        // this assumes the in and out tmp buffers are swapped at every node in the chain.
+        if( instNodes[i].usesCasAabbEmitToOutput )
+            swap( outKeyAabbs, inKeyAabbs );
+    }
+    else
+    {
+        tmpAddress += sizeof( Aabb ) * ( maxKeys );
+    }
+
+    float* inKeyTimes  = 0;
+    float* outKeyTimes = 0;
+    if( instNodes[i].usesIrregularKeys )
+    {
+        inKeyTimes  = reinterpret_cast<float*>( aabbTempMem + tmpAddress );
+        outKeyTimes = inKeyTimes + maxKeys;
+        tmpAddress += sizeof(float) * (2*maxKeys);
+    }
+
+    //////////////////////////////////////////////////////////////////////////
+    // Part IIIa: compute motion aabbs bottom to top
+    //////////////////////////////////////////////////////////////////////////
+
+    MotionAabb inAabb ( inKeyAabbs, inKeyTimes );
+    MotionAabb outAabb( outKeyAabbs, outKeyTimes );
+
+    // outAabb contains the emitted gas aabbs.
+    Traversable& cas = traversables[traversableCount-1];
+    outAabb.initRegularDistribution( cas.motionOptions.timeBegin, cas.motionOptions.timeEnd, ::max( 1u, cas.motionOptions.numKeys ) );
+
+#pragma unroll 1
+    for( int j = traversableCount - 2; j >= 0; j-- )
+    {
+        // input becomes output, output becomes input.
+        // swap pointers instead?
+        inAabb.swap( outAabb );
+
+        Traversable& traversable = traversables[j];
+
+        if( traversable.isTransform() )
+        {
+            if( traversable.type == RTC_TRAVERSABLE_TYPE_SRT_MOTION_TRANSFORM )
+            {
+                const OptixSRTMotionTransform* mt = traversable.getSrtMotionTransform();
+                applySrtMotionTransform( (const SRTData*)mt->srtData, reinterpret_cast<const MotionOptions&>( mt->motionOptions ), inAabb, outAabb );
+            }
+            else if( traversable.type == RTC_TRAVERSABLE_TYPE_MATRIX_MOTION_TRANSFORM )
+            {
+                const OptixMatrixMotionTransform* mt = traversable.getMatrixMotionTransform();
+                applyMatrixMotionTransform( &mt->transform[0][0], reinterpret_cast<const MotionOptions&>( mt->motionOptions ), inAabb, outAabb );
+            }
+            else if( traversable.type == RTC_TRAVERSABLE_TYPE_STATIC_TRANSFORM )
+            {
+                const OptixStaticTransform* mt = traversable.getStaticTransform();
+                applyMatrixStaticTransform( mt->transform, inAabb, outAabb );
+            }
+        }
+    }
+
+    MotionAabb& motionAabb = outAabb;
+    assert( motionAabb.aabbs() != iasBuildAabbs );
+    if( iasNumKeys == 1 )
+    {
+        *iasBuildAabbs = motionAabb.aabbUnion();
+    }
+    else
+    {
+        if( motionAabb.isStatic() )
+        {
+            Aabb unionAabb = motionAabb.aabbUnion(); // union includes check for 0 aabbs / ilwalidity
+            for( unsigned int i = 0; i < motionAabb.keyCount(); ++i )
+                iasBuildAabbs[i] = unionAabb;
+        }
+        else if( motionAabb.canUseForASBuild( reinterpret_cast<const MotionOptions&>( p.iasMotionOptions ) ) )
+        {
+            for( unsigned int i = 0; i < motionAabb.keyCount(); ++i )
+                iasBuildAabbs[i] = motionAabb.aabb(i);
+        }
+        else
+        {
+            resampleMotionAabbs( motionAabb.keysAreRegularlyDistributed(), motionAabb.timeFirstKey(), motionAabb.timeLastKey(),
+                                 motionAabb.aabbs(), (unsigned int)motionAabb.keyCount(), motionAabb.keyTimes(), iasBuildAabbs,
+                                 p.iasMotionOptions.numKeys, p.iasMotionOptions.timeBegin, p.iasMotionOptions.timeEnd );
+        }
+    }
+}
+
+template<bool computeMemoryUsage>
+__global__ void kernel_ComputeMemoryUsage( const ComputeMemoryUsageKernelParams p )
+{
+    const unsigned int id = threadIdx.x + blockDim.x * ( threadIdx.y + blockDim.y * ( blockIdx.x + gridDim.x * blockIdx.y ) );
+    if( id >= p.numInstances )
+        return;
+
+    InstanceNode* instNodes = reinterpret_cast<InstanceNode*>( p.tempBuffer );
+
+    Traversable traversables[MAX_TRANSFORM_CHAIN];
+    int traversableCount = 0;
+
+    getTraversableChain( p.instances[id].traversableHandle, traversables, traversableCount );
+
+    // collect the number of irregular keys per traversable bottom-up
+    bool usesIrregularKeys = false;
+#pragma unroll 1
+    for( int i=traversableCount-1; i>=0; --i )
+    {
+        Traversable& s0 = traversables[i];
+
+        // skip nodes that have already been processed
+        if( s0.merged )
+            continue;
+
+        const int   numKeys   = s0.motionOptions.numKeys;
+        const float timeBegin = s0.motionOptions.timeBegin;
+        const float timeEnd   = s0.motionOptions.timeEnd;
+
+        // skip nodes without motion keys
+        if( numKeys <= 1 )
+            continue;
+
+        int numRegularKeys = numKeys;
+
+        s0.numIrregularKeys += numKeys;
+
+        // propagate the current regular keys up and try to merge the keys with other regular keys
+#pragma unroll 1
+        for( int j=i-1; j>=0; --j )
+        {
+            Traversable& s1 = traversables[j];
+
+            const int   childNumKeys   = s1.motionOptions.numKeys;
+            const float childTimeBegin = s1.motionOptions.timeBegin;
+            const float childTimeEnd   = s1.motionOptions.timeEnd;
+
+            // try merging regular motion keys
+            bool mergeToRegular = false;
+
+            // skip traversables that have already been processed
+            if( !s1.merged )
+            {
+                if( childNumKeys <= 1 )
+                {
+                    // static nodes can always be merged
+                    mergeToRegular = true;
+                }
+                else if( timeBegin == childTimeBegin && timeEnd == childTimeEnd )
+                {
+                    // check if keys trivially match
+                    if( childNumKeys == numRegularKeys )
+                    {
+                        // perfect match
+                        mergeToRegular = true;
+                    }
+                    else
+                    {
+                        usesIrregularKeys = true; // internally uses irregular keys to construct the combined joined distribution
+
+                                                    // if we merge the keys into regular keys, we need a common multiple of intervals
+                                                    // if we merge the keys into irregular keys, we just need the sum of keys excluding the boundaries
+                                                    // check which is best
+                        int commonMultiple = lcm( numRegularKeys - 1, childNumKeys - 1 ) + 1;
+                        if( commonMultiple <= ( childNumKeys - 2 ) + numRegularKeys )
+                        {
+                            mergeToRegular = true;
+                            numRegularKeys = commonMultiple;
+                        }
+                    }
+                }
+                else
+                {
+                    usesIrregularKeys = true;
+                }
+            }
+
+            if( mergeToRegular )
+            {
+                // this entry has been merged with descending traversable keys and can be ignored for merging from now on
+                // we still need to add in non-matching keys from descending traversables
+                s1.numIrregularKeys += numRegularKeys;
+                s1.merged = true; // flag as merged
+            }
+            else
+            {
+                int numUnmatchedKeys = numRegularKeys;
+
+                // check for matching boundaries
+                if( timeBegin == childTimeBegin )
+                    numUnmatchedKeys--;
+                if( timeEnd == childTimeEnd )
+                    numUnmatchedKeys--;
+
+                s1.numIrregularKeys += numUnmatchedKeys;
+            }
+        }
+    }
+
+    // 'null' instance
+    if( traversableCount == 0 )
+    {
+        if( !computeMemoryUsage )
+        {
+            instNodes[id] ={};
+        }
+        return;
+    }
+
+    const Traversable& casTraversable = traversables[traversableCount-1];
+
+    unsigned int numCasKeys = casTraversable.motionOptions.numKeys;
+    unsigned int maxKeys    = max( 1u, traversables[0].numIrregularKeys );
+
+    unsigned int tmpMemoryInBytes = 0;
+    tmpMemoryInBytes += maxKeys * sizeof( Aabb );
+
+    // use the output buffer when it's big enough to hold the maximum key count
+    if( maxKeys > p.iasMotionOptions.numKeys )
+    {
+        tmpMemoryInBytes += maxKeys * sizeof( Aabb );
+        if( !computeMemoryUsage )
+        {
+            instNodes[id].usesOutputAsTmp         = false;
+            instNodes[id].usesCasAabbEmitToOutput = false;
+        }
+    }
+    else if( !computeMemoryUsage )
+    {
+        instNodes[id].usesOutputAsTmp  = true;
+        instNodes[id].usesCasAabbEmitToOutput = ( ( traversableCount % 2 ) == 0 );
+    }
+
+    // we only need key times for irregular keys
+    if( usesIrregularKeys )
+        tmpMemoryInBytes += ( 2 * maxKeys ) * sizeof( float );
+
+    unsigned activemask = __activemask();
+    unsigned long long int totalTmpMemoryInBytes = 0;
+    totalTmpMemoryInBytes = warpPrefixSum( activemask, tmpMemoryInBytes );
+    if( computeMemoryUsage )
+    {
+        if( ( getLaneMaskGt() & activemask ) == 0 ) // last active thread aclwmulates
+            atomicAdd( p.outTempBufferSize, ( unsigned long long int )totalTmpMemoryInBytes );
+    }
+    else
+    {
+        instNodes[id].maxKeys           = maxKeys;
+        instNodes[id].numCasKeys        = numCasKeys;
+        instNodes[id].usesIrregularKeys = usesIrregularKeys;
+        instNodes[id].cas               = (LWdeviceptr)casTraversable.thisP;
+
+        unsigned long long int baseOffset;
+        if( ( getLaneMaskGt() & activemask ) == 0 ) // last active thread aclwmulates
+            baseOffset = atomicAdd( p.outTempBufferSize, ( unsigned long long int )totalTmpMemoryInBytes );
+        int leader = 32 - __ffs( __brev( activemask ) ); // matches the one that did the atomicAdd
+        baseOffset = __shfl_sync( activemask, baseOffset, leader );
+        instNodes[id].tmpAddress = baseOffset + totalTmpMemoryInBytes - tmpMemoryInBytes;
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Trampoline functions to call lwca kernels
+//////////////////////////////////////////////////////////////////////////
+
+#define WARPS_PER_BLOCK 4
+// This is just a helper function used to compute grid and block.
+void calcKernelDims( int numThreads, dim3& blockDim, dim3& gridDim )
+{
+    blockDim = dim3( 32, WARPS_PER_BLOCK );
+    gridDim = dim3( ( numThreads <= 0 ) ? 1 : ( ( numThreads - 1 ) / ( blockDim.x * blockDim.y * blockDim.z ) + 1 ) );
+    while( gridDim.x > 0xffff )
+    {
+        gridDim.x = ( gridDim.x + 1 ) >> 1;
+        gridDim.y <<= 1;
+    }
+}
+
+}  // namespace
+
+
+__host__ void computeMemoryUsage( LWstream             stream,
+                                  const MotionOptions* iasMotionOptions,
+                                  LWdeviceptr          instances,
+                                  unsigned int         numInstances,
+                                  LWdeviceptr          tempBufferSizeInBytes )
+{
+    dim3 block, grid;
+    calcKernelDims( (int)numInstances, block, grid );
+    ComputeMemoryUsageKernelParams params = {*iasMotionOptions, reinterpret_cast<const OptixInstance*>( instances ),
+                                             numInstances, reinterpret_cast<unsigned long long int*>( tempBufferSizeInBytes ), nullptr};
+    void ( *kernel )( ComputeMemoryUsageKernelParams ) = kernel_ComputeMemoryUsage<true>;
+    kernel<<<grid, block, 0, stream>>>( params );
+}
+
+__host__ void computePerInstanceMemory( LWstream             stream,
+                                        const MotionOptions* iasMotionOptions,
+                                        LWdeviceptr          instances,
+                                        unsigned int         numInstances,
+                                        LWdeviceptr          tempBuffer )
+{
+    dim3 block, grid;
+    calcKernelDims( (int)numInstances, block, grid );
+    ComputeMemoryUsageKernelParams params = {*iasMotionOptions, reinterpret_cast<const OptixInstance*>( instances ),
+                                             numInstances, reinterpret_cast<unsigned long long int*>( tempBuffer ),
+                                             reinterpret_cast<char*>( tempBuffer + sizeof( unsigned long long int ) )};
+    void ( *kernel )( ComputeMemoryUsageKernelParams ) = kernel_ComputeMemoryUsage<false>;
+    kernel<<<grid, block, 0, stream>>>( params );
+}
+
+__host__ void computeInstanceAabbs( LWstream             stream,
+                                    const MotionOptions* iasMotionOptions,
+                                    LWdeviceptr          instances,
+                                    unsigned int         numInstances,
+                                    LWdeviceptr          tempBuffer,
+                                    LWdeviceptr          outputAabbBuffer )
+{
+    dim3 block, grid;
+    calcKernelDims( (int)numInstances, block, grid );
+    ComputeInstanceAabbsKernelParams params = {*iasMotionOptions,
+                                               reinterpret_cast<const OptixInstance*>( instances ),
+                                               numInstances,
+                                               reinterpret_cast<InstanceNode*>( tempBuffer + sizeof( unsigned long long int ) ),
+                                               reinterpret_cast<Aabb*>( tempBuffer + sizeof( unsigned long long int ) + sizeof( InstanceNode ) * numInstances ),
+                                               reinterpret_cast<Aabb*>( outputAabbBuffer )};
+
+    kernel_ComputeInstanceAabbs<<<grid, block, 0, stream>>>( params );
+}
+
+}  // namespace optix_exp

@@ -1,0 +1,114 @@
+##############################################################################
+# LwBucket Debugger Extension Common Makefile Fragment
+##############################################################################
+# Setup LWPU specific options (Warning level 4 and link time code gen LTCG)
+LW_COPT_WARN := -W4 -WX
+LW_LTCG := 1
+
+# Setup the desired DDK version (Override the default version)
+LW_DDK_VER    ?= nt8
+LW_DDK_SUBVER ?= 9600
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+LW_INCLUDES += $(OUTPUTDIR)
+
+ifdef LWCFG_INITIALIZED
+  include $(LW_SOURCE)/drivers/common/build/LddmCommon.lwmk
+
+  # compilerOverride is used to override the default compiler.
+  #
+  # Use like this to force msvc120
+  #     compilerOverride=msvc120
+  #
+  # The override can be added to the lwmake command line like this:
+  #     lwmake compilerOverride=msvc120 ...
+  #
+  supportedCompilers = msvc120ctp msvc120 msvc120u2 msvc140 msvc140u2ctp msvc140u3 msvc141
+  newCompilers = msvc140 msvc140u2ctp msvc140u3 msvc141
+
+  ifndef compilerOverride
+    # Default compiler
+    compilerOverride = msvc120u2
+  endif
+  # Select compiler
+  compiler = $(compilerOverride)
+
+  ifeq (,$(filter $(compiler),$(supportedCompilers)))
+    $(error Invalid compiler $(compiler))
+  endif
+
+  ifneq (,$(filter $(compiler),$(newCompilers)))
+    LW_NEW_COMPILER ?= yes
+  endif
+
+  # Select a tool chain. (Sets MSVC_COMPILER_DIR if it is not already set.)
+  include $(LW_SOURCE)/drivers/common/build/$(compiler)_tools_$(LW_TARGET_ARCH).lwmk
+endif
+
+# Compiler flags
+CFLAGS += -DWIN32_LEAN_AND_MEAN=1
+CFLAGS += -DDEPRECATE_DDK_FUNCTIONS=1
+CFLAGS += -EHac -GF -GR- -GS -Gm- -Oy- -Gy
+CFLAGS += -D_STATIC_CPPLIB
+
+# Define OS type for javascript types
+LW_DEFINES += XP_WIN
+
+# Include paths
+LW_INCLUDES += $(MSVC_COMPILER_DIR)/include
+ifeq ($(LW_TARGET_OS),winxp)
+  LW_INCLUDES += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/Include/shared
+  LW_INCLUDES += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/Include/km/crt
+  LW_INCLUDES += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/Include/um
+  LW_INCLUDES += $(LW_TOOLS)/sdk/dbgeng/inc
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += protobuf
+else
+  LW_INCLUDES += $(LW_WDKSDK_INC)/shared
+  LW_INCLUDES += $(LW_WDKSDK_INC)/km/crt
+  LW_INCLUDES += $(LW_WDKSDK_INC)/km
+  LW_INCLUDES += $(LW_WDKSDK_INC)/um
+  LW_INCLUDES += $(LW_TOOLS)/sdk/dbgeng/inc
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += protobuf
+endif
+LW_INCLUDES += ../include
+
+# Library paths
+ifeq ($(LW_TARGET_ARCH),x86)
+  LFLAGS += -libpath:$(MSVC_COMPILER_DIR)/lib
+else
+  LFLAGS += -libpath:$(MSVC_COMPILER_DIR)/lib/amd64
+endif
+
+ifeq ($(LW_TARGET_OS),winxp)
+  ifeq ($(LW_TARGET_ARCH),x86)
+    LFLAGS += -libpath:$(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/lib/wilw6.3/um/x86
+  else
+    LFLAGS += -libpath:$(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/lib/wilw6.3/um/x64
+  endif
+else
+  LFLAGS += -libpath:$(LW_WDKSDK_LIB)/km/$(LW_WDKSDK_LIB_CPU)
+  LFLAGS += -libpath:$(LW_WDKSDK_LIB)/um/$(LW_WDKSDK_LIB_CPU)
+endif
+
+# Required libraries
+LFLAGS += oldnames.lib
+LFLAGS += libcmt.lib
+LFLAGS += advapi32.lib
+LFLAGS += dbgeng.lib
+LFLAGS += dbghelp.lib
+LFLAGS += gdi32.lib
+LFLAGS += gdiplus.lib
+LFLAGS += kernel32.lib
+LFLAGS += msimg32.lib
+LFLAGS += user32.lib
+LFLAGS += uuid.lib
+LFLAGS += version.lib
+
+# Check for new universal/Visual Studio runtime library required (Newer compilers)
+ifdef LW_NEW_COMPILER
+  LFLAGS += libucrt.lib
+  LFLAGS += libvcruntime.lib
+endif

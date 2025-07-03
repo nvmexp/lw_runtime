@@ -1,0 +1,183 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2021 LWPU CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ */
+
+#pragma once
+
+#include <lwtypes.h>
+#if defined(_MSC_VER)
+#pragma warning(disable:4324)
+#endif
+
+//
+// This file was generated with FINN, an LWPU coding tool.
+// Source file: ctrl/ctrlc370/ctrlc370verif.finn
+//
+#if (!defined(LWRM_UNPUBLISHED) || LWRM_UNPUBLISHED == 1)
+//
+// Please edit the original FINN IDL file to create desired edits in this header
+// See https://confluence.lwpu.com/display/CORERM/FINN for more info on how to
+// edit FINN.
+//
+#endif // (!defined(LWRM_UNPUBLISHED) || LWRM_UNPUBLISHED == 1)
+
+
+
+#include "ctrl/ctrlc370/ctrlc370base.h"
+/* C370 is partially derived from 5070 */
+#include "ctrl/ctrl5070/ctrl5070verif.h"
+
+#if (!defined(LWRM_UNPUBLISHED) || LWRM_UNPUBLISHED == 1)
+
+/*
+ * The following control calls are defined in ctrl5070verif.h, but they are
+ * still supported on LWC370. We redirect these control cmds to LW5070_CTRL_CMD,
+ * and keep the _PARAMS unchanged for now.
+ */
+
+#define LWC370_CTRL_CMD_GET_EXCEPTION_RESTART_MODE           LW5070_CTRL_CMD_GET_EXCEPTION_RESTART_MODE
+#define LWC370_CTRL_CMD_SET_EXCEPTION_RESTART_MODE           LW5070_CTRL_CMD_SET_EXCEPTION_RESTART_MODE
+
+/* LWRM_UNPUBLISHED */
+#endif // (!defined(LWRM_UNPUBLISHED) || LWRM_UNPUBLISHED == 1)
+
+
+
+
+#if (!defined(LWRM_UNPUBLISHED) || LWRM_UNPUBLISHED == 1)
+
+/*
+ * LWC370_CTRL_CMD_GET_FORCE_MODESWITCH_FLAGS_OVERRIDES
+ *
+ * This command gets modeswitch flags
+ *
+ *      headInstance
+ *          this field specifies the head from which modeswitch flags will be retrieved
+ *
+ *      modesetValue
+ *          this field specifies the retrieved modesetswitch flags
+ *
+ * Possible status values returned are:
+ *      LW_OK
+ *      LW_ERR_ILWALID_ARGUMENT
+ *
+ */
+
+/* LWRM_UNPUBLISHED */
+#endif // (!defined(LWRM_UNPUBLISHED) || LWRM_UNPUBLISHED == 1)
+
+
+
+#define LWC370_CTRL_CMD_GET_FORCE_MODESWITCH_FLAGS_OVERRIDES (0xc3700601) /* finn: Evaluated from "(FINN_LWC370_DISPLAY_VERIF_INTERFACE_ID << 8) | LWC370_CTRL_CMD_GET_FORCE_MODESWITCH_FLAGS_OVERRIDES_PARAMS_MESSAGE_ID" */
+
+#define LWC370_CTRL_CMD_GET_FORCE_MODESWITCH_FLAGS_OVERRIDES_PARAMS_MESSAGE_ID (0x1U)
+
+typedef struct LWC370_CTRL_CMD_GET_FORCE_MODESWITCH_FLAGS_OVERRIDES_PARAMS {
+    LWC370_CTRL_CMD_BASE_PARAMS base;
+    LwU32                       headInstance;
+    LwU32                       modesetValue;
+} LWC370_CTRL_CMD_GET_FORCE_MODESWITCH_FLAGS_OVERRIDES_PARAMS;
+
+/*
+ * LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_OVERRIDES
+ *
+ * This command sets modeswitch flags, prior to a modeset.  The flags will be
+ * automatically cleared at the end of each modeset, so this function must be
+ * called for each modeset where overrides are desired.
+ *
+ *      headInstance
+ *          this field specifies the head for which modeswitch flags will be overridden
+ *
+ *      modesetMaskValid
+ *          this field specifies the maskset at which modeswitch flags will be overridden
+ *
+ *      modesetValue
+ *          this field specifies the override value
+ *
+ * Possible status values returned are:
+ *      LW_OK
+ *      LW_ERR_ILWALID_ARGUMENT
+ *
+ */
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_OVERRIDES (0xc3700602) /* finn: Evaluated from "(FINN_LWC370_DISPLAY_VERIF_INTERFACE_ID << 8) | LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_OVERRIDES_PARAMS_MESSAGE_ID" */
+
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_OVERRIDES_PARAMS_MESSAGE_ID (0x2U)
+
+typedef struct LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_OVERRIDES_PARAMS {
+    LWC370_CTRL_CMD_BASE_PARAMS base;
+    LwU32                       headInstance;
+    LwU32                       modesetMaskValid;
+    LwU32                       modesetValue;
+} LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_OVERRIDES_PARAMS;
+
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_BLANK                       0:0
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_BLANK_VALID              0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_BLANK_ILWALID            0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOBLANK                     1:1
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOBLANK_VALID            0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOBLANK_ILWALID          0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_SHUTDOWN                    2:2
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_SHUTDOWN_VALID           0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_SHUTDOWN_ILWALID         0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOSHUTDOWN                  3:3
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOSHUTDOWN_VALID         0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOSHUTDOWN_ILWALID       0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_CHANGE_VPLL                 4:4
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_CHANGE_VPLL_VALID        0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_CHANGE_VPLL_ILWALID      0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOCHANGE_VPLL               5:5
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOCHANGE_VPLL_VALID      0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOCHANGE_VPLL_ILWALID    0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOBLANK_WAKEUP              6:6
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOBLANK_WAKEUP_VALID     0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOBLANK_WAKEUP_ILWALID   0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOBLANK_SHUTDOWN            7:7
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOBLANK_SHUTDOWN_VALID   0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_MASK_VALID_FORCE_NOBLANK_SHUTDOWN_ILWALID 0x00000000
+
+
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_BLANK                            0:0
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_BLANK_YES                     0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_BLANK_NO                      0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOBLANK                          1:1
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOBLANK_YES                   0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOBLANK_NO                    0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_SHUTDOWN                         2:2
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_SHUTDOWN_YES                  0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_SHUTDOWN_NO                   0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOSHUTDOWN                       3:3
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOSHUTDOWN_YES                0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOSHUTDOWN_NO                 0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_CHANGE_VPLL                      4:4
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_CHANGE_VPLL_YES               0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_CHANGE_VPLL_NO                0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOCHANGE_VPLL                    5:5
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOCHANGE_VPLL_YES             0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOCHANGE_VPLL_NO              0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOBLANK_WAKEUP                   6:6
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOBLANK_WAKEUP_YES            0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOBLANK_WAKEUP_NO             0x00000000
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOBLANK_SHUTDOWN                 7:7
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOBLANK_SHUTDOWN_YES          0x00000001
+#define LWC370_CTRL_CMD_SET_FORCE_MODESWITCH_FLAGS_VALUE_FORCE_NOBLANK_SHUTDOWN_NO           0x00000000
+
+

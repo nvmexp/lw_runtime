@@ -1,0 +1,77 @@
+#
+# Code generation rules for !.NACT makefiles.
+#
+# NOTE: this calls a sub-make makefile to avoid
+# contaminating the environment with overrides.
+# We call a sub-makefile that will generate the !.nact, specifying
+# LWNTEST_PLATFORM on the command line. This spawns a new make
+# process that will be detached from this one and won't therefore
+# interfere with the environment
+
+LWNGEN_MAKEFILE_SUB = $(LWRDIR)/generate/lwntestgenerate-files.lwmk
+LWNGEN_MAKEFILE_MAIN = $(LWRDIR)/generate/lwntestgenerate-source.lwmk
+
+P4_TARGETS += $(LW_SOURCE)/apps/lwn/lwntest/!.nact
+P4_TARGETS += $(LW_SOURCE)/apps/lwn/lwntest/build/lwntest_vs2017.vcxproj
+P4_TARGETS += $(LW_SOURCE)/apps/lwn/lwntest/build/lwntest_vs2017.vcxproj.filters
+
+LWN_COMMON_DEPS = $(LW_SOURCE)/apps/lwn/lwntest/SrcList.inc
+LWN_COMMON_DEPS += $(LWNGEN_MAKEFILE_MAIN)
+
+# Build a list of source files and headers, separated by a "--" argument.
+# These are used by the Visual Studio project file generation scripts.
+# Because of command-line argument length limitations, these are split
+# into source files and headers files before piping to the outputs.
+LWNTEST_VCPROJ_SOURCE_FILES =
+LWNTEST_VCPROJ_SOURCE_FILES += $(LWNTEST_CFILES)
+LWNTEST_VCPROJ_SOURCE_FILES += $(LWNTEST_CPPFILES)
+LWNTEST_VCPROJ_SOURCE_FILES += $(LWNTEST_CCFILES)
+LWNTEST_VCPROJ_SOURCE_FILES += --
+LWNTEST_VCPROJ_HEADER_FILES =
+LWNTEST_VCPROJ_HEADER_FILES += $(LWNTEST_HEADERS)
+
+########################################################################
+#
+# !nact build file through sub-make
+#
+LWN_NACT_GEN_DEPS = $(LWN_COMMON_DEPS)
+LWN_NACT_GEN_DEPS += $(LWNGEN_MAKEFILE_SUB)
+LWN_NACT_GEN_DEPS += $(LWRDIR)/generate/!.nact_template
+LWN_NACT_GEN_DEPS += $(LWRDIR)/generate/mknact.py
+
+$(OUTPUTDIR)/!.nact.gen: $(LWN_NACT_GEN_DEPS)
+	$(ECHO_GENCMD)
+	$(MAKE) -f $(LWNGEN_MAKEFILE_SUB) LWNTEST_PLATFORM=hos
+
+########################################################################
+#
+# Direct build of Visual Studio project file
+#
+LWN_VCPROJ_GEN_SCRIPT = $(LWRDIR)/generate/mkvcproj.pl
+LWN_VCPROJ_GEN_FILES = $(OUTPUTDIR)/lwntest_vs2017.vcxproj-files.gen
+LWN_VCPROJ_GEN_DEPS = $(LWN_COMMON_DEPS)
+LWN_VCPROJ_GEN_DEPS += $(LWN_VCPROJ_GEN_SCRIPT)
+
+# Create a file containing all of the sources.  This generated file is read by
+# the Perl script to enumerate each file instead of as individual arguemnts to
+# overcome command-line length limitations.
+$(LWN_VCPROJ_GEN_FILES): $(LWN_VCPROJ_GEN_DEPS)
+	$(ECHO_GENCMD)
+	$(file >$@,  $(LWNTEST_VCPROJ_SOURCE_FILES))
+	$(file >>$@, $(LWNTEST_VCPROJ_HEADER_FILES))
+
+$(OUTPUTDIR)/lwntest_vs2017.vcxproj.gen: $(LWN_VCPROJ_GEN_DEPS) $(LWN_VCPROJ_GEN_FILES)
+	$(ECHO_GENCMD)
+	$(PERL) $(LWN_VCPROJ_GEN_SCRIPT) $(LWN_VCPROJ_GEN_FILES) > $@
+
+########################################################################
+#
+# Direct build of Visual Studio project filters file
+#
+LWN_VCPROJF_GEN_SCRIPT = $(LWRDIR)/generate/mkvcprojflt.pl
+LWN_VCPROJF_GEN_DEPS = $(LWN_COMMON_DEPS)
+LWN_VCPROJF_GEN_DEPS += $(LWN_VCPROJF_GEN_SCRIPT)
+
+$(OUTPUTDIR)/lwntest_vs2017.vcxproj.filters.gen: $(LWN_VCPROJF_GEN_DEPS) $(LWN_VCPROJ_GEN_FILES)
+	$(ECHO_GENCMD)
+	$(PERL) $(LWN_VCPROJF_GEN_SCRIPT) $(LWN_VCPROJ_GEN_FILES) > $@

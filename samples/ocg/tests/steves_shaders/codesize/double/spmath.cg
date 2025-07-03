@@ -1,0 +1,32 @@
+unsigned int u : shared;
+float2 f: shared;
+double2 d : shared;
+
+void main()
+{
+    float s;
+    double t;
+
+    s = uint2float_rz(u);
+    s = fadd_rz(s, -f.x);
+    f.y = fmul_rz(-s, -f.y);
+
+    t = dmul_rz(-d.x, d.y);
+    t = dmul_ru(-t, -d.y);
+    t = dmul_rd(d.y, -t);
+    t = dadd_rz(t, -d.x);
+    t = dadd_ru(-t, -d.y);
+    t = dadd_rd(-t, d.x);
+    t = fma_rn(t,t,t);
+    t = fma_rz(t,-d.x,-t);
+    t = fma_ru(t, -t, d.y);
+    t = fma_rd(t, t, -d.y);
+    d.y = t;
+
+    s = fmul_rz(f.x, f.y);
+    f.x = s ? -f.x : f.y;
+
+    f.x = double2float_rz(d.y);
+}
+
+    

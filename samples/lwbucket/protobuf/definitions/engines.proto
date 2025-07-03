@@ -1,0 +1,685 @@
+// _LWRM_COPYRIGHT_BEGIN_
+//
+// Copyright 2009-2017 by LWPU Corporation.  All rights reserved.  All
+// information contained herein is proprietary and confidential to LWPU
+// Corporation.  Any use, reproduction, or disclosure without the written
+// permission of LWPU Corporation is prohibited.
+//
+// _LWRM_COPYRIGHT_END_
+
+package LwDebug.Eng;
+
+import "regs.proto";
+import "fifo.proto";
+import "pmu.proto";
+import "rtos.proto";
+import "vbios.proto";
+
+message Mc
+{
+    message RmData
+    {
+        optional uint32 pmcBoot0 = 1;
+    };
+    message PciBarInfo
+    {
+        optional uint64 offset = 1;
+        optional uint64 length = 2;
+    };
+
+    optional RmData rm_data = 1;
+    repeated PciBarInfo pci_bars = 2;
+    repeated Regs.RegsAndMem regs = 3;
+};
+
+message EngFifo
+{
+    message RmData
+    {
+        optional uint32 vChID = 1;
+        optional uint32 IntrEn0 = 2;
+        optional uint32 AllocateCount = 3;
+        optional uint32 RetryCount = 4;
+        optional uint32 IntrFlags = 5;
+    };
+
+    optional RmData rm_data = 1;
+    repeated Regs.RegsAndMem regs = 2;
+    optional Fifo.C1Contents c1_contents = 3;
+};
+
+message Gr
+{
+    message GrStateInfo
+    {
+        // Optional Data for GF100
+        optional uint32 gpcNum = 1;
+        optional uint32 tpcNum = 2;
+    };
+    repeated GrStateInfo gr_state_info = 1;
+    repeated Regs.RegsAndMem regs = 2;
+}
+
+message Fb
+{
+    message MemoryTypeInfo
+    {
+        enum RamType
+        {
+            UNKNOWN        =  0;
+            SDRAM          =  1;
+            DDR1           =  2;
+            SDDR2          =  3;
+            GDDR2          =  4;
+            GDDR3          =  5;
+            GDDR4          =  6;
+            SDDR3          =  7;
+            GDDR5          =  8;
+            LPDDR2         =  9;
+            GDDR3_BGA144   = 10;
+            GDDR3_BGA136   = 11;
+            SDDR4          = 12;
+            LPDDR4         = 13;
+            HBM1           = 14;
+            HBM2           = 15;
+            GDDR5X         = 16;
+            GDDR6          = 17;
+        };
+
+        enum VendorType
+        {
+            VENDOR_UNKNOWN =  0;
+            SAMSUNG        =  1;
+            QIMONDA        =  2;
+            ELPIDA         =  3;
+            ETRON          =  4;
+            NANYA          =  5;
+            HYNIX          =  6;
+            MOSEL          =  7;
+            WINBOND        =  8;
+            ESMT           =  9;
+            MICRON         = 15;
+        };
+
+        enum DensityType
+        {
+            DENSITY_256M   =  0;
+            DENSITY_512M   =  1;
+            DENSITY_1G     =  2;
+            DENSITY_2G     =  3;
+            DENSITY_4G     =  4;
+            DENSITY_8G     =  5;
+        };
+
+        enum OrgType
+        {
+            X4             =  0;
+            X8             =  1;
+            X16            =  2;
+            X32            =  3;
+        };
+
+        optional RamType     ramtype  = 1;
+        optional VendorType  vendorid = 2;
+        optional uint32      strap    = 3;
+        optional DensityType density  = 4;
+        optional OrgType     org      = 5;
+    };
+
+    repeated Regs.RegsAndMem regs = 1;
+    repeated MemoryTypeInfo memory_type_info = 2;
+}
+
+message Disp
+{
+    repeated Regs.RegsAndMem regs = 1;
+};
+
+message Fan
+{
+    repeated Regs.RegsAndMem regs = 1;
+};
+
+message Thermal
+{
+    repeated Regs.RegsAndMem regs = 1;
+};
+
+message Fuse
+{
+    repeated Regs.RegsAndMem regs = 1;
+};
+
+message VBios
+{
+    enum VBiosStatus
+    {
+        OK                              =  0x00000000;
+        EXPIRED                         =  0x00000001;
+        INVALID                         =  0x00000002;
+        DEVID_MISMATCH                  =  0x00000003;
+        ERR_ROMPACK_OFFSET              =  0x00000004;
+        INSUFFICIENT_RESOURCES          =  0x00000005;
+        NBSI_INCOMPLETE                 =  0x00000006;
+        ILWALID_CERT                    =  0x00000007;
+        ILWALID_HASH                    =  0x00000008;
+        VBIOS_HASH_NOT_STARTED          =  0x00000009;
+        SELWRITY_BLOCK_NOT_FOUND        =  0x0000000a;
+        FIRST_X509_NOT_FOUND            =  0x0000000b;
+        ILWALID_PEM_FORMAT              =  0x0000000c;
+        UNKNOWN_CERT_TYPE               =  0x0000000d;
+        DUPLICATE_VENDOR_CERT_FOUND     =  0x0000000e;
+        NO_PUBLIC_KEY                   =  0x0000000f;
+        POINTER_PAST_SELWRITY_BLK       =  0x00000010;
+        ILWALID_HASH_HEADER_VERSION     =  0x00000011;
+        ERR_HASH_HEADER_FLAG_SET        =  0x00000012;
+        ILWALID_SIGNATURE_HEADER_VER    =  0x00000013;
+        SIG_UNKNOWN_DIGEST_ALGO         =  0x00000014;
+        SIG_UNKNOWN_FORMAT              =  0x00000015;
+        SIG_ILWALID_SIZE                =  0x00000016;
+        SIG_VERIFICATION_FAILURE        =  0x00000017;
+        PRESERV_TABLE_HASH_NOT_STARTED  =  0x00000018;
+        NO_EXPANSION_ROM                =  0x00000019;
+        UNKNOWN_HASH_TYPE               =  0x0000001a;
+        POINTER_PAST_HASH_BLK           =  0x0000001b;
+        CERT_VALIDITY_PERIOD_NOT_FOUND  =  0x0000001c;
+        CERT_OEM_NAME_NOT_FOUND         =  0x0000001d;
+        CERT_CHAIN_OF_TRUST_FAILURE     =  0x0000001e;
+        NO_BIT_HEADER                   =  0x0000001f;
+        NO_VBIOS_FOUND                  =  0x00000020;
+        ILWALID_PARAMS                  =  0x00000021;
+        NOT_SILICON_OR_EMULATION        =  0x00000022;
+        LW_CONFIG_PCI_LW_20_READ_ERROR  =  0x00000023;
+        ILWALID_PCI_ROM_SIG             =  0x00000024;
+        ILWALID_PCI_DATA_SIG            =  0x00000025;
+        ILWALID_PCI_HEADER              =  0x00000026;
+        ILWALID_CHECKSUM                =  0x00000027;
+        NO_NBSI_BLOCK                   =  0x00000028;
+        CANNOT_MAP_TO_KERNEL_SPACE      =  0x00000029;
+        IMAGE_EXCEEDS_PCIR_SIZE         =  0x0000002a;
+        PCIR_VENDOR_ID_MISMATCH         =  0x0000002b;
+        PCIR_LEN_EXCEEDS_IMAGE          =  0x0000002c;
+        IMAGE_SIZE_OUT_OF_BOUNDS        =  0x0000002d;
+        REGISTRY_NOT_FOUND              =  0x0000002e;
+        VOLATILE_REGISTRY_NOT_FOUND     =  0x0000002f;
+        GPUMGR_OBJECT_NOT_FOUND         =  0x00000030;
+        GPUMGR_BUFFER_TOO_SMALL         =  0x00000031;
+        INSTANCE_NOT_FOUND              =  0x00000032;
+        IMAGE_VERIFICATION_FAILURE      =  0x00000033;
+        UNSET                           =  0x00000034;
+    };
+
+    optional uint32 bios_rev          = 1;
+    optional uint32 bios_oem_rev      = 2; // [default = 0];
+    repeated bytes  oca_data_obs      = 3 [deprecated = true];  // Obsolete.  Was never used.
+    optional bytes  mxm_table         = 4;
+    optional Vbios.OCAData oca_data   = 5;
+    optional uint32 board_id          = 6;
+    optional uint32 business_cycle    = 7;
+    optional string chip_sku          = 8;
+    optional string project           = 9;
+    optional bytes  vbios_image       = 10;
+    optional VBiosStatus vbios_status = 11;
+    repeated Regs.RegsAndMem regs     = 12;
+};
+
+message Perf
+{
+    message PerfLimit
+    {
+        //
+        // NOTE:  This enumeration must match LW2080_CTRL_PERF_LIMIT_xyz in ctrl2080perf.h.
+        //
+        enum Name
+        {
+            PERF_LIMIT_PERFMON                        = 0x00;
+            PERF_LIMIT_NO_CLIENT                      = 0x01;
+            PERF_LIMIT_SCREEN_SAVER                   = 0x02;
+            PERF_LIMIT_NO_HIRES                       = 0x03;
+            PERF_LIMIT_OS_LEVEL                       = 0x04;
+            PERF_LIMIT_SPDIFF_GLITCH                  = 0x05;
+            PERF_LIMIT_DISPLAY_GLITCH                 = 0x06;
+            PERF_LIMIT_UNLOAD_DRIVER                  = 0x07;
+            PERF_LIMIT_POWERMIZER                     = 0x08;
+            PERF_LIMIT_STRESSTEST_FAILURE             = 0x09;
+            PERF_LIMIT_RC_ERROR                       = 0x0a;
+            PERF_LIMIT_MIN_FAN_LEVEL                  = 0x0b;
+            PERF_LIMIT_MCLK_CLONE                     = 0x0c;
+            PERF_LIMIT_OVERLAY                        = 0x0d;
+            PERF_LIMIT_HD_FRAMEDROP_WAR               = 0x10;
+            PERF_LIMIT_ISMODEPOSSIBLE                 = 0x11;
+            PERF_LIMIT_FORCED                         = 0x15;
+            PERF_LIMIT_FORCED_DACPERFTEST             = 0x16;
+            PERF_LIMIT_FORCED_STRESSTEST              = 0x18;
+            PERF_LIMIT_POWERMIZER_HARD                = 0x19;
+            PERF_LIMIT_THERMAL                        = 0x1a;
+            PERF_LIMIT_SYSPERF                        = 0x1b;
+            PERF_LIMIT_PWR_SUPPLY_CAPACITY            = 0x1c;
+            PERF_LIMIT_SW_BATTPOWER                   = 0x1d;
+            PERF_LIMIT_EXT_PERF_CONTROL               = 0x1e;
+            PERF_LIMIT_MXM_ACPOWER                    = 0x1f;
+            PERF_LIMIT_AUX_POWER                      = 0x20;
+            PERF_LIMIT_DEEP_IDLE                      = 0x23;
+            PERF_LIMIT_CLIENT_HARD                    = 0x25;
+            PERF_LIMIT_OVERCLOCK                      = 0x26;
+            PERF_LIMIT_FORCED_LINKTRAIN               = 0x27;
+            PERF_LIMIT_BUG_535734                     = 0x29;
+            PERF_LIMIT_BOOST                          = 0x2a;
+            PERF_LIMIT_PM_DYNAMIC                     = 0x2b;
+            PERF_LIMIT_MODS_RULES                     = 0x2c;
+            PERF_LIMIT_EXCEPT_VIDEO                   = 0x2d;
+            PERF_LIMIT_SDI_INPUT_CAPTURE              = 0x2e;
+            PERF_LIMIT_BANDWIDTH_HCLONE               = 0x2f;
+            PERF_LIMIT_VPS                            = 0x31;
+            PERF_LIMIT_CANOAS_MODE                    = 0x32;
+            PERF_LIMIT_BUG_660789                     = 0x33;
+            PERF_LIMIT_LOCKED_DRIVER                  = 0x35;
+            PERF_LIMIT_PMU_OVERRIDE                   = 0x36;
+            PERF_LIMIT_CLIENT_0_MAX                   = 0x37;
+            PERF_LIMIT_CLIENT_0_MIN                   = 0x38;
+            PERF_LIMIT_CLIENT_1_MAX                   = 0x39;
+            PERF_LIMIT_CLIENT_1_MIN                   = 0x3a;
+            PERF_LIMIT_CLIENT_2_MAX                   = 0x3b;
+            PERF_LIMIT_CLIENT_2_MIN                   = 0x3c;
+            PERF_LIMIT_PERFMON_GROUP_1                = 0x3d;
+            PERF_LIMIT_RATED_TDP_MAX                  = 0x40;
+            PERF_LIMIT_OVERVOLTAGE_LOGIC              = 0x41;
+            PERF_LIMIT_RELIABILITY_LOGIC              = 0x42;
+            PERF_LIMIT_PMU_DOM_GRP_1                  = 0x43;
+            PERF_LIMIT_AUX_PWR_STATE                  = 0x44;
+            PERF_LIMIT_PERFORMANCE_CAP                = 0x45;
+            PERF_LIMIT_THERM_POLICY_DOM_GRP_1         = 0x46;
+            PERF_LIMIT_PERFORMANCE_CAP1               = 0x47;
+            PERF_LIMIT_THERM_POLICY_DOM_GRP_0         = 0x48;
+            PERF_LIMIT_CLIENT_STRICT_DRAM_MAX         = 0x49;
+            PERF_LIMIT_CLIENT_STRICT_DRAM_MIN         = 0x4a;
+            PERF_LIMIT_CLIENT_STRICT_GPC_MAX          = 0x4b;
+            PERF_LIMIT_CLIENT_STRICT_GPC_MIN          = 0x4c;
+            PERF_LIMIT_RELIABILITY_ALT_LOGIC          = 0x4d;
+            PERF_LIMIT_THERM_POLICY_LWVDD             = 0x4e;
+            PERF_LIMIT_RATED_TDP_MIN                  = 0x4f;
+            PERF_LIMIT_EDP_POLICY_DOM_GRP_1           = 0x50;
+            PERF_LIMIT_SLI_GPU_BOOST_DOM_GRP_0        = 0x51;
+            PERF_LIMIT_SLI_GPU_BOOST_DOM_GRP_1        = 0x52;
+            PERF_LIMIT_ISMODEPOSSIBLE_DISP            = 0x53;
+            PERF_LIMIT_LWDA_MAX                       = 0x54;
+            PERF_LIMIT_GPU_IS_IDLE                    = 0x55;
+            PERF_LIMIT_SUSPEND_POWER                  = 0x56;
+            PERF_LIMIT_GPU_IS_IDLE_GROUP1             = 0x57;
+            PERF_LIMIT_SLI_DOM_GRP_0_MIN              = 0x58;
+            PERF_LIMIT_APPLICATIONCLOCKS              = 0x59;
+            PERF_LIMIT_LWSTOMER_BOOST_MAX             = 0x5a;
+            PERF_LIMIT_CLIENT_STRICT_DISP_MAX         = 0x5b;
+            PERF_LIMIT_CLIENT_STRICT_DISP_MIN         = 0x5c;
+            PERF_LIMIT_CLIENT_LOOSE_0_MAX             = 0x5d;
+            PERF_LIMIT_CLIENT_LOOSE_1_MAX             = 0x5e;
+            PERF_LIMIT_CLIENT_LOOSE_2_MAX             = 0x5f;
+            PERF_LIMIT_CLIENT_LOOSE_0_MIN             = 0x60;
+            PERF_LIMIT_CLIENT_LOOSE_1_MIN             = 0x61;
+            PERF_LIMIT_CLIENT_LOOSE_2_MIN             = 0x62;
+            PERF_LIMIT_INTERSECT                      = 0x63;
+            PERF_LIMIT_INTERSECT_LOGIC_1_MAX          = 0x64;
+            PERF_LIMIT_INTERSECT_LOGIC_2_MAX          = 0x65;
+            PERF_LIMIT_INTERSECT_SRAM_0_MAX           = 0x66;
+            PERF_LIMIT_INTERSECT_SRAM_1_MAX           = 0x67;
+            PERF_LIMIT_INTERSECT_SRAM_2_MAX           = 0x68;
+            PERF_LIMIT_INTERSECT_LOGIC_0_MIN          = 0x69;
+            PERF_LIMIT_INTERSECT_LOGIC_1_MIN          = 0x6a;
+            PERF_LIMIT_INTERSECT_LOGIC_2_MIN          = 0x6b;
+            PERF_LIMIT_INTERSECT_SRAM_0_MIN           = 0x6c;
+            PERF_LIMIT_INTERSECT_SRAM_1_MIN           = 0x6d;
+            PERF_LIMIT_INTERSECT_SRAM_2_MIN           = 0x6e;
+            PERF_LIMIT_OVERVOLTAGE_SRAM               = 0x6f;
+            PERF_LIMIT_RELIABILITY_ALT_SRAM           = 0x70;
+            PERF_LIMIT_RELIABILITY_SRAM               = 0x71;
+            PERF_LIMIT_MODS_RULES_LOGIC               = 0x72;
+            PERF_LIMIT_MODS_RULES_SRAM                = 0x73;
+            PERF_LIMIT_CLIENT_LOW_INTERSECT           = 0x74;
+            PERF_LIMIT_CLIENT_LOW_STRICT_DRAM_MAX     = 0x75;
+            PERF_LIMIT_CLIENT_LOW_STRICT_GPC_MAX      = 0x76;
+            PERF_LIMIT_CLIENT_LOW_STRICT_DISP_MAX     = 0x77;
+            PERF_LIMIT_CLIENT_LOW_STRICT_DRAM_MIN     = 0x78;
+            PERF_LIMIT_CLIENT_LOW_STRICT_GPC_MIN      = 0x79;
+            PERF_LIMIT_CLIENT_LOW_STRICT_DISP_MIN     = 0x7a;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_0_MAX         = 0x7b;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_1_MAX         = 0x7c;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_2_MAX         = 0x7d;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_0_MIN         = 0x7e;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_1_MIN         = 0x7f;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_2_MIN         = 0x80;
+            PERF_LIMIT_MODS_RULES_INTERSECT           = 0x81;
+            PERF_LIMIT_MODS_RULES_STRICT_DRAM_MAX     = 0x82;
+            PERF_LIMIT_MODS_RULES_STRICT_GPC_MAX      = 0x83;
+            PERF_LIMIT_MODS_RULES_STRICT_DISP_MAX     = 0x84;
+            PERF_LIMIT_MODS_RULES_STRICT_DRAM_MIN     = 0x85;
+            PERF_LIMIT_MODS_RULES_STRICT_GPC_MIN      = 0x86;
+            PERF_LIMIT_MODS_RULES_STRICT_DISP_MIN     = 0x87;
+            PERF_LIMIT_MODS_RULES_LOOSE_0_MAX         = 0x88;
+            PERF_LIMIT_MODS_RULES_LOOSE_1_MAX         = 0x89;
+            PERF_LIMIT_MODS_RULES_LOOSE_2_MAX         = 0x8a;
+            PERF_LIMIT_MODS_RULES_LOOSE_0_MIN         = 0x8b;
+            PERF_LIMIT_MODS_RULES_LOOSE_1_MIN         = 0x8c;
+            PERF_LIMIT_MODS_RULES_LOOSE_2_MIN         = 0x8d;
+            PERF_LIMIT_VMIN_LOGIC                     = 0x8e;
+            PERF_LIMIT_VMIN_SRAM                      = 0x8f;
+            PERF_LIMIT_CLIENT_LOW_STRICT_PSTATE_MIN   = 0x90;
+            PERF_LIMIT_CLIENT_LOW_STRICT_PSTATE_MAX   = 0x91;
+            PERF_LIMIT_CLIENT_STRICT_PSTATE_MAX       = 0x92;
+            PERF_LIMIT_CLIENT_STRICT_PSTATE_MIN       = 0x93;
+            PERF_LIMIT_MODS_RULES_STRICT_PSTATE_MAX   = 0x94;
+            PERF_LIMIT_MODS_RULES_STRICT_PSTATE_MIN   = 0x95;
+            PERF_LIMIT_GPU_STATE_LOAD_BOOST_DOM_GRP_0 = 0x96;
+            PERF_LIMIT_GPU_STATE_LOAD_BOOST_DOM_GRP_1 = 0x97;
+            PERF_LIMIT_UNLOAD_DRIVER_PSTATE           = 0x98;
+            PERF_LIMIT_UNLOAD_DRIVER_VOLTAGE_RAIL_0   = 0x99;
+            PERF_LIMIT_UNLOAD_DRIVER_VOLTAGE_RAIL_1   = 0x9a;
+            PERF_LIMIT_UNLOAD_DRIVER_DISP             = 0x9b;
+            PERF_LIMIT_CLIENT_LOW_STRICT_PCIE_MAX     = 0x9c;
+            PERF_LIMIT_CLIENT_LOW_STRICT_PCIE_MIN     = 0x9d;
+            PERF_LIMIT_CLIENT_STRICT_PCIE_MAX         = 0x9e;
+            PERF_LIMIT_CLIENT_STRICT_PCIE_MIN         = 0x9f;
+            PERF_LIMIT_MODS_RULES_STRICT_PCIE_MAX     = 0xa0;
+            PERF_LIMIT_MODS_RULES_STRICT_PCIE_MIN     = 0xa1;
+            PERF_LIMIT_CLIENT_LOOSE_3_MAX             = 0xa2;
+            PERF_LIMIT_CLIENT_LOOSE_4_MAX             = 0xa3;
+            PERF_LIMIT_CLIENT_LOOSE_5_MAX             = 0xa4;
+            PERF_LIMIT_CLIENT_LOOSE_6_MAX             = 0xa5;
+            PERF_LIMIT_CLIENT_LOOSE_7_MAX             = 0xa6;
+            PERF_LIMIT_CLIENT_LOOSE_8_MAX             = 0xa7;
+            PERF_LIMIT_CLIENT_LOOSE_9_MAX             = 0xa8;
+            PERF_LIMIT_CLIENT_LOOSE_3_MIN             = 0xa9;
+            PERF_LIMIT_CLIENT_LOOSE_4_MIN             = 0xaa;
+            PERF_LIMIT_CLIENT_LOOSE_5_MIN             = 0xab;
+            PERF_LIMIT_CLIENT_LOOSE_6_MIN             = 0xac;
+            PERF_LIMIT_CLIENT_LOOSE_7_MIN             = 0xad;
+            PERF_LIMIT_CLIENT_LOOSE_8_MIN             = 0xae;
+            PERF_LIMIT_CLIENT_LOOSE_9_MIN             = 0xaf;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_3_MAX         = 0xb0;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_4_MAX         = 0xb1;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_5_MAX         = 0xb2;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_6_MAX         = 0xb3;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_7_MAX         = 0xb4;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_8_MAX         = 0xb5;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_9_MAX         = 0xb6;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_3_MIN         = 0xb7;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_4_MIN         = 0xb8;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_5_MIN         = 0xb9;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_6_MIN         = 0xba;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_7_MIN         = 0xbb;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_8_MIN         = 0xbc;
+            PERF_LIMIT_CLIENT_LOW_LOOSE_9_MIN         = 0xbd;
+            PERF_LIMIT_MODS_RULES_LOOSE_3_MAX         = 0xbe;
+            PERF_LIMIT_MODS_RULES_LOOSE_4_MAX         = 0xbf;
+            PERF_LIMIT_MODS_RULES_LOOSE_5_MAX         = 0xc0;
+            PERF_LIMIT_MODS_RULES_LOOSE_6_MAX         = 0xc1;
+            PERF_LIMIT_MODS_RULES_LOOSE_7_MAX         = 0xc2;
+            PERF_LIMIT_MODS_RULES_LOOSE_8_MAX         = 0xc3;
+            PERF_LIMIT_MODS_RULES_LOOSE_9_MAX         = 0xc4;
+            PERF_LIMIT_MODS_RULES_LOOSE_3_MIN         = 0xc4;
+            PERF_LIMIT_MODS_RULES_LOOSE_4_MIN         = 0xc5;
+            PERF_LIMIT_MODS_RULES_LOOSE_5_MIN         = 0xc6;
+            PERF_LIMIT_MODS_RULES_LOOSE_6_MIN         = 0xc7;
+            PERF_LIMIT_MODS_RULES_LOOSE_7_MIN         = 0xc8;
+            PERF_LIMIT_MODS_RULES_LOOSE_8_MIN         = 0xc9;
+            PERF_LIMIT_MODS_RULES_LOOSE_9_MIN         = 0xca;
+        };
+
+        enum MinMax
+        {
+            NONE           =  0;
+            MIN            =  1;
+            MAX            =  2;
+            BOTH           =  3;
+        };
+
+        optional uint32   priority    = 1;
+        optional Name     name        = 2;
+        optional MinMax   minmax      = 3;
+        optional uint32   dom_grp_idx = 4;
+        optional uint32   value       = 5;
+    };
+
+    message OverclockState
+    {
+        //
+        // Information about the clock programming entry. All frequency deltas
+        // are in kHz.
+        //
+        // index     - The index of the clk prog. entry.
+        // avg_delta - Average frequency delta of the VF points for the entry.
+        // min_delta - Minimum frequency delta of the VF points for the entry.
+        // max_delta - Maximum frequency delta of the VF points for the entry.
+        //
+        message ClkProg
+        {
+            optional uint32 index     = 1;
+            optional sint32 avg_delta = 2;
+            optional sint32 min_delta = 3;
+            optional sint32 max_delta = 4;
+        };
+
+        enum ClockDomain
+        {
+            GpcClk         = 1;
+            MClk           = 5;
+            DispClk        = 7;
+            Gpc2Clk        = 13;
+        };
+        optional ClockDomain clk_domain     = 1;
+        optional sint32      factory_offset = 2; // In kHz
+        optional sint32      user_offset    = 3; // In kHz; for P-states 2.x
+        repeated ClkProg     clock_prog     = 4; // For P-states 3.x
+    };
+
+    optional uint32         perfLevel            = 1;
+    optional bool           has_decoupled_clocks = 2;
+    optional bool           has_vpstates         = 3;
+    optional uint32         num_perf_levels      = 4;
+    repeated PerfLimit      active_perf_limits   = 5;
+    repeated OverclockState overclock_state      = 6;
+    repeated Regs.RegsAndMem regs                = 7;
+};
+
+message Bus
+{
+    repeated Regs.RegsAndMem regs = 1;
+};
+
+// Deprecated (do NOT use/enhance)
+message Pmu_Obsolete
+{
+    repeated Regs.RegsAndMem             regs            = 1   [deprecated = true];
+    optional Pmu.FalconRegs_Obsolete     falcon_regs     = 2   [deprecated = true];
+    optional Pmu.PmuRegs_Obsolete        pmu_regs        = 3   [deprecated = true];
+    optional Pmu.FalconRegsInd_Obsolete  falcon_regs_ind = 4   [deprecated = true];
+    optional Pmu.PmuMiscState_Obsolete   pmu_misc_state  = 5   [deprecated = true];
+    optional Rtos.FlcnRegs               flcn_regs       = 11  [deprecated = true];
+    optional Pmu.DebugStatePmu_Obsolete  debug_state_pmu = 21  [deprecated = true];
+    optional Pmu.DebugStateRm_Obsolete   debug_state_rm  = 22  [deprecated = true];
+};
+
+message Ce
+{
+    message CeStatInfo
+    {
+        optional uint32 eng_num = 1;
+    };
+    repeated Regs.RegsAndMem regs = 1;
+};
+
+message RtosFlcn
+{
+    optional Rtos.FlcnId        flcn_id         =  1;
+    optional uint32             flcn_revision   =  2;
+    optional Rtos.FlcnSelwrity  flcn_selwrity   =  3;
+    optional bool               flcn_is_halted  =  4;
+    repeated Regs.RegsAndMem    regs            = 10;
+    repeated Rtos.FlcnRegs      flcn_regs       = 11;
+    optional Rtos.RtosState     rtos_state      = 21;
+    repeated Rtos.RtosTaskState rtos_task_state = 22;
+};
+
+message Lpwr
+{
+    repeated Regs.RegsAndMem    regs            =  1;
+};
+
+message Volt
+{
+    enum VoltRail
+    {
+        VOLT_RAIL_ILWALID = 0x00;
+        VOLT_RAIL_LOGIC   = 0x01;
+        VOLT_RAIL_SRAM    = 0x02;
+    }
+
+    message VoltRailInfo
+    {
+        optional VoltRail rail    = 1;
+        optional uint32   voltage = 2;
+    };
+
+    repeated Regs.RegsAndMem regs          = 1;
+    optional uint32          lwvdd         = 2;
+    repeated VoltRailInfo    volt_rail     = 3;
+    optional uint32          speedo        = 4;
+    optional bool            speedo_signed = 5;
+};
+
+message Gpu
+{
+    enum GpuSampleType
+    {
+        PRODUCTION_0      = 0x00;
+        ES                = 0x01;
+        QS                = 0x02;
+        QS2               = 0x03;
+        PRODUCTION_4      = 0x04;
+        PRODUCTION_5      = 0x05;
+        PRODUCTION_6      = 0x06;
+        PRODUCTION_7      = 0x07;
+    }
+
+    optional uint32             gpu_id                          = 1;
+    optional bool               is_sli                          = 2;
+    optional bool               is_notebook                     = 3;
+    optional bool               is_virtual                      = 4;
+    optional bool               is_full_power                   = 5;
+    optional bool               is_in_fullchip_reset            = 6;
+    optional bool               is_in_sec_bus_reset             = 7;
+    optional bool               is_in_gc6_reset                 = 8;
+    optional bool               is_suspended                    = 9;
+    optional bool               is_lost                         = 10;
+    optional bool               is_accessible                   = 11;
+    optional bool               is_pmu_mutex_held               = 12;
+    optional bool               is_elpg_enabled                 = 13;
+    optional uint32             pwr_feature_setting             = 14;
+    optional uint32             pwr_feature2_setting            = 15;
+    optional uint32             elcg_override_setting           = 16;
+    optional uint32             elpg_override_setting           = 17;
+    optional uint32             blcg_override_setting           = 18;
+    optional uint32             fspg_override_setting           = 19;
+    optional uint32             slcg_override_setting           = 20;
+    optional uint32             jt_override_setting             = 21;
+    optional uint32             clock_slowdown_override_setting = 22;
+    optional uint32             pwr_feature_active              = 23;
+    optional uint32             pwr_feature2_active             = 24;
+    optional uint32             elcg_override_active            = 25;
+    optional uint32             elpg_override_active            = 26;
+    optional uint32             blcg_override_active            = 27;
+    optional uint32             fspg_override_active            = 28;
+    optional uint32             slcg_override_active            = 29;
+    optional uint32             jt_override_active              = 30;
+    optional uint32             clock_slowdown_override_active  = 31;
+    optional GpuSampleType      gpu_sample_type                 = 32;
+    optional uint32             clk_ndiv_sliding_active         = 33;
+    optional uint32             clk_op_mode_active              = 34;
+    optional uint32             lwvdd_psi_active                = 35;
+    optional uint32             rppg_active                     = 36;
+    repeated Regs.RegsAndMem    regs                            = 37;
+};
+
+message Lwd
+{
+    repeated Regs.RegsAndMem    regs            =  1;
+};
+
+message clockInfo
+{
+    enum ClockDomain
+    {
+        UNDEFINED         = 0x00000000;
+        GPCCLK            = 0x00000001;
+        XBARCLK           = 0x00000002;
+        SYSCLK            = 0x00000004;
+        HUBCLK            = 0x00000008;
+        MCLK              = 0x00000010;
+        HOSTCLK           = 0x00000020;
+        DISPCLK           = 0x00000040;
+        PCLK0             = 0x00000080;
+        PCLK1             = 0x00000100;
+        PCLK2             = 0x00000200;
+        PCLK3             = 0x00000400;
+        XCLK              = 0x00000800;
+        GPC2CLK           = 0x00001000;
+        LTC2CLK           = 0x00002000;
+        XBAR2CLK          = 0x00004000;
+        SYS2CLK           = 0x00008000;
+        HUB2CLK           = 0x00010000;
+        LEGCLK            = 0x00020000;
+        UTILSCLK          = 0x00040000;
+        PWRCLK            = 0x00080000;
+        LWDCLK            = 0x00100000;
+        PCIEGENCLK        = 0x00200000;
+        VCLK0             = 0x00400000;
+        VCLK1             = 0x00800000;
+        VCLK2             = 0x01000000;
+        VCLK3             = 0x02000000;
+    }
+
+    enum ClockSource
+    {
+        SOURCE_DEFAULT    = 0x00;
+        SOURCE_MPLL       = 0x01;
+        SOURCE_DISPPLL    = 0x02;
+        SOURCE_VPLL0      = 0x03;
+        SOURCE_VPLL1      = 0x04;
+        SOURCE_VPLL2      = 0x05;
+        SOURCE_VPLL3      = 0x06;
+        SOURCE_SPPLL0     = 0x07;
+        SOURCE_SPPLL1     = 0x08;
+        SOURCE_XCLK       = 0x09;
+        SOURCE_PEXREFCLK  = 0x0A;
+        SOURCE_XTAL       = 0x0B;
+        SOURCE_XX3CLKDIV2 = 0x0C;
+        SOURCE_GPCPLL     = 0x0D;
+        SOURCE_LTCPLL     = 0x0E;
+        SOURCE_XBARPLL    = 0x0F;
+        SOURCE_SYSPLL     = 0x10;
+        SOURCE_XTAL4X     = 0x11;
+        SOURCE_REFMPLL    = 0x12;
+        SOURCE_HOSTCLK    = 0x13;
+        SOURCE_XCLK500    = 0x14;
+        SOURCE_XCLKGEN3   = 0x15;
+        SOURCE_HBMPLL     = 0x16;
+        SOURCE_LWDPLL     = 0x17;
+    }
+
+    optional uint32          flags             = 1;
+    optional ClockDomain     clkDomain         = 2;
+    optional uint32          actualFreq        = 3;
+    optional uint32          targetFreq        = 4;
+    optional ClockSource     clkSource         = 5; // [default = SOURCE_DEFAULT];
+};
+
+message clkChanges
+{
+    optional uint64           timestamp        = 1;
+    repeated clockInfo        new_clk          = 2;
+};
+
+message Clk
+{
+    repeated clkChanges      clk_changes       = 1;
+    repeated Regs.RegsAndMem regs              = 2;
+};

@@ -1,0 +1,126 @@
+# File should be included in main lwcm/makefile.lwmk
+
+##############################################################################
+# define SOURCES
+##############################################################################
+LWRRENT_DIR := testing
+
+LWMLCOMMON_DIR = $(LW_SOURCE)/apps/lwml/common
+LWML_DIR = $(LW_SOURCE)/apps/lwml
+LWMLCOMMON_RELATIVE_DIR := ../../lwml/common
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += TestStatCollection.cpp
+LOCAL_SOURCES += TestCacheManager.cpp
+LOCAL_SOURCES += TestFieldGroups.cpp
+LOCAL_SOURCES += TestLwcmUnitTests.cpp
+LOCAL_SOURCES += TestProtobuf.cpp
+LOCAL_SOURCES += TestVersioning.cpp
+LOCAL_SOURCES += TestPolicyManager.cpp
+LOCAL_SOURCES += TestHealthMonitor.cpp
+LOCAL_SOURCES += TestDiagManager.cpp
+LOCAL_SOURCES += TestLwcmValue.cpp
+LOCAL_SOURCES += TestKeyedVector.cpp
+LOCAL_SOURCES += TestGroupManager.cpp
+LOCAL_SOURCES += TestTopology.cpp
+LOCAL_SOURCES += TestDcgmConnections.cpp
+LOCAL_SOURCES += TestDiagResponseWrapper.cpp
+LOCAL_SOURCES += ../modules/diag/DcgmDiagManager.cpp
+LOCAL_SOURCES += ../modules/diag/DcgmDiagCommon.cpp
+LOCAL_SOURCES += ../modules/diag/DcgmDiagResponseWrapper.cpp
+LOCAL_SOURCES += ../lwvs/libs/jsoncpp-0.10.6/src/jsoncpp.cpp
+
+#The following are to support TestStatCollection
+LOCAL_SOURCES += ../common/DcgmStatCollection.cpp
+LOCAL_SOURCES += $(LWMLCOMMON_RELATIVE_DIR)/measurementcollection.c
+
+ifdef DCGM_BUILD_LWSWITCH_MODULE
+    LOCAL_SOURCES += TestDcgmModuleLwSwitch.cpp
+endif
+
+ifdef DCGM_BUILD_VGPU_MODULE
+    LOCAL_SOURCES += TestDcgmModuleVgpu.cpp
+endif
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+#LOCAL_OBJECTS += $(lwml_loader_TARGET)
+
+##############################################################################
+# define LOCAL_CFLAGS
+##############################################################################
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += .
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(LWML_DIR)
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(DCGM_DIR)/common
+LOCAL_INCLUDES += $(DCGM_DIR)/common/protobuf
+LOCAL_INCLUDES += $(DCGM_DIR)/common/transport
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/src
+LOCAL_INCLUDES += $(DCGM_DIR)/modules
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/lwswitch
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/vgpu
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/diag
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/config
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/protobuf-2.6.0/include/
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/libevent-2.0.22-stable/include/
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/libevent-2.0.22-stable/include/event2/
+LOCAL_INCLUDES += $(DCGM_DIR)/lwvs/libs/jsoncpp-0.10.6/include
+LOCAL_INCLUDES += $(DCGM_DIR)/lwvs/include
+
+# Do not modify CFLAGS because it will be global
+# All other files with LOCAL_CFLAGS use $(DCGM_GLOBAL_CFLAGS) as the base.
+# In this case, that would cause gcc to complain about an "undefined reference"
+LOCAL_CFLAGS :=
+LOCAL_CFLAGS += -DLWML_STATIC_IMPORT=1
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+ifdef DCGM_BUILD_LWSWITCH_MODULE
+LOCAL_CFLAGS += -DDCGM_BUILD_LWSWITCH_MODULE
+endif
+
+ifdef DCGM_BUILD_VGPU_MODULE
+LOCAL_CFLAGS += -DDCGM_BUILD_VGPU_MODULE
+endif
+
+##############################################################################
+# define LOCAL_LDFLAGS
+##############################################################################
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += -L $(LWML_DIR)/$(OUTPUTDIR) -rdynamic
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+LOCAL_LDFLAGS += -L $(OUTPUTDIR) -ldcgm
+LOCAL_LDFLAGS += -lstdc++ -lgcc_s
+
+##############################################################################
+# build
+##############################################################################
+
+testdcgmunittests_TARGET  := $(OUTPUTDIR)/testdcgmunittests$(BINSUFFIX)
+testdcgmunittests_OBJECTS := $(LOCAL_OBJECTS)
+testdcgmunittests_CFLAGS  := $(LOCAL_CFLAGS)
+testdcgmunittests_LDFLAGS := $(LOCAL_LDFLAGS)
+testdcgmunittests_DEPENDS := $(dcgm_TARGET)
+
+build: $(testdcgmunittests_TARGET)
+dcgmbuildsyncpoint:: $(testdcgmunittests_TARGET)
+$(eval $(call MAKE_EXELWTABLE,testdcgmunittests))
+
+##############################################################################
+# export directory
+##############################################################################
+
+#export: $(EXPORT_DIR)/testdcgmunittests$(BINSUFFIX)
+
+#################################################################################
+# End of nested lwmk
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

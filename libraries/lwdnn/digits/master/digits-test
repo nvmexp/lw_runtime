@@ -1,0 +1,24 @@
+#!/bin/bash
+# Copyright (c) 2014-2017, LWPU CORPORATION.  All rights reserved.
+
+set -e
+
+function set_exe {
+    # Sets a global variable to the location of an exelwtable
+    # Arguments:
+    # $1 -- the variable name
+    # $2 -- the exelwtable
+
+    # Check to make sure the exelwtable exists
+    hash $2 2>/dev/null || { echo >&2 "ERROR: \"$2\" exelwtable not found!"; exit 1; }
+    # Print the path to the exelwtable
+    local __resultvar=$1
+    eval $__resultvar="'$(command -v $2)'"
+}
+
+# Some hacking necessary to respect virtualelw installations
+set_exe PYTHON_EXE python2
+set_exe NOSE_EXE nosetests
+
+DIGITS_MODE_TEST=1 $PYTHON_EXE $NOSE_EXE \
+    --no-path-adjustment $@

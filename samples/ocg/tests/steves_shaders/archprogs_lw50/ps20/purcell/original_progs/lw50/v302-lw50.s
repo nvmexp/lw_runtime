@@ -1,0 +1,236 @@
+!!SPA1.0
+.CONST_MODE  PAGE
+.THREAD_TYPE VERTEX
+.MAX_REG     15
+.MAX_IBUF    15
+.MAX_OBUF    29
+# parseasm build date Mar 10 2004 15:40:49
+# -profile vp50 -po tbat3 -po lat3 -if vs2x -i allprogs-new32//v302-lw40.s -o allprogs-new32//v302-lw50.s
+#vendor LWPU
+#version parseasm.0.0
+#profile vp50
+#program fp30entry
+#semantic C[12].C[12]
+#semantic C[11].C[11]
+#semantic C[10].C[10]
+#semantic C[9].C[9]
+#semantic C[15].C[15]
+#semantic C[14].C[14]
+#semantic C[13].C[13]
+#semantic C[8].C[8]
+#semantic C[3].C[3]
+#semantic C[2].C[2]
+#semantic C[1].C[1]
+#semantic C[0].C[0]
+#semantic c.c
+#var float4 o[TEX5] : $vout.O : O[0] : -1 : 0
+#var float4 o[TEX4] : $vout.O : O[0] : -1 : 0
+#var float4 o[TEX3] : $vout.O : O[0] : -1 : 0
+#var float4 o[TEX2] : $vout.O : O[0] : -1 : 0
+#var float4 o[TEX1] : $vout.O : O[0] : -1 : 0
+#var float4 o[TEX0] : $vout.O : O[0] : -1 : 0
+#var float4 o[BCOL0] : $vout.O : O[0] : -1 : 0
+#var float4 o[HPOS] : $vout.O : O[0] : -1 : 0
+#var float4 C[12] :  : c[12] : -1 : 0
+#var float4 C[11] :  : c[11] : -1 : 0
+#var float4 C[10] :  : c[10] : -1 : 0
+#var float4 C[9] :  : c[9] : -1 : 0
+#var float4 v[COL0] : $vin.F : F[0] : -1 : 0
+#var float4 C[15] :  : c[15] : -1 : 0
+#var float4 C[14] :  : c[14] : -1 : 0
+#var float4 C[13] :  : c[13] : -1 : 0
+#var float4 C[8] :  : c[8] : -1 : 0
+#var float4 v[WGHT] : $vin.F : F[0] : -1 : 0
+#var float4 C[3] :  : c[3] : -1 : 0
+#var float4 C[2] :  : c[2] : -1 : 0
+#var float4 C[1] :  : c[1] : -1 : 0
+#var float4 C[0] :  : c[0] : -1 : 0
+#var float4 v[OPOS] : $vin.F : F[0] : -1 : 0
+#var float4 c :  : c[0] : -1 : 0
+#var float4 v[NRML] : $vin.F : F[0] : -1 : 0
+#ibuf 0 = v[OPOS].x
+#ibuf 1 = v[OPOS].y
+#ibuf 2 = v[OPOS].z
+#ibuf 3 = v[OPOS].w
+#ibuf 4 = v[WGT].x
+#ibuf 5 = v[WGT].y
+#ibuf 6 = v[WGT].z
+#ibuf 7 = v[WGT].w
+#ibuf 8 = v[NOR].x
+#ibuf 9 = v[NOR].y
+#ibuf 10 = v[NOR].z
+#ibuf 11 = v[NOR].w
+#ibuf 12 = v[COL0].x
+#ibuf 13 = v[COL0].y
+#ibuf 14 = v[COL0].z
+#ibuf 15 = v[COL0].w
+#obuf 0 = o[HPOS].x
+#obuf 1 = o[HPOS].y
+#obuf 2 = o[HPOS].z
+#obuf 3 = o[HPOS].w
+#obuf 4 = o[BCOL0].x
+#obuf 5 = o[BCOL0].y
+#obuf 6 = o[BCOL0].z
+#obuf 7 = o[BCOL0].w
+#obuf 8 = o[TEX0].x
+#obuf 9 = o[TEX0].y
+#obuf 10 = o[TEX0].z
+#obuf 11 = o[TEX0].w
+#obuf 12 = o[TEX1].x
+#obuf 13 = o[TEX1].y
+#obuf 14 = o[TEX1].z
+#obuf 15 = o[TEX1].w
+#obuf 16 = o[TEX2].x
+#obuf 17 = o[TEX2].y
+#obuf 18 = o[TEX2].z
+#obuf 19 = o[TEX2].w
+#obuf 20 = o[TEX3].x
+#obuf 21 = o[TEX3].y
+#obuf 22 = o[TEX3].z
+#obuf 23 = o[TEX3].w
+#obuf 24 = o[TEX4].x
+#obuf 25 = o[TEX4].y
+#obuf 26 = o[TEX4].z
+#obuf 27 = o[TEX5].x
+#obuf 28 = o[TEX5].y
+#obuf 29 = o[TEX5].z
+BB0:
+F2I.FLOOR R0, v[11];
+F2I.FLOOR R1, v[9];
+I2I.M4   R0, R0;
+I2I.M4   R1, R1;
+R2A      A0, R0;
+R2A      A1, R1;
+FMUL     R1, v[1], c[A0 + 1];
+FMUL     R0, v[1], c[A1 + 1];
+FMAD     R1, v[0], c[A0], R1;
+FMAD     R0, v[0], c[A1], R0;
+FMUL     R2, v[8], c[A1 + 16];
+FMAD     R1, v[2], c[A0 + 2], R1;
+FMAD     R0, v[2], c[A1 + 2], R0;
+FMAD     R2, v[10], c[A0 + 16], R2;
+FMAD     R3, v[3], c[A0 + 3], R1;
+FMAD     R4, v[3], c[A1 + 3], R0;
+FMUL     R0, v[1], c[A0 + 5];
+FMUL     R1, v[1], c[A1 + 5];
+FMUL     R4, v[8], R4;
+FMAD     R0, v[0], c[A0 + 4], R0;
+FMAD     R1, v[0], c[A1 + 4], R1;
+FMAD     R4, v[10], R3, R4;
+FMAD     R0, v[2], c[A0 + 6], R0;
+FMAD     R1, v[2], c[A1 + 6], R1;
+FADD32   R7, R2, -R4;
+FMAD     R0, v[3], c[A0 + 7], R0;
+FMAD     R3, v[3], c[A1 + 7], R1;
+FMUL     R2, v[8], c[A1 + 17];
+FMUL     R1, v[1], c[A0 + 9];
+FMUL     R3, v[8], R3;
+FMAD     R2, v[10], c[A0 + 17], R2;
+FMAD     R1, v[0], c[A0 + 8], R1;
+FMAD     R6, v[10], R0, R3;
+FMUL     R0, v[1], c[A1 + 9];
+FMAD     R1, v[2], c[A0 + 10], R1;
+FADD32   R9, R2, -R6;
+FMAD     R0, v[0], c[A1 + 8], R0;
+FMAD     R5, v[3], c[A0 + 11], R1;
+FMUL32   R2, R9, R9;
+FMAD     R1, v[2], c[A1 + 10], R0;
+FMUL     R0, v[8], c[A1 + 18];
+FMAD     R3, R7, R7, R2;
+FMAD     R1, v[3], c[A1 + 11], R1;
+FMAD     R2, v[10], c[A0 + 18], R0;
+FMUL     R0, v[8], c[A1 + 12];
+FMUL     R8, v[8], R1;
+FMUL     R1, v[8], c[A1 + 13];
+FMAD     R0, v[10], c[A0 + 12], R0;
+FMAD     R5, v[10], R5, R8;
+FMAD     R1, v[10], c[A0 + 13], R1;
+FADD     R0, -v[0], R0;
+FADD32   R8, R2, -R5;
+FADD     R2, -v[1], R1;
+FMUL     R1, v[8], c[A1 + 14];
+FMAD     R10, R8, R8, R3;
+FMUL32   R3, R2, R2;
+FMAD     R1, v[10], c[A0 + 14], R1;
+RSQ      R10, |R10|;
+FMAD     R3, R0, R0, R3;
+FADD     R1, -v[2], R1;
+FMUL32   R7, R7, R10;
+FMUL32   R9, R9, R10;
+FMUL32   R8, R8, R10;
+FMAD     R3, R1, R1, R3;
+RSQ      R3, |R3|;
+FMAD     R7, R0, R3, R7;
+FMAD     R9, R2, R3, R9;
+FMAD     R8, R1, R3, R8;
+FMUL32   R11, R6, c[37];
+FMUL32   R10, R9, R9;
+FMAD     R11, R4, c[36], R11;
+FMAD     R10, R7, R7, R10;
+FMUL32   R12, R6, c[41];
+FMAD     R11, R5, c[38], R11;
+FMAD     R10, R8, R8, R10;
+FMAD     R12, R4, c[40], R12;
+FMAD     o[20], v[3], c[39], R11;
+RSQ      R10, |R10|;
+FMAD     R11, R5, c[42], R12;
+FMUL32   R12, R6, c[45];
+FMUL32   o[27], R7, R10;
+FMUL32   o[28], R9, R10;
+FMUL32   o[29], R8, R10;
+FMAD     o[21], v[3], c[43], R11;
+FMAD     R7, R4, c[44], R12;
+FMUL32   R8, R6, c[49];
+FMUL32   R9, R6, c[53];
+FMAD     R7, R5, c[46], R7;
+FMAD     R8, R4, c[48], R8;
+FMAD     R9, R4, c[52], R9;
+FMAD     o[22], v[3], c[47], R7;
+FMAD     R7, R5, c[50], R8;
+FMAD     R8, R5, c[54], R9;
+FMUL32   R9, R6, c[57];
+FMAD     o[23], v[3], c[51], R7;
+FMAD     o[12], v[3], c[55], R8;
+FMAD     R7, R4, c[56], R9;
+FMUL32   R8, R6, c[61];
+FMUL32   R9, R6, c[1];
+FMAD     R7, R5, c[58], R7;
+FMAD     R8, R4, c[60], R8;
+FMAD     R9, R4, c[0], R9;
+FMAD     o[13], v[3], c[59], R7;
+FMAD     R7, R5, c[62], R8;
+FMAD     R8, R5, c[2], R9;
+FMUL32   R9, R6, c[5];
+FMAD     o[14], v[3], c[63], R7;
+FMAD     o[0], v[3], c[3], R8;
+FMAD     R7, R4, c[4], R9;
+FMUL32   R8, R6, c[9];
+FMUL32   R6, R6, c[13];
+FMAD     R7, R5, c[6], R7;
+FMAD     R8, R4, c[8], R8;
+FMAD     R4, R4, c[12], R6;
+FMAD     o[1], v[3], c[7], R7;
+FMAD     R6, R5, c[10], R8;
+FMAD     R4, R5, c[14], R4;
+FMUL32   o[24], R0, R3;
+FMAD     o[2], v[3], c[11], R6;
+FMAD     o[3], v[3], c[15], R4;
+FMUL32   o[25], R2, R3;
+FMUL32   o[26], R1, R3;
+MOV      o[16], v[12];
+MOV      o[17], v[13];
+MOV      o[18], v[14];
+MOV      o[19], v[15];
+MOV      o[15], v[3];
+MOV      o[8], v[4];
+MOV      o[9], v[5];
+MOV      o[10], v[6];
+MOV      o[11], v[7];
+MOV32    o[4], c[32];
+MOV32    o[5], c[33];
+MOV32    o[6], c[34];
+MOV32    o[7], c[35];
+END
+# 135 instructions, 16 R-regs
+# 135 inst, (13 mov, 0 mvi, 0 tex, 3 complex, 119 math)
+#    105 64-bit, 30 32-bit, 0 32-bit-const

@@ -1,0 +1,32 @@
+FM_DIR := $(LW_SOURCE)/apps/fabricmanager
+LWML_DIR := $(LW_SOURCE)/apps/lwml/
+FTOOLS_DIR := $(FM_DIR)/Tools/fabricTool
+SHARED_FABRIC_DIR := $(FM_DIR)/Tools/shared_fabric
+LWRRENT_DIR := $(FTOOLS_DIR)
+OUTPUTDIR   := $(FTOOLS_DIR)/_out
+
+FM_GLOBAL_CFLAGS := -fPIC -Wno-write-strings
+FM_GLOBAL_LDFLAGS :=  -static-libstdc++ -static-libgcc -lrt -lc
+
+LWML_BUILD_DIR := $(LWML_DIR)/build/
+include $(LWML_BUILD_DIR)/common.lwmk
+
+LWML_BUILD_MISSING_PROTOTYPES =
+
+ifdef LWCFG_INITIALIZED
+
+include $(FM_DIR)/libs/libs.lwmk
+include $(FM_DIR)/infra/protobuf/protobuf.lwmk
+include $(FTOOLS_DIR)/fabricgen.lwmk
+include $(FTOOLS_DIR)/fabrictool.lwmk
+include $(FM_DIR)/sdk/fmlib/fmlib.lwmk
+include $(SHARED_FABRIC_DIR)/sharedfabricselector.lwmk
+
+clean_fm:
+	$(RM) $(OUTPUTDIR)
+
+.PHONY: clean_fm
+clean: clean_fm
+
+endif # LWCFG_INITIALIZED
+include $(LWML_BUILD_DIR)/commonRules.lwmk

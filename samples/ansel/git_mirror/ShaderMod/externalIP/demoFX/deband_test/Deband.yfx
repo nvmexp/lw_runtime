@@ -1,0 +1,180 @@
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 texcoord: TexCoord;
+};
+
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+}
+
+cbuffer controlBuf
+{
+	float g_sldIntensity;
+	float g_sldDeband;
+}
+
+Texture2D txDiffuse;
+Texture2D txDither;
+
+SamplerState samLinear;
+SamplerState samLinearWrap;
+SamplerState samNearestWrap;
+
+#define g_sldVignette				0.3 //[0.0 to 1.0] Vignette amount
+
+float interleavedGradientNoise( float2 uv )
+{
+    const float3 magic = float3( 0.06711056, 0.00583715, 52.9829189 );
+    return frac( magic.z * frac( dot( uv, magic.xy ) ) );
+}
+
+float3 screenSpaceDither( float2 uv )
+{
+	float vDitherVal = dot(float2( 171.0, 231.0 ), uv.xy);
+    float3 vDither = float3(vDitherVal, vDitherVal, vDitherVal);
+    vDither.rgb = frac( vDither.rgb / float3( 103.0, 71.0, 97.0 ) );
+    return vDither.rgb / 255.0; //note: looks better without 0.375...
+}
+
+#define MOD3 float3(443.8975,397.2973, 491.1871)
+float hash12(float2 p)
+{
+	float3 p3 = frac(float3(p.xyx) * MOD3);
+    p3 += dot(p3, p3.yzx + 19.19);
+    return frac((p3.x + p3.y) * p3.z);
+}
+
+float4 PS_RedMonochrome( VSOut frag ): SV_Target
+{
+	float2 uv = frag.texcoord;
+	float4 color = txDiffuse.Sample(samLinear, frag.texcoord);
+	
+	// Vignette
+#if 0
+	float2 inTex = frag.texcoord - 0.5.xx; // Distance from center
+	inTex.x *= 1.2; // Slight aspect ratio correction
+	float vignette = saturate(1.0 - dot( inTex, inTex )); // Length
+	vignette = saturate(smoothstep(0.3, 1.0, vignette)); // Smoothstep
+	float3 color_vign = color.xyz * vignette;
+	if (captureState == 0)
+		color.xyz = lerp(color.xyz, color_vign, g_sldVignette * g_sldIntensity);
+#endif
+	
+	// Sepia
+	const float4 lumFilter = { 0.2126, 0.7152, 0.0722, 0.0 };
+	float4 outColor = float4(lerp(color, (dot(color, lumFilter)).xxxx, g_sldIntensity));
+	//outColor += vec4(texture2D(dither_sampler, gl_FragCoord.xy / 8.0).r / 32.0 - (1.0 / 128.0));
+#if 1
+
+	{
+#define DITHER 4
+#if (DITHER == 0)
+
+#elif (DITHER == 1)
+	// Bayer matrix
+	// from http://www.anisopteragames.com/how-to-fix-color-banding-with-dithering/
+	const float ditherTexScaling = 8.0;
+	const float ditherDivisor = 16.0;
+	float ditherValue = txDither.Sample(samNearestWrap, frag.texcoord * screenSize / ditherTexScaling).r / ditherDivisor - (1.0 / 128.0);
+	outColor += float4(ditherValue, ditherValue, ditherValue, 0.0);
+	//outColor.r = 1.0;
+#elif (DITHER == 2)
+	// from "NEXT GENERATION POST PROCESSING IN CALL OF DUTY: ADVANCED WARFARE"
+	float ditherValue = interleavedGradientNoise( frag.texcoord * screenSize ) / 255.0;
+	outColor += float4(ditherValue, ditherValue, ditherValue, 0.0);
+#elif (DITHER == 3)
+	// from http://alex.vlachos.com/graphics/Alex_Vlachos_Advanced_VR_Rendering_GDC2015.pdf
+	float3 ditherValue = screenSpaceDither( frag.texcoord * screenSize );
+	outColor += float4(ditherValue.x, ditherValue.y, ditherValue.z, 0.0);
+#elif (DITHER == 4)
+	float ditherValue = hash12( frag.texcoord * screenSize ) / 255.0;
+	outColor += 10.0 * g_sldDeband * float4(ditherValue, ditherValue, ditherValue, 0.0);
+	//outColor.r = 1.0;
+#endif
+	}
+	
+#else
+	float ditherValue = txDither.Sample(samNearestWrap, frag.texcoord * screenSize / 8.0).r;
+	outColor = float4(ditherValue, ditherValue, ditherValue, 1.0);
+#endif
+
+
+	// Deband testing
+	if (frag.texcoord.x > 0.5 && frag.texcoord.y < 0.5)
+	{
+		const float gradDet = 64.0;
+		const float2 pixelCoord = frag.texcoord * screenSize;
+
+		float gradY = frag.texcoord.y * 2.0;
+		
+		float gradArg = (frag.texcoord.x - 0.5) * 2.0;
+
+		float testWidth = 0.2;
+		float gradY_testWidth = gradY / testWidth;
+		float testNumF = floor(gradY_testWidth);
+		int testNum = testNumF;
+		
+		if (gradY_testWidth * 2.0 - floor(gradY_testWidth * 2.0) < 0.04)
+			return float4(0.0, 0.0, 0.0, 1.0);
+		if (gradY_testWidth - floor(gradY_testWidth) < 0.08)
+			return float4(0.0, 0.0, 0.0, 1.0);
+
+		float gradVal = gradArg;
+		if (gradY_testWidth - testNumF > 0.5)
+		{
+			const float speed = 0.05;
+#if 1
+			// Triangular wave (with variable duty cycle)
+			float phase = gradArg * 0.5 + speed * (elapsedTime*0.001);
+			float internalPhase = phase - floor(phase);
+			const float duty = 0.5;
+			if (internalPhase > duty)
+				gradVal = 1.0 - (internalPhase - duty) / (1.0 - duty);
+			else
+				gradVal = internalPhase / duty;
+#else
+			// Sine wave
+			gradVal = sin(3.141593 * (gradArg + 2 * speed * (elapsedTime*0.001))) * 0.5 + 0.5;
+#endif
+		}
+
+		float4 outColorDeband = float4(gradVal, gradVal, gradVal, 1.0);
+			
+		const float DBGdebandEnhance = 10.0 * g_sldDeband;
+		
+		if (testNum == 1)
+		{
+			const float ditherTexScaling = 16.0;
+			const float ditherDivisor = 16.0;
+			float ditherValue = txDither.Sample(samNearestWrap, pixelCoord / ditherTexScaling).r / ditherDivisor - (1.0 / 128.0);
+			outColorDeband += DBGdebandEnhance * float4(ditherValue, ditherValue, ditherValue, 0.0);
+		}
+		else if (testNum == 2)
+		{
+			// from "NEXT GENERATION POST PROCESSING IN CALL OF DUTY: ADVANCED WARFARE"
+			float ditherValue = interleavedGradientNoise( pixelCoord ) / 255.0;
+			outColorDeband += DBGdebandEnhance * float4(ditherValue, ditherValue, ditherValue, 0.0);
+		}
+		else if (testNum == 3)
+		{
+			// from http://alex.vlachos.com/graphics/Alex_Vlachos_Advanced_VR_Rendering_GDC2015.pdf
+			float3 ditherValue = screenSpaceDither( pixelCoord );
+			outColorDeband += DBGdebandEnhance * float4(ditherValue.x, ditherValue.y, ditherValue.z, 0.0);
+		}
+		else if (testNum == 4)
+		{
+			float ditherValue = hash12( pixelCoord ) / 255.0;
+			outColorDeband += DBGdebandEnhance * float4(ditherValue, ditherValue, ditherValue, 0.0);
+		}
+		
+		outColorDeband = floor(outColorDeband * gradDet) / gradDet;
+		
+		return outColorDeband;
+	}
+
+	return outColor;
+}

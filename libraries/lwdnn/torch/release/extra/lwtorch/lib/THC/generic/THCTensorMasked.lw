@@ -1,0 +1,193 @@
+#ifndef THC_GENERIC_FILE
+#define THC_GENERIC_FILE "generic/THCTensorMasked.lw"
+#else
+
+
+THC_API void
+THCTensor_(maskedFill)(THCState* state,
+                       THCTensor *tensor, THLwdaByteTensor *mask, real value)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, mask));
+  THArgCheck(THCTensor_(nElement)(state, tensor) ==
+             THLwdaByteTensor_nElement(state, mask),
+             2, "sizes do not match");
+
+  if (!THC_pointwiseApply2(state, tensor, mask,
+                           TensorMaskedFillOp<real, unsigned char>(value))) {
+    THArgCheck(false, 2, LWTORCH_DIM_WARNING);
+  }
+
+  THLwdaCheck(lwdaGetLastError());
+}
+
+THC_API void
+THCTensor_(maskedFillByte)(THCState* state,
+                           THCTensor *tensor, THByteTensor *mask, real value)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
+  THLongStorage* maskSizes = THByteTensor_newSizeOf(mask);
+  THLwdaByteTensor* maskLwda = THLwdaByteTensor_newWithSize(state, maskSizes, NULL);
+  THLongStorage_free(maskSizes);
+  THLwdaByteTensor_copyByte(state, maskLwda, mask);
+  THCTensor_(maskedFill)(state, tensor, maskLwda, value);
+  THLwdaByteTensor_free(state, maskLwda);
+}
+
+THC_API void
+THCTensor_(maskedCopy)(THCState* state,
+                       THCTensor *tensor, THLwdaByteTensor *mask, THCTensor *src)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
+  ptrdiff_t maskSize = THLwdaByteTensor_nElement(state, mask);
+  ptrdiff_t tensorSize = THCTensor_(nElement)(state, tensor);
+  ptrdiff_t srcSize = THCTensor_(nElement)(state, src);
+
+  // `mask` and `tensor` must have the same number of elements
+  THArgCheck(maskSize == tensorSize, 2,
+             "mask and tensor must have the same number of elements");
+
+  // Determine our output size
+  ptrdiff_t totalElements = THLwdaByteTensor_sumall(state, mask);
+
+  // The number of `1` elements present in the mask must be <= the
+  // number of elements available in `src`
+  if (totalElements > srcSize) {
+    THArgCheck(false, 2, "source nElements must be == mask `1` elements");
+  }
+
+  // FIXME: there appears to be a bug in Thrust (LWCA 7.0) for mixed
+  // iterator prefix sums? Colwert `mask` to the same datatype as what
+  // we're aclwmulating the prefix sum in (long) to get around it
+  THLwdaLongTensor* maskLong = THLwdaLongTensor_new(state);
+  THLongStorage* maskSizes = THLwdaByteTensor_newSizeOf(state, mask);
+  THLwdaLongTensor_resize(state, maskLong, maskSizes, NULL);
+  THLwdaLongTensor_copyLwdaByte(state, maskLong, mask);
+
+  // Use a prefix sum to determine the output locations of the masked elements
+  THLwdaLongTensor* maskPrefixSum = THLwdaLongTensor_new(state);
+  THLwdaLongTensor_resize(state, maskPrefixSum, maskSizes, NULL);
+  THLongStorage_free(maskSizes);
+
+  THCThrustAllocator thrustAlloc(state);
+  thrust::device_ptr<long>
+    maskData(THLwdaLongTensor_data(state, maskLong));
+  thrust::device_ptr<long>
+    maskPrefixSumData(THLwdaLongTensor_data(state, maskPrefixSum));
+
+  thrust::exclusive_scan(
+#if LWDA_VERSION >= 7000
+    thrust::lwca::par(thrustAlloc).on(THCState_getLwrrentStream(state)),
+#endif
+    maskData,
+    maskData + THLwdaLongTensor_nElement(state, maskLong),
+    maskPrefixSumData);
+
+  // We are getting elements from `src` based on an offset from
+  // `maskPrefixSum`, so that should be made contiguous too
+  THCTensor* contigSrc = THCTensor_(newContiguous)(state, src);
+
+  // update `tensor` where `mask` == 1 but pull from `src` at
+  // maskPrefixSum
+  bool status = THC_pointwiseApply3(
+    state, tensor, mask, maskPrefixSum,
+    TensorMaskedCopyOp<real, unsigned char, long>(
+      THCTensor_(data)(state, contigSrc)));
+
+  THCTensor_(free)(state, contigSrc);
+  THLwdaLongTensor_free(state, maskLong);
+  THLwdaLongTensor_free(state, maskPrefixSum);
+
+  THArgCheck(status, 2, LWTORCH_DIM_WARNING);
+  THLwdaCheck(lwdaGetLastError());
+}
+
+THC_API void
+THCTensor_(maskedCopyByte)(THCState* state,
+                           THCTensor *tensor, THByteTensor *mask, THCTensor *src) {
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
+  THLongStorage* maskSizes = THByteTensor_newSizeOf(mask);
+  THLwdaByteTensor* maskLwda = THLwdaByteTensor_newWithSize(state, maskSizes, NULL);
+  THLongStorage_free(maskSizes);
+  THLwdaByteTensor_copyByte(state, maskLwda, mask);
+  THCTensor_(maskedCopy)(state, tensor, maskLwda, src);
+  THLwdaByteTensor_free(state, maskLwda);
+}
+
+THC_API void
+THCTensor_(maskedSelect)(THCState* state,
+                         THCTensor* tensor, THCTensor* src, THLwdaByteTensor* mask) {
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
+  THArgCheck(THLwdaByteTensor_nElement(state, mask) ==
+             THCTensor_(nElement)(state, src),
+             2, "sizes do not match");
+
+  // Determine our output size
+  ptrdiff_t totalElements = THLwdaByteTensor_sumall(state, mask);
+  THCTensor* tensorContig = THCTensor_(newContiguous)(state, tensor);
+
+  THCTensor_(resize1d)(state, tensorContig, totalElements);
+  if (tensor != tensorContig) {
+    THCTensor_(resize1d)(state, tensor, totalElements);
+  }
+
+  // FIXME: there appears to be a bug in Thrust (LWCA 7.0) for mixed
+  // iterator prefix sums? Colwert `mask` to the same datatype as what
+  // we're aclwmulating the prefix sum in (long) to get around it
+  THLwdaLongTensor* maskLong = THLwdaLongTensor_new(state);
+  THLongStorage* maskSizes = THLwdaByteTensor_newSizeOf(state, mask);
+  THLwdaLongTensor_resize(state, maskLong, maskSizes, NULL);
+  THLwdaLongTensor_copyLwdaByte(state, maskLong, mask);
+
+  // Use a prefix sum to determine the output locations of the masked elements
+  THLwdaLongTensor* maskPrefixSum = THLwdaLongTensor_new(state);
+  THLwdaLongTensor_resize(state, maskPrefixSum, maskSizes, NULL);
+  THLongStorage_free(maskSizes);
+
+  THCThrustAllocator thrustAlloc(state);
+  thrust::device_ptr<long>
+    maskData(THLwdaLongTensor_data(state, maskLong));
+  thrust::device_ptr<long>
+    maskPrefixSumData(THLwdaLongTensor_data(state, maskPrefixSum));
+
+  thrust::exclusive_scan(
+#if LWDA_VERSION >= 7000
+    thrust::lwca::par(thrustAlloc).on(THCState_getLwrrentStream(state)),
+#endif
+    maskData,
+    maskData + THLwdaLongTensor_nElement(state, maskLong),
+    maskPrefixSumData);
+
+  // Then copy over the masked elements at their desired output index
+  bool status = THC_pointwiseApply3(
+    state, mask, maskPrefixSum,
+    src, TensorMaskedSelectOp<real, unsigned char, long>(
+      THCTensor_(data)(state, tensor)));
+
+  THLwdaLongTensor_free(state, maskLong);
+  THLwdaLongTensor_free(state, maskPrefixSum);
+
+  if (tensor != tensorContig) {
+    THCTensor_(freeCopyTo)(state, tensorContig, tensor);
+  } else {
+    THCTensor_(free)(state, tensorContig);
+  }
+
+  THArgCheck(status, 2, LWTORCH_DIM_WARNING);
+  THLwdaCheck(lwdaGetLastError());
+}
+
+// FIXME: remove now that we have THLwdaByteTensor?
+THC_API void
+THCTensor_(maskedSelectByte)(THCState* state,
+                             THCTensor *tensor, THCTensor *src, THByteTensor *mask)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
+  THLongStorage* maskSizes = THByteTensor_newSizeOf(mask);
+  THLwdaByteTensor* maskLwda = THLwdaByteTensor_newWithSize(state, maskSizes, NULL);
+  THLongStorage_free(maskSizes);
+  THLwdaByteTensor_copyByte(state, maskLwda, mask);
+  THCTensor_(maskedSelect)(state, tensor, src, maskLwda);
+  THLwdaByteTensor_free(state, maskLwda);
+}
+
+#endif

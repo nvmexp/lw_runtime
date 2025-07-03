@@ -1,0 +1,64 @@
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 txcoord: TexCoord;
+};
+
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+	float4 tileUV;
+}
+
+cbuffer controlBuf
+{
+	float g_sldASPX;
+	float g_sldASPY;
+}
+
+Texture2D texColor;
+
+SamplerState samLinear;
+SamplerState samLinearWrap;
+
+#ifndef LW_COMMON
+#define LW_COMMON
+
+#define CAPTURE_STATE_NOT_STARTED		0
+#define CAPTURE_STATE_REGULAR			1
+#define CAPTURE_STATE_REGULARSTEREO		2
+#define CAPTURE_STATE_HIGHRES			3
+#define CAPTURE_STATE_360			4
+#define CAPTURE_STATE_360STEREO			5
+
+#endif
+
+float4 PSMain( VSOut IN ): SV_Target
+{	
+	float4 color = texColor.Sample(samLinear, IN.txcoord.xy);
+
+	static const float lwrrent_aspect = screenSize.x / screenSize.y;
+
+	[branch]
+	if(captureState != CAPTURE_STATE_360 && captureState != CAPTURE_STATE_360STEREO)
+	{
+		float g_sldASP = g_sldASPX / g_sldASPY;
+		//colwert current tile texcoord to global image texcoord
+		float2 ntxcoord = lerp(tileUV.xy, tileUV.zw, IN.txcoord.xy) * 2.0 - 1.0; 
+
+		[branch]
+		if(g_sldASP < lwrrent_aspect)
+		{
+			ntxcoord.x *= lwrrent_aspect / g_sldASP;	
+		}		
+		else
+		{
+			ntxcoord.y /= lwrrent_aspect / g_sldASP;	
+		}		
+		color.rgb *= all(saturate(1.0 - ntxcoord * ntxcoord));	
+	}
+	
+	return color;
+}

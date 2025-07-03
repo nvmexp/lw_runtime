@@ -1,0 +1,27 @@
+//
+// Copyright 2021 LWPU Corporation. All rights reserved.
+//
+
+#include <xmma/ampere/traits.h>
+#include <xmma/ampere/fragment.h>
+#include <xmma/ampere/smem_tile.h>
+#include <xmma/ampere/smem_tile_with_halo.h>
+
+#include "colw_fused.h"
+
+using Traits = xmma::Ampere_hmma_fp16_traits;
+using Cta_tile = typename Traits::template Cta_tile_extd<128, 128, 32, 2, 2, 1, 1>;
+using Colw_tile = xmma::Tile_nhw<1, 8, 16>;
+
+#include "colw_pool.lwh"
+
+namespace optix_exp {
+
+__global__
+__launch_bounds__(Kernel_traits::Cta_tile::THREADS_PER_CTA)
+void colw_ampere_fpool_128_128_32_kernel(Colw_params params)
+{
+    xmma::ext::colw_with_2x2_pooling::device<Kernel_traits>(params);
+}
+
+};

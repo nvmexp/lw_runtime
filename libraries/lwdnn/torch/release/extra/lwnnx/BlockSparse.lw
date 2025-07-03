@@ -1,0 +1,652 @@
+#include "utils.h"
+#define BLOCKSPARSE_THREADS 32
+#define BLOCKSPARSE_MAXOUTPUTBLOCKSIZE 512
+#define BLOCKSPARSE_STREAMS 8
+  
+__global__ void lwnnx_BlockSparse_updateOutput_kernel(
+  float *output, const float *input, const float *outputIndice, 
+  const float *outputScale, const float *bias,  
+  int outputSize, int nOutputBlock, 
+  int inputWindowSize, int outputWindowSize)
+{
+  __shared__ float buffer[BLOCKSPARSE_THREADS];
+  int tx = threadIdx.x;
+  int i_step = blockDim.x;
+  int k = blockIdx.x;
+  
+  float *output_k = output + k*outputWindowSize*outputSize;
+  const float *input_k = input + k*inputWindowSize*outputWindowSize*outputSize;
+  const float *outputIndice_k = outputIndice + k*outputWindowSize;
+  const float *outputScale_k = outputScale + k*outputWindowSize;
+  
+  for (int m=0; m<outputWindowSize; m++)
+  {
+    int outputIdx = (int)outputIndice_k[m] - 1;
+    float outputScale = outputScale_k[m];
+    
+    for (int j=tx; j<outputSize; j+=i_step)
+    {
+      buffer[tx] = bias[outputIdx*outputSize + j];
+          
+      for (int l=0; l<inputWindowSize; l++)
+        buffer[tx] += input_k[l*outputWindowSize*outputSize + m*outputSize + j];
+
+      output_k[m*outputSize + j] = outputScale*buffer[tx];
+    }
+  }
+}
+
+static int lwnnx_BlockSparse_updateOutput(lua_State *L)
+{ 
+  /* input, inputIndice, outputIndice, inputScale, outputScale, gradOutput*/
+  THCState *state = getLwtorchState(L);
+  // batchSize x inputWindowSize x inputSize
+  THLwdaTensor *input = (THLwdaTensor*)luaT_checkudata(L, 2, "torch.LwdaTensor");  
+  // batchSize x inputWindowSize
+  THLwdaLongTensor *inputIndice = (THLwdaLongTensor*)luaT_checkudata(L, 3, "torch.LwdaLongTensor");
+  THLwdaTensor *inputScale = (THLwdaTensor*)luaT_checkudata(L, 5, "torch.LwdaTensor");
+  // batchSize x outputWindowSize
+  THLwdaLongTensor *outputIndice = (THLwdaLongTensor*)luaT_checkudata(L, 4, "torch.LwdaLongTensor");
+  THLwdaTensor *outputScale = (THLwdaTensor*)luaT_checkudata(L, 6, "torch.LwdaTensor");
+  
+  int batchSize = luaT_getfieldcheckint(L, 1, "batchSize");
+  int inputSize = luaT_getfieldcheckint(L, 1, "inputSize");
+  int outputSize = luaT_getfieldcheckint(L, 1, "outputSize");
+  int inputWindowSize = luaT_getfieldcheckint(L, 1, "inputWindowSize");
+  int outputWindowSize = luaT_getfieldcheckint(L, 1, "outputWindowSize");
+  int nInputBlock = luaT_getfieldcheckint(L, 1, "nInputBlock");
+  int nOutputBlock = luaT_getfieldcheckint(L, 1, "nOutputBlock");
+  int batchedGemmMax = luaT_getfieldcheckint(L, 1, "batchedGemmMax");
+  long nBatched = batchSize*inputWindowSize*outputWindowSize;
+  
+  THLongTensor *inputIndiceHost = (THLongTensor*)luaT_getfieldcheckudata(L, 1, "inputIndiceHost", "torch.LongTensor");
+  THLongTensor *outputIndiceHost = (THLongTensor*)luaT_getfieldcheckudata(L, 1, "outputIndiceHost", "torch.LongTensor");
+  // nOutputBlock x nInputBlock x outputSize x inputSize
+  THLwdaTensor *weight = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "weight", "torch.LwdaTensor");
+  // nOutputBlock x outputSize
+  THLwdaTensor *bias = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "bias", "torch.LwdaTensor");
+  // batchSize x inputWindowSize x outputWindowSize x outputSize
+  THLwdaTensor *outputBatched = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "outputBatched", "torch.LwdaTensor");
+  // batchSize x outputWindowSize x outputSize
+  THLwdaTensor *output = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "_output", "torch.LwdaTensor");
+  
+  lwblasStatus_t stat;
+  lwblasHandle_t handle;
+  
+  float alpha = 1;
+  float beta = 0;
+  
+  if (nInputBlock > 1) 
+  {
+    luaL_argcheck(L, input->nDimension == 3, 2, "3D(batch mode) tensor expected");
+    luaL_argcheck(L, input->size[2] == inputSize, 2, "invalid input size"); 
+  } 
+  else 
+  {
+    luaL_argcheck(L, input->nDimension == 2, 2, "2D(batch mode) tensor expected");
+    luaL_argcheck(L, input->size[1] == inputSize, 2, "invalid input size"); 
+  }
+  luaL_argcheck(L, inputIndice->nDimension == 2, 3, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, outputIndice->nDimension == 2, 4, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, inputScale->nDimension == 2, 5, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, outputScale->nDimension == 2, 6, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, THLwdaTensor_isContiguous(state, input), 2, "Expecting contiguous input");
+  
+  THLwdaTensor_resize4d(state, outputBatched, batchSize, inputWindowSize, outputWindowSize, outputSize);
+  THLongTensor_resize2d(inputIndiceHost, batchSize, inputWindowSize);
+  THLongTensor_resize2d(outputIndiceHost, batchSize, outputWindowSize);
+  
+  THLongTensor_copyLwda(state, inputIndiceHost, inputIndice);
+  THLongTensor_copyLwda(state, outputIndiceHost, outputIndice);
+  
+  stat = lwblasCreate(&handle);
+  if (stat != LWBLAS_STATUS_SUCCESS) 
+    THError("LWBLAS initialization failed");
+  
+  if ( nOutputBlock > 1 )
+    THLwdaTensor_resize3d(state, output, batchSize, outputWindowSize, outputSize);
+  else
+    THLwdaTensor_resize2d(state, output, batchSize, outputSize);
+  
+  /* streamed or batched */
+  if (sqrt(inputSize*outputSize) > batchedGemmMax)
+  {
+    lwdaStream_t streams[BLOCKSPARSE_STREAMS];
+    
+    for (int i=0; i<BLOCKSPARSE_STREAMS; i++)
+    {
+      if (lwdaStreamCreate(&streams[i]) != lwdaSuccess)
+        THError("error initializing stream");
+    }
+    lwdaDeviceSynchronize();
+    
+    long batchedIdx = 0;
+    for (int i=0; i<batchSize; i++)
+    {
+      float *inputPtr = THLwdaTensor_data(state, input)+i*input->stride[0];
+      float *outputPtr = THLwdaTensor_data(state, outputBatched)+i*outputBatched->stride[0];
+      long *inputIdxPtr = THLongTensor_data(inputIndiceHost)+i*inputIndiceHost->stride[0];
+      long *outputIdxPtr = THLongTensor_data(outputIndiceHost)+i*outputIndiceHost->stride[0];
+      
+      for (int l=0; l<inputWindowSize; l++) 
+      {              
+        for (int m=0; m<outputWindowSize; m++)
+        {
+          lwblasSetStream(handle, streams[batchedIdx%BLOCKSPARSE_STREAMS]);
+      
+          stat = lwblasSgemv(handle, LWBLAS_OP_T,  inputSize, outputSize,
+                            &alpha, (const float*)THLwdaTensor_data(state, weight)+(inputIdxPtr[l]-1)*weight->stride[1] + (outputIdxPtr[m]-1)*weight->stride[0], inputSize,
+                            (const float*)inputPtr, 1,
+                            &beta, outputPtr, 1);
+                            
+          if (stat != LWBLAS_STATUS_SUCCESS) 
+            THError("lwblasSgemv failed");
+
+          outputPtr += outputBatched->stride[2];
+          batchedIdx++;
+        }
+        
+        inputPtr += input->stride[1];
+      }
+    }
+    
+    lwblasSetStream(handle, NULL);
+    lwdaDeviceSynchronize();
+    
+    for (int i=0; i<BLOCKSPARSE_STREAMS; i++)
+    {
+      if (lwdaStreamDestroy(streams[i]) != lwdaSuccess)
+        THError("error destroying stream");
+    }
+    
+  }
+  else
+  {  
+    THCharTensor *inputHost = (THCharTensor*)luaT_getfieldcheckudata(L, 1, "inputHost", "torch.CharTensor");
+    THCharTensor *weightHost = (THCharTensor*)luaT_getfieldcheckudata(L, 1, "weightHost", "torch.CharTensor");
+    THCharTensor *outputHost = (THCharTensor*)luaT_getfieldcheckudata(L, 1, "outputHost", "torch.CharTensor");
+    
+    THLwdaTensor *inputLwda = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "inputLwda", "torch.LwdaTensor");
+    THLwdaTensor *weightLwda = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "weightLwda", "torch.LwdaTensor");
+    THLwdaTensor *outputLwda = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "outputLwda", "torch.LwdaTensor");
+  
+    // put output back on top of the stack
+    output = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "_output", "torch.LwdaTensor");
+    
+    lwblasSetStream(handle, NULL);
+    
+    THCharTensor_resize1d(inputHost, nBatched*sizeof(float*));
+    THCharTensor_resize1d(weightHost, nBatched*sizeof(float*));
+    THCharTensor_resize1d(outputHost, nBatched*sizeof(float*));
+    
+    THLwdaTensor_resize1d(state, inputLwda, nBatched*sizeof(float*)/sizeof(float));
+    THLwdaTensor_resize1d(state, weightLwda, nBatched*sizeof(float*)/sizeof(float));
+    THLwdaTensor_resize1d(state, outputLwda, nBatched*sizeof(float*)/sizeof(float));
+    
+    const float **inputB = (const float **)THCharTensor_data(inputHost);
+    const float **weightB = (const float **)THCharTensor_data(weightHost);
+    float **outputB = (float **)THCharTensor_data(outputHost);
+    
+    const float **inputB_d = (const float **)THLwdaTensor_data(state, inputLwda);
+    const float **weightB_d = (const float **)THLwdaTensor_data(state, weightLwda);
+    float **outputB_d = (float **)THLwdaTensor_data(state, outputLwda);
+    
+    long batchedIdx = 0;
+    for (int i=0; i<batchSize; i++)
+    {
+      float *inputPtr = THLwdaTensor_data(state, input)+i*input->stride[0];
+      float *outputPtr = THLwdaTensor_data(state, outputBatched)+i*outputBatched->stride[0];
+      long *inputIdxPtr = THLongTensor_data(inputIndiceHost)+i*inputIndiceHost->stride[0];
+      long *outputIdxPtr = THLongTensor_data(outputIndiceHost)+i*outputIndiceHost->stride[0];
+      
+      for (int l=0; l<inputWindowSize; l++) 
+      {              
+        for (int m=0; m<outputWindowSize; m++)
+        {
+          inputB[batchedIdx] = inputPtr;
+          weightB[batchedIdx] = THLwdaTensor_data(state, weight) + (outputIdxPtr[m]-1)*weight->stride[0] + (inputIdxPtr[l]-1)*weight->stride[1];
+          outputB[batchedIdx] = outputPtr;
+
+          outputPtr += outputBatched->stride[2];
+          batchedIdx++;
+        }
+        
+        inputPtr += input->stride[1];
+      }
+    }
+    
+    if(lwdaMemcpy(inputB_d, inputB, sizeof(float*) * nBatched, lwdaMemcpyHostToDevice) != lwdaSuccess)
+      THError("lwdaMemcpy failed");
+    if(lwdaMemcpy(weightB_d, weightB, sizeof(float*) * nBatched, lwdaMemcpyHostToDevice) != lwdaSuccess)
+      THError("lwdaMemcpy failed");
+    if(lwdaMemcpy(outputB_d, outputB, sizeof(float*) * nBatched, lwdaMemcpyHostToDevice) != lwdaSuccess)
+      THError("lwdaMemcpy failed");
+    
+    stat = lwblasSgemmBatched(handle, LWBLAS_OP_T, LWBLAS_OP_N,
+                             outputSize, 1, inputSize,
+                             &alpha, weightB_d, inputSize, 
+                             inputB_d, inputSize, 
+                             &beta, outputB_d, outputSize, 
+                             nBatched);
+    
+    if (stat != LWBLAS_STATUS_SUCCESS) 
+      THError("lwblasSgemmBatched failed");
+    
+  }
+  
+  /* call lwdakernel */
+  dim3 blocks(input->size[0]); // each lwca-block is an example
+  dim3 threads(BLOCKSPARSE_THREADS);
+  lwnnx_BlockSparse_updateOutput_kernel<<<blocks,threads>>>(
+    THLwdaTensor_data(state, output), THLwdaTensor_data(state, outputBatched), 
+    (const float *)THLwdaLongTensor_data(state, outputIndice), THLwdaTensor_data(state, outputScale),
+    THLwdaTensor_data(state, bias),  outputSize, nOutputBlock,
+    inputWindowSize, outputWindowSize
+  );
+  
+  lwblasDestroy(handle);
+  
+  lwdaError errcode = lwdaGetLastError();
+  if(errcode != lwdaSuccess)
+    THError(lwdaGetErrorString(errcode));
+
+  return 1;
+}
+  
+__global__ void lwnnx_BlockSparse_updateGradOutput_kernel(
+  float *_gradOutput, float* gradOutputScale, const float *gradOutput, 
+  const float *output, const float *outputScale, 
+  int outputWindowSize, int outputSize)
+{
+  __shared__ float buffer[BLOCKSPARSE_THREADS];
+  int tx = threadIdx.x;
+  int i_step = blockDim.x;
+  int k = blockIdx.x;
+  
+  float *_gradOutput_k = _gradOutput + k*outputWindowSize*outputSize;
+  float *gradOutputScale_k = gradOutputScale + k*outputWindowSize;
+  const float *gradOutput_k = gradOutput + k*outputWindowSize*outputSize;
+  const float *output_k = output + k*outputWindowSize*outputSize;
+  const float *outputScale_k = outputScale + k*outputWindowSize;
+  
+  
+  // get gradients for outputScale (to be backwarded to a Gater)
+  for (int m=0; m<outputWindowSize; m++)
+  {
+    float outputScale = outputScale_k[m];
+    
+    float *_blockGradOutput = _gradOutput_k + m*outputSize;  
+    const float *blockGradOutput = gradOutput_k + m*outputSize;
+    const float *blockOutput = output_k + m*outputSize;
+    
+    buffer[tx] = 0;
+    
+    for (int j=tx; j<outputSize; j+=i_step)
+    {
+      const float grad = blockGradOutput[j];
+      buffer[tx] += blockOutput[j]*grad;
+      _blockGradOutput[j] = grad*outputScale;
+    }
+    
+    // add (reduce)
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+    {
+      __syncthreads();
+      if (tx < stride)
+        buffer[tx] += buffer[tx+stride];
+    }
+    
+    if (tx == 0)
+      gradOutputScale_k[m] = buffer[0]/(outputScale+0.00000001);
+  }
+}
+
+
+static int lwnnx_BlockSparse_updateGradInput(lua_State *L)
+{   
+  /* input, inputIndice, outputIndice, inputScale, outputScale*/
+  THCState *state = getLwtorchState(L);
+  // batchSize x inputWindowSize x inputSize
+  THLwdaTensor *input = (THLwdaTensor*)luaT_checkudata(L, 2, "torch.LwdaTensor");  
+  // batchSize x inputWindowSize
+  THLwdaTensor *inputIndice = (THLwdaTensor*)luaT_checkudata(L, 3, "torch.LwdaTensor");
+  THLwdaTensor *inputScale = (THLwdaTensor*)luaT_checkudata(L, 5, "torch.LwdaTensor");
+  // batchSize x outputWindowSize
+  THLwdaTensor *outputIndice = (THLwdaTensor*)luaT_checkudata(L, 4, "torch.LwdaTensor");
+  THLwdaTensor *outputScale = (THLwdaTensor*)luaT_checkudata(L, 6, "torch.LwdaTensor");
+  // batchSize x outputWindowSize x outputSize
+  THLwdaTensor *gradOutput = (THLwdaTensor*)luaT_checkudata(L, 7, "torch.LwdaTensor");
+  THLwdaTensor *output = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "_output", "torch.LwdaTensor");
+  
+  int batchSize = luaT_getfieldcheckint(L, 1, "batchSize");
+  int inputSize = luaT_getfieldcheckint(L, 1, "inputSize");
+  int outputSize = luaT_getfieldcheckint(L, 1, "outputSize");
+  int inputWindowSize = luaT_getfieldcheckint(L, 1, "inputWindowSize");
+  int outputWindowSize = luaT_getfieldcheckint(L, 1, "outputWindowSize");
+  int nInputBlock = luaT_getfieldcheckint(L, 1, "nInputBlock");
+  int nOutputBlock = luaT_getfieldcheckint(L, 1, "nOutputBlock");
+  int batchedGemmMax = luaT_getfieldcheckint(L, 1, "batchedGemmMax");
+  long nBatched = batchSize*inputWindowSize*outputWindowSize;
+  
+  THLongTensor *inputIndiceHost = (THLongTensor*)luaT_getfieldcheckudata(L, 1, "inputIndiceHost", "torch.LongTensor");
+  THLongTensor *outputIndiceHost = (THLongTensor*)luaT_getfieldcheckudata(L, 1, "outputIndiceHost", "torch.LongTensor");
+  THLwdaTensor *weight = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "weight", "torch.LwdaTensor");
+  THLwdaTensor *gradInputBatched = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "gradInputBatched", "torch.LwdaTensor");
+  THLwdaTensor *_gradOutput = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "_gradOutput", "torch.LwdaTensor");
+  THLwdaTensor *gradInput = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "_gradInput", "torch.LwdaTensor");
+  THLwdaTensor *gradOutputScale = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "gradOutputScale", "torch.LwdaTensor");
+  
+  lwblasStatus_t stat;
+  lwblasHandle_t handle;
+  
+  float alpha = 1;
+  float beta = 0;
+  
+  if (nInputBlock > 1) 
+  {
+    luaL_argcheck(L, input->nDimension == 3, 2, "3D(batch mode) tensor expected");
+    luaL_argcheck(L, input->size[2] == inputSize, 2, "invalid input size"); 
+  } 
+  else 
+  {
+    luaL_argcheck(L, input->nDimension == 2, 2, "2D(batch mode) tensor expected");
+    luaL_argcheck(L, input->size[1] == inputSize, 2, "invalid input size"); 
+  }
+  luaL_argcheck(L, inputIndice->nDimension == 2, 3, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, outputIndice->nDimension == 2, 4, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, inputScale->nDimension == 2, 5, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, outputScale->nDimension == 2, 6, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, THLwdaTensor_isContiguous(state, input), 2, "Expecting contiguous input");
+  
+  THLwdaTensor_resizeAs(state, _gradOutput, gradOutput);
+  THLwdaTensor_resizeAs(state, gradOutputScale, outputScale);
+  THLwdaTensor_resize4d(state, gradInputBatched, batchSize, outputWindowSize, inputWindowSize, inputSize);
+ 
+  /* call lwdakernel */
+  dim3 blocks(input->size[0]); // each lwca-block is an example
+  dim3 threads(BLOCKSPARSE_THREADS);
+  lwnnx_BlockSparse_updateGradOutput_kernel<<<blocks,threads>>>(
+    THLwdaTensor_data(state, _gradOutput), THLwdaTensor_data(state, gradOutputScale), 
+    THLwdaTensor_data(state, gradOutput), THLwdaTensor_data(state, output),
+    THLwdaTensor_data(state, outputScale), outputWindowSize, outputSize
+  );
+  
+  lwdaError errcode = lwdaGetLastError();
+  if(errcode != lwdaSuccess)
+    THError(lwdaGetErrorString(errcode));
+    
+  stat = lwblasCreate(&handle);
+  if (stat != LWBLAS_STATUS_SUCCESS) 
+    THError("LWBLAS initialization failed");
+  
+  /* streamed or batched */
+  if (sqrt(inputSize*outputSize) > batchedGemmMax)
+  {
+    lwdaStream_t streams[BLOCKSPARSE_STREAMS];
+    
+    for (int i=0; i<BLOCKSPARSE_STREAMS; i++)
+    {
+      if (lwdaStreamCreate(&streams[i]) != lwdaSuccess)
+        THError("error initializing stream");
+    }
+    lwdaDeviceSynchronize();
+    
+    long batchedIdx = 0;
+    for (int i=0; i<batchSize; i++)
+    {
+      float *gradOutputPtr = THLwdaTensor_data(state, _gradOutput)+i*_gradOutput->stride[0];
+      float *gradInputPtr = THLwdaTensor_data(state, gradInputBatched)+i*gradInputBatched->stride[0];
+      long *inputIdxPtr = THLongTensor_data(inputIndiceHost)+i*inputIndiceHost->stride[0];
+      long *outputIdxPtr = THLongTensor_data(outputIndiceHost)+i*outputIndiceHost->stride[0];
+      
+      for (int m=0; m<outputWindowSize; m++)
+      {              
+        for (int l=0; l<inputWindowSize; l++) 
+        {
+          lwblasSetStream(handle, streams[batchedIdx%BLOCKSPARSE_STREAMS]);
+      
+          stat = lwblasSgemv(handle, LWBLAS_OP_N,  inputSize, outputSize,
+                            &alpha, (const float*)THLwdaTensor_data(state, weight)+(outputIdxPtr[m]-1)*weight->stride[0]+(inputIdxPtr[l]-1)*weight->stride[1], inputSize,
+                            (const float*)gradOutputPtr, 1,
+                            &beta, gradInputPtr, 1);
+                            
+          if (stat != LWBLAS_STATUS_SUCCESS) 
+            THError("lwblasSgemv failed");
+
+          gradInputPtr += gradInputBatched->stride[2];
+          batchedIdx++;
+        }
+        
+        gradOutputPtr += _gradOutput->stride[1];
+      }
+    }
+    
+    lwblasSetStream(handle, NULL);
+    lwdaDeviceSynchronize();
+    
+    for (int i=0; i<BLOCKSPARSE_STREAMS; i++)
+    {
+      if (lwdaStreamDestroy(streams[i]) != lwdaSuccess)
+        THError("error destroying stream");
+    }
+    
+  }
+  else
+  {  
+    THCharTensor *inputHost = (THCharTensor*)luaT_getfieldcheckudata(L, 1, "inputHost", "torch.CharTensor");
+    THCharTensor *weightHost = (THCharTensor*)luaT_getfieldcheckudata(L, 1, "weightHost", "torch.CharTensor");
+    THCharTensor *outputHost = (THCharTensor*)luaT_getfieldcheckudata(L, 1, "outputHost", "torch.CharTensor");
+    
+    THLwdaTensor *inputLwda = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "inputLwda", "torch.LwdaTensor");
+    THLwdaTensor *weightLwda = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "weightLwda", "torch.LwdaTensor");
+    THLwdaTensor *outputLwda = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "outputLwda", "torch.LwdaTensor");
+    // put gradInput back on top of the stack
+    gradInput = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "_gradInput", "torch.LwdaTensor");
+    gradOutputScale = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "gradOutputScale", "torch.LwdaTensor");
+    
+    lwblasSetStream(handle, NULL);
+    
+    THCharTensor_resize1d(inputHost, nBatched*sizeof(float*));
+    THCharTensor_resize1d(weightHost, nBatched*sizeof(float*));
+    THCharTensor_resize1d(outputHost, nBatched*sizeof(float*));
+    
+    THLwdaTensor_resize1d(state, inputLwda, nBatched*sizeof(float*)/sizeof(float));
+    THLwdaTensor_resize1d(state, weightLwda, nBatched*sizeof(float*)/sizeof(float));
+    THLwdaTensor_resize1d(state, outputLwda, nBatched*sizeof(float*)/sizeof(float));
+    
+    float **gradInputB = (float **)THCharTensor_data(inputHost);
+    const float **weightB = (const float **)THCharTensor_data(weightHost);
+    const float **gradOutputB = (const float **)THCharTensor_data(outputHost);
+    
+    float **gradInputB_d = (float **)THLwdaTensor_data(state, inputLwda);
+    const float **weightB_d = (const float **)THLwdaTensor_data(state, weightLwda);
+    const float **gradOutputB_d = (const float **)THLwdaTensor_data(state, outputLwda);
+    
+
+    long batchedIdx = 0;
+    for (int i=0; i<batchSize; i++)
+    {
+      float *gradOutputPtr = THLwdaTensor_data(state, _gradOutput)+i*_gradOutput->stride[0];
+      float *gradInputPtr = THLwdaTensor_data(state, gradInputBatched)+i*gradInputBatched->stride[0];
+      long *inputIdxPtr = THLongTensor_data(inputIndiceHost)+i*inputIndiceHost->stride[0];
+      long *outputIdxPtr = THLongTensor_data(outputIndiceHost)+i*outputIndiceHost->stride[0];
+      
+      for (int m=0; m<outputWindowSize; m++)
+      {              
+        for (int l=0; l<inputWindowSize; l++) 
+        {
+          gradInputB[batchedIdx] = gradInputPtr;
+          weightB[batchedIdx] = THLwdaTensor_data(state, weight)+(outputIdxPtr[m]-1)*weight->stride[0]+(inputIdxPtr[l]-1)*weight->stride[1];
+          gradOutputB[batchedIdx] = gradOutputPtr;
+
+          gradInputPtr += gradInputBatched->stride[2];
+          batchedIdx++;
+        }
+        
+        gradOutputPtr += _gradOutput->stride[1];
+      }
+    }
+    
+    if(lwdaMemcpy(gradInputB_d, gradInputB, sizeof(float*)*nBatched, lwdaMemcpyHostToDevice) != lwdaSuccess)
+      THError("lwdaMemcpy failed");
+    if(lwdaMemcpy(weightB_d, weightB, sizeof(float*)*nBatched, lwdaMemcpyHostToDevice) != lwdaSuccess)
+      THError("lwdaMemcpy failed");
+    if(lwdaMemcpy(gradOutputB_d, gradOutputB, sizeof(float*)*nBatched, lwdaMemcpyHostToDevice) != lwdaSuccess)
+      THError("lwdaMemcpy failed");
+
+    stat = lwblasSgemmBatched(handle, LWBLAS_OP_N, LWBLAS_OP_N,
+                             inputSize, 1, outputSize,
+                             &alpha, weightB_d, inputSize, 
+                             gradOutputB_d, outputSize, 
+                             &beta, gradInputB_d, inputSize, 
+                             nBatched);
+    
+    if (stat != LWBLAS_STATUS_SUCCESS) 
+      THError("lwblasSgemmBatched failed");
+    
+  }
+  
+  lwblasDestroy(handle);
+  
+  THLwdaTensor_sum(state, gradInput, gradInputBatched, 0, 1);
+  THLwdaTensor_resizeAs(state, gradInput, input); 
+  
+  errcode = lwdaGetLastError();
+  if(errcode != lwdaSuccess)
+    THError(lwdaGetErrorString(errcode));
+
+  return 2;
+}
+  
+__global__ void lwnnx_BlockSparse_accGradParameters_kernel(
+  float *gradWeight, float* gradBias, float *gradOutput, 
+  float *input, float *inputIndice, float *outputIndice, 
+  int inputSize, int outputSize, int nInputBlock, int nOutputBlock,
+  int inputWindowSize, int outputWindowSize, float scale)
+{
+  __shared__ float buffer[BLOCKSPARSE_THREADS];
+  __shared__ float gradOutputBuffer[BLOCKSPARSE_MAXOUTPUTBLOCKSIZE];
+  int tx = threadIdx.x;
+  int i_step = blockDim.x;
+  int k = blockIdx.x;
+  
+  float *input_k = input + k*inputWindowSize*inputSize;
+  float *gradOutput_k = gradOutput + k*outputWindowSize*outputSize;
+  float *inputIndice_k = inputIndice + k*inputWindowSize;
+  float *outputIndice_k = outputIndice + k*outputWindowSize;
+  
+  // loop through blocks
+  for (int m=0; m<outputWindowSize; m++)
+  {
+    int outputIdx = (int)outputIndice_k[m] - 1;
+      
+    float *blockGradOutput = gradOutput_k + m*outputSize;
+    float *blockGradBias = gradBias + outputIdx*outputSize;
+    
+    for (int j=tx; j<outputSize; j+=i_step)
+      gradOutputBuffer[j] = blockGradOutput[j]*scale;
+    
+    __syncthreads(); // needed for some reason
+    
+    for (int l=0; l<inputWindowSize; l++)
+    {
+      int inputIdx = (int)inputIndice_k[l] - 1;
+      
+      float *blockInput = input_k + l*inputSize;
+      float *blockGradWeight = gradWeight + outputIdx*nInputBlock*outputSize*inputSize + inputIdx*outputSize*inputSize;
+      
+      // addr weights (scalar-products)
+      for (int i=tx; i<inputSize; i+=i_step)
+      {
+        // copy input to buffer
+        buffer[tx] = blockInput[i];
+      
+        // multiply accumulate weights
+        for (int j=0; j<outputSize; j++)
+          atomicAdd(&(blockGradWeight[j*inputSize + i]), gradOutputBuffer[j]*buffer[tx]);
+      }
+    }
+    
+    __syncthreads(); // needed for some reason
+    
+    // multiply accumulate biases 
+    for (int j=tx; j<outputSize; j+=i_step)
+      atomicAdd(&(blockGradBias[j]), gradOutputBuffer[j]);
+  }
+}
+
+
+static int lwnnx_BlockSparse_accGradParameters(lua_State *L)
+{ 
+  /* input, inputIndice, outputIndice, inputScale, outputScale, gradOutput, scale */
+  THCState *state = getLwtorchState(L);
+  // batchSize x inputWindowSize x inputSize
+  THLwdaTensor *input = (THLwdaTensor*)luaT_checkudata(L, 2, "torch.LwdaTensor");  
+  // batchSize x inputWindowSize
+  THLwdaTensor *inputIndice = (THLwdaTensor*)luaT_checkudata(L, 3, "torch.LwdaTensor");
+  THLwdaTensor *inputScale = (THLwdaTensor*)luaT_checkudata(L, 5, "torch.LwdaTensor");
+  // batchSize x outputWindowSize
+  THLwdaTensor *outputIndice = (THLwdaTensor*)luaT_checkudata(L, 4, "torch.LwdaTensor");
+  THLwdaTensor *outputScale = (THLwdaTensor*)luaT_checkudata(L, 6, "torch.LwdaTensor");
+  float scale = luaL_optnumber(L, 8, 1);
+  
+  int inputSize = luaT_getfieldcheckint(L, 1, "inputSize");
+  int outputSize = luaT_getfieldcheckint(L, 1, "outputSize");
+  int nInputBlock = luaT_getfieldcheckint(L, 1, "nInputBlock");
+  int nOutputBlock = luaT_getfieldcheckint(L, 1, "nOutputBlock");
+  
+  THLwdaTensor *gradWeight = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "gradWeight", "torch.LwdaTensor");
+  THLwdaTensor *gradBias = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "gradBias", "torch.LwdaTensor");
+  THLwdaTensor *_gradOutput = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "_gradOutput", "torch.LwdaTensor");
+  THLongTensor *inputIndiceHost = (THLongTensor*)luaT_getfieldcheckudata(L, 1, "inputIndiceHost", "torch.LongTensor");
+  THLongTensor *outputIndiceHost = (THLongTensor*)luaT_getfieldcheckudata(L, 1, "outputIndiceHost", "torch.LongTensor");
+  
+  if (nInputBlock > 1) 
+  {
+    luaL_argcheck(L, input->nDimension == 3, 2, "3D(batch mode) tensor expected");
+    luaL_argcheck(L, input->size[2] == inputSize, 2, "invalid input size"); 
+  } 
+  else 
+  {
+    luaL_argcheck(L, input->nDimension == 2, 2, "2D(batch mode) tensor expected");
+    luaL_argcheck(L, input->size[1] == inputSize, 2, "invalid input size"); 
+  }
+  luaL_argcheck(L, inputIndice->nDimension == 2, 3, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, outputIndice->nDimension == 2, 4, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, inputScale->nDimension == 2, 5, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, outputScale->nDimension == 2, 6, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, outputSize <= BLOCKSPARSE_MAXOUTPUTBLOCKSIZE, 1, "outputSize is too large");
+  
+  /* call lwdakernel */
+  dim3 blocks(input->size[0]); // each lwca-block is an example
+  dim3 threads(BLOCKSPARSE_THREADS);
+  lwnnx_BlockSparse_accGradParameters_kernel<<<blocks,threads>>>(
+    THLwdaTensor_data(state, gradWeight), THLwdaTensor_data(state, gradBias), 
+    THLwdaTensor_data(state, _gradOutput), THLwdaTensor_data(state, input),
+    THLwdaTensor_data(state, inputIndice), THLwdaTensor_data(state, outputIndice), 
+    inputSize, outputSize, nInputBlock, nOutputBlock, 
+    inputIndice->size[1], outputIndice->size[1], scale
+  );
+  
+  lwdaError errcode = lwdaGetLastError();
+  if(errcode != lwdaSuccess)
+    THError(lwdaGetErrorString(errcode));
+  
+  return 0;
+}
+
+
+  
+static const struct luaL_Reg lwnnx_BlockSparse__ [] = {
+  {"BlockSparse_updateOutput", lwnnx_BlockSparse_updateOutput},
+  {"BlockSparse_updateGradInput", lwnnx_BlockSparse_updateGradInput},
+  {"BlockSparse_accGradParameters", lwnnx_BlockSparse_accGradParameters},
+  {NULL, NULL}
+};
+
+static void lwnnx_BlockSparse_init(lua_State *L)
+{
+  luaT_pushmetatable(L, "torch.LwdaTensor");
+  luaT_registeratname(L, lwnnx_BlockSparse__, "nn");
+  lua_pop(L,1);
+}

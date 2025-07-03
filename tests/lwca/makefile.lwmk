@@ -1,0 +1,96 @@
+MACOSX_FAT_OUTPUTDIR := 0
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+SOURCES :=
+DEVICE_SOURCES :=
+
+GPGPU_PATH := $(LW_SOURCE)/drivers/gpgpu
+LWDA_PATH := $(GPGPU_PATH)/lwca
+
+# Unix only command for nicer terminal output, define empty for windows
+ifndef quiet_cmd_echo_only
+define quiet_cmd_echo_only
+  
+endef
+endif
+
+LW_MODULE_LOGGING_NAME := "tests/lwca"
+
+ifeq ($(LW_BUILD_TYPE),release)
+  override LW_SEPARATE_DEBUG_INFO := 1
+endif
+
+include $(LW_SOURCE)/tests/lwca/makefileHelper$(LW_HOST_OS_FAMILY).lwmk
+
+ifdef LWCFG_INITIALIZED
+
+GPGPU_DEFINES ?=
+include $(GPGPU_PATH)/shared/lwos/lwos-lwca.lwmk
+
+# To WAR issues with newer GCC on older libc++ systems
+CFLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
+
+TARGET_EXE = $(OUTPUTDIR)/lwda_driver_test$(EXESUFFIX)
+
+SOURCES += $(LW_TOOLS)/sdk/gtest/1.8.1/fused-src/gtest/gtest-all.cc
+CFLAGS += -DGTEST_HAS_TR1_TUPLE=0
+
+LW_INCLUDES += $(OUTPUTDIR)
+LW_INCLUDES += $(LW_SOURCE)/drivers/gpgpu/shared/lwos
+LW_INCLUDES += $(LW_TOOLS)/sdk/gtest/1.8.1/fused-src
+LW_WARNINGS_AS_ERRORS = 1
+
+include src/makefile.lwmk
+
+GENERATED_SOURCES += $(addprefix $(OUTPUTDIR)/,$(notdir $(DEVICE_SOURCES:.lw=.lw.fatbin.cpp)))
+
+# Generate driver headers
+LWDA_DRIVER_HEADER_OUTPUTDIR := $(OUTPUTDIR)
+include $(LWDA_PATH)/headers/lwda_headers.lwmk
+
+define COPY_RULE
+$(1): $(2)
+	$$(MKDIR) $$(dir $$@)
+	$$(call quiet_cmd_echo_only,COPY) \
+	$$(COPY) $$< $$@
+endef
+
+# Copy over the internal headers, just so we have a single plce for the public
+# and internal headers
+$(foreach header,$(LWDA_DRIVER_INTERNAL_HEADERS),\
+	$(eval $(call COPY_RULE,$(OUTPUTDIR)/$(header),$(LWDA_PATH)/inc/$(header))))
+
+LW_GENERATED_HEADERS += $(addprefix $(OUTPUTDIR)/,$(LWDA_DRIVER_HEADERS))
+LW_GENERATED_HEADERS += $(addprefix $(OUTPUTDIR)/,$(LWDA_DRIVER_INTERNAL_HEADERS))
+
+# Generate function prototypes for loader
+
+GPGPU_SCRIPTS_PATH := $(GPGPU_PATH)/build/scripts
+PERL_FLAGS := -I$(GPGPU_SCRIPTS_PATH) -I$(OUTPUTDIR)
+
+define FUNCTION_PROTOTYPE_RULE
+$(1): $(2) $$(OUTPUTDIR)/LwdaParseDatabase.pm
+	$$(MKDIR) $$(dir $$@)
+	$$(call quiet_cmd_echo_only,PERL) \
+	$$(PERL) $$(PERL_FLAGS) $$(GPGPU_SCRIPTS_PATH)/GenerateLwFunctionTypes.pl $$@ $$<
+endef
+
+$(OUTPUTDIR)/LwdaParseDatabase.pm: $(GPGPU_SCRIPTS_PATH)/BuildParseDatabase.pl $(GPGPU_SCRIPTS_PATH)/PerlmodDoxygenConfig.txt $(GPGPU_SCRIPTS_PATH)/CodeGenUtils.pm
+	$(call quiet_cmd_echo_only,PERL) \
+	$(PERL) $(PERL_FLAGS) $(GPGPU_SCRIPTS_PATH)/BuildParseDatabase.pl $(doxygenForParseDb) $@ -D__LWDA_API_VERSION_INTERNAL $(addprefix $(OUTPUTDIR)/,$(LWDA_DRIVER_HEADERS))
+
+$(foreach header,$(LWDA_DRIVER_HEADERS),\
+	$(eval $(call FUNCTION_PROTOTYPE_RULE,$(OUTPUTDIR)/generated_types_$(header),$(OUTPUTDIR)/$(header))))
+
+LW_GENERATED_HEADERS += $(addprefix $(OUTPUTDIR)/generated_types_,$(LWDA_DRIVER_HEADERS))
+
+$(eval $(call LW_BINARY_FROM_OBJECTS,$(TARGET_EXE),$(call BUILD_OBJECT_LIST,$(SOURCES) $(GENERATED_SOURCES))))
+
+$(TARGET_EXE): LW_BINARY_IS_CXX := 1
+build: $(TARGET_EXE)
+
+endif
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

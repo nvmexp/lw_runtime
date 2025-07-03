@@ -1,0 +1,29 @@
+##############################################################################
+# Define the rules to create testing packages
+##############################################################################
+
+COMP_ARCHIVESUFFIX := $(ARCHIVESUFFIX).gz
+build: $(OUTPUTDIR)/dcgm_collectd$(COMP_ARCHIVESUFFIX)
+dcgmbuildsyncpoint:: $(OUTPUTDIR)/dcgm_collectd$(COMP_ARCHIVESUFFIX) 
+
+DCGMCOLLECTDDIR := dcgm_collectd
+DCGMCOLLECTDNAME := dcgm_collectd
+
+$(OUTPUTDIR)/$(DCGMCOLLECTDNAME)$(COMP_ARCHIVESUFFIX): $(OUTPUTDIR)/testing$(ARCHIVESUFFIX) $(OUTPUTDIR)/bindings$(COMP_ARCHIVESUFFIX)
+	@$(ECHO) Generating dcgm_collectd package for $@...
+	@$(FORCE_RMDIR) $(OUTPUTDIR)/$(DCGMCOLLECTDDIR)
+
+	@$(MKDIR) $(OUTPUTDIR)/$(DCGMCOLLECTDDIR)
+	@$(MKDIR) $(OUTPUTDIR)/$(DCGMCOLLECTDDIR)
+	
+	#BINDINGSDIR comes from testing/python/buildexportbindings.lwmk
+	#Capture all relevant bindings files
+	$(COPY) $(OUTPUTDIR)/$(BINDINGSDIR)/*.py $(OUTPUTDIR)/$(DCGMCOLLECTDDIR)
+
+	$(COPY) $(DCGM_DIR)/$(DCGMCOLLECTDDIR)/*.py $(OUTPUTDIR)/$(DCGMCOLLECTDDIR)
+	
+	$(TAR) -C $(OUTPUTDIR) -cf $(@:.tar.gz=.tar)  $(DCGMCOLLECTDDIR)
+	$(GZIP_CMD) -f $(@:.tar.gz=.tar)
+
+	$(COPY) $(DCGM_DIR)/$(DCGMCOLLECTDDIR)/dcgm_collectd.py $(OUTPUTDIR)/testing/tests/stubs/
+

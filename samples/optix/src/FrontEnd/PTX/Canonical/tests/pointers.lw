@@ -1,0 +1,241 @@
+#include <optix_world.h>
+
+rtBuffer<float, 1>         bufferFloat;
+rtBuffer<float3, 1>        bufferFloat3;
+rtBuffer<long long int, 1> addressBuffer;
+rtDeclareVariable( int, bufferIndex, , );
+rtDeclareVariable( float, value, , );
+rtDeclareVariable( int, bufferFloatId, , );
+rtDeclareVariable( int, bufferFloat3Id, , );
+rtDeclareVariable( int, control, , );
+
+__device__ float global_variable = 42.35f;
+
+// Support functions.
+__device__ __noinline__ float* returnPointer()
+{
+    float* ptr = &bufferFloat[bufferIndex];
+    return ptr;
+}
+
+__device__ __noinline__ float* returnPointerUsingBufferId()
+{
+    float* ptr = &bufferFloat[bufferIndex];
+    return ptr;
+}
+
+__device__ __noinline__ void setToValue( float* input_ptr )
+{
+    input_ptr[0] = value;
+}
+
+__device__ __noinline__ float* getPointer( int index )
+{
+    return &bufferFloat[index];
+}
+
+// Tests using global variables.
+// -----------------------------------------------------------------------------
+RT_PROGRAM void pass_global_variable_to_function()
+{
+    bufferFloat[0] = 0.f;
+    setToValue( &global_variable );
+    bufferFloat[0] = global_variable;
+}
+
+// Tests using bound buffers.
+// -----------------------------------------------------------------------------
+RT_PROGRAM void pass_buffer_element_pointer_to_function()
+{
+    setToValue( &bufferFloat[bufferIndex] );
+}
+
+RT_PROGRAM void pass_buffer_subelement_pointer_to_function()
+{
+    setToValue( &bufferFloat3[bufferIndex].y );
+}
+
+RT_PROGRAM void pass_buffer_pointer_to_function_after_switch()
+{
+    float* ptr = 0;
+    if( control < 15 )
+    {
+        ptr = &bufferFloat[bufferIndex];
+    }
+    else
+    {
+        ptr = &bufferFloat3[bufferIndex].y;
+    }
+
+    setToValue( ptr );
+}
+
+RT_PROGRAM void pass_buffer_subelement_pointer_to_function_with_arithmetics()
+{
+    float3* ptr      = &bufferFloat3[bufferIndex];
+    char*   char_ptr = (char*)ptr;
+    // Access the 'y' element of the float3.
+    char_ptr       = char_ptr + 4;
+    float* new_ptr = (float*)char_ptr;
+
+    setToValue( new_ptr );
+}
+
+RT_PROGRAM void return_buffer_element_pointer_from_function()
+{
+    float* ptr = returnPointer();
+    *ptr       = value;
+}
+
+RT_PROGRAM void store_pointer_to_buffer_in_buffer()
+{
+    float* ptr       = &bufferFloat[bufferIndex];
+    addressBuffer[0] = (long long int)ptr;
+
+    float* loaded_ptr = (float*)addressBuffer[0];
+
+    *loaded_ptr = value;
+}
+
+// Tests using buffer ids.
+// -----------------------------------------------------------------------------
+RT_PROGRAM void pass_buffer_id_element_pointer_to_function()
+{
+    setToValue( &rtBufferId<float, 1>( bufferFloatId )[bufferIndex] );
+}
+
+RT_PROGRAM void pass_buffer_id_subelement_pointer_to_function()
+{
+    setToValue( &rtBufferId<float3, 1>( bufferFloat3Id )[bufferIndex].y );
+}
+
+RT_PROGRAM void pass_buffer_id_subelement_pointer_to_function_with_arithmetics()
+{
+    float3* ptr      = &( rtBufferId<float3, 1>( bufferFloat3Id )[bufferIndex] );
+    char*   char_ptr = (char*)ptr;
+    // Access the 'y' element of the float3.
+    char_ptr       = char_ptr + 4;
+    float* new_ptr = (float*)char_ptr;
+
+    setToValue( new_ptr );
+}
+
+RT_PROGRAM void return_buffer_id_element_pointer_from_function()
+{
+    float* ptr = returnPointerUsingBufferId();
+    *ptr       = value;
+}
+
+RT_PROGRAM void store_pointer_to_buffer_id_in_buffer()
+{
+    float* ptr       = &( rtBufferId<float, 1>( bufferFloatId )[bufferIndex] );
+    addressBuffer[0] = (long long int)ptr;
+
+    float* loaded_ptr = (float*)addressBuffer[0];
+
+    *loaded_ptr = value;
+}
+
+// Tests on aliasing different types of pointers.
+// -----------------------------------------------------------------------------
+RT_PROGRAM void alias_buffer_and_variable_pointers()
+{
+    bufferFloat[0] = 0;
+    float* ptr     = 0;
+    if( control < 10 )
+    {
+        ptr = &bufferFloat[0];
+    }
+    else
+    {
+        ptr = &value;
+    }
+
+    bufferFloat3[0].x = *ptr;
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void alias_stack_and_variable_pointers()
+{
+    bufferFloat[0]        = 0;
+    float* ptr            = 0;
+    float  local_variable = 55.56f;
+    if( control < 10 )
+    {
+        ptr = &local_variable;
+    }
+    else
+    {
+        ptr = &value;
+    }
+
+    bufferFloat[0] = *ptr;
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void alias_escaped_and_buffer_pointer_load()
+{
+    bufferFloat[0] = 0;
+    float* ptr     = 0;
+    if( control < 10 )
+    {
+        ptr = getPointer( 3 );
+    }
+    else
+    {
+        ptr = &bufferFloat[1];
+    }
+
+    bufferFloat[0] = *ptr;
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void alias_escaped_and_buffer_pointer_store()
+{
+    bufferFloat[0] = 0;
+    float* ptr     = 0;
+    if( control < 10 )
+    {
+        ptr = getPointer( 3 );
+    }
+    else
+    {
+        ptr = &bufferFloat[1];
+    }
+
+    *ptr = 54.32;
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void alias_escaped_and_buffer_pointer_function()
+{
+    float* ptr = 0;
+    if( control < 10 )
+    {
+        ptr = getPointer( 3 );
+    }
+    else
+    {
+        ptr = &bufferFloat[1];
+    }
+
+    ptr += 1;
+    setToValue( ptr );
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void alias_escaped_and_buffer_pointer_atomic()
+{
+    bufferFloat[0] = 0;
+    float* ptr     = 0;
+    if( control < 10 )
+    {
+        ptr = getPointer( 3 );
+    }
+    else
+    {
+        ptr = &bufferFloat[1];
+    }
+
+    atomicAdd( ptr, 3 );
+}

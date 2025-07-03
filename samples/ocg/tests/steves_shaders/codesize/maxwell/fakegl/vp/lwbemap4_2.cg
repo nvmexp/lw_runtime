@@ -1,0 +1,46 @@
+// TLOG_T(+3): Cg shader: 
+struct vertIn {
+    float4 oPosition   : POSITION;
+    float3 normal   : NORMAL;
+    float4 primaryColor   :  COLOR0;
+    float4 texCoord0 : TEXCOORD0;
+};
+struct vertOut {
+    float4 hPosition   : POSITION;
+    float4 primaryColor   :  COLOR0;
+    float4 texCoord0 : TEXCOORD0;
+};
+vertOut main(vertIn IN,
+    const uniform float4x4 modelViewProj : C[12][960],
+    const uniform float4x4 modelViewIlwerseTranspose : C[12][1152],
+    const uniform float4x4 modelView : C[12][1088],
+    uniform float4 eyePoint : C[12][1856],
+    const uniform float4x4 texMatrix0 : C[12][2048])
+{
+    float3 normal_eye;
+    float4 vertex_eye;
+    float4 R0;
+    float tempTexGenSM_1f;
+    float4 R10;
+    vertOut OUT;
+    normal_eye = mul((float3x3) modelViewIlwerseTranspose, IN.normal);
+    vertex_eye = mul(modelView, IN.oPosition);
+    OUT.hPosition = mul(modelViewProj, IN.oPosition);
+    normal_eye = normalize(normal_eye);
+    OUT.primaryColor.xyzw = IN.primaryColor.xyzw;
+    R0 = (-vertex_eye / vertex_eye.w) + eyePoint;
+    R0.w = dot(R0.xyz, R0.xyz);
+    R0 = R0.wxyz * rsqrt(R0.w);
+    tempTexGenSM_1f = dot(normal_eye.xyz, R0.yzw);
+    R10.xyz = normal_eye * float3(2, 2, 2);
+    R10.w = 0;
+    R10 = (tempTexGenSM_1f * R10) - R0.yzwx;
+    float4 tempTexCoord0;
+    tempTexCoord0 = IN.texCoord0;
+    tempTexCoord0.x = R10.x;
+    tempTexCoord0.y = R10.y;
+    tempTexCoord0.z = R10.z;
+    OUT.texCoord0.xyz = mul(texMatrix0, tempTexCoord0).xyz;
+    return OUT;
+}
+// TLOG_T(+3): Command Line: -profile vpf -nofastmath -po cimm,hexfp,ubank=14 -po sm40 -po hint=2

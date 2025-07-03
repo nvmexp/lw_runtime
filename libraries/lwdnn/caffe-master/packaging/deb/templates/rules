@@ -1,0 +1,46 @@
+#!/usr/bin/make -f
+
+ifeq ($(LWDA_VERSION),7.5)
+	LWDA_ARCH_BIN := 30 35 50 52
+	LWDA_ARCH_PTX := 52
+else ifeq ($(LWDA_VERSION),8.0)
+	LWDA_ARCH_BIN := 30 35 50 52 60
+	LWDA_ARCH_PTX := 60
+else ifeq ($(LWDA_VERSION),)
+$(error "LWDA_VERSION is not set")
+else
+$(error "LWDA_VERSION $(LWDA_VERSION) is not recognized")
+endif
+
+%:
+	dh $@ --buildsystem=cmake --parallel
+
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-DBLAS=Open \
+		-DCMAKE_BUILD_TYPE="Release" \
+		-DCMAKE_SKIP_RPATH=TRUE \
+		-DCPU_ONLY=OFF \
+		-DLWDA_ARCH_NAME=Manual \
+		-DLWDA_ARCH_BIN="$(LWDA_ARCH_BIN)" \
+		-DLWDA_ARCH_PTX="$(LWDA_ARCH_PTX)"
+
+BIN_BUILD_DIR := debian/tmp/usr/bin
+TOOLS_INSTALL_DIR := debian/caffe-lw-tools/usr/bin
+LIB_BUILD_DIR := debian/tmp/usr/lib
+LIB_INSTALL_DIR := debian/libcaffe-lw0/usr/lib/x86_64-linux-gnu
+
+override_dh_auto_install:
+	dh_auto_install
+	# Copy the tools manually rather than with a ".install" file because
+	#   we want to add the "caffe_" prefix.
+	mkdir -p $(TOOLS_INSTALL_DIR)
+	for orig_name in `ls $(BIN_BUILD_DIR) -I caffe`; do \
+		dest_name=caffe_$$orig_name; \
+		cp -v $(BIN_BUILD_DIR)/$$orig_name $(TOOLS_INSTALL_DIR)/$$dest_name; \
+	done
+	# Copy the versioned DSOs manually since the version number changes
+	mkdir -p $(LIB_INSTALL_DIR)
+	for filename in `ls $(LIB_BUILD_DIR)/*.so.*`; do \
+		cp -av $$filename $(LIB_INSTALL_DIR)/; \
+	done

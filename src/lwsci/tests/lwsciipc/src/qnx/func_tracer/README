@@ -1,0 +1,214 @@
+#
+# Copyright (c) 2021, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+# https://confluence.lwpu.com/display/ESS/Function+Call+Tracer
+# https://git-master.lwpu.com/r/#/c/3rdparty/qnx/src/+/2605602/
+
+Program Invocation:
+
+python3 sequencer.py <sample_slog_file> <map_json>
+
+where:
+    sample_slog_file is output of slog2info for a resmgr or library.
+    map_json is memory range for resmgr or library.
+
+output:
+    sample_slog_file_out which contains function names for resmgr or library.
+
+Sample Input:
+Jan 01 00:00:01.118            io_lwgpio.139300..0            io-lwgpio* 10019  [0x3573129b] Resmgr Function Entry: 0x000000100cf56c
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x35771f56] Resmgr Function Entry: 0x000000100cb7b8
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x357725f5] Resmgr Function Exit: 0x000000100cb7b8
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x35772676] Resmgr Function Entry: 0x000000100cee1c
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x357726ba] Resmgr Function Entry: 0x000000100ced40
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x357726f8] Resmgr Function Exit: 0x000000100ced40
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x35772727] Resmgr Function Entry: 0x000000100cea60
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x35772768] Library Function Entry: 0x00000078015170
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x357732ae] Library Function Entry: 0x0000007801c1e8
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x35773481] Library Function Entry: 0x0000007801caec
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x35774f4e] Library Function Exit: 0x0000007801caec
+
+Sample Output:
+Jan 01 00:00:01.118            io_lwgpio.139300..0            io-lwgpio* 10019  [0x3573129b] Resmgr Function Entry: main
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x35771f56] Resmgr Function Entry: alloc_pPlatInfo
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x357725f5] Resmgr Function Exit: alloc_pPlatInfo
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x35772676] Resmgr Function Entry: resmgr_get_inputs
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x357726ba] Resmgr Function Entry: parse_cmd_line
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x357726f8] Resmgr Function Exit: parse_cmd_line
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x35772727] Resmgr Function Entry: lwgpio_plat_init
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x35772768] Library Function Entry: SubU32
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x357732ae] Library Function Entry: udt_init
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x35773481] Library Function Entry: shm_malloc
+Jan 01 00:00:01.119            io_lwgpio.139300..0            io-lwgpio  10019  [0x35774f4e] Library Function Exit: shm_malloc
+
+json file:
+    This file contains base_address, end_address and binary_path
+    for instrumented resmgr and library. Json files needs to be
+    modified for individual binaries as per code section and data
+    section layout.
+
+    binary_path: relative path from root directory of repo (TEGRA_TOP).
+    base_address: start address of code section.
+    end_address: base_address + code section size + data section size.
+
+    base_address and end_address can be callwlated from output of pidin
+    command.
+
+    Example: Callwlating addresses for instrumented liblwgpio,
+             liblwdtcommon and io-lwgpio resmgr.
+
+    # pidin -p io-lwgpio -f M
+      Memory
+
+            io-lwgpio          @        100c8000              68K  8192
+            libc.so.4          @         1000000             620K   24K
+            v_qnx_overrides.so @        78000000             4096  4096
+            liblwdtcommon.so   @        78012000              88K  4096
+            blwos_s3_safety.so @        78043000              32K  4096
+            liblwtegrahv.so    @        7805c000              12K  4096
+            libslog2.so.1      @        78070000              16K  4096
+            o_lwgpio.139300..0 @        28001000 (       0)       4100K
+            /dev/mem           @        28403000 ( 2210000)        4096
+            /dev/mem           @        28405000 ( 2211000)        4096
+            /dev/mem           @        28407000 ( 2212000)        4096
+            /dev/mem           @        28409000 ( 2213000)        4096
+            /dev/mem           @        2840b000 ( 2214000)        4096
+            /dev/mem           @        2840d000 ( 2215000)        4096
+            /dev/mem           @        2840f000 ( c2f1000)        4096
+            /dev/mem           @        28411000 ( c1e0000)         64K
+
+    # pidin -p test_ionotify -f M
+      Memory
+
+            test_ionotify      @        100c8000              28K  8192
+            libc.so.4          @         1000000             620K   24K
+            v_qnx_overrides.so @        78000000             4096  4096
+            liblwgpio.so       @        78012000              12K  4096
+            blwos_s3_safety.so @        78027000              32K  4096
+            libslog2.so.1      @        78040000              16K  4096
+            st_ionotify.962565 @        28001000 (       0)         32K
+
+    For io-lwgpio, base_address = 100c8000 and end_address = 100c800 + 68K +
+    8192.
+
+    For liblwdtcommon.so, base_address = 78012000 and end_address = 78012000 +
+    88K + 4096.
+
+    For liblwgpio.so, base_address = 78012000 and end_address = 78012000 +
+    12K + 4096.
+
+=============================================================================
+12/02/2021 - LwSciIpc release safety (embedded/5.2-lts)
+
+cd /tmp
+./test_lwsciipc_resmgr &
+./test_lwsciipc_lwmap -e ipc_test_0 -@ &
+./test_lwsciipc_read -@ &
+./test_lwsciipc_readm -c ipc_test_1 -@ &
+
+pidin -p lwsciipc_init -f M
+pidin -p devv-lwivc -f M
+pidin -p io-lwsciipc -f M
+pidin -p test_lwsciipc_read -f M
+pidin -p test_lwsciipc_resmgr -f M
+pidin -p test_lwsciipc_lwmap -f M
+pidin -p test_lwsciipc_readm -f M
+
+# pidin -p lwsciipc_init -f M
+      Memory
+
+            lwsciipc_init      @        100c8000              40K  8192 + 0xC000
+            libc.so.4          @         1000000             620K   24K
+            v_qnx_overrides.so @        78000000             4096  4096
+            liblwivc.so        @        78012000              16K  4096 + 0x5000
+            liblwdtcommon.so   @        78027000              88K  4096 + 0x17000
+            blwos_s3_safety.so @        78058000              32K  4096
+            libslog2.so.1      @        78071000              16K  4096
+            ciipc_init.4102..0 @        28001000 (       0)         64M
+
+# pidin -p devv-lwivc -f M
+      Memory
+
+            devv-lwivc         @        100c8000              24K  8192 + 0x8000
+            libc.so.4          @         1000000             620K   24K
+            v_qnx_overrides.so @        78000000             4096  4096
+            blwos_s3_safety.so @        78012000              32K  4096
+            libslog2.so.1      @        7802b000              16K  4096
+            devv_lwivc.4103..0 @        28001000 (       0)         64M
+            /dev/mem           @        2c003000 (7fffe70000)         64K
+
+# pidin -p io-lwsciipc -f M
+      Memory
+
+            io-lwsciipc        @        100c8000              32K  8192 + 0xA000
+            libc.so.4          @         1000000             620K   24K
+            v_qnx_overrides.so @        78000000             4096  4096
+            blwos_s3_safety.so @        78012000              32K  4096
+            libslog2.so.1      @        7802b000              16K  4096
+            o_lwsciipc.4104..0 @        28001000 (       0)         64M
+
+# pidin -p test_lwsciipc_read -f M
+      Memory
+
+            test_lwsciipc_read @        100c8000              40K  8192 + 0xC000
+            libc.so.4          @         1000000             620K   24K
+            v_qnx_overrides.so @        78000000             4096  4096
+            liblwsciipc.so     @        78012000              72K  4096 + 0x13000
+            liblwscievent.so   @        78036000              16K  4096 + 0x5000
+            libslog2.so.1      @        7804b000              16K  4096
+            libm.so.3          @        78061000             228K  4096
+            liblwivc.so        @        780ab000              16K  4096 + 0x5000
+            blwos_s3_safety.so @        780c0000              32K  4096
+            pc_read.3407877..0 @        28001000 (       0)         64M
+            mem/LwSciIpcConfig @        2c003000 (       0)         36K
+            /dev/mem           @        2c00d000 (7fb99a0000)        196K
+
+#  pidin -p test_lwsciipc_resmgr -f M
+      Memory
+
+            st_lwsciipc_resmgr @        100c8000              12K  8192 + 0x5000
+            libc.so.4          @         1000000             620K   24K
+            v_qnx_overrides.so @        78000000             4096  4096
+            liblwsciipc.so     @        78012000              72K  4096 + 0x13000
+            blwos_s3_safety.so @        78036000              32K  4096
+            libslog2.so.1      @        7804f000              16K  4096
+            liblwivc.so        @        78065000              16K  4096 + 0x5000
+            _resmgr.4292682..0 @        28001000 (       0)         64M
+            mem/LwSciIpcConfig @        2c003000 (       0)         36K
+
+#  pidin -p test_lwsciipc_lwmap -f M
+      Memory
+
+            est_lwsciipc_lwmap @        100c8000              12K  8192 + 0x5000
+            libc.so.4          @         1000000             620K   24K
+            v_qnx_overrides.so @        78000000             4096  4096
+            liblwsciipc.so     @        78012000              72K  4096 + 0x13000
+            blwos_s3_safety.so @        78036000              32K  4096
+            libslog2.so.1      @        7804f000              16K  4096
+            liblwivc.so        @        78065000              16K  4096 + 0x5000
+            c_lwmap.4296788..0 @        28001000 (       0)         64M
+
+# pidin -p test_lwsciipc_readm -f M
+      Memory
+
+            est_lwsciipc_readm @        100c8000              20K  8192
+            libc.so.4          @         1000000             620K   24K
+            v_qnx_overrides.so @        78000000             4096  4096
+            liblwsciipc.so     @        78012000              72K  4096 + 0x13000
+            liblwscievent.so   @        78036000              16K  4096 + 0x5000
+            libslog2.so.1      @        7804b000              16K  4096
+            liblwivc.so        @        78061000              16K  4096 + 0x5000
+            blwos_s3_safety.so @        78076000              32K  4096
+            c_readm.4436054..0 @        28001000 (       0)       4100K
+
+slay test_lwsciipc_resmgr
+slay test_lwsciipc_lwmap
+slay test_lwsciipc_read
+slay test_lwsciipc_readm
+

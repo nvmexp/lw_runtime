@@ -1,0 +1,117 @@
+#include <optix_world.h>
+
+rtBuffer<int> input;
+rtDeclareVariable( uint3, launch_index, rtLaunchIndex, );
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print()
+{
+    rtPrintf( "printf successfully exelwted!\n" );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_const()
+{
+    rtPrintf( "int: %d\n", 7 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_const64()
+{
+    rtPrintf( "long long int: %lld\n", (long long int)100200300400500 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_multiplePrintfStatements()
+{
+    rtPrintf( "char: %c\n", 'A' );
+    rtPrintf( "int: %d\n", -10 );
+    rtPrintf( "unsigned int: %u\n", 20 );
+    rtPrintf( "long int: %ld\n", (long int)-30 );
+    rtPrintf( "long unsigned int: %lu\n", (long unsigned int)40 );
+    rtPrintf( "long long int: %lld\n", (long long int)-50 );
+    rtPrintf( "long long unsigned int: %lu\n", (long long unsigned int)60 );
+    rtPrintf( "float: %f\n", 42.f );
+    rtPrintf( "double: %f\n", 42.0 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_multiplePrintfParameters()
+{
+    rtPrintf(
+        "char: %c\nint: %d\nunsigned int: %u\nlong int: %ld\nlong unsigned int: %lu\nlong long int: %lld\nlong long "
+        "unsigned int: %lu\nfloat: %f\ndouble: %f\n",
+        'A', -10, 20, (long int)-30, (long unsigned int)40, (long long int)-50, (long long unsigned int)60, 42.f, 42.0 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+RT_PROGRAM void print_inputFromBuffer()
+{
+    rtPrintf( "input from buffer: %d\n", input[0] );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_launchindex()
+{
+    rtPrintf( "launch index: %d %d %d\n", launch_index.x, launch_index.y, launch_index.z );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_exception_details()
+{
+    rtPrintf(
+        "Caught RT_EXCEPTION_BUFFER_INDEX_OUT_OF_BOUNDS\n"
+        "  launch index   : %d, %d, %d\n"
+        "  buffer address : 0x%llX\n"
+        "  dimensionality : %d\n"
+        "  size           : %lldx%lldx%lld\n"
+        "  element size   : %d\n"
+        "  accessed index : %lld, %lld, %lld\n",
+        1, 2, 3, (long long int)100, 3, (long long int)200, (long long int)200, (long long int)200, 8, (long long int)4,
+        (long long int)5, (long long int)6 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_conditional()
+{
+    if( input[0] > 10 )
+        rtPrintf( "You should see this.\n" );
+
+    if( input[0] < 5 )
+        rtPrintf( "This should not have been printed.\n" );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_loop()
+{
+    for( int i = 0, e = input[0]; i < e; ++i )
+        rtPrintf( "iteration %d\n", i );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// The final rtPrintf force the addition of a prehader to the loop.
+RT_PROGRAM void print_loop_with_final_rtPrintf()
+{
+    for( int i = 0, e = input[0]; i < e; ++i )
+        rtPrintf( "iteration %d\n", i );
+    rtPrintf( "Done!\n" );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_address()
+{
+    int local_variable = 0;
+    rtPrintf( "%p", &local_variable );
+}

@@ -1,0 +1,35 @@
+OBJ_SUFFIX := .o
+PKG_SUFFIX := .tgz
+
+# In an effort to avoid the common pitfalls of dynamically linked C++ all C++
+# code must be statically compiled in the SRT framework.  This includes the
+# stdc++ library.
+CXX_LINK_FLAGS = -Bstatic -lstdc++ -Bdynamic
+
+# If we're on Android the Android build system has already injected appropriate
+# linker flags for the C++ standard library, so we don't need to do it.
+ifdef LW_TARGET_OS
+  ifeq ($(LW_TARGET_OS),Android)
+    CXX_LINK_FLAGS =
+  endif
+endif
+LDFLAGS += $(CXX_LINK_FLAGS)
+
+LW_CXX_EXCEPTIONS=1
+LW_CXX_RTTI=1
+
+define BUILD_PACKAGE
+# Add it as a top level target
+  build: $$(OUTPUTDIR)/$(1).tgz
+
+# Previous ADD_TO_PACKAGE calls will have populated the input files, which this
+# now collects and uses to create the package.
+  $$(OUTPUTDIR)/$(1).tgz:
+	$$(call quiet_cmd,TAR) -C $$(OUTPUTDIR) -czf $$@ $$(subst $$(OUTPUTDIR)/,,$$^)
+endef
+
+define BUILD_EXELWTABLE
+  $(call LW_BINARY_FROM_OBJECTS,$(OUTPUTDIR)/$($(1)_EXE).unstripped,$$(sort $$(call TARGET_OBJECTS,$(1))))
+  $(eval $(call LW_DEBUG_INFO_CMD,$(OUTPUTDIR)/$($(1)_EXE).unstripped,$(OUTPUTDIR)/$($(1)_EXE),$(OUTPUTDIR)/$($(1)_EXE).debug))
+  $(OUTPUTDIR)/$($(1)_EXE).unstripped: $$($(1)_PREREQUISITES)
+endef

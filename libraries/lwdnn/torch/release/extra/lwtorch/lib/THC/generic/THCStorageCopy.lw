@@ -1,0 +1,46 @@
+#ifndef THC_GENERIC_FILE
+#define THC_GENERIC_FILE "generic/THCStorageCopy.lw"
+#else
+
+void THCStorage_(rawCopy)(THCState *state, THCStorage *self, real *src)
+{
+  THLwdaCheck(lwdaMemcpyAsync(self->data, src, self->size * sizeof(real), lwdaMemcpyDeviceToDevice, THCState_getLwrrentStream(state)));
+}
+
+// colwersions are delegated to THCTensor implementation
+#define THC_LWDA_STORAGE_IMPLEMENT_COPY(TYPEC,TYPELWDA)                                 \
+void THCStorage_(copyLwda##TYPEC)(THCState *state, THCStorage *self, struct THLwda##TYPELWDA##Storage *src)  \
+{                                                                                       \
+  THArgCheck(self->size == src->size, 2, "size does not match");                        \
+  THCTensor* selfTensor = THCTensor_(newWithStorage1d)(state, self, 0, self->size, 1);  \
+  struct THLwda##TYPELWDA##Tensor* srcTensor =                                          \
+      THLwda##TYPELWDA##Tensor_newWithStorage1d(state, src, 0, src->size, 1);           \
+  THCTensor_(copyLwda##TYPEC)(state, selfTensor, srcTensor);                            \
+  THLwda##TYPELWDA##Tensor_free(state, srcTensor);                                      \
+  THCTensor_(free)(state, selfTensor);                                                  \
+}
+
+THC_LWDA_STORAGE_IMPLEMENT_COPY(Byte,Byte)
+THC_LWDA_STORAGE_IMPLEMENT_COPY(Char,Char)
+THC_LWDA_STORAGE_IMPLEMENT_COPY(Short,Short)
+THC_LWDA_STORAGE_IMPLEMENT_COPY(Int,Int)
+THC_LWDA_STORAGE_IMPLEMENT_COPY(Long,Long)
+THC_LWDA_STORAGE_IMPLEMENT_COPY(Float,)  // i.e. float
+THC_LWDA_STORAGE_IMPLEMENT_COPY(Double,Double)
+#ifdef LWDA_HALF_TENSOR
+THC_LWDA_STORAGE_IMPLEMENT_COPY(Half,Half)
+#endif
+
+#undef THC_LWDA_STORAGE_IMPLEMENT_COPY
+
+void THCStorage_(copyLwda)(THCState *state, THCStorage *self, THCStorage *src)
+{
+  THCStorage_(TH_CONCAT_2(copyLwda, Real))(state, self, src);
+}
+
+void THCStorage_(copy)(THCState *state, THCStorage *self, THCStorage *src)
+{
+  THCStorage_(copyLwda)(state, self, src);
+}
+
+#endif

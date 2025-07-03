@@ -1,0 +1,60 @@
+# -*- mode: perl; -*-
+
+# BUS Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $busHal = [
+
+    # per-GPU defaults for ELPG for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+
+        TEST_BUS_INTERRUPTS  => [
+
+            DESCRIPTION   => "bus test interrupts",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ MAXWELL_thru_ADA, ],
+            _GH100        => [ HOPPER_and_later, -GH202, ],
+            _GH202        => [ GH202, ],
+        ],
+
+        DISABLE_WM_BOXES  => [
+
+            DESCRIPTION   => "Disable P2P mailboxes",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 *",
+            STUB_RETURNS  => ERROR,
+
+            # GK208, GM107, GM108 are intentionally set to STUB since it has no P2P
+            _GK104        => [ MAXWELL_thru_ADA, -GM107, -GM108 ],
+            _GH100        => [ HOPPER_and_later, ],
+            _STUB         => [ GM107, GM108 ],
+        ],
+
+        ENABLE_WM_BOXES    => [
+
+            DESCRIPTION    => "Enable P2P mailboxes",
+            RETURN_TYPE    => LW_STATUS,
+            ARGUMENTS      => "LwU32",
+            STUB_RETURNS   => ERROR,
+            LIKE_INTERFACE => DISABLE_WM_BOXES,
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $busHal;

@@ -1,0 +1,103 @@
+// _LWRM_COPYRIGHT_BEGIN_
+//
+// Copyright 2009-2017 by LWPU Corporation.  All rights reserved.  All
+// information contained herein is proprietary and confidential to LWPU
+// Corporation.  Any use, reproduction, or disclosure without the written
+// permission of LWPU Corporation is prohibited.
+//
+// _LWRM_COPYRIGHT_END_
+//
+
+package Dcl;
+
+import "bsp.proto";
+import "dplib.proto";
+import "engines.proto";
+import "fifo.proto";
+import "fcln.proto";
+import "gr.proto";
+import "journal.proto";
+import "perf.proto";
+import "notifier.proto";
+import "lwlog.proto";
+import "rc.proto";
+import "regs.proto";
+import "smu.proto";
+import "vbios.proto";
+import "vp.proto";
+
+// For collections of registers from hal routines by chip type
+message ErrorRegs
+{
+    repeated Regs.RegsAndMem gt215_regs  = 1;
+    repeated Regs.RegsAndMem igt21A_regs = 2;
+};
+
+message Engines
+{
+    optional LwDebug.Eng.Gpu           eng_gpu          = 1;
+    repeated LwDebug.Eng.Mc            eng_mc           = 2;
+    optional LwDebug.Eng.EngFifo       eng_fifo         = 3;
+    repeated Regs.RegsAndMem           raw_memory       = 4;
+    repeated LwDebug.Eng.Gr            eng_gr           = 5;
+    optional LwDebug.Eng.Fb            eng_fb           = 6;
+    optional LwDebug.Eng.Disp          eng_disp         = 7;
+    optional LwDebug.Eng.Fan           eng_fan          = 8;
+    optional LwDebug.Eng.Thermal       eng_thermal      = 9;
+    optional LwDebug.Eng.Fuse          eng_fuse         = 10;
+    optional LwDebug.Eng.VBios         eng_vbios        = 11;
+    optional LwDebug.Eng.Perf          eng_perf         = 12;
+    optional LwDebug.Eng.Bus           eng_bus          = 13;
+    optional LwDebug.Eng.Pmu_Obsolete  eng_pmu_obsolete = 14 [deprecated = true];
+    optional LwDebug.Eng.Ce            eng_ce           = 15;
+    repeated LwDebug.Eng.RtosFlcn      eng_rtos_flcn    = 16;
+    optional LwDebug.Eng.Lpwr          eng_lpwr         = 17;
+    repeated LwDebug.Eng.Lwd           eng_lwd          = 18;
+    optional LwDebug.Eng.Volt          eng_volt         = 19;
+    optional LwDebug.Eng.Clk           eng_clk          = 20;
+};
+
+//
+// Reserve 300s for this message to help with error checking
+// when these are added to mcStatusRecord.
+//
+
+message DclMsg
+{
+    optional Journal.Common                common                       = 330;  // Put common header first.
+    optional Gr.Exception                  gr_exception                 = 301;
+    optional Gr.ErrorInfo                  gr_errorinfo                 = 302;
+    optional Fifo.C1Contents               fifo_c1contents              = 303;
+    optional Perf.PerfInfo                 perf_perfinfo                = 304;
+    optional Perf.AddnlPerfInfo            perf_addnlperfinfo           = 305;
+    optional Perf.ThermalTable             perf_thermaltable            = 306;
+    optional Vbios.MxmTable                vbios_mxmtable               = 307;
+    optional Bsp.ErrorInfo                 bsp_errorinfo                = 318;
+    optional Vp.ErrorInfo                  vp_errorinfo                 = 319;
+    optional Fcln.ErrorInfo                fcln_errorinfo               = 310;
+    optional Notifier.MissedInfo           notifier_missedinfo          = 311;
+    optional Rc.GenericData                rc_genericdata               = 312;
+    optional Smu.CommandInfo               smu_commandinfo              = 313;
+    optional Smu.PstateInfo                smu_pstateinfo               = 314;
+    optional Journal.Assert                journal_assert               = 315;
+    optional Dcl.ErrorRegs                 dcl_errorregs                = 316;
+    optional Journal.RvaHeader             journal_rvaheader            = 320;
+    optional Journal.BadRead               journal_badread              = 321;
+    optional Journal.SurpriseRemoval       journal_surpriseremoval      = 322;
+    optional Fifo.ErrorInfo                fifo_errorinfo               = 323;
+    optional Lwlog.LoggerInfo              lwlog_loggerinfo             = 324;
+    optional DpLib.DpAssertHit             dplib_dpasserthit            = 325;
+    optional DpLib.DpLogCall               dplib_dplogcall              = 326;
+    optional Journal.BugCheck              journal_bugcheck             = 327;
+    optional Journal.RmDiagWrapBuff_RECORD wrap_buff_recs               = 328;
+    repeated Rc.RcCounter                  rcCounter                    = 329;
+    optional Engines                       engine                       = 3;     // Must match LWDEBUG_LWDUMP_GPU_INFO;
+
+    // 1000's are reserved for Debug Buffers (1000-1999)
+};
+
+// DCL only message wrapper for LW2080_CTRL_CMD_RC_GET_ERROR
+message ErrorBlock
+{
+    repeated Dcl.DclMsg data = 1;
+};

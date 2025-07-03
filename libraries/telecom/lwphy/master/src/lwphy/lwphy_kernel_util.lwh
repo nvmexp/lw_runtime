@@ -1,0 +1,210 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#if !defined(LWPHY_KERNEL_UTIL_LWH_INCLUDED_)
+#define LWPHY_KERNEL_UTIL_LWH_INCLUDED_
+
+#include <lwda_fp16.h>
+#include "lwphy_internal.h"
+
+// clang-format off
+#if LWPHY_DEBUG
+
+#define KERNEL_PRINT_BLOCK_ONCE(...) do { if((0 == threadIdx.x) && (0 == threadIdx.y) && (0 == threadIdx.z)) { printf(__VA_ARGS__); } } while(0)
+#define KERNEL_PRINT_GRID_ONCE(...) do { if((0 == threadIdx.x) && (0 == blockIdx.x)) { printf(__VA_ARGS__); } } while(0)
+#define KERNEL_PRINT_GRID_ONCE_AT_X(threadX, blockX, ...) do { if((threadX == threadIdx.x) && (blockX == blockIdx.x)) { printf(__VA_ARGS__); } } while(0)
+#define KERNEL_PRINT_IF(cond, ...) do { if(cond) { printf(__VA_ARGS__); } } while(0)
+#define KERNEL_PRINT(...) do { printf(__VA_ARGS__); } while(0)
+
+#else
+
+#define KERNEL_PRINT_BLOCK_ONCE(...)
+#define KERNEL_PRINT_GRID_ONCE(...)
+#define KERNEL_PRINT_GRID_ONCE_AT_X(threadX, blockX, ...)
+#define KERNEL_PRINT_IF(cond, ...)
+#define KERNEL_PRINT(...)
+
+#endif
+
+// clang-format on
+
+////////////////////////////////////////////////////////////////////////
+// See the simpleTemplates LWCA example
+// clang-format off
+template <typename T> struct shared_mem_t                { __device__ T*             addr() { extern __device__ void error(); error();  return nullptr; } };
+template <>           struct shared_mem_t<float>         { __device__ float*         addr() { extern __shared__ float s_float[];        return s_float; } };
+template <>           struct shared_mem_t<struct __half> { __device__ struct __half* addr() { extern __shared__ struct __half s_half[]; return s_half;  } };
+template <>           struct shared_mem_t<int>           { __device__ int*           addr() { extern __shared__ int s_int[];            return s_int;   } };
+template <>           struct shared_mem_t<char>          { __device__ char*          addr() { extern __shared__ char s_char[];          return s_char;  } };
+// clang-format on
+
+////////////////////////////////////////////////////////////////////////
+// kernel_mat
+// Simple wrapper to allow (row, col) addressing from an address within
+// a kernel
+template <typename T>
+class kernel_mat //
+{
+public:
+    __device__ kernel_mat(T* d, int lda) :
+        data_(d),
+        lda_(lda) {}
+    __device__ T&    operator()(int i, int j) { return data_[(j * lda_) + i]; }
+    __device__ const T& operator()(int i, int j) const { return data_[(j * lda_) + i]; }
+
+private:
+    T*  data_;
+    int lda_;
+};
+
+////////////////////////////////////////////////////////////////////////
+// grid_copy_x()
+template <typename T>
+__device__ void grid_copy_x(T* dst, const T* src, size_t szElements)
+{
+    for(size_t i = (blockIdx.x * blockDim.x) + threadIdx.x; i < szElements; i += (blockDim.x * gridDim.x))
+    {
+        dst[i] = src[i];
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// block_copy_sync
+template <typename T>
+__device__ void block_copy_sync(T* dst, const T* src, int szElements)
+{
+    for(int i = static_cast<int>(threadIdx.x); i < szElements; i += static_cast<int>(blockDim.x))
+    {
+        dst[i] = src[i];
+    }
+    __syncthreads();
+}
+
+////////////////////////////////////////////////////////////////////////
+// block_copy_sync_2D
+template <typename T>
+__device__ void block_copy_sync_2D(T* dst, const T* src, int szElements)
+{
+    for(int i = static_cast<int>(threadIdx.x + (threadIdx.y * blockDim.x));
+        i < szElements;
+        i += static_cast<int>(blockDim.x * blockDim.y))
+    {
+        dst[i] = src[i];
+    }
+    __syncthreads();
+}
+
+////////////////////////////////////////////////////////////////////////
+// block_zero_sync
+template <typename T>
+__device__ void block_zero_sync(T* dst, int szElements)
+{
+    for(int i = static_cast<int>(threadIdx.x);
+        i < szElements;
+        i += static_cast<int>(blockDim.x))
+    {
+        dst[i] = 0;
+    }
+    __syncthreads();
+}
+
+////////////////////////////////////////////////////////////////////////
+// block_zero_sync_2D
+template <typename T>
+__device__ void block_zero_sync_2D(T* dst, int szElements)
+{
+    for(int i = static_cast<int>(threadIdx.x + (threadIdx.y * blockDim.x));
+        i < szElements;
+        i += static_cast<int>(blockDim.x * blockDim.y))
+    {
+        dst[i] = static_cast<T>(0);
+    }
+    __syncthreads();
+}
+
+////////////////////////////////////////////////////////////////////////
+// block_copy_pair_sync
+template <typename T>
+__device__ void block_copy_pair_sync(T* dst0, T* dst1, const T* devSource, int sz)
+{
+    for(int i = static_cast<int>(threadIdx.x); i < sz; i += static_cast<int>(blockDim.x))
+    {
+        dst0[i] = devSource[i];
+        dst1[i] = devSource[i];
+    }
+    __syncthreads();
+}
+
+// clang-format off
+template <typename T> struct printer;
+template <>           struct printer<int32_t>  { static LWDA_INLINE void print(const int32_t& i)  { KERNEL_PRINT("%4i ", static_cast<int>(i)); } };
+template <>           struct printer<int16_t>  { static LWDA_INLINE void print(const int16_t& i)  { KERNEL_PRINT("%4i ", static_cast<int>(i)); } };
+template <>           struct printer<uint32_t> { static LWDA_INLINE void print(const uint32_t& u) { KERNEL_PRINT("%4u ", static_cast<unsigned int>(u)); } };
+template <>           struct printer<uint16_t> { static LWDA_INLINE void print(const uint16_t& u) { KERNEL_PRINT("%4u ", static_cast<unsigned int>(u)); } };
+template <>           struct printer<int8_t>   { static LWDA_INLINE void print(const int8_t& i)   { KERNEL_PRINT("%4i ", static_cast<int>(i)); } };
+template <>           struct printer<float>    { static LWDA_INLINE void print(const float& f)    { KERNEL_PRINT("%.4f ", f);                  } };
+template <>           struct printer<__half>   { static LWDA_INLINE void print(const __half& h)   { KERNEL_PRINT("%.4f ", __half2float(h));    } };
+template <>           struct printer<__half2>  { static LWDA_INLINE void print(const __half2& h)  { KERNEL_PRINT("[%.4f, %.4f] ", __low2float(h), __high2float(h)); } };
+// clang-format on
+
+template <typename T>
+__device__ void print_array_sync(const char* desc, const T* shmem, int N)
+{
+    __syncthreads();
+    if((0 == threadIdx.x) && (0 == threadIdx.y) && (0 == threadIdx.z) && (0 == blockIdx.x) && (0 == blockIdx.y) && (0 == blockIdx.z))
+    {
+        KERNEL_PRINT("%s:\n", desc);
+        for(int i = 0; i < N; ++i)
+        {
+            KERNEL_PRINT("%4i: ", i);
+            printer<T>::print(shmem[i]);
+            KERNEL_PRINT("\n");
+        }
+    }
+    __syncthreads();
+}
+
+template <typename T, int M, int N>
+__device__ void print_matrix(const char* desc, const T (&m)[M][N])
+{
+    __syncthreads();
+    if((0 == threadIdx.x) && (0 == threadIdx.y) && (0 == threadIdx.z) && (0 == blockIdx.x) && (0 == blockIdx.y) && (0 == blockIdx.z))
+    {
+        KERNEL_PRINT("%s (%i x %i):\n", desc, M, N);
+        for(int i = 0; i < M; ++i)
+        {
+            for(int j = 0; j < N; ++j)
+            {
+                printer<T>::print(m[i][j]);
+            }
+            KERNEL_PRINT("\n");
+        }
+    }
+}
+
+template <typename T>
+__device__ void print_kernel_mat(const char* desc, const kernel_mat<T>& a, int M, int N)
+{
+    __syncthreads();
+    if((0 == threadIdx.x) && (0 == threadIdx.y) && (0 == threadIdx.z) && (0 == blockIdx.x) && (0 == blockIdx.y) && (0 == blockIdx.z))
+    {
+        KERNEL_PRINT("%s (%i x %i):\n", desc, M, N);
+        for(int i = 0; i < M; ++i)
+        {
+            for(int j = 0; j < N; ++j)
+            {
+                printer<T>::print(a(i, j));
+            }
+            KERNEL_PRINT("\n");
+        }
+    }
+}
+
+#endif // !defined(LWPHY_KERNEL_UTIL_LWH_INCLUDED_)

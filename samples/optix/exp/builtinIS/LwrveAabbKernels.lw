@@ -1,0 +1,1450 @@
+/*
+ * Copyright (c) 2019, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU Corporation and its licensors retain all intellectual property and proprietary
+ * rights in and to this software, related documentation and any modifications thereto.
+ * Any use, reproduction, disclosure or distribution of this software and related
+ * documentation without an express license agreement from LWPU Corporation is strictly
+ * prohibited.
+ *
+ * TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+ * AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+ * SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+ * LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+ * BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+ * INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGES
+ */
+
+#include <optix_types.h>
+
+#include <rtcore/interface/types.h>
+
+#include <vector_functions.h>
+#include <vector_types.h>
+
+#include "BuiltinISCommon.h"
+#include "LwrvePhantomIntersector.h"
+
+#include "LwrveAabb.h"
+
+
+namespace optix_exp {
+
+template <typename T>
+static __host__ __device__ __forceinline__ T bezEval1( float t, T p0, T p1 )
+{
+    const float t1 = 1.f - t;
+    return p0 * t1 + p1 * t;
+}
+
+template <typename T>
+static __host__ __device__ __forceinline__ T bezEval2( float t, T p0, T p1, T p2 )
+{
+    const float t1 = 1.f - t;
+    return p0 * t1 * t1 + p1 * t * t1 * 2.f + p2 * t * t;
+}
+
+static __host__ __device__ __forceinline__ float calc_extrema2( const float p0, const float p1, const float p2 )
+{
+    // solve quadratic bezier for derivative = 0
+    // B(t) = p0*(1-t)^2 + 2*p1*t(1-t) + p2*t^2
+    //      = + tt(p0 - 2*p1 + p2) + t(2*p1 - 2*p0) + p0
+    // B'(t) = 2t (p0 - 2*p1 + p2) + t(2p1 - 2p0)
+
+    float a = 2.f * ( p0 - 2.f * p1 + p2 );
+    float b = 2.f * ( p1 - p0 );
+
+    // at + b = 0
+    // t = -b / a
+
+    return ( fabsf( a ) > 1e-9f ) ? clamp( -b / a, 0.f, 1.f ) : 1.f;
+}
+
+template <typename T>
+static __host__ __device__ __forceinline__ T bezEval3( float t, T p0, T p1, T p2, T p3 )
+{
+    const float t1 = 1.f - t;
+    return p0 * t1 * t1 * t1 + p1 * t * t1 * t1 * 3.f + p2 * t * t * t1 * 3.f + p3 * t * t * t;
+}
+
+static __host__ __device__ __forceinline__ void calc_extrema3( const float p0, const float p1, const float p2, const float p3, float& t0, float& t1 )
+{
+    // solve cubic bezier for derivative = 0
+    // B(t) = p0*(1-t)^3 + p1*t(1-t)^2 + p2*t^2(1-t) + p3*t^3
+    // B'(t) = 3*t^2 * (3*p1 - p0 + p3 - 3*p2) + 6*t * (p0 - 2*p1 + p2) + 3*(p1 - p0)
+    float a = 3.f * ( 3.f * p1 - p0 + p3 - 3.f * p2 );
+    float b = 6.f * ( p0 - 2.f * p1 + p2 );
+    float c = 3.f * ( p1 - p0 );
+
+    if( a == 0.f )
+    {
+        t0 = ( fabsf( b ) > 1e-9 ) ? -c / b : 0.f;
+        t1 = 1.f;
+    }
+    else
+    {
+        float discrim = b * b - 4.f * a * c;
+        if( discrim >= 0.f )
+        {
+            discrim = sqrtf( discrim );
+            t0      = clamp( ( -b - discrim ) / ( 2.f * a ), 0.f, 1.f );
+            t1      = clamp( ( -b + discrim ) / ( 2.f * a ), 0.f, 1.f );
+        }
+        else
+        {
+            t0 = 0.f;
+            t1 = 1.f;
+        }
+    }
+}
+
+static __device__ __forceinline__ unsigned char quantize_ru( float x, float lo, float hi )
+{
+    return (unsigned char)min( max( (int)ceilf( __fmul_ru( __fsub_ru( x, lo ), __fdiv_ru( 255.f, __fsub_rd( hi, lo ) ) ) ), 0x00 ), 0xFF );
+}
+
+static __device__ __forceinline__ unsigned char quantize_rn( float x, float lo, float hi )
+{
+    return (unsigned char)min( max( (int)ceilf( __fmul_rn( __fsub_rn( x, lo ), __fdiv_rn( 255.f, __fsub_rn( hi, lo ) ) ) ), 0x00 ), 0xFF );
+}
+
+static __device__ __forceinline__ float2 calc_minmax2( const float p0, const float p1, const float p2, float ta, float tb )
+{
+    float ra = bezEval2( ta, p0, p1, p2 );
+    float rb = bezEval2( tb, p0, p1, p2 );
+
+    float hi = fmaxf( ra, rb );
+    float lo = fminf( ra, rb );
+
+    float et = calc_extrema2( p0, p1, p2 );
+
+    if( et > ta && et < tb )
+    {
+        const float p = bezEval2( et, p0, p1, p2 );
+        hi            = fmaxf( hi, p );
+        lo            = fminf( lo, p );
+    }
+
+    return make_float2( lo, hi );
+}
+
+static __device__ __forceinline__ float2 calc_minmax3( const float p0, const float p1, const float p2, const float p3, float ta, float tb )
+{
+    float ra = bezEval3( ta, p0, p1, p2, p3 );
+    float rb = bezEval3( tb, p0, p1, p2, p3 );
+
+    float hi = fmaxf( ra, rb );
+    float lo = fminf( ra, rb );
+
+    float et0, et1;
+    calc_extrema3( p0, p1, p2, p3, et0, et1 );
+
+    if( et0 > ta && et0 < tb )
+    {
+        const float p = bezEval3( et0, p0, p1, p2, p3 );
+        hi            = fmaxf( hi, p );
+        lo            = fminf( lo, p );
+    }
+
+    if( et1 > ta && et1 < tb )
+    {
+        const float p = bezEval3( et1, p0, p1, p2, p3 );
+        hi            = fmaxf( hi, p );
+        lo            = fminf( lo, p );
+    }
+
+    return make_float2( lo, hi );
+}
+
+// Note: Make sure that the decoded ranges can be perfectly encoded in the non-uniform range format.
+static __device__ __forceinline__ bool decodeSegmentRange( int range, float& range_min, float& range_max )
+{
+    if( range >= 8 )
+    {
+        range_min = ( range - 8 ) * 0.125f;
+        range_max = range_min + 0.125f;
+    }
+    else if( range >= 4 )
+    {
+        range_min = ( range - 4 ) * 0.25f;
+        range_max = range_min + 0.25f;
+    }
+    else if( range >= 2 )
+    {
+        range_min = ( range - 2 ) * 0.5f;
+        range_max = range_min + 0.5f;
+    }
+    else if( range == 1 )
+    {
+        range_min = 0.f;
+        range_max = 1.f;
+    }
+    else
+    {
+        // invalid range
+        return false;
+    }
+    return true;
+}
+
+// compute an orthogonal basis around n and b
+static __device__ __inline__ void hughes_moeller( const float3& n, float3& t, float3& b )
+{
+    // try tangent to both normal and (sugested)binormal first
+    t = cross3( n, b );
+
+    // fallback for parallel normal and binormal
+    if( fabsf( dot3( t, n ) ) < 0.01f )
+    {
+        // Choose a vector guarenteed orthogonal to n as the direction of tangent
+        if( fabs( n.x ) > fabs( n.z ) )
+            t = make_float3( -n.y, n.x, 0.0f );
+        else
+            t = make_float3( 0.0f, -n.z, n.y );
+    }
+
+    t = normalize3( t );
+    b = cross3( t, n );  // Construct binormal using a cross product
+}
+
+// clang-format off
+static __device__ __inline__ void quadraticSplit( float z, const float *i, float *l /*may not alias with i*/, float *r /*may alias with i*/ )
+{
+    const float nz = z - 1.f;
+    
+           l[0] =           i[0];
+           l[1] =     -nz * i[0] +           z * i[1];
+    r[0] = l[2] = nz * nz * i[0] + -2 * z * nz * i[1] + z * z * i[2];
+    r[1]        =                          -nz * i[1] +     z * i[2];
+    r[2]        =                                               i[2];
+}
+
+static __device__ __inline__ void lwbicSplit( float z, const float *i, float *l /*may not alias with i*/, float *r /*may alias with i*/ )
+{
+    const float nz = z - 1.f;
+    
+           l[0] =                 i[0];
+           l[1] =           -nz * i[0] +               z * i[1];
+           l[2] =       nz * nz * i[0] +     -2 * z * nz * i[1] +           z * z * i[2];
+    r[0] = l[3] = -nz * nz * nz * i[0] + 3 * z * nz * nz * i[1] + -3 * z * z * nz * i[2] + z * z * z * i[3];
+    r[1]        =                                nz * nz * i[1] +     -2 * z * nz * i[2] +     z * z * i[3];
+    r[2]        =                                                             -nz * i[2] +         z * i[3];
+    r[3]        =                                                                                      i[3];
+}
+// clang-format on
+
+static __device__ __inline__ void LwbicLSS( const float4 p[4], const float ta, const float tb, float4& A, float4& B )
+{
+    const int NSPLITS = 4;  // more splits for tighter bound
+
+    float3 p0 = make_float3( p[0].x, p[0].y, p[0].z );
+    float3 p1 = make_float3( p[1].x, p[1].y, p[1].z );
+    float3 p2 = make_float3( p[2].x, p[2].y, p[2].z );
+    float3 p3 = make_float3( p[3].x, p[3].y, p[3].z );
+
+    // select major axis through segment endpoints
+    float3 pa = bezEval3( ta, p0, p1, p2, p3 );
+    float3 pb = bezEval3( tb, p0, p1, p2, p3 );
+    // and the binormal axis through segment midpoint
+    float3 pc = bezEval3( 0.5f * ( ta + tb ), p0, p1, p2, p3 );
+
+    // create basis along major axis, with prefered binormal
+    float3 t;
+    float3 b = normalize3( pc - pa );
+    float3 n = normalize3( pb - pa );
+    hughes_moeller( n, t, b );
+
+    // project lwrve control points into tangent plane
+    float2 pp0 = make_float2( dot3( ( p0 - pa ), t ), dot3( ( p0 - pa ), b ) );
+    float2 pp1 = make_float2( dot3( ( p1 - pa ), t ), dot3( ( p1 - pa ), b ) );
+    float2 pp2 = make_float2( dot3( ( p2 - pa ), t ), dot3( ( p2 - pa ), b ) );
+    float2 pp3 = make_float2( dot3( ( p3 - pa ), t ), dot3( ( p3 - pa ), b ) );
+
+    // compute AABB bounds in tangent plane
+    float2 xminmaxLo = calc_minmax3( pp0.x - p[0].w, pp1.x - p[1].w, pp2.x - p[2].w, pp3.x - p[3].w, ta, tb );
+    float2 yminmaxLo = calc_minmax3( pp0.y - p[0].w, pp1.y - p[1].w, pp2.y - p[2].w, pp3.y - p[3].w, ta, tb );
+    float2 xminmaxHi = calc_minmax3( pp0.x + p[0].w, pp1.x + p[1].w, pp2.x + p[2].w, pp3.x + p[3].w, ta, tb );
+    float2 yminmaxHi = calc_minmax3( pp0.y + p[0].w, pp1.y + p[1].w, pp2.y + p[2].w, pp3.y + p[3].w, ta, tb );
+
+    float2 xminmax = make_float2( xminmaxLo.x, xminmaxHi.y );
+    float2 yminmax = make_float2( yminmaxLo.x, yminmaxHi.y );
+
+    // take AABB center as projected LSS origin
+    float2 c = make_float2( 0.5f * ( xminmax.x + xminmax.y ), 0.5f * ( yminmax.x + yminmax.y ) );
+
+    // bound radius
+    float cx[4] = { pp0.x - c.x, pp1.x - c.x, pp2.x - c.x, pp3.x - c.x };
+    float cy[4] = { pp0.y - c.y, pp1.y - c.y, pp2.y - c.y, pp3.y - c.y };
+
+    // clip segment to [ta,tb] range using right split [ta,1] followed by left split [ta,tb].
+    float lx[4], ly[4];
+    float rx[4], ry[4];
+    lwbicSplit( ta, cx, lx, rx );
+    lwbicSplit( ta, cy, ly, ry );
+    lwbicSplit( ( tb - ta ) / ( 1.f - ta ), rx, cx, rx );
+    lwbicSplit( ( tb - ta ) / ( 1.f - ta ), ry, cy, ry );
+
+    float r2 = cx[0] * cx[0] + cy[0] * cy[0];
+    for( int i = NSPLITS; i > 0; --i )
+    {
+        float lx[4], ly[4];
+        lwbicSplit( 1.f / (float)i, cx, lx, cx );
+        lwbicSplit( 1.f / (float)i, cy, ly, cy );
+
+        r2 = fmaxf( r2, lx[1] * lx[1] + ly[1] * ly[1] );
+        r2 = fmaxf( r2, lx[2] * lx[2] + ly[2] * ly[2] );
+        r2 = fmaxf( r2, lx[3] * lx[3] + ly[3] * ly[3] );
+    }
+
+    float radius = sqrtf( r2 ) + calc_minmax3( p[0].w, p[1].w, p[2].w, p[3].w, ta, tb ).y;
+
+    // callwlate LSS begin end and point
+    float3 e0 = pa + c.x * t + c.y * b;
+    float3 e1 = pb + c.x * t + c.y * b;
+
+    // use the same radius for begin and end for simpliticy
+    A = make_float4( e0.x, e0.y, e0.z, radius );
+    B = make_float4( e1.x, e1.y, e1.z, radius );
+}
+
+
+static __device__ __inline__ void QuadraticLSS( float4 p[3], float ta, float tb, float4& A, float4& B )
+{
+    const int NSPLITS = 4;  // more splits for tighter bound
+
+    float3 p0 = make_float3( p[0].x, p[0].y, p[0].z );
+    float3 p1 = make_float3( p[1].x, p[1].y, p[1].z );
+    float3 p2 = make_float3( p[2].x, p[2].y, p[2].z );
+
+    // select major axis through segment endpoints
+    float3 pa = bezEval2( ta, p0, p1, p2 );
+    float3 pb = bezEval2( tb, p0, p1, p2 );
+    // and the binormal axis through segment midpoint
+    float3 pc = bezEval2( 0.5f * ( ta + tb ), p0, p1, p2 );
+
+    // create basis along major axis, with prefered binormal
+    float3 t;
+    float3 b = normalize3( pc - pa );
+    float3 n = normalize3( pb - pa );
+    hughes_moeller( n, t, b );
+
+    // project lwrve control points into tangent plane
+    float2 pp0 = make_float2( dot3( ( p0 - pa ), t ), dot3( ( p0 - pa ), b ) );
+    float2 pp1 = make_float2( dot3( ( p1 - pa ), t ), dot3( ( p1 - pa ), b ) );
+    float2 pp2 = make_float2( dot3( ( p2 - pa ), t ), dot3( ( p2 - pa ), b ) );
+
+    // compute AABB bounds in tangent plane
+    float2 xminmax = calc_minmax2( pp0.x, pp1.x, pp2.x, ta, tb );
+    float2 yminmax = calc_minmax2( pp0.y, pp1.y, pp2.y, ta, tb );
+
+    // take AABB center as projected LSS origin
+    float2 c = make_float2( 0.5f * ( xminmax.x + xminmax.y ), 0.5f * ( yminmax.x + yminmax.y ) );
+
+    // bound radius
+    float cx[3] = { pp0.x - c.x, pp1.x - c.x, pp2.x - c.x };
+    float cy[3] = { pp0.y - c.y, pp1.y - c.y, pp2.y - c.y };
+
+    // clip segment to [ta,tb] range using right split [ta,1] followed by left split [ta,tb].
+    float lx[3], ly[3];
+    float rx[3], ry[3];
+    quadraticSplit( ta, cx, lx, rx );
+    quadraticSplit( ta, cy, ly, ry );
+    quadraticSplit( ( tb - ta ) / ( 1.f - ta ), rx, cx, rx );
+    quadraticSplit( ( tb - ta ) / ( 1.f - ta ), ry, cy, ry );
+
+    float r2 = cx[0] * cx[0] + cy[0] * cy[0];
+    for( int i = NSPLITS; i > 0; --i )
+    {
+        float lx[3], ly[3];
+        quadraticSplit( 1.f / (float)i, cx, lx, cx );
+        quadraticSplit( 1.f / (float)i, cy, ly, cy );
+
+        r2 = fmaxf( r2, lx[1] * lx[1] + ly[1] * ly[1] );
+        r2 = fmaxf( r2, lx[2] * lx[2] + ly[2] * ly[2] );
+    }
+
+    float radius = sqrtf( r2 ) + calc_minmax2( p[0].w, p[1].w, p[2].w, ta, tb ).y;
+
+    // callwlate LSS begin end and point
+    float3 e0 = pa + c.x * t + c.y * b;
+    float3 e1 = pb + c.x * t + c.y * b;
+
+    // use the same radius for begin and end for simpliticy
+    A = make_float4( e0.x, e0.y, e0.z, radius );
+    B = make_float4( e1.x, e1.y, e1.z, radius );
+}
+
+static __device__ __inline__ void LinearLSS( float4 p[2], float ta, float tb, float4& A, float4& B )
+{
+    A = bezEval1( ta, p[0], p[1] );
+    B = bezEval1( tb, p[0], p[1] );
+}
+
+static __device__ __forceinline__ float length3_ru( float3 A )
+{
+    return __fsqrt_ru( __fadd_ru( __fmul_ru( A.x, A.x ), __fadd_ru( __fmul_ru( A.y, A.y ), __fmul_ru( A.z, A.z ) ) ) );
+}
+
+static __device__ __forceinline__ float quantize_error_rnz( uint64_t q, float x, float lo, float hi )
+{
+    float dx = __fadd_rn( lo, __fmul_rn( __fdiv_rn( (float)q, 255.f ), __fsub_rn( hi, lo ) ) );
+    return ( dx < x ) ? __fsub_rd( dx, x ) : __fsub_ru( dx, x );
+}
+
+static __device__ __inline__ uint64_t QuantizeLSS( const OptixAabb& aabb, float4 A, float4 B )
+{
+    // quantize LSS end-points
+    uint64_t qAx = quantize_rn( A.x, aabb.minX, aabb.maxX );
+    uint64_t qAy = quantize_rn( A.y, aabb.minY, aabb.maxY );
+    uint64_t qAz = quantize_rn( A.z, aabb.minZ, aabb.maxZ );
+
+    uint64_t qBx = quantize_rn( B.x, aabb.minX, aabb.maxX );
+    uint64_t qBy = quantize_rn( B.y, aabb.minY, aabb.maxY );
+    uint64_t qBz = quantize_rn( B.z, aabb.minZ, aabb.maxZ );
+
+    const float errA = length3_ru( make_float3( quantize_error_rnz( qAx, A.x, aabb.minX, aabb.maxX ),
+                                                quantize_error_rnz( qAy, A.y, aabb.minY, aabb.maxY ),
+                                                quantize_error_rnz( qAz, A.z, aabb.minZ, aabb.maxZ ) ) );
+    const float errB = length3_ru( make_float3( quantize_error_rnz( qBx, B.x, aabb.minX, aabb.maxX ),
+                                                quantize_error_rnz( qBy, B.y, aabb.minY, aabb.maxY ),
+                                                quantize_error_rnz( qBz, B.z, aabb.minZ, aabb.maxZ ) ) );
+
+    // radius quantize resolution
+    float rRes = fmaxf( fmaxf( __fsub_ru( aabb.maxX, aabb.minX ), __fsub_ru( aabb.maxY, aabb.minY ) ),
+                        __fsub_ru( aabb.maxZ, aabb.minZ ) );
+    // account for rounding error in 3D end-point quantization
+    uint64_t qAr = min( (uint64_t)quantize_ru( /*__fadd_ru(*/ A.w /*, errA )*/, 0.f, rRes ), (uint64_t)0xff );
+    uint64_t qBr = min( (uint64_t)quantize_ru( /*__fadd_ru(*/ B.w /*, errB )*/, 0.f, rRes ), (uint64_t)0xff );
+
+    uint64_t qA = qAx | ( qAy << 8 ) | ( qAz << 16 ) | ( qAr << 24 );
+    uint64_t qB = qBx | ( qBy << 8 ) | ( qBz << 16 ) | ( qBr << 24 );
+
+    return qA | ( qB << 32 );
+}
+
+static __device__ __inline__ bool decodeRange( unsigned int  segmentIdx,
+                                               unsigned int* segments,
+                                               unsigned int  numSplits,
+                                               float&        ta,
+                                               float&        tb,
+                                               unsigned int& idx )
+{
+    if( segments )
+    {
+        idx                      = segments[segmentIdx] >> 4;
+        const unsigned int range = segments[segmentIdx] & 0xF;
+        if( !decodeSegmentRange( range, ta, tb ) )
+            return false;
+        // The decoded range should be quantizable without loss, so we don't have to correct for quantization.
+    }
+    else
+    {
+        idx                      = segmentIdx / numSplits;
+        const unsigned int range = segmentIdx % numSplits;
+
+        ta = ( range ) * ( 1.f / (float)numSplits );
+        tb = ( range + 1 ) * ( 1.f / (float)numSplits );
+    }
+
+    return true;
+}
+
+static __global__ void kernel_lwrveBB3toLSS( unsigned int  numSegments,
+                                             unsigned int  numSplits,  // for uniform splitting
+                                             unsigned int  numLSSs,
+                                             unsigned int* segments,  // for adaptive splitting
+                                             char*         indices,
+                                             unsigned int  indexStrideInBytes,
+                                             char*         vertices,
+                                             unsigned int  vertexStrideInBytes,
+                                             char*         widths,
+                                             unsigned int  widthStrideInBytes,
+                                             char*         aabbs,
+                                             unsigned int  aabbStrideInBytes,
+                                             bool          isCatmullRom )
+{
+    unsigned int segmentIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( segmentIdx >= numSegments )
+        return;
+
+    float        ta, tb;
+    unsigned int idx;
+    if( !decodeRange( segmentIdx, segments, numSplits, ta, tb, idx ) )
+        return;
+
+    // Index of first lwrve segment point.
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)idx * indexStrideInBytes );
+
+    // Get segment vertices.
+    float4 q[4];
+    for( int i = 0; i < 4; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        q[i]     = make_float4( v.x, v.y, v.z, w );
+    }
+
+    float4 p[4];
+    if( isCatmullRom )
+        colwSegCatromBez3( p, q );
+    else
+        colwSegBsplineBez3( p, q );
+
+    OptixAabb aabb = *reinterpret_cast<OptixAabb*>( aabbs + segmentIdx * aabbStrideInBytes );
+    uint64_t* lss  = reinterpret_cast<uint64_t*>( aabbs + segmentIdx * aabbStrideInBytes + sizeof( OptixAabb ) );
+
+    for( unsigned int i = 0; i < numLSSs; ++i )
+    {
+        float t0 = ta + ( ( i ) / (float)numLSSs ) * ( tb - ta );
+        float t1 = ta + ( ( i + 1 ) / (float)numLSSs ) * ( tb - ta );
+
+        float4 A, B;
+        LwbicLSS( p, t0, t1, A, B );  // TODO: account for rounding errors
+        lss[i] = QuantizeLSS( aabb, A, B );
+    }
+}
+
+static __global__ void kernel_lwrveBB2toLSS( unsigned int  numSegments,
+                                             unsigned int  numSplits,  // for uniform splitting
+                                             unsigned int  numLSSs,
+                                             unsigned int* segments,  // for adaptive splitting
+                                             char*         indices,
+                                             unsigned int  indexStrideInBytes,
+                                             char*         vertices,
+                                             unsigned int  vertexStrideInBytes,
+                                             char*         widths,
+                                             unsigned int  widthStrideInBytes,
+                                             char*         aabbs,
+                                             unsigned int  aabbStrideInBytes )
+{
+    unsigned int segmentIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( segmentIdx >= numSegments )
+        return;
+
+    float        ta, tb;
+    unsigned int idx;
+    if( !decodeRange( segmentIdx, segments, numSplits, ta, tb, idx ) )
+        return;
+
+    // Index of first lwrve segment point.
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)idx * indexStrideInBytes );
+
+    // Get segment vertices.
+    float4 q[3];
+    for( int i = 0; i < 3; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        q[i]     = make_float4( v.x, v.y, v.z, w );
+    }
+
+    float4 p[3];
+    colwSegBsplineBez2( p, q );
+
+    OptixAabb aabb = *reinterpret_cast<OptixAabb*>( aabbs + segmentIdx * aabbStrideInBytes );
+    uint64_t* lss  = reinterpret_cast<uint64_t*>( aabbs + segmentIdx * aabbStrideInBytes + sizeof( OptixAabb ) );
+
+    for( unsigned int i = 0; i < numLSSs; ++i )
+    {
+        float t0 = ta + ( ( i ) / (float)numLSSs ) * ( tb - ta );
+        float t1 = ta + ( ( i + 1 ) / (float)numLSSs ) * ( tb - ta );
+
+        float4 A, B;
+        QuadraticLSS( p, t0, t1, A, B );  // TODO: account for rounding errors
+        lss[i] = QuantizeLSS( aabb, A, B );
+    }
+}
+
+static __global__ void kernel_lwrveBB1toLSS( unsigned int  numSegments,
+                                             unsigned int  numSplits,  // for uniform splitting
+                                             unsigned int  numLSSs,
+                                             unsigned int* segments,  // for adaptive splitting
+                                             char*         indices,
+                                             unsigned int  indexStrideInBytes,
+                                             char*         vertices,
+                                             unsigned int  vertexStrideInBytes,
+                                             char*         widths,
+                                             unsigned int  widthStrideInBytes,
+                                             char*         aabbs,
+                                             unsigned int  aabbStrideInBytes )
+{
+    unsigned int segmentIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( segmentIdx >= numSegments )
+        return;
+
+    float        ta, tb;
+    unsigned int idx;
+    if( !decodeRange( segmentIdx, segments, numSplits, ta, tb, idx ) )
+        return;
+
+    // Index of first lwrve segment point.
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)idx * indexStrideInBytes );
+
+    // Get segment vertices.
+    float4 q[2];
+    for( int i = 0; i < 2; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        q[i]     = make_float4( v.x, v.y, v.z, w );
+    }
+
+    OptixAabb aabb = *reinterpret_cast<OptixAabb*>( aabbs + segmentIdx * aabbStrideInBytes );
+    uint64_t* lss  = reinterpret_cast<uint64_t*>( aabbs + segmentIdx * aabbStrideInBytes + sizeof( OptixAabb ) );
+
+    for( unsigned int i = 0; i < numLSSs; ++i )
+    {
+        float t0 = ta + ( ( i ) / (float)numLSSs ) * ( tb - ta );
+        float t1 = ta + ( ( i + 1 ) / (float)numLSSs ) * ( tb - ta );
+
+        float4 A, B;
+        LinearLSS( q, t0, t1, A, B );
+        lss[i] = QuantizeLSS( aabb, A, B );
+    }
+}
+
+void makeLwrveLSSs( LWstream               stream,
+                    const OptixBuildInput& bi,
+                    unsigned int           motionStep,
+                    unsigned int           numSplits,
+                    LWdeviceptr            segments,
+                    unsigned int           numSegments,
+                    LWdeviceptr            aabbs,
+                    size_t                 aabbStrideInBytes,
+                    unsigned int           numLSSs )
+{
+    unsigned int vertexStrideInBytes = bi.lwrveArray.vertexStrideInBytes > 0 ? bi.lwrveArray.vertexStrideInBytes : sizeof( float3 );
+    unsigned int widthStrideInBytes = bi.lwrveArray.widthStrideInBytes > 0 ? bi.lwrveArray.widthStrideInBytes : sizeof( float );
+    unsigned int indexStrideInBytes =
+        bi.lwrveArray.indexStrideInBytes > 0 ? bi.lwrveArray.indexStrideInBytes : sizeof( unsigned int );
+
+    if( numSegments )
+    {
+        if( bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_LINEAR )
+        {
+            // degree 1 bspline
+            kernel_lwrveBB1toLSS<<<( numSegments + 63 ) / 64, 64, 0, stream>>>(
+                numSegments, numSplits, numLSSs, reinterpret_cast<unsigned int*>( segments ),
+                reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ), indexStrideInBytes,
+                reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[motionStep] ), vertexStrideInBytes,
+                reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[motionStep] ), widthStrideInBytes,
+                reinterpret_cast<char*>( aabbs ), aabbStrideInBytes );
+        }
+        else if( bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_QUADRATIC_BSPLINE )
+        {
+            // degree 2 bspline
+            kernel_lwrveBB2toLSS<<<( numSegments + 63 ) / 64, 64, 0, stream>>>(
+                numSegments, numSplits, numLSSs, reinterpret_cast<unsigned int*>( segments ),
+                reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ), indexStrideInBytes,
+                reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[motionStep] ), vertexStrideInBytes,
+                reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[motionStep] ), widthStrideInBytes,
+                reinterpret_cast<char*>( aabbs ), aabbStrideInBytes );
+        }
+        else  // OPTIX_PRIMITIVE_TYPE_ROUND_LWBIC_BSPLINE or OPTIX_PRIMITIVE_TYPE_ROUND_CATMULLROM
+        {
+            // degree 3 bspline or CatmullRom spline
+            bool isCatmullRom = ( bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_CATMULLROM );
+            kernel_lwrveBB3toLSS<<<( numSegments + 63 ) / 64, 64, 0, stream>>>(
+                numSegments, numSplits, numLSSs, reinterpret_cast<unsigned int*>( segments ),
+                reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ), indexStrideInBytes,
+                reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[motionStep] ), vertexStrideInBytes,
+                reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[motionStep] ), widthStrideInBytes,
+                reinterpret_cast<char*>( aabbs ), aabbStrideInBytes, isCatmullRom );
+        }
+    }
+}
+
+static __global__ void kernel_lwrveBB3( unsigned int numPrimitives,
+                                        unsigned int numSplits,
+                                        char*        indices,
+                                        unsigned int indexStrideInBytes,
+                                        char*        vertices,
+                                        unsigned int vertexStrideInBytes,
+                                        char*        widths,
+                                        unsigned int widthStrideInBytes,
+                                        char*        aabbs,
+                                        unsigned int aabbStrideInBytes,
+                                        bool         isCatmullRom )
+{
+    unsigned int primIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( primIdx >= numPrimitives )
+        return;
+
+    // Index of first lwrve segment point.
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)primIdx * indexStrideInBytes );
+
+    // Get segment vertices.
+    float3 q0 = *reinterpret_cast<float3*>( vertices + c0_idx * vertexStrideInBytes );
+    float4 q[4];
+    q[0] = make_float4( 0.f, 0.f, 0.f, *reinterpret_cast<float*>( widths + c0_idx * widthStrideInBytes ) );
+    for( int i = 1; i < 4; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        q[i]     = make_float4( v.x - q0.x, v.y - q0.y, v.z - q0.z, w );
+    }
+
+    float4 p[4];
+    if( isCatmullRom )
+        colwSegCatromBez3( p, q );
+    else
+        colwSegBsplineBez3( p, q );
+
+    float  tb = 0.f;
+    float4 pa, pb;
+
+    pb = p[0];
+
+    for( int intervalId = 0; intervalId < numSplits; intervalId++ )
+    {
+        // parameter endpoints of our split interval
+        tb = (float)( intervalId + 1 ) / (float)numSplits;
+
+        // lwrve endpoints of our split interval
+        pa = pb;
+        pb = make_float4(  // bez_p0 + (hc + hb*tb)*tb;
+            bezEval3( tb, p[0].x, p[1].x, p[2].x, p[3].x ), bezEval3( tb, p[0].y, p[1].y, p[2].y, p[3].y ),
+            bezEval3( tb, p[0].z, p[1].z, p[2].z, p[3].z ), bezEval3( tb, p[0].w, p[1].w, p[2].w, p[3].w ) );
+
+        // clamp radius so that negative values don't mess up AABBs
+        const float ra = fmaxf( 0.f, pa.w );
+        const float rb = fmaxf( 0.f, pb.w );
+
+        OptixAabb splitAabb;
+
+        // Start with the bounds of our 2 endpoints
+        // We don't need to look at the internal control points,
+        // because solving for the lwrve's extrema handles that
+        splitAabb.minX = fminf( pa.x - ra, pb.x - rb ) + q0.x;
+        splitAabb.minY = fminf( pa.y - ra, pb.y - rb ) + q0.y;
+        splitAabb.minZ = fminf( pa.z - ra, pb.z - rb ) + q0.z;
+
+        splitAabb.maxX = fmaxf( pa.x + ra, pb.x + rb ) + q0.x;
+        splitAabb.maxY = fmaxf( pa.y + ra, pb.y + rb ) + q0.y;
+        splitAabb.maxZ = fmaxf( pa.z + ra, pb.z + rb ) + q0.z;
+
+        const size_t aabb_idx = primIdx * numSplits + intervalId;
+
+        OptixAabb* aabb = reinterpret_cast<OptixAabb*>( aabbs + aabb_idx * aabbStrideInBytes );
+        *aabb           = splitAabb;
+    }
+
+    // Improve AABB by computing extrema using the derivative of the Bezier lwrve.
+    // et0 and et1 are the parameter t values of the lwrve extrema,
+    // stored separately in each channel.
+    // There can be 2 extrema per channel
+    bool hasConstantRadius = ( q[0].w == q[1].w && q[0].w == q[2].w && q[0].w == q[3].w );
+
+    const float* P = (float*)&p[0].x;
+    float        et0, et1;
+
+    if( hasConstantRadius )
+    {
+        const float r = fmaxf( 0.f, p[0].w );
+
+        for( int axis = 0; axis < 3; axis++ )
+        {
+            calc_extrema3( P[0 * 4 + axis], P[1 * 4 + axis], P[2 * 4 + axis], P[3 * 4 + axis], et0, et1 );
+            if( et0 > 0.f && et0 < 1.f )
+            {
+                float x = bezEval3( et0, P[0 * 4 + axis], P[1 * 4 + axis], P[2 * 4 + axis], P[3 * 4 + axis] )
+                          + reinterpret_cast<float*>( &q0.x )[axis];
+                int    intervalId  = int( et0 * numSplits );
+                size_t aabb_idx    = primIdx * numSplits + intervalId;
+                float* aabb        = reinterpret_cast<float*>( aabbs + aabb_idx * aabbStrideInBytes );
+                float  l           = ( aabb )[0 + axis];
+                float  h           = ( aabb )[3 + axis];
+                ( aabb )[0 + axis] = fminf( l, x - r );
+                ( aabb )[3 + axis] = fmaxf( h, x + r );
+            }
+            if( et1 > 0.f && et1 < 1.f )
+            {
+                float x = bezEval3( et1, P[0 * 4 + axis], P[1 * 4 + axis], P[2 * 4 + axis], P[3 * 4 + axis] )
+                          + reinterpret_cast<float*>( &q0.x )[axis];
+                int    intervalId  = int( et1 * numSplits );
+                size_t aabb_idx    = primIdx * numSplits + intervalId;
+                float* aabb        = reinterpret_cast<float*>( aabbs + aabb_idx * aabbStrideInBytes );
+                float  l           = ( aabb )[0 + axis];
+                float  h           = ( aabb )[3 + axis];
+                ( aabb )[0 + axis] = fminf( l, x - r );
+                ( aabb )[3 + axis] = fmaxf( h, x + r );
+            }
+        }
+    }
+    else
+    {
+        for( int axis = 0; axis < 3; axis++ )
+        {
+
+            calc_extrema3( P[0 * 4 + axis] - P[0 * 4 + 3],  // [xyz]0 - r0
+                           P[1 * 4 + axis] - P[1 * 4 + 3],  // [xyz]1 - r1
+                           P[2 * 4 + axis] - P[2 * 4 + 3],  // [xyz]2 - r2
+                           P[3 * 4 + axis] - P[3 * 4 + 3],  // [xyz]3 - r3
+                           et0, et1 );
+
+            if( et0 > 0.f && et0 < 1.f )
+            {
+                int    intervalId = int( et0 * numSplits );
+                size_t aabb_idx   = primIdx * numSplits + intervalId;
+                float  x          = bezEval3( et0, P[0 * 4 + axis], P[1 * 4 + axis], P[2 * 4 + axis], P[3 * 4 + axis] )
+                          + reinterpret_cast<float*>( &q0.x )[axis];
+                float r            = bezEval3( et0, P[0 * 4 + 3], P[1 * 4 + 3], P[2 * 4 + 3], P[3 * 4 + 3] );
+                r                  = fmaxf( 0.f, r );
+                float* aabb        = reinterpret_cast<float*>( aabbs + aabb_idx * aabbStrideInBytes );
+                float  l           = ( aabb )[0 + axis];
+                ( aabb )[0 + axis] = fminf( l, x - r );
+            }
+            if( et1 > 0.f && et1 < 1.f )
+            {
+                int    intervalId = int( et1 * numSplits );
+                size_t aabb_idx   = primIdx * numSplits + intervalId;
+                float  x          = bezEval3( et1, P[0 * 4 + axis], P[1 * 4 + axis], P[2 * 4 + axis], P[3 * 4 + axis] )
+                          + reinterpret_cast<float*>( &q0.x )[axis];
+                float r            = bezEval3( et1, P[0 * 4 + 3], P[1 * 4 + 3], P[2 * 4 + 3], P[3 * 4 + 3] );
+                r                  = fmaxf( 0.f, r );
+                float* aabb        = reinterpret_cast<float*>( aabbs + aabb_idx * aabbStrideInBytes );
+                float  l           = ( aabb )[0 + axis];
+                ( aabb )[0 + axis] = fminf( l, x - r );
+            }
+
+            calc_extrema3( P[0 * 4 + axis] + P[0 * 4 + 3],  // [xyz]0 + r0
+                           P[1 * 4 + axis] + P[1 * 4 + 3],  // [xyz]1 + r1
+                           P[2 * 4 + axis] + P[2 * 4 + 3],  // [xyz]2 + r2
+                           P[3 * 4 + axis] + P[3 * 4 + 3],  // [xyz]3 + r3
+                           et0, et1 );
+
+            if( et0 > 0.f && et0 < 1.f )
+            {
+                int    intervalId = int( et0 * numSplits );
+                size_t aabb_idx   = primIdx * numSplits + intervalId;
+                float  x          = bezEval3( et0, P[0 * 4 + axis], P[1 * 4 + axis], P[2 * 4 + axis], P[3 * 4 + axis] )
+                          + reinterpret_cast<float*>( &q0.x )[axis];
+                float r            = bezEval3( et0, P[0 * 4 + 3], P[1 * 4 + 3], P[2 * 4 + 3], P[3 * 4 + 3] );
+                r                  = fmaxf( 0.f, r );
+                float* aabb        = reinterpret_cast<float*>( aabbs + aabb_idx * aabbStrideInBytes );
+                float  h           = ( aabb )[3 + axis];
+                ( aabb )[3 + axis] = fmaxf( h, x + r );
+            }
+            if( et1 > 0.f && et1 < 1.f )
+            {
+                int    intervalId = int( et1 * numSplits );
+                size_t aabb_idx   = primIdx * numSplits + intervalId;
+                float  x          = bezEval3( et1, P[0 * 4 + axis], P[1 * 4 + axis], P[2 * 4 + axis], P[3 * 4 + axis] )
+                          + reinterpret_cast<float*>( &q0.x )[axis];
+                float r            = bezEval3( et1, P[0 * 4 + 3], P[1 * 4 + 3], P[2 * 4 + 3], P[3 * 4 + 3] );
+                r                  = fmaxf( 0.f, r );
+                float* aabb        = reinterpret_cast<float*>( aabbs + aabb_idx * aabbStrideInBytes );
+                float  h           = ( aabb )[3 + axis];
+                ( aabb )[3 + axis] = fmaxf( h, x + r );
+            }
+        }
+    }
+}
+
+
+static __host__ void makeLwbicLwrveAabbs( LWstream     stream,
+                                          unsigned int numPrimitives,
+                                          unsigned int numSplits,
+                                          char*        indices,
+                                          unsigned int indexStrideInBytes,
+                                          char*        vertices,
+                                          unsigned int vertexStrideInBytes,
+                                          char*        widths,
+                                          unsigned int widthStrideInBytes,
+                                          char*        aabbs,
+                                          unsigned int aabbStrideInBytes,
+                                          bool         isCatmullRom )
+{
+    kernel_lwrveBB3<<<( numPrimitives + 63 ) / 64, 64, 0, stream>>>( numPrimitives, numSplits, indices, indexStrideInBytes,
+                                                                     vertices, vertexStrideInBytes, widths, widthStrideInBytes,
+                                                                     aabbs, aabbStrideInBytes, isCatmullRom );
+}
+
+static __global__ void kernel_lwrveBB2( unsigned int numPrimitives,
+                                        unsigned int numSplits,
+                                        char*        indices,
+                                        unsigned int indexStrideInBytes,
+                                        char*        vertices,
+                                        unsigned int vertexStrideInBytes,
+                                        char*        widths,
+                                        unsigned int widthStrideInBytes,
+                                        char*        aabbs,
+                                        unsigned int aabbStrideInBytes )
+{
+    unsigned int primIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( primIdx >= numPrimitives )
+        return;
+
+    // control points are stored as position in xyz and radius in w
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)primIdx * indexStrideInBytes );
+
+    float3 q0 = *reinterpret_cast<float3*>( vertices + c0_idx * vertexStrideInBytes );
+    float4 q[3];
+    q[0] = make_float4( 0.f, 0.f, 0.f, *reinterpret_cast<float*>( widths + c0_idx * widthStrideInBytes ) );
+    for( int i = 1; i < 3; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        q[i]     = make_float4( v.x - q0.x, v.y - q0.y, v.z - q0.z, w );
+    }
+
+    float4 p[3];
+    colwSegBsplineBez2( p, q );
+
+    // Get the Horner form of our positional control points, for faster lwrve eval
+    // (1-t)(1-t)A + 2t(1-t)B + ttC
+    // => ttA -2ttB + ttC -2tA + 2tB + A
+    // => A + t(t(C-B+(A-B)) - 2(A-B))
+
+    float4 AmB     = p[0] - p[1];  // A - B
+    float4 CmB     = p[2] - p[1];  // C - B
+    float4 AmBpCmB = AmB + CmB;
+    //float4 ha = AmB; // A-B
+    float4 hb = AmBpCmB;  // C-B+(A-B) == A - 2B + C
+    float4 hc = -2.f * AmB;
+
+    float  tb;
+    float4 pa, pb;
+
+    tb = 0.f;
+    pb = p[0];
+
+    for( int intervalId = 0; intervalId < numSplits; intervalId++ )
+    {
+        // parameter endpoints of our split interval
+        tb = (float)( intervalId + 1 ) / (float)numSplits;
+
+        // lwrve endpoints of our interval
+        pa = pb;
+        pb = p[0] + ( hc + hb * tb ) * tb;
+
+        // clamp radius so that negative values don't mess up bounds
+        const float ra = fmaxf( 0.f, pa.w );
+        const float rb = fmaxf( 0.f, pb.w );
+
+        OptixAabb splitAabb;
+
+        splitAabb.minX = fminf( pa.x - ra, pb.x - rb ) + q0.x;
+        splitAabb.minY = fminf( pa.y - ra, pb.y - rb ) + q0.y;
+        splitAabb.minZ = fminf( pa.z - ra, pb.z - rb ) + q0.z;
+
+        splitAabb.maxX = fmaxf( pa.x + ra, pb.x + rb ) + q0.x;
+        splitAabb.maxY = fmaxf( pa.y + ra, pb.y + rb ) + q0.y;
+        splitAabb.maxZ = fmaxf( pa.z + ra, pb.z + rb ) + q0.z;
+
+        const size_t aabb_idx = primIdx * numSplits + intervalId;
+
+        OptixAabb* aabb = reinterpret_cast<OptixAabb*>( aabbs + aabb_idx * aabbStrideInBytes );
+        *aabb           = splitAabb;
+    }
+
+    // find all maxima/minima, by solving for the zeros in the lwrve derivative
+    // P'(t) = 0
+    // deriv[ (1-t)(1-t)p0 + 2t(1-t)p1 + ttp2 ] = 0
+    // => (-2-2t)p0 + (2-4t)p1 + 2tp2 = 0
+    // => t = (p0-p1)/(p0-p1 + p2-p1)
+
+    bool hasConstantRadius = ( q[0].w == q[1].w && q[0].w == q[2].w );
+
+    const float* P = (float*)&( p[0].x );
+
+    if( hasConstantRadius )
+    {
+        const float r = fmaxf( 0.f, p[0].w );
+        for( int axis = 0; axis < 3; axis++ )
+        {
+            float et = calc_extrema2( P[0 * 4 + axis], P[1 * 4 + axis], P[2 * 4 + axis] );
+            if( et > 0.f && et < 1.f )
+            {
+                float x = ( (float*)&p[0].x )[axis] + ( ( (float*)&hc.x )[axis] + ( (float*)&hb.x )[axis] * et ) * et
+                          + reinterpret_cast<float*>( &q0.x )[axis];
+                int    intervalId  = int( et * numSplits );
+                size_t aabb_idx    = primIdx * numSplits + intervalId;
+                float* aabb        = reinterpret_cast<float*>( aabbs + aabb_idx * aabbStrideInBytes );
+                ( aabb )[0 + axis] = fminf( ( aabb )[0 + axis], x - r );
+                ( aabb )[3 + axis] = fmaxf( ( aabb )[3 + axis], x + r );
+            }
+        }
+    }
+    else
+    {
+        for( int axis = 0; axis < 3; axis++ )
+        {
+            float et;
+            et = calc_extrema2( P[0 * 4 + axis] - P[0 * 4 + 3],    // [xyz]0 - r0
+                                P[1 * 4 + axis] - P[1 * 4 + 3],    // [xyz]1 - r1
+                                P[2 * 4 + axis] - P[2 * 4 + 3] );  // [xyz]2 - r2
+
+            if( et > 0.f && et < 1.f && ( (float*)&hb.x )[axis] - ( (float*)&hb.x )[3] > 0.f )  // the derivative needs to correspond to a minimum
+            {
+                int          intervalId = int( et * numSplits );
+                const size_t aabb_idx   = primIdx * numSplits + intervalId;
+                float x = ( (float*)&p[0].x )[axis] + ( ( (float*)&hc.x )[axis] + ( (float*)&hb.x )[axis] * et ) * et
+                          + reinterpret_cast<float*>( &q0.x )[axis];
+                float r            = ( (float*)&p[0].x )[3] + ( ( (float*)&hc.x )[3] + ( (float*)&hb.x )[3] * et ) * et;
+                r                  = fmaxf( 0.f, r );
+                float* aabb        = reinterpret_cast<float*>( aabbs + aabb_idx * aabbStrideInBytes );
+                ( aabb )[0 + axis] = fminf( ( aabb )[0 + axis], x - r );
+            }
+
+            et = calc_extrema2( P[0 * 4 + axis] + P[0 * 4 + 3],    // [xyz]0 + r0
+                                P[1 * 4 + axis] + P[1 * 4 + 3],    // [xyz]1 + r1
+                                P[2 * 4 + axis] + P[2 * 4 + 3] );  // [xyz]2 + r2
+
+            if( et > 0.f && et < 1.f && ( (float*)&hb.x )[axis] + ( (float*)&hb.x )[3] < 0.f )  // the derivative needs to correspond to a maximum
+            {
+                int          intervalId = int( et * numSplits );
+                const size_t aabb_idx   = primIdx * numSplits + intervalId;
+                float x = ( (float*)&p[0].x )[axis] + ( ( (float*)&hc.x )[axis] + ( (float*)&hb.x )[axis] * et ) * et
+                          + reinterpret_cast<float*>( &q0.x )[axis];
+                float r            = ( (float*)&p[0].x )[3] + ( ( (float*)&hc.x )[3] + ( (float*)&hb.x )[3] * et ) * et;
+                r                  = fmaxf( 0.f, r );
+                float* aabb        = reinterpret_cast<float*>( aabbs + aabb_idx * aabbStrideInBytes );
+                ( aabb )[3 + axis] = fmaxf( ( aabb )[3 + axis], x + r );
+            }
+        }
+    }
+}
+
+static __host__ void makeQuadraticLwrveAabbs( LWstream     stream,
+                                              unsigned int numPrimitives,
+                                              unsigned int numSplits,
+                                              char*        indices,
+                                              unsigned int indexStrideInBytes,
+                                              char*        vertices,
+                                              unsigned int vertexStrideInBytes,
+                                              char*        widths,
+                                              unsigned int widthStrideInBytes,
+                                              char*        aabbs,
+                                              unsigned int aabbStrideInBytes )
+{
+    kernel_lwrveBB2<<<( numPrimitives + 63 ) / 64, 64, 0, stream>>>( numPrimitives, numSplits, indices, indexStrideInBytes,
+                                                                     vertices, vertexStrideInBytes, widths,
+                                                                     widthStrideInBytes, aabbs, aabbStrideInBytes );
+}
+
+static __global__ void kernel_lwrveBB1( unsigned int numPrimitives,
+                                        unsigned int numSplits,
+                                        char*        indices,
+                                        unsigned int indexStrideInBytes,
+                                        char*        vertices,
+                                        unsigned int vertexStrideInBytes,
+                                        char*        widths,
+                                        unsigned int widthStrideInBytes,
+                                        char*        aabbs,
+                                        unsigned int aabbStrideInBytes )
+{
+    unsigned int primIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( primIdx >= numPrimitives )
+        return;
+
+    // control points are stored as position in xyz and radius in w
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)primIdx * indexStrideInBytes );
+
+    float4 p[2];
+    for( int i = 0; i < 2; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        p[i]     = make_float4( v.x, v.y, v.z, w );
+    }
+
+    float        tb     = 0.f;
+    const float4 diff_p = p[1] - p[0];
+    float4       pa, pb;
+    pb = p[0];
+
+    for( int intervalId = 0; intervalId < numSplits; intervalId++ )
+    {
+        // parameter endpoints of our split interval
+        tb = (float)( intervalId + 1 ) / (float)numSplits;
+
+        // lwrve endpoints of our interval
+        pa = pb;
+        pb = p[0] + diff_p * tb;
+
+        // clamp radius so that negative values don't mess up bounds
+        const float ra = fmaxf( 0.f, pa.w );
+        const float rb = fmaxf( 0.f, pb.w );
+
+        OptixAabb splitAabb;
+
+        splitAabb.minX = fminf( pa.x - ra, pb.x - rb );
+        splitAabb.minY = fminf( pa.y - ra, pb.y - rb );
+        splitAabb.minZ = fminf( pa.z - ra, pb.z - rb );
+
+        splitAabb.maxX = fmaxf( pa.x + ra, pb.x + rb );
+        splitAabb.maxY = fmaxf( pa.y + ra, pb.y + rb );
+        splitAabb.maxZ = fmaxf( pa.z + ra, pb.z + rb );
+
+        const size_t aabb_idx = primIdx * numSplits + intervalId;
+
+        OptixAabb* aabb = reinterpret_cast<OptixAabb*>( aabbs + aabb_idx * aabbStrideInBytes );
+        *aabb           = splitAabb;
+    }
+}
+
+static __host__ void makeLinearLwrveAabbs( LWstream     stream,
+                                           unsigned int numPrimitives,
+                                           unsigned int numSplits,
+                                           char*        indices,
+                                           unsigned int indexStrideInBytes,
+                                           char*        vertices,
+                                           unsigned int vertexStrideInBytes,
+                                           char*        widths,
+                                           unsigned int widthStrideInBytes,
+                                           char*        aabbs,
+                                           unsigned int aabbStrideInBytes )
+{
+    kernel_lwrveBB1<<<( numPrimitives + 63 ) / 64, 64, 0, stream>>>( numPrimitives, numSplits, indices, indexStrideInBytes,
+                                                                     vertices, vertexStrideInBytes, widths,
+                                                                     widthStrideInBytes, aabbs, aabbStrideInBytes );
+}
+
+void makeLwrveAabbs( LWstream stream, const OptixBuildInput& bi, unsigned int motionStep, unsigned int numSplits, LWdeviceptr aabbs, size_t aabbStrideInBytes )
+{
+    unsigned int vertexStrideInBytes = bi.lwrveArray.vertexStrideInBytes > 0 ? bi.lwrveArray.vertexStrideInBytes : sizeof( float3 );
+    unsigned int widthStrideInBytes = bi.lwrveArray.widthStrideInBytes > 0 ? bi.lwrveArray.widthStrideInBytes : sizeof( float );
+    unsigned int indexStrideInBytes =
+        bi.lwrveArray.indexStrideInBytes > 0 ? bi.lwrveArray.indexStrideInBytes : sizeof( unsigned int );
+
+    if( bi.lwrveArray.numPrimitives )
+    {
+        if( bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_LINEAR )
+        {
+            // degree 1 bspline
+            makeLinearLwrveAabbs( stream, bi.lwrveArray.numPrimitives, numSplits,
+                                  reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ), indexStrideInBytes,
+                                  reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[motionStep] ),
+                                  vertexStrideInBytes, reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[motionStep] ),
+                                  widthStrideInBytes, reinterpret_cast<char*>( aabbs ), aabbStrideInBytes );
+        }
+        else if( bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_QUADRATIC_BSPLINE )
+        {
+            // degree 2 bspline
+            makeQuadraticLwrveAabbs( stream, bi.lwrveArray.numPrimitives, numSplits,
+                                     reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ), indexStrideInBytes,
+                                     reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[motionStep] ),
+                                     vertexStrideInBytes, reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[motionStep] ),
+                                     widthStrideInBytes, reinterpret_cast<char*>( aabbs ), aabbStrideInBytes );
+        }
+        else  // OPTIX_PRIMITIVE_TYPE_ROUND_LWBIC_BSPLINE or OPTIX_PRIMITIVE_TYPE_ROUND_CATMULLROM
+        {
+            // degree 3 bspline or CatmullRom lwrve
+            bool isCatmullRom = ( bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_CATMULLROM );
+            makeLwbicLwrveAabbs( stream, bi.lwrveArray.numPrimitives, numSplits, reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ),
+                                 indexStrideInBytes, reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[motionStep] ),
+                                 vertexStrideInBytes, reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[motionStep] ),
+                                 widthStrideInBytes, reinterpret_cast<char*>( aabbs ), aabbStrideInBytes, isCatmullRom );
+        }
+    }
+}
+
+static __global__ void kernel_lwrveSegmentBB3( unsigned int   numSegments,
+                                               unsigned int*  segments,
+                                               char*          indices,
+                                               unsigned int   indexStrideInBytes,
+                                               char*          vertices,
+                                               unsigned int   vertexStrideInBytes,
+                                               char*          widths,
+                                               unsigned int   widthStrideInBytes,
+                                               char*          aabbs,
+                                               unsigned int   aabbStrideInBytes,
+                                               unsigned char* inflectionPoints,
+                                               bool           isCatmullRom )
+{
+    unsigned int segmentIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( segmentIdx >= numSegments )
+        return;
+
+    const unsigned int segment = segments[segmentIdx];
+    const unsigned int idx     = segment >> 4;
+    const unsigned int range   = segment & 0xF;
+
+    if( range == 0 )
+    {
+        // invalid segment
+        OptixAabb  aabbNan = { NAN, NAN, NAN, NAN, NAN, NAN };
+        OptixAabb* aabb    = reinterpret_cast<OptixAabb*>( aabbs + segmentIdx * aabbStrideInBytes );
+        *aabb              = aabbNan;
+        return;
+    }
+
+    float2        u;
+    unsigned char t = inflectionPoints[idx];
+    u               = decodeSegmentRangeWithInflection( range, t );
+
+    // Index of first lwrve segment point.
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)idx * indexStrideInBytes );
+
+    // Get segment vertices.
+    float3 q0 = *reinterpret_cast<float3*>( vertices + c0_idx * vertexStrideInBytes );
+    float4 q[4];
+    q[0] = make_float4( 0.f, 0.f, 0.f, *reinterpret_cast<float*>( widths + c0_idx * widthStrideInBytes ) );
+    for( int i = 1; i < 4; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        q[i]     = make_float4( v.x - q0.x, v.y - q0.y, v.z - q0.z, w );
+    }
+
+    LwrvePolynom3 pol( q, isCatmullRom );
+
+    float4 tx1, tx2;
+    pol.findExtremums( tx1, tx2 );
+
+    OptixAabb rangeAabb;
+
+    rangeAabb      = pol.paddedBounds( u.x, u.y, tx1, tx2 );
+    rangeAabb.minX = __fadd_rd( rangeAabb.minX, q0.x );
+    rangeAabb.minY = __fadd_rd( rangeAabb.minY, q0.y );
+    rangeAabb.minZ = __fadd_rd( rangeAabb.minZ, q0.z );
+    rangeAabb.maxX = __fadd_ru( rangeAabb.maxX, q0.x );
+    rangeAabb.maxY = __fadd_ru( rangeAabb.maxY, q0.y );
+    rangeAabb.maxZ = __fadd_ru( rangeAabb.maxZ, q0.z );
+
+    OptixAabb* aabb = reinterpret_cast<OptixAabb*>( aabbs + segmentIdx * aabbStrideInBytes );
+    *aabb           = rangeAabb;
+}
+
+static __host__ void makeLwbicLwrveSegmentAabbs( LWstream       stream,
+                                                 unsigned int   numSegments,
+                                                 char*          indices,
+                                                 unsigned int   indexStrideInBytes,
+                                                 char*          vertices,
+                                                 unsigned int   vertexStrideInBytes,
+                                                 char*          widths,
+                                                 unsigned int   widthStrideInBytes,
+                                                 unsigned int*  segments,
+                                                 char*          aabbs,
+                                                 unsigned int   aabbStrideInBytes,
+                                                 unsigned char* inflectionPoints,
+                                                 bool           isCatmullRom )
+{
+    kernel_lwrveSegmentBB3<<<( numSegments + 63 ) / 64, 64, 0, stream>>>( numSegments, segments, indices, indexStrideInBytes,
+                                                                          vertices, vertexStrideInBytes, widths,
+                                                                          widthStrideInBytes, aabbs, aabbStrideInBytes,
+                                                                          inflectionPoints, isCatmullRom );
+}
+
+static __global__ void kernel_lwrveSegmentBB2( unsigned int  numSegments,
+                                               unsigned int* segments,
+                                               char*         indices,
+                                               unsigned int  indexStrideInBytes,
+                                               char*         vertices,
+                                               unsigned int  vertexStrideInBytes,
+                                               char*         widths,
+                                               unsigned int  widthStrideInBytes,
+                                               char*         aabbs,
+                                               unsigned int  aabbStrideInBytes )
+{
+    unsigned int segmentIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( segmentIdx >= numSegments )
+        return;
+
+    const unsigned int segment = segments[segmentIdx];
+    const unsigned int idx     = segment >> 4;
+    const unsigned int range   = segment & 0xF;
+
+    float ta, tb;
+    if( !decodeSegmentRange( range, ta, tb ) )
+    {
+        OptixAabb  aabbNan = { NAN, NAN, NAN, NAN, NAN, NAN };
+        OptixAabb* aabb    = reinterpret_cast<OptixAabb*>( aabbs + segmentIdx * aabbStrideInBytes );
+        *aabb              = aabbNan;
+        return;
+    }
+
+    // Index of first lwrve segment point.
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)idx * indexStrideInBytes );
+
+    // Get segment vertices.
+    float3 q0 = *reinterpret_cast<float3*>( vertices + c0_idx * vertexStrideInBytes );
+    float4 q[3];
+    q[0] = make_float4( 0.f, 0.f, 0.f, *reinterpret_cast<float*>( widths + c0_idx * widthStrideInBytes ) );
+    for( int i = 1; i < 3; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        q[i]     = make_float4( v.x - q0.x, v.y - q0.y, v.z - q0.z, w );
+    }
+
+    LwrvePolynom2 pol( q );
+
+    float4 tx1;
+    pol.findExtremums( tx1 );
+
+    OptixAabb rangeAabb;
+
+    rangeAabb      = pol.paddedBounds( ta, tb, tx1 );
+    rangeAabb.minX = __fadd_rd( rangeAabb.minX, q0.x );
+    rangeAabb.minY = __fadd_rd( rangeAabb.minY, q0.y );
+    rangeAabb.minZ = __fadd_rd( rangeAabb.minZ, q0.z );
+    rangeAabb.maxX = __fadd_ru( rangeAabb.maxX, q0.x );
+    rangeAabb.maxY = __fadd_ru( rangeAabb.maxY, q0.y );
+    rangeAabb.maxZ = __fadd_ru( rangeAabb.maxZ, q0.z );
+
+    OptixAabb* aabb = reinterpret_cast<OptixAabb*>( aabbs + segmentIdx * aabbStrideInBytes );
+    *aabb           = rangeAabb;
+}
+
+static __host__ void makeQuadraticLwrveSegmentAabbs( LWstream      stream,
+                                                     unsigned int  numSegments,
+                                                     char*         indices,
+                                                     unsigned int  indexStrideInBytes,
+                                                     char*         vertices,
+                                                     unsigned int  vertexStrideInBytes,
+                                                     char*         widths,
+                                                     unsigned int  widthStrideInBytes,
+                                                     unsigned int* segments,
+                                                     char*         aabbs,
+                                                     unsigned int  aabbStrideInBytes )
+{
+    kernel_lwrveSegmentBB2<<<( numSegments + 63 ) / 64, 64, 0, stream>>>( numSegments, segments, indices, indexStrideInBytes,
+                                                                          vertices, vertexStrideInBytes, widths,
+                                                                          widthStrideInBytes, aabbs, aabbStrideInBytes );
+}
+
+static __global__ void kernel_lwrveSegmentBB1( unsigned int  numSegments,
+                                               unsigned int* segments,
+                                               char*         indices,
+                                               unsigned int  indexStrideInBytes,
+                                               char*         vertices,
+                                               unsigned int  vertexStrideInBytes,
+                                               char*         widths,
+                                               unsigned int  widthStrideInBytes,
+                                               char*         aabbs,
+                                               unsigned int  aabbStrideInBytes )
+{
+    unsigned int segmentIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( segmentIdx >= numSegments )
+        return;
+
+    const unsigned int idx   = segments[segmentIdx] >> 4;
+    const unsigned int range = segments[segmentIdx] & 0xF;
+
+    float ta, tb;
+    if( !decodeSegmentRange( range, ta, tb ) )
+    {
+        OptixAabb  aabbNan = { NAN, NAN, NAN, NAN, NAN, NAN };
+        OptixAabb* aabb    = reinterpret_cast<OptixAabb*>( aabbs + segmentIdx * aabbStrideInBytes );
+        *aabb              = aabbNan;
+        return;
+    }
+
+    // control points are stored as position in xyz and radius in w
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)idx * indexStrideInBytes );
+
+    float4 p[2];
+    for( int i = 0; i < 2; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        p[i]     = make_float4( v.x, v.y, v.z, w );
+    }
+
+    const float4 diff_p = p[1] - p[0];
+    float4       pa, pb;
+    pa             = p[0] + diff_p * ta;
+    pb             = p[0] + diff_p * tb;
+    const float ra = fmaxf( 0.f, pa.w );
+    const float rb = fmaxf( 0.f, pb.w );
+
+    OptixAabb rangeAabb;
+
+    rangeAabb.minX = fminf( pa.x - ra, pb.x - rb );
+    rangeAabb.minY = fminf( pa.y - ra, pb.y - rb );
+    rangeAabb.minZ = fminf( pa.z - ra, pb.z - rb );
+
+    rangeAabb.maxX = fmaxf( pa.x + ra, pb.x + rb );
+    rangeAabb.maxY = fmaxf( pa.y + ra, pb.y + rb );
+    rangeAabb.maxZ = fmaxf( pa.z + ra, pb.z + rb );
+
+    OptixAabb* aabb = reinterpret_cast<OptixAabb*>( aabbs + segmentIdx * aabbStrideInBytes );
+    *aabb           = rangeAabb;
+}
+
+
+static __host__ void makeLinearLwrveSegmentAabbs( LWstream      stream,
+                                                  unsigned int  numSegments,
+                                                  char*         indices,
+                                                  unsigned int  indexStrideInBytes,
+                                                  char*         vertices,
+                                                  unsigned int  vertexStrideInBytes,
+                                                  char*         widths,
+                                                  unsigned int  widthStrideInBytes,
+                                                  unsigned int* segments,
+                                                  char*         aabbs,
+                                                  unsigned int  aabbStrideInBytes )
+{
+    kernel_lwrveSegmentBB1<<<( numSegments + 63 ) / 64, 64, 0, stream>>>( numSegments, segments, indices, indexStrideInBytes,
+                                                                          vertices, vertexStrideInBytes, widths,
+                                                                          widthStrideInBytes, aabbs, aabbStrideInBytes );
+}
+
+
+void makeLwrveSegmentAabbs( LWstream               stream,
+                            const OptixBuildInput& bi,
+                            unsigned int           motionStep,
+                            float                  numSplits,
+                            LWdeviceptr            segments,
+                            LWdeviceptr            aabbs,
+                            size_t                 aabbStrideInBytes,
+                            LWdeviceptr            inflectionPoints )
+{
+    // Current version assuming no multiboxes.
+
+    unsigned int vertexStrideInBytes = bi.lwrveArray.vertexStrideInBytes > 0 ? bi.lwrveArray.vertexStrideInBytes : sizeof( float3 );
+    unsigned int widthStrideInBytes = bi.lwrveArray.widthStrideInBytes > 0 ? bi.lwrveArray.widthStrideInBytes : sizeof( float );
+    unsigned int indexStrideInBytes =
+        bi.lwrveArray.indexStrideInBytes > 0 ? bi.lwrveArray.indexStrideInBytes : sizeof( unsigned int );
+
+    const unsigned int numSegments = static_cast<unsigned int>( numSplits * bi.lwrveArray.numPrimitives );
+
+    if( numSegments )
+    {
+        if( bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_LINEAR )
+        {
+            // degree 1 bspline
+            makeLinearLwrveSegmentAabbs( stream, numSegments, reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ), indexStrideInBytes,
+                                         reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[motionStep] ), vertexStrideInBytes,
+                                         reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[motionStep] ),
+                                         widthStrideInBytes, reinterpret_cast<unsigned int*>( segments ),
+                                         reinterpret_cast<char*>( aabbs ), aabbStrideInBytes );
+        }
+        else if( bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_QUADRATIC_BSPLINE )
+        {
+            // degree 2 bspline
+            makeQuadraticLwrveSegmentAabbs(
+                stream, numSegments, reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ), indexStrideInBytes,
+                reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[motionStep] ), vertexStrideInBytes,
+                reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[motionStep] ), widthStrideInBytes,
+                reinterpret_cast<unsigned int*>( segments ), reinterpret_cast<char*>( aabbs ), aabbStrideInBytes );
+        }
+        else  // OPTIX_PRIMITIVE_TYPE_ROUND_LWBIC_BSPLINE or OPTIX_PRIMITIVE_TYPE_ROUND_CATMULLROM
+        {
+            // degree 3 bspline
+
+            bool isCatmullRom = ( bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_CATMULLROM );
+            makeLwbicLwrveSegmentAabbs( stream, numSegments, reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ), indexStrideInBytes,
+                                        reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[motionStep] ), vertexStrideInBytes,
+                                        reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[motionStep] ), widthStrideInBytes,
+                                        reinterpret_cast<unsigned int*>( segments ), reinterpret_cast<char*>( aabbs ),
+                                        aabbStrideInBytes, reinterpret_cast<unsigned char*>( inflectionPoints ), isCatmullRom );
+        }
+    }
+}
+
+}  // namespace optix_exp

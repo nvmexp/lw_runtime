@@ -1,0 +1,116 @@
+#
+#  Copyright (c) 2019 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+ifeq ($(LW_HOST_OS_FAMILY),Unix)
+  # Linux build doesn't use precompiled headers.
+  LW_NO_PCH = 1
+endif
+
+# Silence some undefined variable warnings from included LWVM makefiles
+CG_ASMCLIENT_INCLUDES ?=
+CG_ASMCLIENT_FILES ?=
+CG_ASMCLIENT_BASE_FILES ?=
+CG_ASMCLIENT_BASE_CPP_FILES ?=
+
+LWVM_BUILD_CONFIG_FILE_LWStdUtils = $(LW_SOURCE)/drivers/common/build/LWVMLWStdUtilsConfig.lwmk
+LWVM_DRIVER_PATH = $(LW_SOURCE)/drivers
+LWVM_RMSDK_INC_PATH = $(LW_SOURCE)/sdk/lwpu/inc
+
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+  # LLVM libs need the c++ runtime
+  USE_WINCPRT = 1
+endif
+
+# Don't disable I/O in LWVM.  Doing so breaks llvm-as, among other things.
+LW_DEFINES += LWVM_ENABLE_IO
+LW_DEFINES += DISABLE_LWASSERT
+LW_DEFINES += LWVM_ENABLE_SERIALIZATION
+# LLVM does not compile the CPU code properly.
+LW_DEFINES += DISABLE_CPU_FALLBACK=1
+
+
+LWVM_VERSION ?= lwvm70
+
+# Disable patch for building LWVM 70 for WSL with MUSL (we build with glibc)
+LWVM_SKIP_WSL_MUSL_PATCH = 1
+
+LWVM_BUILD_LWPTX =
+LWVM_BUILD_UNIFIED =
+LWVM_BUILD_OCG =
+LWVM_BUILD_COVERAGE =
+LWVM_BUILD_CLANG =
+
+# This is required by lwvm/common/lib/LWGPGPUutils/filelist.lwmk.  It's usually defined in
+# compiler/gpgpucomp/gpgpucomp.lwmk, but including that would be overkill.
+GPGPU_COMPILER_TOOLS_VERSION = Lwca compilation tools, release $(LWDA_VERSION)
+
+# Build tools for the host platform (amd64) if we're not building for it.
+ifneq ($(LW_TARGET_ARCH),amd64)
+  LWVM_BUILD_TOOLS_HOST = 1
+endif
+
+include $(LW_SOURCE)/drivers/compiler/lwvm/build/lwvm.lwmk
+
+# The compiler/utilities include directories interfere with the OptiX fork of the PTX parser.
+COMPILER_UTILITIES = $(addprefix $(LWVM_COMPILER_PATH)/utilities/, dci std threads)
+LWVM_INCLUDES := $(filter-out $(COMPILER_UTILITIES), $(LWVM_INCLUDES))
+
+LW_INCLUDES += $(LWVM_INCLUDES)
+LW_DEFINES  += $(LWVM_DEFINES)
+CFLAGS += $(LWVM_CFLAGS)
+
+ifeq ($(LW_TARGET_OS_FAMILY),Unix)
+  # WAR for debug build error with LWVM70:
+  # ld: error: liblwoptix.so.1.unstripped(.debug_info) is too large (0x27ebe5e3 bytes)
+  CFLAGS += -gsplit-dwarf
+endif
+
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+  ifneq ($(findstring $(LW_BUILD_TYPE),"debug"),)
+    LFLAGS += dbghelp.lib
+  endif
+  LFLAGS += shell32.lib
+endif
+
+LW_REQUIRED_DIRS += $(filter-out $(OUTPUTDIR_ABSOLUTE)%,$(LWVM_INCLUDES))
+
+LWVM_LIBRARIES += $(LWVM_LIBRARIES_GPGPU)
+
+# If we're cross compiling, build host versions of the tools and use them
+# instead of the target versions.
+LLVM_TOOLS_HOST_SUFFIX :=
+ifneq ($(LW_TARGET_ARCH),amd64)
+  # LWVM applies the suffix "-host" to tools built for the host platform
+  LLVM_TOOLS_HOST_SUFFIX := -host
+endif
+
+# TODO: 2573536 Change these to $(OUTPUTDIR) when we're decoupled completely from LWVM's build.
+LLVM_LINK := $(OUTPUTDIR_ABSOLUTE)/llvm-link$(LLVM_TOOLS_HOST_SUFFIX)$(EXESUFFIX)
+LLVM_DIS := $(OUTPUTDIR_ABSOLUTE)/llvm-dis$(LLVM_TOOLS_HOST_SUFFIX)$(EXESUFFIX)
+LLVM_AS := $(OUTPUTDIR_ABSOLUTE)/llvm-as$(LLVM_TOOLS_HOST_SUFFIX)$(EXESUFFIX)
+LLVM_OPT := $(OUTPUTDIR_ABSOLUTE)/opt$(LLVM_TOOLS_HOST_SUFFIX)$(EXESUFFIX)
+LWVM_TOOLS := $(LLVM_LINK) $(LLVM_DIS) $(LLVM_AS) $(LLVM_OPT)
+
+.PHONY: lwvm-build
+lwvm-build: $(LWVM_DEPS) $(LWVM_LIBRARIES) $(LWVM_TOOLS)

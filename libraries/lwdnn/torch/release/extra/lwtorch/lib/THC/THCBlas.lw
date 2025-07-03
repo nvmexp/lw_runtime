@@ -1,0 +1,506 @@
+#include "THCBlas.h"
+#include "THCGeneral.h"
+#include "THCHalf.h"
+
+float THLwdaBlas_Sdot(THCState *state, long n, float *x, long incx, float *y, long incy)
+{
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+
+  if ((n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX)) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    float result;
+    lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+    lwblasSetStream(handle, THCState_getLwrrentStream(state));
+    THLwblasCheck(lwblasSdot(handle, i_n, x, i_incx, y, i_incy, &result));
+    return result;
+  }
+
+  THError("Lwblas_Sdot only supports n, incx and incy "
+          "up to signed integer limits: %d", INT_MAX);
+  return 0;
+}
+
+double THLwdaBlas_Ddot(THCState *state, long n, double *x, long incx, double *y, long incy)
+{
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+
+  if ((n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX)) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    double result;
+    lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+    lwblasSetStream(handle, THCState_getLwrrentStream(state));
+    THLwblasCheck(lwblasDdot(handle, i_n, x, i_incx, y, i_incy, &result));
+    return result;
+  }
+
+  THError("Lwblas_Ddot only supports n, incx and incy "
+          "up to signed integer limits: %d", INT_MAX);
+  return 0;
+}
+
+#ifdef LWDA_HALF_TENSOR
+float THLwdaBlas_Hdot(THCState *state, long n, half *x, long incx, half *y, long incy)
+{
+#if LWDA_VERSION >= 8000
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+
+  if ((n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX)) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    float result;
+    lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+    lwblasSetStream(handle, THCState_getLwrrentStream(state));
+    THLwblasCheck(lwblasDotEx(handle, i_n, x, LWDA_R_16F, i_incx, y, LWDA_R_16F, i_incy, &result, LWDA_R_32F, LWDA_R_32F));
+    return result;
+}
+
+  THError("Lwblas_Hdot only supports n, incx and incy "
+          "up to signed integer limits: %d", INT_MAX);
+  return 0;
+#else
+  THError("Lwblas_Hdot requires LWCA 8.0+");
+  return 0;
+#endif
+}
+#endif
+
+/* Level 2 */
+void THLwdaBlas_Sgemv(THCState *state, char trans, long m, long n, float alpha, float *a, long lda, float *x, long incx, float beta, float *y, long incy)
+{
+  if(n == 1)
+    lda = m;
+
+  lwblasOperation_t op;
+  if (trans == 't') op = LWBLAS_OP_T;
+  else if (trans == 'n') op = LWBLAS_OP_N;
+  else if (trans == 'c') op = LWBLAS_OP_C;
+
+  if( (m <= INT_MAX) && (n <= INT_MAX) &&
+      (lda > 0) && (lda <= INT_MAX) &&
+      (incx > 0) && (incx <= INT_MAX) &&
+      (incy > 0) && (incy <= INT_MAX) )
+  {
+    int i_m = (int)m;
+    int i_n = (int)n;
+    int i_lda = (int)lda;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+
+    lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+    lwblasSetStream(handle, THCState_getLwrrentStream(state));
+    THLwblasCheck(lwblasSgemv(handle, op, i_m, i_n, &alpha, a, i_lda, x, i_incx, &beta, y, i_incy));
+    return;
+  }
+  THError("Lwblas_Sgemv only supports m, n, lda, incx, incy"
+          "in the range 0 < [val] <= %d", INT_MAX);
+}
+
+void THLwdaBlas_Dgemv(THCState *state, char trans, long m, long n, double alpha, double *a, long lda, double *x, long incx, double beta, double *y, long incy)
+{
+  if(n == 1)
+    lda = m;
+
+  lwblasOperation_t op;
+  if (trans == 't') op = LWBLAS_OP_T;
+  else if (trans == 'n') op = LWBLAS_OP_N;
+  else if (trans == 'c') op = LWBLAS_OP_C;
+
+  if( (m <= INT_MAX) && (n <= INT_MAX) &&
+      (lda > 0) && (lda <= INT_MAX) &&
+      (incx > 0) && (incx <= INT_MAX) &&
+      (incy > 0) && (incy <= INT_MAX) )
+  {
+    int i_m = (int)m;
+    int i_n = (int)n;
+    int i_lda = (int)lda;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+
+    lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+    lwblasSetStream(handle, THCState_getLwrrentStream(state));
+    THLwblasCheck(lwblasDgemv(handle, op, i_m, i_n, &alpha, a, i_lda, x, i_incx, &beta, y, i_incy));
+    return;
+  }
+  THError("Lwblas_Dgemv only supports m, n, lda, incx, incy"
+          "in the range 0 < [val] <= %d", INT_MAX);
+}
+
+void THLwdaBlas_Sger(THCState *state, long m, long n, float alpha, float *x, long incx, float *y, long incy, float *a, long lda)
+{
+  if(n == 1)
+    lda = m;
+
+  if( (m <= INT_MAX) && (n <= INT_MAX) && (lda <= INT_MAX)  && (incx <= INT_MAX) && (incy <= INT_MAX) )
+    {
+      int i_m = (int)m;
+      int i_n = (int)n;
+      int i_lda = (int)lda;
+      int i_incx = (int)incx;
+      int i_incy = (int)incy;
+
+      lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+      lwblasSetStream(handle, THCState_getLwrrentStream(state));
+      THLwblasCheck(lwblasSger(handle, i_m, i_n, &alpha, x, i_incx, y, i_incy, a, i_lda));
+      return;
+    }
+  THError("Lwblas_Sger only supports m, n, lda, incx, incy"
+          "with the bound [val] <= %d", INT_MAX);
+}
+
+void THLwdaBlas_Dger(THCState *state, long m, long n, double alpha, double *x, long incx, double *y, long incy, double *a, long lda)
+{
+  if(n == 1)
+    lda = m;
+
+  if( (m <= INT_MAX) && (n <= INT_MAX) && (lda <= INT_MAX)  && (incx <= INT_MAX) && (incy <= INT_MAX) )
+    {
+      int i_m = (int)m;
+      int i_n = (int)n;
+      int i_lda = (int)lda;
+      int i_incx = (int)incx;
+      int i_incy = (int)incy;
+
+      lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+      lwblasSetStream(handle, THCState_getLwrrentStream(state));
+      THLwblasCheck(lwblasDger(handle, i_m, i_n, &alpha, x, i_incx, y, i_incy, a, i_lda));
+      return;
+    }
+  THError("Lwblas_Dger only supports m, n, lda, incx, incy"
+          "with the bound [val] <= %d", INT_MAX);
+}
+
+
+lwblasOperation_t colwertTransToLwblasOperation(char trans) {
+  if (trans == 't') return LWBLAS_OP_T;
+  else if (trans == 'n') return LWBLAS_OP_N;
+  else if (trans == 'c') return LWBLAS_OP_C;
+  else {
+    THError("trans must be one of: t, n, c");
+    return LWBLAS_OP_T;
+  }
+}
+
+void adjustLd(char transa, char transb, long m, long n, long k, long *lda, long *ldb, long *ldc)
+{
+  int transa_ = ((transa == 't') || (transa == 'T'));
+  int transb_ = ((transb == 't') || (transb == 'T'));
+
+  if(n == 1)
+    *ldc = m;
+
+  if(transa_)
+  {
+    if(m == 1)
+      *lda = k;
+  }
+  else
+  {
+    if(k == 1)
+      *lda = m;
+  }
+
+  if(transb_)
+  {
+    if(k == 1)
+      *ldb = n;
+  }
+  else
+  {
+    if(n == 1)
+      *ldb = k;
+  }
+}
+
+/* Level 3 */
+void THLwdaBlas_Sgemm(THCState *state, char transa, char transb, long m, long n, long k, float alpha, float *a, long lda, float *b, long ldb, float beta, float *c, long ldc)
+{
+  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  lwblasOperation_t opa = colwertTransToLwblasOperation(transa);
+  lwblasOperation_t opb = colwertTransToLwblasOperation(transb);
+
+  if( (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (lda <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX) )
+  {
+    int i_m = (int)m;
+    int i_n = (int)n;
+    int i_k = (int)k;
+    int i_lda = (int)lda;
+    int i_ldb = (int)ldb;
+    int i_ldc = (int)ldc;
+
+    lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+    lwblasSetStream(handle, THCState_getLwrrentStream(state));
+    THLwblasCheck(lwblasSgemm(handle, opa, opb, i_m, i_n, i_k, &alpha, a, i_lda, b, i_ldb, &beta, c, i_ldc));
+    return;
+  }
+  THError("Lwblas_Sgemm only supports m, n, k, lda, ldb, ldc"
+          "with the bound [val] <= %d", INT_MAX);
+}
+
+#ifdef LWDA_HALF_TENSOR
+// In LWCA 8.0, definition of data types for sgemmex changed
+#if LWDA_VERSION < 8000
+#  define LWDA_R_16F LWBLAS_DATA_HALF
+#endif
+
+void THLwdaBlas_Hgemm(THCState *state, char transa, char transb, long m, long n, long k, half alpha, half *a, long lda, half *b, long ldb, half beta, half *c, long ldc)
+{
+  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  lwblasOperation_t opa = colwertTransToLwblasOperation(transa);
+  lwblasOperation_t opb = colwertTransToLwblasOperation(transb);
+
+  if( (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (lda <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX) )
+    {
+      int i_m = (int)m;
+      int i_n = (int)n;
+      int i_k = (int)k;
+      int i_lda = (int)lda;
+      int i_ldb = (int)ldb;
+      int i_ldc = (int)ldc;
+
+      lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+      lwblasSetStream(handle, THCState_getLwrrentStream(state));
+
+      // Simulated Hgemm
+      float fAlpha = THC_half2float(alpha);
+      float fBeta = THC_half2float(beta);
+
+#if LWDA_VERSION < 9000
+      THLwblasCheck(lwblasSgemmEx(handle, opa, opb,
+                                  i_m, i_n, i_k, &fAlpha,
+                                  a, LWDA_R_16F, i_lda, b, LWDA_R_16F,
+                                  i_ldb, &fBeta, c, LWDA_R_16F, i_ldc));
+#else
+      lwdaDeviceProp* prop = THCState_getLwrrentDeviceProperties(state);
+      if (prop->major >= 5){
+        THLwblasCheck(lwblasSetMathMode(handle, LWBLAS_TENSOR_OP_MATH));
+        THLwblasCheck(lwblasGemmEx(handle, opa, opb,
+                                   i_m, i_n, i_k, &fAlpha,
+                                   a, LWDA_R_16F, i_lda, b, LWDA_R_16F,
+                                   i_ldb, &fBeta, c, LWDA_R_16F, i_ldc,
+                                   LWDA_R_32F, LWBLAS_GEMM_DFALT_TENSOR_OP));
+        THLwblasCheck(lwblasSetMathMode(handle, LWBLAS_DEFAULT_MATH));
+      }else{
+        THLwblasCheck(lwblasSgemmEx(handle, opa, opb,
+                                    i_m, i_n, i_k, &fAlpha,
+                                    a, LWDA_R_16F, i_lda, b, LWDA_R_16F,
+                                    i_ldb, &fBeta, c, LWDA_R_16F, i_ldc));
+      }
+#endif
+      return;
+    }
+  THError("Lwblas_Hgemm only supports m, n, k, lda, ldb, ldc"
+          "with th bound [val] <= %d", INT_MAX);
+}
+#endif
+
+void THLwdaBlas_Dgemm(THCState *state, char transa, char transb, long m, long n, long k, double alpha, double *a, long lda, double *b, long ldb, double beta, double *c, long ldc)
+{
+  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  lwblasOperation_t opa = colwertTransToLwblasOperation(transa);
+  lwblasOperation_t opb = colwertTransToLwblasOperation(transb);
+
+  if( (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (lda <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX) )
+  {
+    int i_m = (int)m;
+    int i_n = (int)n;
+    int i_k = (int)k;
+    int i_lda = (int)lda;
+    int i_ldb = (int)ldb;
+    int i_ldc = (int)ldc;
+
+    lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+    lwblasSetStream(handle, THCState_getLwrrentStream(state));
+    THLwblasCheck(lwblasDgemm(handle, opa, opb, i_m, i_n, i_k, &alpha, a, i_lda, b, i_ldb, &beta, c, i_ldc));
+    return;
+  }
+  THError("Lwblas_Dgemm only supports m, n, k, lda, ldb, ldc"
+          "with the bound [val] <= %d", INT_MAX);
+}
+
+
+void THLwdaBlas_SgemmBatched(THCState *state, char transa, char transb, long m, long n, long k,
+                             float alpha, const float *a[], long lda, const float *b[], long ldb,
+                             float beta, float *c[], long ldc, long batchCount)
+{
+  if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
+  {
+    THError("Lwblas_SgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  lwblasOperation_t opa = colwertTransToLwblasOperation(transa);
+  lwblasOperation_t opb = colwertTransToLwblasOperation(transb);
+
+  lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+  lwblasSetStream(handle, THCState_getLwrrentStream(state));
+  THLwblasCheck(lwblasSgemmBatched(handle,
+                                   opa, opb, (int)m, (int)n, (int)k,
+                                   &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
+                                   (int)batchCount));
+}
+
+#if LWDA_VERSION >= 8000
+void THLwdaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, long m, long n, long k,
+                             float alpha, const float *a, long lda, long strideA, const float *b, long ldb, long strideB,
+                             float beta, float *c, long ldc, long strideC, long batchCount)
+{
+  if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
+        
+  {
+    THError("Lwblas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, batchCount"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  lwblasOperation_t opa = colwertTransToLwblasOperation(transa);
+  lwblasOperation_t opb = colwertTransToLwblasOperation(transb);
+
+  lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+  lwblasSetStream(handle, THCState_getLwrrentStream(state));
+  THLwblasCheck(lwblasSgemmStridedBatched(handle,
+                                   opa, opb, (int)m, (int)n, (int)k,
+                                   &alpha, a, (int)lda, strideA, b, (int)ldb, strideB, &beta, c, (int)ldc, strideC,
+                                   (int)batchCount));
+}
+#endif
+
+void THLwdaBlas_DgemmBatched(THCState *state, char transa, char transb, long m, long n, long k,
+                             double alpha, const double *a[], long lda, const double *b[], long ldb,
+                             double beta, double *c[], long ldc, long batchCount)
+{
+  if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
+  {
+    THError("Lwblas_DgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  lwblasOperation_t opa = colwertTransToLwblasOperation(transa);
+  lwblasOperation_t opb = colwertTransToLwblasOperation(transb);
+
+  lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+  lwblasSetStream(handle, THCState_getLwrrentStream(state));
+  THLwblasCheck(lwblasDgemmBatched(handle,
+                                   opa, opb, (int)m, (int)n, (int)k,
+                                   &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
+                                   (int)batchCount));
+}
+
+#if LWDA_VERSION >= 8000
+void THLwdaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, long m, long n, long k,
+                             double alpha, const double *a, long lda, long strideA, const double *b, long ldb, long strideB,
+                             double beta, double *c, long ldc, long strideC, long batchCount)
+{
+  if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
+  {
+    THError("Lwblas_DgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  lwblasOperation_t opa = colwertTransToLwblasOperation(transa);
+  lwblasOperation_t opb = colwertTransToLwblasOperation(transb);
+
+  lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+  lwblasSetStream(handle, THCState_getLwrrentStream(state));
+  THLwblasCheck(lwblasDgemmStridedBatched(handle,
+                                   opa, opb, (int)m, (int)n, (int)k,
+                                   &alpha, a, (int)lda, strideA, b, (int)ldb, strideB, &beta, c, (int)ldc, strideC, 
+                                   (int)batchCount));
+}
+#endif
+
+/* Ilwerse */
+void THLwdaBlas_Sgetrf(THCState *state, int n, float **a, int lda, int *pivot, int *info, int batchSize) {
+  if( (n >= INT_MAX) || (lda >= INT_MAX) || (batchSize >= INT_MAX) )
+  {
+    THError("Lwblas_Sgetrf only supports n, lda, batchSize"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+  lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+  lwblasSetStream(handle, THCState_getLwrrentStream(state));
+  THLwblasCheck(lwblasSgetrfBatched(handle, n, a, lda, pivot, info, batchSize));
+}
+
+void THLwdaBlas_Dgetrf(THCState *state, int n, double **a, int lda, int *pivot, int *info, int batchSize) {
+  if( (n >= INT_MAX) || (lda >= INT_MAX) || (batchSize >= INT_MAX) )
+  {
+    THError("Lwblas_Dgetrf only supports n, lda, batchSize"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+  lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+  lwblasSetStream(handle, THCState_getLwrrentStream(state));
+  THLwblasCheck(lwblasDgetrfBatched(handle, n, a, lda, pivot, info, batchSize));
+}
+
+THC_API void THLwdaBlas_Sgetrs(THCState *state, char transa, int n, int nrhs, const float **a, int lda, int *pivot, float **b, int ldb, int *info, int batchSize)
+{
+  if( (n >= INT_MAX) || (nrhs >= INT_MAX) || (lda >= INT_MAX) || (ldb >= INT_MAX) || (batchSize >= INT_MAX) )
+  {
+    THError("Lwblas_Dgetrs only supports n, nrhs, lda, ldb, batchSize"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  // no need to adjust leading dimensions, since matrices are square
+  lwblasOperation_t opa = colwertTransToLwblasOperation(transa);
+
+  lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+  lwblasSetStream(handle, THCState_getLwrrentStream(state));
+  THLwblasCheck(lwblasSgetrsBatched(handle, opa, n, nrhs, a, lda, pivot, b, ldb, info, batchSize));
+}
+
+
+THC_API void THLwdaBlas_Dgetrs(THCState *state, char transa, int n, int nrhs, const double **a, int lda, int *pivot, double **b, int ldb, int *info, int batchSize)
+{
+  if( (n >= INT_MAX) || (nrhs >= INT_MAX) || (lda >= INT_MAX) || (ldb >= INT_MAX) || (batchSize >= INT_MAX) )
+  {
+    THError("Lwblas_Dgetrs only supports n, nrhs, lda, ldb, batchSize"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  // no need to adjust leading dimensions, since matrices are square
+  lwblasOperation_t opa = colwertTransToLwblasOperation(transa);
+
+  lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+  lwblasSetStream(handle, THCState_getLwrrentStream(state));
+  THLwblasCheck(lwblasDgetrsBatched(handle, opa, n, nrhs, a, lda, pivot, b, ldb, info, batchSize));
+}
+
+void THLwdaBlas_Sgetri(THCState *state, int n, const float **a, int lda, int *pivot, float **c, int ldc, int *info, int batchSize) {
+
+  if( (n >= INT_MAX) || (lda >= INT_MAX)|| (ldc >= INT_MAX) || (batchSize >= INT_MAX) )
+  {
+    THError("Lwblas_Sgetri only supports n, lda, ldc, batchSize"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+  lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+  lwblasSetStream(handle, THCState_getLwrrentStream(state));
+  THLwblasCheck(lwblasSgetriBatched(handle, n, a, lda, pivot, c, ldc, info, batchSize));
+}
+
+void THLwdaBlas_Dgetri(THCState *state, int n, const double **a, int lda, int *pivot, double **c, int ldc, int *info, int batchSize) {
+
+  if( (n >= INT_MAX) || (lda >= INT_MAX)|| (ldc >= INT_MAX) || (batchSize >= INT_MAX) )
+  {
+    THError("Lwblas_Dgetri only supports n, lda, ldc, batchSize"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+  lwblasHandle_t handle = THCState_getLwrrentBlasHandle(state);
+  lwblasSetStream(handle, THCState_getLwrrentStream(state));
+  THLwblasCheck(lwblasDgetriBatched(handle, n, a, lda, pivot, c, ldc, info, batchSize));
+}

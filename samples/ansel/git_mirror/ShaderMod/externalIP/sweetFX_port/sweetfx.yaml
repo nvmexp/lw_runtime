@@ -1,0 +1,100 @@
+pass_template: 
+    samplerstates:
+        $s0: #colorLinearSampler
+            filter: MIN_MAG_LINEAR_MIP_POINT
+            addressU: CLAMP
+            addressV: CLAMP
+        $s1: #colorGammaSampler
+            filter: MIN_MAG_LINEAR_MIP_POINT
+            addressU: CLAMP
+            addressV: CLAMP
+            #should have sRGB texture support
+        $s2: #BorderSampler
+            filter: MIN_MAG_LINEAR_MIP_POINT
+            addressU: CLAMP            #Should be BORDER
+            addressV: CLAMP            #Should be BORDER
+    type: BGRA8_uint
+    constant-buffers: 
+        globalParams: {screenSize: SCREEN_SIZE, elapsedTime: ELAPSED_TIME, captureState: CAPTURE_STATE}
+        ControlBuf:
+            g_chkASCII: chkASCII
+            g_chkAdvCRT: chkAdvCRT
+            g_sldAdvCRTStrength: sldAdvCRTStrength
+            g_chkCartoon: chkCartoon
+            g_chkNostalgia: chkNostalgia
+            g_chkExplosion: chkExplosion
+            g_chkColorMatrix: chkColorMatrix
+
+typical_slider:
+      type: float
+      minimum-value: 0.0
+      maximum-value: 1.0
+      default-value: 0.5
+      ui-value-step: 0.0
+      
+user-constants:
+    - name: chkAdvCRT
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "CRT"
+      default-value: false
+    - name: sldAdvCRTStrength
+      ui-hint: "Use this to scale LUT effect: 0 is 0%, 1 is 100%"
+      ui-label: "Strength"
+      import: [typical_slider]
+    - name: chkExplosion
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "Explosion"
+      default-value: false
+    - name: chkCartoon
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "Cartoon"
+      default-value: false
+    - name: chkASCII
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "ASCII"
+      default-value: false
+    - name: chkNostalgia
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "Nostalgia"
+      default-value: false
+    - name: chkColorMatrix
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "Color matrix"
+      default-value: false
+           
+main:
+    import: [pass_template]
+    shader: LwSharedWrap@sweetfx\sweet.yfx
+    textures:
+        $t0:
+            import: [pass_Cartoon]
+pass_Cartoon:
+    import: [pass_template]
+    shader: LwCartoonWrap@sweetfx\sweet.yfx
+    textures:
+        $t0:
+            import: [pass_ASCII]
+pass_ASCII:
+    import: [pass_template]
+    shader: LwAsciiWrap@sweetfx\sweet.yfx
+    textures:
+        $t0:
+            import: [pass_Explosion]
+pass_Explosion:
+    import: [pass_template]
+    shader: LwExplosionWrap@sweetfx\sweet.yfx
+    textures:
+        $t0:
+            import: [pass_CRT]
+pass_CRT:
+    import: [pass_template]
+    shader: LwAdvCRTWrap@sweetfx\sweet.yfx
+    textures:
+        $t0:
+            channel: PIPE_INPUTS_COLOR 

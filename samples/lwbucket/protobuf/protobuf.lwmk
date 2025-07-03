@@ -1,0 +1,76 @@
+##############################################################################
+# LwBucket Debugger Extension Protobuf Makefile Fragment
+##############################################################################
+# Protobuf sources
+PROTOBUF_SOURCES += prbdec.cpp
+
+# Define the protobuf source location
+PROTOBUF_DIR = $(LW_SOURCE)/apps/lwbucket/protobuf
+
+# Build the list of protobuf objects
+PROTOBUF_OBJECTS = $(call BUILD_OBJECT_LIST,$(PROTOBUF_SOURCES))
+
+# Add protobuf source files to source list
+SOURCES += $(addprefix $(PROTOBUF_DIR)/,$(PROTOBUF_SOURCES))
+
+########################################################################################
+# Protobuf setup
+########################################################################################
+RM_PROTO_DIR := protobuf/definitions
+
+# Add protobuf dependency definitions
+LWRM_PROTOBUF_OUTPUTDIR = $(OUTPUTDIR)
+include $(RM_PROTO_DIR)/deps.mk
+
+VPATH :=
+VPATH += $(RM_PROTO_DIR)
+VPATH += .
+
+PROTOC_INCLUDES += -I$(RM_PROTO_DIR)
+PROTOC_OPTIONS += --lwpb_out=$(OUTPUTDIR)
+
+# RM protoc sources
+PROTOC_SOURCES += all_dcl.proto
+PROTOC_SOURCES += bsp.proto
+PROTOC_SOURCES += dplib.proto
+PROTOC_SOURCES += engines.proto
+PROTOC_SOURCES += fcln.proto
+PROTOC_SOURCES += fifo.proto
+PROTOC_SOURCES += gr.proto
+PROTOC_SOURCES += journal.proto
+PROTOC_SOURCES += mc.proto
+PROTOC_SOURCES += notifier.proto
+PROTOC_SOURCES += lw4_fifo.proto
+PROTOC_SOURCES += lwdebug.proto
+PROTOC_SOURCES += lwlog.proto
+PROTOC_SOURCES += perf.proto
+PROTOC_SOURCES += pmu.proto
+PROTOC_SOURCES += rc.proto
+PROTOC_SOURCES += regs.proto
+PROTOC_SOURCES += rtos.proto
+PROTOC_SOURCES += smu.proto
+PROTOC_SOURCES += vbios.proto
+PROTOC_SOURCES += vp.proto
+
+ALL_PB_CFILES := $(call BUILD_PROTOC_C_LIST, $(PROTOC_SOURCES))
+ALL_PB_HFILES := $(call BUILD_PROTOC_H_LIST, $(PROTOC_SOURCES))
+PROTOC_OBJECTS := $(call BUILD_OBJECT_LIST, $(ALL_PB_CFILES))
+
+########################################################################################
+# PB file generation
+########################################################################################
+
+FORCE_PB_HFILE_GENERATION_LWMK := $(OUTPUTDIR)/force_pb_hfile_generation.lwmk
+
+# declare ALL_PB_HFILES as a prerequisite of FORCE_PB_HFILE_GENERATION
+$(FORCE_PB_HFILE_GENERATION_LWMK): $(ALL_PB_HFILES)
+	$(TOUCH) $@
+
+# force this lwmk fragment to be included; this should trigger
+# ALL_PB_HFILES generation
+-include $(FORCE_PB_HFILE_GENERATION_LWMK)
+
+########################################################################################
+
+# no precompiled header for protobuf C files
+SOURCES += $(ALL_PB_CFILES)

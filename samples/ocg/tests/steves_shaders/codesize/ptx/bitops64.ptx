@@ -1,0 +1,51 @@
+       .version 3.1 
+       .target sm_20
+
+        .global .u64 mem0;
+        .global .s64 mem1;
+        .global .u32 memu;
+
+        .entry main 
+        {
+           .reg .u64 a, b, c;
+           .reg .s64 x, y, z;
+           .reg .b64 b0, b1, b2;
+           .reg .u32 p, q, r;
+           
+
+           ld.global.u64 a, [mem0];
+           bfind.u64  p, a;
+           bfind.u64.shiftamt q, a;
+           add.u32   q, q, p;
+
+           ld.global.s64 x, [mem1];
+           bfind.s64 p, x;
+           add.u32 q, q, p;
+           bfind.s64.shiftamt p, x;
+           add.u32 q, q, p;
+           st.global.u32 [memu], q;
+          
+           bar.sync 0;
+
+           ld.global.u64  a, [mem0];
+           bfe.u64        b, a, 0, 16;
+           st.global.u64  [mem0], b;
+
+           ld.global.s64  x, [mem1];
+           bfe.s64        x, x, 3, 15;
+           st.global.u64  [mem1], x; 
+
+           bar.sync 0;
+
+           ld.global.u64 a, [mem0];
+           ld.global.u64 a, [mem0 + 8];
+           bfi.b64       a, a, b, 3, 10;
+           st.global.u64 [mem0], a;
+
+           bar.sync 0;
+           ld.global.u64 a, [mem0];
+           brev.b64      a, a;
+           st.global.u64 [mem0], a;
+           exit;
+        }
+

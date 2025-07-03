@@ -1,0 +1,69 @@
+.version 3.1
+.target sm_20
+
+.func (.reg .v2 .b32 out) myadd (.reg .v2 .b32 a, .reg .v2 .s32 b, .reg .v2 .u32 c)
+{
+    .reg .u32 resx, resy, tempx, tempy;
+
+    mov.v2.b32   {resx, resy}, a;
+    mov.v2.b32   {tempx, tempy}, b;
+    add.u32      resx, resx, tempx;
+    add.u32      resy, resy, tempy;
+    mov.v2.b32   {tempx, tempy}, c;
+    add.u32      resx, resx, tempx;
+    add.u32      resy, resy, tempy;
+
+    mov.v2.b32   out, {resx, resy};
+    ret;
+}
+
+.func (.reg .v4 .b32 out) myadd4 (.reg .v4 .b32 a, .reg .v4 .s32 b, .reg .v4 .u32 c)
+{
+    .reg .u32 resx, resy, resz, resw, tempx, tempy, tempz, tempw;
+
+    mov.v4.b32   {resx, resy, resz, resw}, a;
+    mov.v4.b32   {tempx, tempy, tempz, tempw}, b;
+    add.u32      resx, resx, tempx;
+    add.u32      resy, resy, tempy;
+    add.u32      resz, resz, tempz;
+    add.u32      resw, resw, tempw;
+    mov.v4.b32   {tempx, tempy, tempz, tempw}, c;
+    add.u32      resx, resx, tempx;
+    add.u32      resy, resy, tempy;
+    add.u32      resz, resz, tempz;
+    add.u32      resw, resw, tempw;
+
+    mov.v4.b32   out, {resx, resy, resz, resw};
+    ret;
+}
+
+.entry main(.param .u32 output, .param .u32 output1)
+{
+    .reg .u32 o;
+    .reg .v2 .b32 inb, out;
+    .reg .v2 .u32 inu;
+    .reg .v2 .s32 ins;
+    .reg .v4 .b32 inb4, out4;
+    .reg .v4 .u32 inu4;
+    .reg .v4 .s32 ins4;
+
+    mov.v2.b32   inb, {1, 2};
+    mov.v2.b32   inu, {11, 12};
+    mov.v2.b32   ins, {111, 112};
+
+    call (out), myadd, (inb, ins, inu);
+
+    ld.param.u32 o, [output];
+    st.v2.b32    [o], out;
+
+    mov.v4.b32   inb4, {1, 2, 3, 4};
+    mov.v4.b32   inu4, {11, 12, 13, 14};
+    mov.v4.b32   ins4, {111, 112, 113, 114};
+
+    call (out4), myadd4, (inb4, ins4, inu4);
+
+    ld.param.u32 o, [output1];
+    st.v4.b32    [o], out4;
+
+    exit;
+}

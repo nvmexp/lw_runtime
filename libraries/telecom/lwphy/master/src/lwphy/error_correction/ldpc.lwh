@@ -1,0 +1,524 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#if !defined(LDPC_LWH_INCLUDED_)
+#define LDPC_LWH_INCLUDED_
+
+#include "lwphy_kernel_util.lwh"
+#include "type_colwert.hpp"
+#include "nrLDPC.lwh"
+
+////////////////////////////////////////////////////////////////////////
+// Define this preprocessor token to allow compilation of code to have
+// LDPC kernels write per-iteration (diagnostic) data to a caller-provided
+// output tensor.
+//#define ENABLE_LDPC_DIAGNOSTIC 1
+
+// Use this macro to conditionally perform an operation, but only when
+// ENABLE_LDPC_DIAGNOSTIC is defined.
+#if ENABLE_LDPC_DIAGNOSTIC
+#define LDPC_DIAGNOSTIC_IF(cond, stmt) \
+    do                                 \
+    {                                  \
+        if(cond) { stmt; }             \
+    } while(0)
+#else
+#define LDPC_DIAGNOSTIC_IF(cond, stmt)
+#endif
+
+namespace
+{
+// Z = a * 2^j
+// Set 0: a = 2,  j = 0..7
+// Set 1: a = 3,  j = 0..7
+// Set 2: a = 5,  j = 0..6
+// Set 3: a = 7,  j = 0..5
+// Set 4: a = 9,  j = 0..5
+// Set 5: a = 11, j = 0..5
+// Set 6: a = 13, j = 0..4
+// Set 7: a = 15, j = 0..4
+//                         j
+//       --------------------------------------
+//  a  |   0    1    2    3    4    5    6    7
+//  2  |   2    4    8   16   32   64  128  256
+//  3  |   3    6   12   24   48   96  192  384
+//  5  |   5   10   20   40   80  160  320   -
+//  7  |   7   14   28   56  112  224   -    -
+//  9  |   9   18   36   72  144  288   -    -
+//  11 |  11   22   44   88  176  352   -    -
+//  13 |  13   26   52  104  208   -    -    -
+//  15 |  15   30   60  120  240   -    -    -
+//
+// TODO: Lwrrently only works for valid Z values. Change
+// return statement to check if a*2j == Z and return -1 if
+// not equal. Also, add invalid Z values to test values to confirm.
+int set_from_Z(int Z)
+{
+    if((Z < 2) || (Z > 384))
+    {
+        return -1;
+    }
+    //------------------------------------------------------------------
+    // All powers of 2 are in set 0
+    if(0 == (Z & (Z - 1)))
+    {
+        return 0;
+    }
+    //------------------------------------------------------------------
+    while(Z)
+    {
+        if((Z < 16) && (1 == (Z % 2)))
+            return (Z / 2);
+        Z >>= 1;
+    }
+    return -1;
+}
+
+#if 0
+void test_set_from_Z()
+{
+    struct Z_set
+    {
+        int Z;
+        int iLS;
+    };
+    const Z_set test_values[] = { {  2, 0}, {  3, 1}, {  4, 0}, {  5, 2}, {  6, 1}, {  7, 3}, {  8, 0}, {  9, 4}, { 10, 2}, { 11, 5},
+                                  { 12, 1}, { 13, 6}, { 14, 3}, { 15, 7}, { 16, 0}, { 18, 4}, { 20, 2}, { 22, 5}, { 24, 1}, { 26, 6},
+                                  { 28, 3}, { 30, 7}, { 32, 0}, { 36, 4}, { 40, 2}, { 44, 5}, { 48, 1}, { 52, 6}, { 56, 3}, { 60, 7},
+                                  { 64, 0}, { 72, 4}, { 80, 2}, { 88, 5}, { 96, 1}, {104, 6}, {112, 3}, {120, 7}, {128, 0}, {144, 4},
+                                  {160, 2}, {176, 5}, {192, 1}, {208, 6}, {224, 3}, {240, 7}, {256, 0}, {288, 4}, {320, 2}, {352, 5},
+                                  {384, 1}};
+    int correct_count = 0;
+    for(int i = 0; i <= sizeof(test_values) / sizeof(test_values[0]); ++i)
+    {
+        const Z_set& s = test_values[i];
+        int iLS = set_from_Z(s.Z);
+        if(iLS != s.iLS)
+        {
+            fprintf(stderr,
+                    "Z to set mismatch: Z = %i, actual = %i, returned = %i\n",
+                    s.Z,
+                    s.iLS,
+                    iLS);
+        }
+        else
+        {
+            ++correct_count;
+        }
+    }
+    printf("test_set_from_Z(): %i out of %lu correct\n",
+           correct_count,
+           sizeof(test_values) / sizeof(test_values[0]));
+}
+#endif
+} // namespace
+
+// clang-format off
+template <typename TLLR> LWDA_INLINE bool is_neg        (const TLLR& llr)   { return (llr < static_cast<TLLR>(0)); }
+template <>              LWDA_INLINE bool is_neg<__half>(const __half& llr) { return __hlt(llr, 0);                }
+
+template <typename TLLR> LWDA_INLINE TLLR   negate        (const TLLR& llr)   { return (-llr); }
+template <>              LWDA_INLINE __half negate<__half>(const __half& llr) { return __hneg(llr);                }
+
+template <typename TLLR> LWDA_INLINE float to_float     (const TLLR&  llr);
+template <>              LWDA_INLINE float to_float     (const float& llr)  { return llr; }
+template <>              LWDA_INLINE float to_float     (const __half& llr) { return __half2float(llr); }
+
+template <typename TLLR> LWDA_INLINE TLLR   llr_abs        (const TLLR& llr)   { return fabsf(llr);                       }
+template <> LWDA_INLINE              __half llr_abs<__half>(const __half& llr) { return __hlt(llr, 0) ? __hneg(llr): llr; }
+// clang-format on
+
+// Diagnostic output includes per-iteration data
+template <lwphyDataType_t TType>
+using LDPC_output_diagnostic_t = tensor_ref_contig_3D<TType>;
+
+namespace ldpc
+{
+LWDA_INLINE
+int device_popc(unsigned int a) { return __popc(a); }
+
+template <lwphyDataType_t TType>
+LDPC_output_diagnostic_t<TType> get_diagnostic_tensor_ref(lwphyLDPCDiagnostic_t* diag)
+{
+    // Contiguous layout type
+    typedef typename LDPC_output_diagnostic_t<TType>::layout_t layout_t;
+#if ENABLE_LDPC_DIAGNOSTIC
+    if(diag)
+    {
+        const tensor_desc& td = static_cast<const tensor_desc&>(*diag->desc);
+        // Create a contiguous layout from the generic tensor layout
+        return LDPC_output_diagnostic_t<TType>(diag->addr, layout_t(td.layout()));
+    }
+    else
+    {
+        return LDPC_output_diagnostic_t<TType>(nullptr, layout_t());
+    }
+#else
+    return LDPC_output_diagnostic_t<TType>(nullptr, layout_t());
+#endif
+}
+} // namespace ldpc
+
+template <class TDerived>
+class LDPC_workspace {
+public:
+    //------------------------------------------------------------------
+    // get_workspace_size()
+    static size_t get_workspace_size(const LDPC_config& config)
+    {
+        return (TDerived::workspace_bytes_per_codeword(config) * config.num_codewords);
+    }
+
+protected:
+    __device__
+    LDPC_workspace(void* pv) :
+        address_(pv) {}
+    template <typename T>
+    __device__
+        T*
+        offset_as(int offset_bytes)
+    {
+        return reinterpret_cast<T*>(static_cast<char*>(address_) + offset_bytes);
+    }
+
+private:
+    void* address_;
+};
+
+////////////////////////////////////////////////////////////////////////
+// LDPC_shared_mem
+// Base class for describing and using dynamic shared memory allocations
+// for LDPC kernels.
+// Derived classes will in most cases implement a get_shared_mem_size(0
+// function so that kernel launch code can provide the amount of shared
+// memory to the launch configuration.
+template <class TDerived>
+class LDPC_shared_mem {
+public:
+protected:
+    //------------------------------------------------------------------
+    // Constructor
+    LDPC_shared_mem() = default;
+    //------------------------------------------------------------------
+    // offset_as()
+    template <typename T>
+    __device__
+        T*
+        offset_as(int offset_bytes)
+    {
+        return reinterpret_cast<T*>(static_cast<char*>(shmem_.addr()) + offset_bytes);
+    }
+
+private:
+    shared_mem_t<char> shmem_;
+};
+
+//__device__ inline uint8_t get_row_degree(int BG, int nodeIndex)
+//{
+//    return (1 == BG) ? (bg1_csr_row_array[nodeIndex + 1] - bg1_csr_row_array[nodeIndex])
+//                     : (bg2_csr_row_array[nodeIndex + 1] - bg2_csr_row_array[nodeIndex]);
+//}
+
+struct bg1_CN_row_shift_info_t
+{
+    __device__
+    bg1_CN_row_shift_info_t(int checkNodeIndex, int Z) :
+        shift_values(&(bg1_shift_Z[bg1_Z_shift_index[Z]][bg1_csr_row_array[checkNodeIndex]])),
+        column_values(&(bg1_csr_col_array[bg1_csr_row_array[checkNodeIndex]])),
+        row_degree(bg1_csr_row_array[checkNodeIndex + 1] - bg1_csr_row_array[checkNodeIndex])
+    {
+    }
+    const int16_t* shift_values;
+    const int8_t*  column_values;
+    uint8_t        row_degree;
+};
+
+//struct bg1_VN_col_shift_info_t
+//{
+//    __device__
+//    bg1_VN_col_shift_info_t(int varNodeIndex, int Z) :
+//        shift_values(&(bg1_col_shift_Z[bg1_Z_shift_index[Z]][bg1_csc_col_array[varNodeIndex]])),
+//        row_values(&(bg1_csc_row_array[bg1_csc_col_array[varNodeIndex]])),
+//        col_degree(bg1_csc_col_array[varNodeIndex + 1] - bg1_csc_col_array[varNodeIndex])
+//    {
+//    }
+//    const int16_t* shift_values;
+//    const int16_t* row_values;
+//    uint8_t        col_degree;
+//};
+
+struct bg1_VN_col_shift_index_info_t
+{
+    __device__
+    bg1_VN_col_shift_index_info_t(int varNodeIndex, int Z) :
+        shift_values(&(bg1_col_shift_Z[bg1_Z_shift_index[Z]][bg1_csc_col_array[varNodeIndex]])),
+        row_idx_values(&(bg1_csc_row_idx_array[bg1_csc_col_array[varNodeIndex]])),
+        col_degree(bg1_csc_col_array[varNodeIndex + 1] - bg1_csc_col_array[varNodeIndex])
+    {
+    }
+    const int16_t*       shift_values;
+    const csc_row_idx_t* row_idx_values;
+    uint8_t              col_degree;
+};
+
+template <typename LLR_t>
+struct c2v_message_t
+{
+    LLR_t    min0;
+    LLR_t    min1;
+    uint32_t sign_index; // Low 19 bits are sign bits (a set bit indicates a negative number)
+    // High 13 bits are the index, within the row values, of min0. This number
+    // must be between 0 and (ROW_DEGREE - 1). (max row degree is 19, so value < 19)
+    /*LWDA_BOTH_INLINE*/ c2v_message_t() = default;
+    LWDA_BOTH_INLINE c2v_message_t(LLR_t v0, LLR_t v1) :
+        sign_index(0)
+    {
+        LLR_t    abs0  = llr_abs(v0);
+        LLR_t    abs1  = llr_abs(v1);
+        uint32_t signs = is_neg(v0) ? 1 : 0;
+        if(is_neg(v1)) signs |= 2;
+        set_signs(signs);
+        if(abs0 < abs1)
+        {
+            min0 = abs0;
+            min1 = abs1;
+            set_row_index(0);
+        }
+        else
+        {
+            min0 = abs1;
+            min0 = abs0;
+            set_row_index(1);
+        }
+    }
+    LWDA_BOTH_INLINE c2v_message_t(LLR_t m0, LLR_t m1, uint32_t sign, uint32_t index) :
+        min0(m0),
+        min1(m1),
+        sign_index(sign | (index << 19)) {}
+    LWDA_BOTH_INLINE c2v_message_t(LLR_t m0, LLR_t m1, uint32_t signIndex) :
+        min0(m0),
+        min1(m1),
+        sign_index(signIndex) {}
+    LWDA_BOTH_INLINE void set_signs(uint32_t s) { sign_index = (sign_index | (s & 0x7FFFF)); };
+    LWDA_BOTH_INLINE uint32_t get_signs() const { return (sign_index & 0x7FFFF); }
+    LWDA_BOTH_INLINE void     set_row_index(int idx) { sign_index = (sign_index | (idx << 19)); }
+    LWDA_BOTH_INLINE uint32_t get_row_index() const { return (sign_index >> 19); }
+    LWDA_INLINE LLR_t get_value_for_index(int rowIndex, float norm) const
+    {
+        uint32_t minRowIndex = get_row_index();
+        uint32_t signs       = get_signs();
+        LLR_t    minAbsLvc   = (rowIndex == minRowIndex) ? min1 : min0;
+        LLR_t    signProd    = (0 != (__popc(signs & ~(1 << rowIndex)) & 1)) ? -1.0f : 1.0f; // TODO: get approprate constants for type
+        //KERNEL_PRINT("col_index = %u, row_index = %u, signs = 0x%X, minAbsLvc = %.4f, signProd = %.4f, returning %.4f\n",
+        //             minColIndex, minRowIndex, signs, to_float(minAbsLvc), to_float(signProd), to_float(type_colwert<LLR_t>(norm) * minAbsLvc * signProd));
+        return type_colwert<LLR_t>(norm) * minAbsLvc * signProd;
+    }
+    LWDA_INLINE void process(LLR_t value, int row_index)
+    {
+        sign_index |= (is_neg(value) ? 1 : 0) << row_index;
+        LLR_t Lvcabs = llr_abs(value);
+        if(Lvcabs < min0)
+        {
+            set_row_index(row_index);
+            min1 = min0;
+            min0 = Lvcabs;
+        }
+        else if(Lvcabs < min1)
+        {
+            min1 = Lvcabs;
+        }
+    }
+    LWDA_BOTH_INLINE void init()
+    {
+        min0 = min1 = 10000;
+        sign_index  = 0;
+    }
+    static LWDA_INLINE int get_variable_index(const bg1_CN_row_shift_info_t& shiftInfo,  // shift data
+                                              int                            iVN,        // index within row
+                                              int                            nodeOffset, // offset of check variable within node
+                                              int                            Z)                                     // lifting factor
+    {
+        const int8_t POS          = shiftInfo.column_values[iVN];
+        int          block_offset = nodeOffset + shiftInfo.shift_values[iVN];
+        if(block_offset >= Z) block_offset -= Z;
+        return (POS * Z) + block_offset;
+    }
+    static LWDA_INLINE c2v_message_t create_message(const bg1_CN_row_shift_info_t& shiftInfo,  // shift data
+                                                    int                            nodeOffset, // offset of check variable within node
+                                                    int                            Z,          // lifting factor
+                                                    const LLR_t*                   initLLR)                      // initial LLR data
+    {
+        uint32_t signBits = 0;
+        int      minIndex;
+        LLR_t    min0, min1;
+        // The minimum row degree in BG1 is 3, so we Unroll the first 3
+        int   VN0     = get_variable_index(shiftInfo, 0, nodeOffset, Z);
+        int   VN1     = get_variable_index(shiftInfo, 1, nodeOffset, Z);
+        int   VN2     = get_variable_index(shiftInfo, 2, nodeOffset, Z);
+        LLR_t Lvc0    = initLLR[VN0];
+        LLR_t Lvc1    = initLLR[VN1];
+        LLR_t Lvc2    = initLLR[VN2];
+        LLR_t LvcAbs0 = llr_abs(Lvc0);
+        LLR_t LvcAbs1 = llr_abs(Lvc1);
+        LLR_t LvcAbs2 = llr_abs(Lvc2);
+        signBits      = (is_neg(Lvc0) ? 1 : 0);
+        signBits |= (is_neg(Lvc1) ? 2 : 0);
+        if(LvcAbs0 < LvcAbs1)
+        {
+            minIndex = 0;
+            min0     = LvcAbs0;
+            min1     = LvcAbs1;
+        }
+        else
+        {
+            minIndex = 1;
+            min0     = LvcAbs1;
+            min1     = LvcAbs0;
+        }
+        signBits |= (is_neg(Lvc2) ? 4 : 0);
+        if(LvcAbs2 < min0)
+        {
+            minIndex = 2;
+            min1     = min0;
+            min0     = LvcAbs2;
+        }
+        else if(LvcAbs2 < min1)
+        {
+            min1 = LvcAbs2;
+        }
+        for(int iVN = BG1_MIN_ROW_DEG; iVN < shiftInfo.row_degree; ++iVN)
+        {
+            const int VN_idx = get_variable_index(shiftInfo, iVN, nodeOffset, Z);
+            LLR_t     Lvc    = initLLR[VN_idx];
+            signBits |= (is_neg(Lvc) ? 1 : 0) << iVN;
+            LLR_t Lvcabs = llr_abs(Lvc);
+            if(Lvcabs < min0)
+            {
+                minIndex = iVN;
+                min1     = min0;
+                min0     = Lvcabs;
+            }
+            else if(Lvcabs < min1)
+            {
+                min1 = Lvcabs;
+            }
+            //KERNEL_PRINT_IF(CHECK_IDX == 6, "CHECK_IDX = %i, iVN = %i, minIndex = %i, minPos = %i, min0 = %.4f, min1 = %.4f, Lvc = %.4f\n",
+            //                CHECK_IDX, iVN, minIndex, minPos, to_float(min0), to_float(min1), to_float(Lvc));
+        }
+        return c2v_message_t(min0, min1, signBits, minIndex);
+    }
+};
+
+template <typename LLR_t>
+class c2v_message_reader {
+public:
+    typedef c2v_message_t<LLR_t> c2v_message;
+    LWDA_INLINE
+    c2v_message_reader(const c2v_message& msg, LLR_t norm) :
+        norm_min0(norm * msg.min0),
+        norm_min1(norm * msg.min1),
+        sign_bits(msg.get_signs()),
+        min_index(msg.get_row_index()),
+        sign_prod(ldpc::device_popc(sign_bits) & 0x1) // 0 if count is even, 1 if odd
+    {
+    }
+    LWDA_INLINE LLR_t get_value_for_index_and_advance(int rowIndex)
+    {
+        LLR_t result = (rowIndex == min_index) ? norm_min1 : norm_min0;
+        // The least significant bit of sign_bits represents the sign
+        // of the "current" value. sign_prod represents product of the
+        // sign of all values. If we remove the "current" value, what
+        // is the product of the remaining signs?
+        //               product of all
+        //  current        sign values
+        // value sign     0       1
+        //     0          0       1
+        //     1          1       0
+        // This is an XOR operation.
+        if(0 != ((sign_bits & 0x1) ^ sign_prod))
+        {
+            result = negate(result);
+        }
+        //KERNEL_PRINT("rowIndex = %u, sign_bits = 0x%X, sign_prod = %u, returning %.4f\n",
+        //             rowIndex, sign_bits, sign_prod, to_float(result));
+        // Prepare for the next iteration
+        sign_bits >>= 1;
+
+        return result;
+    }
+
+private:
+    const LLR_t norm_min0;
+    const LLR_t norm_min1;
+    uint32_t    sign_bits; // Low 19 bits are valid
+    uint32_t    min_index; // Low 13 bits are valid
+    uint32_t    sign_prod;
+};
+
+template <lwphyDataType_t TType>
+using c2v_message_type_t = c2v_message_t<typename data_type_traits<TType>::type>;
+
+template <typename LLR_t>
+LWDA_INLINE void load_c2v_message(c2v_message_t<LLR_t>* dst, const c2v_message_t<LLR_t>* src)
+{
+    *dst = *src;
+}
+
+template <>
+LWDA_INLINE void load_c2v_message(c2v_message_t<__half>* dst, const c2v_message_t<__half>* src)
+{
+    *(reinterpret_cast<uint2*>(dst)) = *(reinterpret_cast<const uint2*>(src));
+}
+
+template <lwphyDataType_t TLLREnum>
+__device__ void cta_write_hard_decision(LDPC_output_t                                    tOutput,
+                                        int                                              codeWordIdx,
+                                        int                                              K,
+                                        const typename data_type_traits<TLLREnum>::type* srcAPP)
+{
+    typedef typename data_type_traits<TLLREnum>::type LLR_t;
+    const int                                         WORDS_PER_CW      = (K + 31) / 32;
+    const int                                         BIT_BLOCK_COUNT   = (K + 1023) / 1024;
+    const int                                         THREAD_BLOCK_SIZE = blockDim.x * blockDim.y;
+    const int                                         WARPS_PER_BLOCK   = THREAD_BLOCK_SIZE / 32;
+    const int                                         THREAD_RANK       = (threadIdx.y * blockDim.x) + threadIdx.x;
+    const int                                         WARP_IDX          = THREAD_RANK / 32;
+    const int                                         LANE_IDX          = THREAD_RANK % 32;
+    // Write output bits. Each warp of 32 threads will cooperate to
+    // generate up to 32 output "words", and each of those "words" will
+    // contain 32 decision bits. (Each warp will read 1024 LLR values,
+    // and generate 1024 output bits in 32 uint32_t words.)
+    // The maximum codeword size is 8448 bits, which corresponds to
+    // 8448 / 32 = 264 32-bit words for output.
+    for(int iOutBlock = WARP_IDX; iOutBlock < BIT_BLOCK_COUNT; iOutBlock += WARPS_PER_BLOCK)
+    {
+        uint32_t thread_output = 0;
+        int      start_bit_idx = iOutBlock * 1024;
+        for(int i = 0; i < 32; ++i)
+        {
+            int      idx           = start_bit_idx + (i * 32) + LANE_IDX;
+            uint32_t hard_decision = ((idx < K) && is_neg(srcAPP[idx])) ? 1 : 0;
+            uint32_t warp_bits     = __ballot_sync(0xFFFFFFFF, hard_decision);
+            if(i == LANE_IDX)
+            {
+                thread_output = warp_bits;
+            }
+        }
+        const int OUT_INDEX = (iOutBlock * 32) + LANE_IDX;
+        //KERNEL_PRINT("THREAD_RANK = %i, iOutBlock = %i, OUT_INDEX = %i\n", THREAD_RANK, iOutBlock, OUT_INDEX);
+        if(OUT_INDEX < WORDS_PER_CW)
+        {
+            //KERNEL_PRINT_IF(0 == OUT_INDEX, "output[0] = 0x%X\n", thread_output);
+            tOutput({OUT_INDEX, codeWordIdx}) = thread_output;
+        }
+    }
+}
+
+#endif // !defined(LDPC_LWH_INCLUDED_)

@@ -1,0 +1,47 @@
+#!/bin/bash
+
+set -e
+
+[[ -n "$AFL" ]] || AFL=/usr
+export AFL_PATH="$AFL"/lib/afl
+export CC="$AFL"/bin/afl-clang-fast
+export AFL_HARDEN=1
+export AFL_NO_AFFINITY=1
+
+[[ -n "$JOBS" ]] || JOBS="$(grep -c ^processor /proc/cpuinfo)"
+
+make clean
+make libfuzzer=0 -j "$JOBS"
+
+run()
+{
+    [[ $# -eq 2 ]] || exit 1
+    echo "Spawning AFL with $@..."
+    local CORP=( )
+    if [[ -f corpus ]]; then
+        CORP+=( -i corpus )
+        [[ -f corpus_gen ]] && CORP+=( -x corpus_gen )
+    else
+        CORP+=( -i corpus_gen )
+    fi
+    "$AFL"/bin/afl-fuzz ${CORP[*]} \
+                        -o corpus_afl \
+                        -t 1000+ \
+                        "$@" \
+                        -- ./fuzz_mle \
+                        2>&1 > $2.log
+}
+
+[[ -d corpus_gen ]] || ./gen_corpus
+
+if [[ $JOBS -eq 1 ]]; then
+    run -M fuzz0
+else
+    run -M fuzz0 &
+    if [[ $JOBS -gt 2 ]]; then
+        for JOB in $(seq $(($JOBS - 2))); do
+            run -S "fuzz$JOB" &
+        done
+    fi
+    run -S "fuzz$(($JOBS - 1))"
+fi

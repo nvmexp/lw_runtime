@@ -1,0 +1,49 @@
+##############################################################################
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+
+##############################################################################
+# string to prepend in unix builds when exelwting rules in this gmake instance
+##############################################################################
+
+LW_MODULE_LOGGING_NAME = "apps/lwwatch"
+
+##############################################################################
+# hwsnoop-specific source files to build into lwwatch
+##############################################################################
+
+SOURCES += hwsnoop.c
+
+##############################################################################
+# common lwwatch unix makefile definitions
+##############################################################################
+
+LWWATCHCFG_PROFILE = unix-hwsnoop
+
+include $(LW_SOURCE)/apps/lwwatch/os/unix/common/unix.lwmk
+
+##############################################################################
+# hwsnoop-specific defines
+##############################################################################
+
+LW_DEFINES += HWSNOOP_RPC
+
+##############################################################################
+# hwsnoop-specific LDFLAGS
+##############################################################################
+
+_pci_dir = $(LW_TOOLS)/unix/targets/$(LW_TARGET_TOOLS_DIR)/hwsnoop/pciutils-2.2.9
+_hwsnoop_dir = $(LW_TOOLS)/unix/targets/$(LW_TARGET_TOOLS_DIR)/hwsnoop/libhwsnoop
+
+LDFLAGS += $(_pci_dir)/lib/libpci.a
+LDFLAGS += $(_hwsnoop_dir)/lib/libhwsnoop.a
+
+LW_INCLUDES += $(_pci_dir)/include/
+LW_INCLUDES += $(_hwsnoop_dir)/include/
+
+##############################################################################
+# include definitions of build rules
+##############################################################################
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

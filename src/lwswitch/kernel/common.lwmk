@@ -1,0 +1,145 @@
+##############################################################################
+#
+# _LWRM_COPYRIGHT_BEGIN_
+#
+# Copyright 2019-2021 by LWPU Corporation.  All rights reserved.  All
+# information contained herein is proprietary and confidential to LWPU
+# Corporation.  Any use, reproduction, or disclosure without the written
+# permission of LWPU Corporation is prohibited.
+#
+# _LWRM_COPYRIGHT_END_
+#
+# This lwmakefile fragment defines the common sources and includes used by all
+# LWSwitch driver builds. This requires some lwmake variables to be defined:
+#	LW_SOURCE - branch location on local disk, e.g., chips_a
+#	OUTPUTDIR - the directory where build artifacts will be placed
+#
+
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+LWSWITCH_DRV_DIR = $(LW_SOURCE)/drivers/lwswitch
+
+LWSWITCH_INCLUDES =
+LWSWITCH_INCLUDES += $(OUTPUTDIR)
+LWSWITCH_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LWSWITCH_INCLUDES += $(LW_SOURCE)/drivers/common/inc
+LWSWITCH_INCLUDES += $(LW_SOURCE)/drivers/common/inc/swref
+LWSWITCH_INCLUDES += $(LW_SOURCE)/drivers/common/inc/hwref
+LWSWITCH_INCLUDES += $(LW_SOURCE)/drivers/resman/inc/libraries
+# This include is part of the below INFOROM_FS kludge
+# TODO remove once the LWSwitch build is isolated from the RM build
+LWSWITCH_INCLUDES += $(LW_SOURCE)/drivers/resman/src/libraries
+LWSWITCH_INCLUDES += $(LW_SOURCE)/drivers/common/shared/inc
+LWSWITCH_INCLUDES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/common/inc
+LWSWITCH_INCLUDES += $(LWSWITCH_DRV_DIR)/interface
+LWSWITCH_INCLUDES += $(LW_SOURCE)/drivers/lwlink/interface
+LWSWITCH_INCLUDES += $(LWSWITCH_DRV_DIR)/kernel/inc
+LWSWITCH_INCLUDES += $(LWSWITCH_DRV_DIR)/common/inc
+
+LWSWITCH_SOURCES =
+
+ifdef LWCFG_INITIALIZED
+  ifeq ($(LWCFG_GLOBAL_ARCH_LWSWITCH),1)
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/error_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/rom_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/spi_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/bios_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/pmgr_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/smbpbi_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/bus_lwswitch.c
+
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/discovery_sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/intr_sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/clock_sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/bus_sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/minion_sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/fuse_sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/pmgr_sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/link_sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/therm_sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/jtag_sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/flcn_sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/inforom_sv10.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/sv10/smbpbi_sv10.c
+
+    ifeq ($(LWCFG_GLOBAL_LWSWITCH_IMPL_LR10),1)
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/discovery_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/intr_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/clock_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/bus_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/minion_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/soe_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/fuse_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/pmgr_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/link_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/therm_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/jtag_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/flcn_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/inforom_lr10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/lr10/smbpbi_lr10.c
+    endif
+
+    ifeq ($(LWCFG_GLOBAL_LWSWITCH_IMPL_LS10),1)
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/discovery_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/intr_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/clock_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/bus_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/fuse_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/minion_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/soe_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/pmgr_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/link_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/therm_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/flcn_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/inforom_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/smbpbi_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/sugen_ls10.c
+      LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ls10/multicast_ls10.c
+    endif
+
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/flcn_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/flcn_call_hal_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/flcnable_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/flcnable_call_hal_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/flcndmem_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/flcnqueue_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/flcnqueue_dmem_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/flcnqueue_fb_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/flcnqueuerd_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/flcnrtosdebug_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/v03/flcn0300_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/v04/flcn0400_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/v05/flcn0501_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/flcn/v06/flcn0600_lwswitch.c
+
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/soe/soe_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/soe/soe_call_hal_lwswitch.c
+#if (!defined(LWRM_UNPUBLISHED_OPAQUE) || LWRM_UNPUBLISHED_OPAQUE == 1)
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/cci/cci_lwswitch.c
+#endif //(!defined(LWRM_UNPUBLISHED_OPAQUE) || LWRM_UNPUBLISHED_OPAQUE == 1)
+
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/inforom/inforom_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/inforom/ifrlwlink_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/inforom/ifrecc_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/inforom/ifrro_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/inforom/ifroms_lwswitch.c
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/inforom/ifrbbx_lwswitch.c
+
+    LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/kernel/ipmi/fru_lwswitch.c
+
+  endif
+endif
+
+################################################
+# LWH_SOURCE -- LWOC Headers
+################################################
+
+# LWH files to be processed by lwhtrans
+# LWH_SOURCES    += $(LWSWITCH_DIR_XX)/lwswitchHalspec.h
+# LWH_SOURCES    += $(LWSWITCH_DIR_XX)/header1.h
+# LWH_SOURCES    += $(LWSWITCH_DIR_XX)/header2.h
+

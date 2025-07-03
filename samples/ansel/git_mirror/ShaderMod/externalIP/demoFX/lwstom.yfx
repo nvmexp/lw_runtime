@@ -1,0 +1,223 @@
+// This filter is in part based on MasterEffect ReBorn 1.1.287 
+// Copyright (c) 2009-2015 Gilcher Pascal aka Marty McFly
+// See Tools/tools_licenses.txt for the terms that the work is being licensed under.
+
+#define BUFFER_WIDTH	(float)(screenSize.x)
+#define BUFFER_HEIGHT	(float)(screenSize.y)
+#define BUFFER_RCP_WIDTH	1/BUFFER_WIDTH
+#define BUFFER_RCP_HEIGHT	1/BUFFER_HEIGHT
+
+#define PixelSize  	float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT)
+
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 texcoord: TexCoord;
+};
+
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+	float4 tileUV;
+}
+
+SamplerState colorLinearSampler;
+SamplerState colorLinearSamplerWrap;
+
+cbuffer controlBuf
+{
+	float g_sldVignette;
+	float g_sldFilmGrain;
+	float g_sldLUT;
+	bool g_DisableAnamflare;
+	float g_sldContrast;
+	float g_sldBrightness;
+}
+
+Texture2D SamplerLDR;
+
+// This should move to a centralized file but not appropriate to make that change now.
+#ifndef LW_COMMON
+#define LW_COMMON
+
+#define CAPTURE_STATE_NOT_STARTED		0
+#define CAPTURE_STATE_REGULAR			1
+#define CAPTURE_STATE_REGULARSTEREO		2
+#define CAPTURE_STATE_HIGHRES			3
+#define CAPTURE_STATE_360				4
+#define CAPTURE_STATE_360STEREO			5
+
+#endif 
+
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// Tonemapping															     //
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+float4 AnselColor(float4 colorInput)
+{
+	float4 clr = colorInput;
+	float4 clr_out = float4(0.5954f * clr.r, 0.58f * clr.g, 0.3487f * clr.b, clr.a);
+
+	float4 clr2 = clr * clr;
+    clr_out += float4(-1.492f * clr2.r, -3.916f * clr2.g, -1.835f * clr2.b, 0.0f);
+
+	float4 clr3 = clr2 * clr;
+    clr_out += float4(19.17f * clr3.r, 26.03f * clr3.g, 12.92f * clr3.b, 0.0f);
+
+	float4 clr4 = clr2 * clr2;
+    clr_out += float4(-45.04f * clr4.r, -50.52 * clr4.g, -19.09 * clr4.b, 0.0f);
+	
+	float4 clr5 = clr3 * clr2;
+    clr_out += float4(41.23f * clr5.r, 41.09 * clr5.g, 9.679 * clr5.b, 0.0f);
+
+	float4 clr6 = clr4 * clr2;
+    clr_out += float4(-13.47f * clr6.r, -12.28 * clr6.g, -1.066 * clr6.b, 0.0f);
+		
+	return clr_out;
+}
+
+float4 AnselSketch(float4 colorInput, float2 texCoords, Texture2D texColor, SamplerState sampState)
+{
+	const int ks = 3;
+	// Sobel Horizontal
+	float filterKernelH[ks * ks] =
+			{
+				 -1,  0,  1,
+				 -2,  0,  2,
+				 -1,  0,  1
+			};
+	// Sobel Vertical
+	float filterKernelV[ks * ks] =
+			{
+				 -1, -2, -1,
+				  0,  0,  0,
+				  1,  2,  1
+			};
+
+	float4 clrH = { 0.0f, 0.0f, 0.0f, 0.0f };
+	float4 clrV = { 0.0f, 0.0f, 0.0f, 0.0f };
+	float4 clrOriginal;
+
+	[unroll]
+	for (int i = 0; i < ks; ++i)
+	{
+		[unroll]
+		for (int j = 0; j < ks; ++j)  
+		{
+			float4 clr = texColor.Sample(sampState, texCoords, int2(i - ks/2, j - ks/2));
+			
+			if (i == ks/2 && j == ks/2)
+				clrOriginal = clr;
+			
+			clrH += filterKernelH[i+j*ks] * clr;
+			clrV += filterKernelV[i+j*ks] * clr;
+		}
+	}
+
+	// BW result
+//	const float4 lumFilter = { 0.2126, 0.7152, 0.0722, 0.0 };
+//	return float4( (1.0 - length(float2( dot(clrH, lumFilter), dot(clrV, lumFilter) ))).xxx, 1.0 ); 
+
+#define ILWERT
+
+	float3 sobelLengths =
+#ifndef ILWERT
+		{
+			length( float2(clrH.r, clrV.r) ),
+			length( float2(clrH.g, clrV.g) ),
+			length( float2(clrH.b, clrV.b) )
+		};
+#else
+		{
+			1.0 - length( float2(clrH.r, clrV.r) ),
+			1.0 - length( float2(clrH.g, clrV.g) ),
+			1.0 - length( float2(clrH.b, clrV.b) )
+		};
+#endif
+	return float4( lerp(colorInput.rgb, sobelLengths, 0.45), colorInput.a ); 
+}
+
+
+float3 ColormodPass( float3 color )
+{
+
+#define ColormodChroma 			1.0		// Saturation
+#define ColormodGammaR 			1.0		// Gamma for Red color channel
+#define ColormodGammaG 			1.0		// Gamma for Green color channel
+#define ColormodGammaB 			1.0		// Gamma for Blue color channel
+#define ColormodContrastR 		1.0		// Contrast for Red color channel
+#define ColormodContrastG 		1.0		// ...
+#define ColormodContrastB 		1.0		// ...
+#define ColormodBrightnessR 	0.0		// Brightness for Red color channel
+#define ColormodBrightnessG 	0.0		// ...
+#define ColormodBrightnessB 	0.0		// ...
+#define g_sldGamma				0.5
+
+	float brightnessTerm = 2.0f * g_sldBrightness - 1.0f;
+	
+	const float contrastMin = -1.6094379124341003746007593332262; //ln(0.2)
+	const float contrastMax = 1.6094379124341003746007593332262; //ln(5.0)
+	
+	float contrastFactor = exp(contrastMin  + g_sldContrast * (contrastMax  - contrastMin)); 
+	//float contrastFactor = g_sldContrast <= 0.5f ? (0.5f - g_sldContrast) * -2.0f + 1.0f : (g_sldContrast - 0.5f) * 10.0f + 1.0f;
+
+	color.xyz = (color.xyz - dot(color.xyz, 0.333)) * ColormodChroma + dot(color.xyz, 0.333);
+	color.xyz = saturate(color.xyz);
+	color.x = (pow(color.x, 2.0 * (1.0 - g_sldGamma) * ColormodGammaR) - 0.5) * ColormodContrastR * contrastFactor  + 0.5 + brightnessTerm;
+	color.y = (pow(color.y, 2.0 * (1.0 - g_sldGamma) * ColormodGammaG) - 0.5) * ColormodContrastG * contrastFactor  + 0.5 + brightnessTerm;
+	color.z = (pow(color.z, 2.0 * (1.0 - g_sldGamma) * ColormodGammaB) - 0.5) * ColormodContrastB * contrastFactor  + 0.5 + brightnessTerm;
+	return color;	
+}
+
+
+float4 PS_Colors(VSOut IN) : SV_Target 
+{
+	//float4 color = tex2D(SamplerLDR, IN.texcoord.xy);
+	float4 color = SamplerLDR.Sample(colorLinearSampler, IN.texcoord.xy);
+
+	float3 anselColor = AnselColor(color).rgb;
+	color.xyz = lerp(color.xyz, anselColor, g_sldLUT);
+
+
+	color.xyz = ColormodPass(color.xyz);
+
+
+	return color;
+
+}
+
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// Overlay															     //
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+float4 PS_Overlay(VSOut IN) : SV_Target 
+{
+#define SamplerLwrrent SamplerLDR
+
+	float4 color = SamplerLDR.Sample(colorLinearSampler, IN.texcoord.xy);
+//		float4 sample2 = SamplerLDR.Sample(colorLinearSampler, texCoord.xy);
+
+	float3 anselSketch = AnselSketch(color, IN.texcoord.xy, SamplerLDR, colorLinearSampler).rgb;
+	color.xyz = lerp(color.xyz, anselSketch, g_sldFilmGrain);
+
+	float2 inTex; // Distance from center
+	if (captureState == CAPTURE_STATE_HIGHRES)
+	{
+		inTex = float2((tileUV.z - tileUV.x) * IN.texcoord.x + tileUV.x, (tileUV.w - tileUV.y) * IN.texcoord.y + tileUV.y) - 0.5.xx;
+	}
+	else 
+	{
+		inTex = IN.texcoord - 0.5.xx;
+	}
+	inTex.x *= 1.2; // Slight aspect ratio correction
+	float vignette = saturate(1.0 - dot( inTex, inTex )); // Length
+	vignette = saturate(smoothstep(0.3, 1.0, vignette)); // Smoothstep
+	float3 color_vign = color.xyz * vignette;
+
+	if (captureState != CAPTURE_STATE_360 && captureState != CAPTURE_STATE_360STEREO)
+		color.xyz = lerp(color.xyz, color_vign, g_sldVignette);
+
+
+	return color;
+}

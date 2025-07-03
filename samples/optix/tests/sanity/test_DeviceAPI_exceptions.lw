@@ -1,0 +1,679 @@
+
+//
+//  Copyright (c) 2020 LWPU Corporation.  All rights reserved.
+//
+//  LWPU Corporation and its licensors retain all intellectual property and proprietary
+//  rights in and to this software, related documentation and any modifications thereto.
+//  Any use, reproduction, disclosure or distribution of this software and related
+//  documentation without an express license agreement from LWPU Corporation is strictly
+//  prohibited.
+//
+//  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+//  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+//  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+//  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+//  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+//  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+//  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+//  SUCH DAMAGES
+//
+
+#ifdef OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+#define OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE_HAS_PARAMS
+#endif  // OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+// ?? So far all tests seem to use params as the name
+//#define OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE_PARAMS_NAME params
+
+#include "test_DeviceAPI_exceptions.h"
+
+extern "C" {
+__constant__ Params params;
+}
+
+#include <cmath>
+#include <optix.h>
+
+__device__ __forceinline__ void copyString( char* src, char* dst, int dstSize )
+{
+    if( dstSize == 0 )
+        return;
+    if( src != nullptr )
+    {
+        int i = 0;
+        for( ; i < dstSize && src[i] != '\0'; ++i )
+        {
+            dst[i] = src[i];
+        }
+        if( i == dstSize )
+        {
+            dst[i - 1] = '\0';
+        }
+    }
+    else
+    {
+        dst[0] = '\0';
+    }
+}
+
+__device__ void traceRay( bool ilwertDirection = false )
+{
+    float3 origin = make_float3( params.rayData[0], params.rayData[1], params.rayData[2] );
+    float3 direction =
+        make_float3( params.rayData[3], params.rayData[4], ilwertDirection ? -1.0 * params.rayData[5] : params.rayData[5] );
+    float               tmin           = params.rayData[6];
+    float               tmax           = params.rayData[7];
+    float               rayTime        = params.rayData[8];
+    OptixVisibilityMask visibilityMask = 1;
+    OptixRayFlags       rayFlags       = OPTIX_RAY_FLAG_NONE;
+    unsigned int        SBToffset      = params.sbtOffset;
+    unsigned int        SBTstride      = 1;
+    unsigned int        missSBTIndex   = params.missSBTIndex;
+
+    optixTrace( params.handle, origin, direction, tmin, tmax, rayTime, visibilityMask, rayFlags, SBToffset, SBTstride, missSBTIndex );
+}
+
+extern "C" __global__ void __raygen__()
+{
+    traceRay();
+}
+
+extern "C" __global__ void __raygen__miss()
+{
+    traceRay( true );
+}
+
+extern "C" __global__ void __intersection__()
+{
+    float3 dir = optixGetWorldRayDirection();
+    if( dir.z > 0.0f )
+        optixReportIntersection( 1.0f, 0 );
+}
+
+extern "C" __global__ void __exception__()
+{
+    int exceptionCode = optixGetExceptionCode();
+    if( exceptionCode == OPTIX_EXCEPTION_CODE_TRAVERSAL_ILWALID_HIT_SBT || exceptionCode == OPTIX_EXCEPTION_CODE_TRAVERSAL_ILWALID_MISS_SBT )
+    {
+        int offset = optixGetExceptionIlwalidSbtOffset();
+        if( offset )
+        {
+            unsigned int* payloads = (unsigned int*)params.payloads;
+            payloads[0]            = offset;
+        }
+    }
+    else if( exceptionCode == OPTIX_EXCEPTION_CODE_TRAVERSAL_ILWALID_TRAVERSABLE )
+    {
+        unsigned int* payloads = (unsigned int*)params.payloads;
+        payloads[0]            = static_cast<unsigned int>( optixGetExceptionIlwalidTraversable() );
+    }
+    else if( exceptionCode == OPTIX_EXCEPTION_CODE_ILWALID_RAY )
+    {
+        OptixIlwalidRayExceptionDetails details = optixGetExceptionIlwalidRay();
+        params.rayData[0]                       = details.origin.x;
+        params.rayData[1]                       = details.origin.y;
+        params.rayData[2]                       = details.origin.z;
+        params.rayData[3]                       = details.direction.x;
+        params.rayData[4]                       = details.direction.y;
+        params.rayData[5]                       = details.direction.z;
+        params.rayData[6]                       = details.tmin;
+        params.rayData[7]                       = details.tmax;
+        params.rayData[8]                       = details.time;
+        copyString( optixGetExceptionLineInfo(), params.lineInfo, params.lineInfoLength );
+    }
+    else if( exceptionCode == OPTIX_EXCEPTION_CODE_CALLABLE_PARAMETER_MISMATCH )
+    {
+        OptixParameterMismatchExceptionDetails details = optixGetExceptionParameterMismatch();
+        params.paramMismatchIntData[0]                 = details.expectedParameterCount;
+        params.paramMismatchIntData[1]                 = details.passedArgumentCount;
+        params.paramMismatchIntData[2]                 = details.sbtIndex;
+        copyString( details.callableName, params.paramMismatchCallableName, params.paramMismatchCallableNameLength );
+        copyString( optixGetExceptionLineInfo(), params.lineInfo, params.lineInfoLength );
+    }
+}
+
+extern "C" __global__ void __miss__() {}
+extern "C" __global__ void __closesthit__() {}
+extern "C" __global__ void __anyhit__() {}
+extern "C" __global__ void __direct_callable__() {}
+extern "C" __global__ void __continuation_callable__() {}
+
+extern "C" __global__ void __direct_callable__param_mismatch( int ) {}
+extern "C" __global__ void __continuation_callable__param_mismatch( int ) {}
+extern "C" __global__ void __direct_callable__param_mismatch__unused( int ) {}
+extern "C" __global__ void __continuation_callable__param_mismatch__unused( int ) {}
+extern "C" __global__ void __raygen__dc_missingArgs()
+{
+    // additional offset as __LINE__ and optixGetExceptionLineInfo() differ by that
+    *params.callSiteLine = __LINE__ + 2;
+    optixDirectCall<void>( SBT_INDEX_DIRECT_CALLABLE );
+}
+extern "C" __global__ void __raygen__dc_tooManyArgs()
+{
+    // additional offset as __LINE__ and optixGetExceptionLineInfo() differ by that
+    *params.callSiteLine = __LINE__ + 2;
+    optixDirectCall<void>( SBT_INDEX_DIRECT_CALLABLE, 0, 1 );
+}
+extern "C" __global__ void __raygen__cc_missingArgs()
+{
+    // additional offset as __LINE__ and optixGetExceptionLineInfo() differ by that
+    *params.callSiteLine = __LINE__ + 2;
+    optixContinuationCall<void>( SBT_INDEX_CONTINUATION_CALLABLE );
+}
+extern "C" __global__ void __raygen__cc_tooManyArgs()
+{
+    // additional offset as __LINE__ and optixGetExceptionLineInfo() differ by that
+    *params.callSiteLine = __LINE__ + 2;
+    optixContinuationCall<void>( SBT_INDEX_CONTINUATION_CALLABLE, 0, 1 );
+}
+
+
+extern "C" __global__ void __raygen__directcallable()
+{
+    optixDirectCall<void>( SBT_INDEX_DIRECT_CALLABLE );
+}
+extern "C" __global__ void __raygen__continuationcallable()
+{
+    optixContinuationCall<void>( SBT_INDEX_CONTINUATION_CALLABLE );
+}
+
+extern "C" __global__ void __exception__0()
+{
+    unsigned int* payloads = (unsigned int*)params.payloads;
+    payloads[0]            = optixGetExceptionCode();
+}
+extern "C" __global__ void __raygen__withThrow_0()
+{
+    optixThrowException( PROGRAM_TYPE_PAYLOAD_RG );
+}
+extern "C" __global__ void __intersection__withThrow_0()
+{
+    optixThrowException( PROGRAM_TYPE_PAYLOAD_IS );
+}
+extern "C" __global__ void __miss__withThrow_0()
+{
+    optixThrowException( PROGRAM_TYPE_PAYLOAD_MS );
+}
+extern "C" __global__ void __closesthit__withThrow_0()
+{
+    optixThrowException( PROGRAM_TYPE_PAYLOAD_CH );
+}
+extern "C" __global__ void __anyhit__withThrow_0()
+{
+    optixThrowException( PROGRAM_TYPE_PAYLOAD_AH );
+}
+extern "C" __global__ void __direct_callable__withThrow_0()
+{
+    optixThrowException( PROGRAM_TYPE_PAYLOAD_DC );
+}
+extern "C" __global__ void __continuation_callable__withThrow_0()
+{
+    optixThrowException( PROGRAM_TYPE_PAYLOAD_CC );
+}
+
+extern "C" __global__ void __exception__1()
+{
+    unsigned int* payloads = (unsigned int*)params.payloads;
+    // additional check for correctness of exception code set/get
+    if( optixGetExceptionCode() == PAYLOAD_VAL_0 )
+        payloads[0] = optixGetExceptionDetail_0();
+}
+extern "C" __global__ void __raygen__withThrow_1()
+{
+    optixThrowException( PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_0 );
+}
+extern "C" __global__ void __intersection__withThrow_1()
+{
+    optixThrowException( PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_0 );
+}
+extern "C" __global__ void __miss__withThrow_1()
+{
+    optixThrowException( PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_0 );
+}
+extern "C" __global__ void __closesthit__withThrow_1()
+{
+    optixThrowException( PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_0 );
+}
+extern "C" __global__ void __anyhit__withThrow_1()
+{
+    optixThrowException( PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_0 );
+}
+extern "C" __global__ void __direct_callable__withThrow_1()
+{
+    optixThrowException( PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_0 );
+}
+extern "C" __global__ void __continuation_callable__withThrow_1()
+{
+    optixThrowException( PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_0 );
+}
+
+extern "C" __global__ void __exception__2()
+{
+    unsigned int* payloads = (unsigned int*)params.payloads;
+    // additional check for correctness of exception code set/get
+    if( optixGetExceptionCode() == ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 ) )
+    {
+        payloads[0] = optixGetExceptionDetail_0();
+        payloads[1] = optixGetExceptionDetail_1();
+    }
+}
+extern "C" __global__ void __raygen__withThrow_2()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_1 );
+}
+extern "C" __global__ void __intersection__withThrow_2()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_1 );
+}
+extern "C" __global__ void __miss__withThrow_2()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_1 );
+}
+extern "C" __global__ void __closesthit__withThrow_2()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_1 );
+}
+extern "C" __global__ void __anyhit__withThrow_2()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_1 );
+}
+extern "C" __global__ void __direct_callable__withThrow_2()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_1 );
+}
+extern "C" __global__ void __continuation_callable__withThrow_2()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_1 );
+}
+
+extern "C" __global__ void __exception__3()
+{
+    unsigned int* payloads = (unsigned int*)params.payloads;
+    // additional check for correctness of exception code set/get
+    if( optixGetExceptionCode() == ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 ) )
+    {
+        payloads[0] = optixGetExceptionDetail_0();
+        payloads[1] = optixGetExceptionDetail_1();
+        payloads[2] = optixGetExceptionDetail_2();
+    }
+}
+extern "C" __global__ void __raygen__withThrow_3()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_0,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_2 );
+}
+extern "C" __global__ void __intersection__withThrow_3()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_0,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_2 );
+}
+extern "C" __global__ void __miss__withThrow_3()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_0,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_2 );
+}
+extern "C" __global__ void __closesthit__withThrow_3()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_0,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_2 );
+}
+extern "C" __global__ void __anyhit__withThrow_3()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_0,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_2 );
+}
+extern "C" __global__ void __direct_callable__withThrow_3()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_0,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_2 );
+}
+extern "C" __global__ void __continuation_callable__withThrow_3()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_0,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_1, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_2 );
+}
+
+extern "C" __global__ void __exception__4()
+{
+    unsigned int* payloads = (unsigned int*)params.payloads;
+    // additional check for correctness of exception code set/get
+    if( optixGetExceptionCode() == ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 ) )
+    {
+        payloads[0] = optixGetExceptionDetail_0();
+        payloads[1] = optixGetExceptionDetail_1();
+        payloads[2] = optixGetExceptionDetail_2();
+        payloads[3] = optixGetExceptionDetail_3();
+    }
+}
+extern "C" __global__ void __raygen__withThrow_4()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_3 );
+}
+extern "C" __global__ void __intersection__withThrow_4()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_3 );
+}
+extern "C" __global__ void __miss__withThrow_4()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_3 );
+}
+extern "C" __global__ void __closesthit__withThrow_4()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_3 );
+}
+extern "C" __global__ void __anyhit__withThrow_4()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_3 );
+}
+extern "C" __global__ void __direct_callable__withThrow_4()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_3 );
+}
+extern "C" __global__ void __continuation_callable__withThrow_4()
+{
+    optixThrowException( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_3 );
+}
+
+extern "C" __global__ void __exception__5()
+{
+    unsigned int* payloads = (unsigned int*)params.payloads;
+    // additional check for correctness of exception code set/get - right shift due to avoid exception code overflow
+    if( optixGetExceptionCode() == ( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 ) >> 4 ) )
+    {
+        payloads[0] = optixGetExceptionDetail_0();
+        payloads[1] = optixGetExceptionDetail_1();
+        payloads[2] = optixGetExceptionDetail_2();
+        payloads[3] = optixGetExceptionDetail_3();
+        payloads[4] = optixGetExceptionDetail_4();
+    }
+}
+extern "C" __global__ void __raygen__withThrow_5()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_4 );
+}
+extern "C" __global__ void __intersection__withThrow_5()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_4 );
+}
+extern "C" __global__ void __miss__withThrow_5()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_4 );
+}
+extern "C" __global__ void __closesthit__withThrow_5()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_4 );
+}
+extern "C" __global__ void __anyhit__withThrow_5()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_4 );
+}
+extern "C" __global__ void __direct_callable__withThrow_5()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_4 );
+}
+extern "C" __global__ void __continuation_callable__withThrow_5()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_4 );
+}
+
+extern "C" __global__ void __exception__6()
+{
+    unsigned int* payloads = (unsigned int*)params.payloads;
+    // additional check for correctness of exception code set/get - right shift due to avoid exception code overflow
+    if( optixGetExceptionCode()
+        == ( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 ) >> 4 ) )
+    {
+        payloads[0] = optixGetExceptionDetail_0();
+        payloads[1] = optixGetExceptionDetail_1();
+        payloads[2] = optixGetExceptionDetail_2();
+        payloads[3] = optixGetExceptionDetail_3();
+        payloads[4] = optixGetExceptionDetail_4();
+        payloads[5] = optixGetExceptionDetail_5();
+    }
+}
+extern "C" __global__ void __raygen__withThrow_6()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_5 );
+}
+extern "C" __global__ void __intersection__withThrow_6()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_5 );
+}
+extern "C" __global__ void __miss__withThrow_6()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_5 );
+}
+extern "C" __global__ void __closesthit__withThrow_6()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_5 );
+}
+extern "C" __global__ void __anyhit__withThrow_6()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_5 );
+}
+extern "C" __global__ void __direct_callable__withThrow_6()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_5 );
+}
+extern "C" __global__ void __continuation_callable__withThrow_6()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 ) >> 4,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_5 );
+}
+
+extern "C" __global__ void __exception__7()
+{
+    unsigned int* payloads = (unsigned int*)params.payloads;
+    // additional check for correctness of exception code set/get - right shift due to avoid exception code overflow
+    if( optixGetExceptionCode()
+        == ( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 | PAYLOAD_VAL_6 ) >> 4 ) )
+    {
+        payloads[0] = optixGetExceptionDetail_0();
+        payloads[1] = optixGetExceptionDetail_1();
+        payloads[2] = optixGetExceptionDetail_2();
+        payloads[3] = optixGetExceptionDetail_3();
+        payloads[4] = optixGetExceptionDetail_4();
+        payloads[5] = optixGetExceptionDetail_5();
+        payloads[6] = optixGetExceptionDetail_6();
+    }
+}
+extern "C" __global__ void __raygen__withThrow_7()
+{
+    optixThrowException(
+        ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 | PAYLOAD_VAL_6 ) >> 4,
+        PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_1,
+        PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_3, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_4,
+        PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_5, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_6 );
+}
+extern "C" __global__ void __intersection__withThrow_7()
+{
+    optixThrowException(
+        ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 | PAYLOAD_VAL_6 ) >> 4,
+        PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_1,
+        PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_3, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_4,
+        PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_5, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_6 );
+}
+extern "C" __global__ void __miss__withThrow_7()
+{
+    optixThrowException(
+        ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 | PAYLOAD_VAL_6 ) >> 4,
+        PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_1,
+        PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_3, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_4,
+        PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_5, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_6 );
+}
+extern "C" __global__ void __closesthit__withThrow_7()
+{
+    optixThrowException(
+        ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 | PAYLOAD_VAL_6 ) >> 4,
+        PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_1,
+        PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_3, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_4,
+        PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_5, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_6 );
+}
+extern "C" __global__ void __anyhit__withThrow_7()
+{
+    optixThrowException(
+        ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 | PAYLOAD_VAL_6 ) >> 4,
+        PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_1,
+        PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_3, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_4,
+        PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_5, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_6 );
+}
+extern "C" __global__ void __direct_callable__withThrow_7()
+{
+    optixThrowException(
+        ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 | PAYLOAD_VAL_6 ) >> 4,
+        PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_1,
+        PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_3, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_4,
+        PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_5, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_6 );
+}
+extern "C" __global__ void __continuation_callable__withThrow_7()
+{
+    optixThrowException(
+        ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 | PAYLOAD_VAL_6 ) >> 4,
+        PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_1,
+        PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_3, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_4,
+        PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_5, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_6 );
+}
+
+extern "C" __global__ void __exception__8()
+{
+    unsigned int* payloads = (unsigned int*)params.payloads;
+    // additional check for correctness of exception code set/get - right shift due to avoid exception code overflow
+    if( optixGetExceptionCode()
+        == ( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5 | PAYLOAD_VAL_6 | PAYLOAD_VAL_7 )
+             >> 4 ) )
+    {
+        payloads[0] = optixGetExceptionDetail_0();
+        payloads[1] = optixGetExceptionDetail_1();
+        payloads[2] = optixGetExceptionDetail_2();
+        payloads[3] = optixGetExceptionDetail_3();
+        payloads[4] = optixGetExceptionDetail_4();
+        payloads[5] = optixGetExceptionDetail_5();
+        payloads[6] = optixGetExceptionDetail_6();
+        payloads[7] = optixGetExceptionDetail_7();
+    }
+}
+extern "C" __global__ void __raygen__withThrow_8()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5
+                           | PAYLOAD_VAL_6 | PAYLOAD_VAL_7 )
+                             >> 4,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_5,
+                         PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_6, PROGRAM_TYPE_PAYLOAD_RG | PAYLOAD_VAL_7 );
+}
+extern "C" __global__ void __intersection__withThrow_8()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5
+                           | PAYLOAD_VAL_6 | PAYLOAD_VAL_7 )
+                             >> 4,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_5,
+                         PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_6, PROGRAM_TYPE_PAYLOAD_IS | PAYLOAD_VAL_7 );
+}
+extern "C" __global__ void __miss__withThrow_8()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5
+                           | PAYLOAD_VAL_6 | PAYLOAD_VAL_7 )
+                             >> 4,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_5,
+                         PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_6, PROGRAM_TYPE_PAYLOAD_MS | PAYLOAD_VAL_7 );
+}
+extern "C" __global__ void __closesthit__withThrow_8()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5
+                           | PAYLOAD_VAL_6 | PAYLOAD_VAL_7 )
+                             >> 4,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_5,
+                         PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_6, PROGRAM_TYPE_PAYLOAD_CH | PAYLOAD_VAL_7 );
+}
+extern "C" __global__ void __anyhit__withThrow_8()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5
+                           | PAYLOAD_VAL_6 | PAYLOAD_VAL_7 )
+                             >> 4,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_5,
+                         PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_6, PROGRAM_TYPE_PAYLOAD_AH | PAYLOAD_VAL_7 );
+}
+extern "C" __global__ void __direct_callable__withThrow_8()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5
+                           | PAYLOAD_VAL_6 | PAYLOAD_VAL_7 )
+                             >> 4,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_5,
+                         PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_6, PROGRAM_TYPE_PAYLOAD_DC | PAYLOAD_VAL_7 );
+}
+extern "C" __global__ void __continuation_callable__withThrow_8()
+{
+    optixThrowException( ( PAYLOAD_VAL_0 | PAYLOAD_VAL_1 | PAYLOAD_VAL_2 | PAYLOAD_VAL_3 | PAYLOAD_VAL_4 | PAYLOAD_VAL_5
+                           | PAYLOAD_VAL_6 | PAYLOAD_VAL_7 )
+                             >> 4,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_0, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_1,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_2, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_3,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_4, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_5,
+                         PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_6, PROGRAM_TYPE_PAYLOAD_CC | PAYLOAD_VAL_7 );
+}

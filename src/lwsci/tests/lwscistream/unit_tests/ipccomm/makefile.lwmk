@@ -1,0 +1,94 @@
+##############################################################################
+# Copyright (c) 2021, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+##############################################################################
+
+##############################################################################
+# test_lwscistream_ipccomm makefile
+##############################################################################
+
+
+##############################################################################
+# Include the common lwmake file
+##############################################################################
+
+include $(LW_SOURCE)/drivers/lwsci/tests/lwscistream/unit_tests/common.lwmk
+
+##############################################################################
+# Identify this module to lwCommon.lwmk so it can decide the build type
+##############################################################################
+
+LW_MODULE_LOGGING_NAME = "test_lwscistream_ipccomm"
+
+##############################################################################
+# path shorthands
+##############################################################################
+
+LWSCISTREAM_TEST_PATH    := $(LWSCI_TESTS_PATH)/lwscistream/unit_tests/ipccomm
+
+##############################################################################
+# define TEST SOURCES
+##############################################################################
+
+LWSCISTREAM_TEST_SOURCES := test_ipccomm.cpp
+
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/test_files/,$(LWSCISTREAM_TEST_SOURCES))
+
+##############################################################################
+# define INCLUDES
+##############################################################################
+
+LW_INCLUDES += $(LWSCISTREAM_TEST_PATH)/stub_files
+ifneq ($(LW_TARGET_OS),QNX)
+ LW_INCLUDES += $(LWSCISTREAM_TEST_PATH)/stub_files/linux
+else
+# The QNX toolchain headers are already included through -isystem qcc command line
+# option but they are overridden here using -I option to include the mock headers.
+# This is possible because -I has higher precedence compared to -isystem.
+ LW_INCLUDES += $(LWSCISTREAM_TEST_PATH)/stub_files/qnx
+endif
+LW_INCLUDES += $(LWSCISTREAM_TEST_PATH)/driver_files
+LW_INCLUDES += $(LWSCI_TESTS_PATH)/lwscistream/unit_tests
+
+##############################################################################
+# define  SOURCES
+##############################################################################
+
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,common_stub.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,glob_test_vars.cpp)
+ifneq ($(LW_TARGET_OS),QNX)
+ SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/linux/,qnx_nto_stub.cpp)
+else
+ SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/qnx/,qnx_nto_stub.cpp)
+endif
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/driver_files/,ipccomm.cpp)
+
+##############################################################################
+# link the binary
+##############################################################################
+
+TESTAPP_BIN := test_lwscistream_ipccomm
+TESTAPP := $(OUTPUTDIR)/$(TESTAPP_BIN)
+
+TESTAPP_LD_TARGET = $(TESTAPP).unstripped
+TESTAPP_DEBUG_INFO = $(TESTAPP).debug
+$(eval $(call LW_DEBUG_INFO_CMD, \
+  $(TESTAPP_LD_TARGET), \
+  $(TESTAPP), \
+  $(TESTAPP_DEBUG_INFO)))
+
+build: $(TESTAPP)
+
+$(TESTAPP_LD_TARGET): $(OBJECTS)
+	$(call quiet_cmd,LINK) $(OBJECTS) -o $(TESTAPP_LD_TARGET) $(LDFLAGS)
+
+##############################################################################
+# include definitions of tools and build rules
+##############################################################################
+
+include $(LW_COMMON)/build/lwCommonRules.lwmk

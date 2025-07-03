@@ -1,0 +1,175 @@
+
+//
+//  Copyright (c) 2020 LWPU Corporation.  All rights reserved.
+//
+//  LWPU Corporation and its licensors retain all intellectual property and proprietary
+//  rights in and to this software, related documentation and any modifications thereto.
+//  Any use, reproduction, disclosure or distribution of this software and related
+//  documentation without an express license agreement from LWPU Corporation is strictly
+//  prohibited.
+//
+//  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+//  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+//  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+//  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+//  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+//  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+//  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+//  SUCH DAMAGES
+//
+
+#ifdef OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+#define OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE_HAS_PARAMS
+#endif  // OPTIX_OPTIONAL_TEST_CALL_COVERAGE
+
+#include "test_DeviceAPI_lwrveHit.h"
+
+extern "C" {
+__constant__ Params params;
+}
+
+#include <optix.h>
+
+static __forceinline__ __device__ void setFrontBackFace()
+{
+    *params.d_optixPrimitiveTypeResultOutPointer = optixGetPrimitiveType();
+
+    switch( params.expectedLwrveHitType )
+    {
+        case EXPECTED_LWRVE_HIT_TYPE_FRONT_FACE_HIT:
+            if( optixIsFrontFaceHit() )
+                *params.d_lwrveHitResultOutPointer = LWRVE_HIT_ID_FRONT;
+            break;
+
+        case EXPECTED_LWRVE_HIT_TYPE_BACK_FACE_HIT:
+            if( optixIsBackFaceHit() )
+                *params.d_lwrveHitResultOutPointer = LWRVE_HIT_ID_BACK;
+            break;
+
+        default:
+            break;
+    }
+}
+
+static __forceinline__ __device__ void setFrontBackFaceFromArgument()
+{
+    const unsigned int optixHitKind = optixGetHitKind();
+
+    *params.d_optixPrimitiveTypeResultOutPointer = optixGetPrimitiveType( optixHitKind );
+
+    switch( params.expectedLwrveHitType )
+    {
+        case EXPECTED_LWRVE_HIT_TYPE_FRONT_FACE_HIT:
+            if( optixIsFrontFaceHit( optixHitKind ) )
+                *params.d_lwrveHitResultOutPointer = LWRVE_HIT_ID_FRONT;
+            break;
+
+        case EXPECTED_LWRVE_HIT_TYPE_BACK_FACE_HIT:
+            if( optixIsBackFaceHit( optixHitKind ) )
+                *params.d_lwrveHitResultOutPointer = LWRVE_HIT_ID_BACK;
+            break;
+
+        default:
+            break;
+    }
+}
+
+static __forceinline__ __device__ void callGetLwrveParameter()
+{
+    if( params.hitpointPos != HITPOINT_POS_UNDEF )
+        *params.d_lwrveParamResultOutPointer = optixGetLwrveParameter();
+}
+
+__device__ void traceRay()
+{
+    float3 origin, direction;
+    switch( params.expectedLwrveHitType )
+    {
+        case EXPECTED_LWRVE_HIT_TYPE_FRONT_FACE_HIT:
+            origin    = make_float3( 0.f, 0.f, -2.f );
+            direction = make_float3( 0.f, 0.f, 1.f );
+            break;
+        case EXPECTED_LWRVE_HIT_TYPE_BACK_FACE_HIT:
+            origin    = make_float3( 0.f, 0.f, 0.f );
+            direction = make_float3( 0.f, 0.f, 2.f );
+            break;
+    }
+    // here only set origin as EXPECTED_LWRVE_HIT_TYPE_FRONT_FACE_HIT is always on when proper case hit
+    switch( params.hitpointPos )
+    {
+        case HITPOINT_POS_START:
+            origin = make_float3( 0.f, -1.f, -2.f );
+            break;
+        case HITPOINT_POS_MIDDLE:
+            origin = make_float3( 0.f, 0.f, -2.f );
+            break;
+        case HITPOINT_POS_END:
+            origin = make_float3( 0.f, +1.f, -2.f );
+            break;
+        case HITPOINT_POS_UNDEF:
+        default:
+            // pass-through
+            break;
+    }
+
+    float               tmin           = 0.0f;
+    float               tmax           = 1e16f;
+    float               rayTime        = 0.0f;
+    OptixVisibilityMask visibilityMask = 255;
+    OptixRayFlags       rayFlags       = OPTIX_RAY_FLAG_NONE;
+    unsigned int        SBToffset      = 0;
+    unsigned int        SBTstride      = 0;
+    unsigned int        missSBTIndex   = 0;
+
+    optixTrace( params.handle, origin, direction, tmin, tmax, rayTime, visibilityMask, rayFlags, SBToffset, SBTstride, missSBTIndex );
+}
+
+extern "C" __global__ void __raygen__()
+{
+    traceRay();
+}
+
+extern "C" __global__ void __exception__() {}
+
+extern "C" __global__ void __anyhit__()
+{
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_ANY_HIT )
+    {
+        switch( params.useHitKindArgument )
+        {
+            case USE_IMPLICIT_HIT_KIND:
+                setFrontBackFace();
+                break;
+
+            case USE_HIT_KIND_ARGUMENT:
+                setFrontBackFaceFromArgument();
+                break;
+
+            default:
+                break;
+        }
+        callGetLwrveParameter();
+    }
+}
+
+extern "C" __global__ void __closesthit__()
+{
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_CLOSEST_HIT )
+    {
+        switch( params.useHitKindArgument )
+        {
+            case USE_IMPLICIT_HIT_KIND:
+                setFrontBackFace();
+                break;
+
+            case USE_HIT_KIND_ARGUMENT:
+                setFrontBackFaceFromArgument();
+                break;
+
+            default:
+                break;
+        }
+        callGetLwrveParameter();
+    }
+}

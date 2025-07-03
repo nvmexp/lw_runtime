@@ -1,0 +1,69 @@
+##############################################################################
+# define LOCAL_SOURCES
+##############################################################################
+
+LW_CXX_EXCEPTIONS := 0
+LW_CXX_RTTI := 0
+LW_BUILD_PIC := 1
+
+LWRRENT_DIR := $(LWVS_DIR)/plugin_src/smperf
+LOCAL_SOURCES :=
+LOCAL_SOURCES += SmPerfPlugin.cpp
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+##############################################################################
+## define LOCAL_CFLAGS
+###############################################################################
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(LWVS_PLUGIN_INCLUDES)
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+LOCAL_CFLAGS += -fopenmp -Wno-sign-compare
+
+LWVS_SMPERF_LIBRARY_NAME = libSmPerformance.so
+
+##############################################################################
+## define LOCAL_LDFLAGS
+###############################################################################
+
+LOCAL9_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL9_LDFLAGS += -L $(LOCAL_LWDA9_DIR)/lib/$(LW_TARGET_ARCH) -l$(LWDART) -l$(LWBLAS) -lgomp -lstdc++ -lc -llwlibos
+LOCAL9_LDFLAGS += -L$(OUTPUTDIR)/lwda9 -lpluginCommon
+
+LOCAL10_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL10_LDFLAGS += -L $(LOCAL_LWDA10_DIR)/lib/$(LW_TARGET_ARCH) -l$(LWDART) -l$(LWBLAS)
+LOCAL10_LDFLAGS += -lgomp -lstdc++ -lc -llwlibos
+LOCAL10_LDFLAGS += -L$(OUTPUTDIR)/lwda10 -lpluginCommon
+
+smperf9_TARGET  := $(OUTPUTDIR)/lwda9/$(LWVS_SMPERF_LIBRARY_NAME)
+smperf9_SONAME  := $(LWVS_SMPERF_LIBRARY_NAME)
+smperf9_OBJECTS := $(LOCAL_OBJECTS)
+smperf9_CFLAGS  := $(LOCAL_CFLAGS) $(addprefix -I,$(LOCAL_LWDA9_DIR)/include)
+smperf9_LDFLAGS := $(LOCAL9_LDFLAGS)
+smperf9_DEPENDS ?= $(common9_TARGET)
+
+smperf10_TARGET  := $(OUTPUTDIR)/lwda10/$(LWVS_SMPERF_LIBRARY_NAME)
+smperf10_SONAME  := $(LWVS_SMPERF_LIBRARY_NAME)
+smperf10_OBJECTS := $(LOCAL_OBJECTS)
+smperf10_CFLAGS  := $(LOCAL_CFLAGS) $(addprefix -I,$(LOCAL_LWDA10_DIR)/include)
+smperf10_LDFLAGS := $(LOCAL10_LDFLAGS)
+smperf10_DEPENDS ?= $(common10_TARGET)
+
+# C++11 produces a ctor/dtor for basic_string that RedHat and CentOS do not
+# like; use the default C++ dialect.
+CXX_STD =
+
+build: $(smperf10_TARGET) $(smperf9_TARGET)
+$(eval $(call MAKE_SHARED_LIBRARY,smperf10))
+$(eval $(call MAKE_SHARED_LIBRARY,smperf9))
+build: $(smperf10_TARGET).guardwords $(smperf9_TARGET).guardwords
+
+#################################################################################
+## End of nested lwmk
+##################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

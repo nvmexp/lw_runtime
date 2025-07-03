@@ -1,0 +1,63 @@
+LW_MODULE_BUILD_TYPE_ALIASES = egl
+LW_MODULE_LOGGING_NAME = "testclient"
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+EGL_TESTCLIENT_DIR = $(LW_SOURCE)/apps/egl/testclient
+
+include $(EGL_TESTCLIENT_DIR)/egl-dso-stub.lwmk
+
+SOURCES += $(EGL_TESTCLIENT_DIR)/testclient.cpp
+SOURCES += $(EGL_TESTCLIENT_DIR)/testclientStream1.cpp
+SOURCES += $(EGL_TESTCLIENT_DIR)/testclientStream2.cpp
+
+LW_DEFINES += LW_EGL_DESKTOP_COMPATIBLE_HEADERS
+LW_INCLUDES += $(LW_SOURCE)/apps/egl/utils
+LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc
+LW_INCLUDES += $(LW_SOURCE)/drivers/khronos/egl/interface/partner
+LW_INCLUDES += $(LW_SOURCE)/drivers/khronos/egl/interface
+LW_INCLUDES += $(LW_SOURCE)/drivers/khronos/interface/apps-mirror
+
+include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+
+# Tell eglplatform.h not to try to deduce the target platform/window system
+LW_DEFINES += WIN_INTERFACE_LWSTOM
+
+LIBTESTCLIENT = $(OUTPUTDIR)/libtestclient.so
+LIBTESTCLIENT_SONAME = libtestclient.so.$(LW_VERSION_STRING)
+
+LINK_OBJECTS = $(OBJECTS)
+
+# Link in libpthread
+LDFLAGS += $(PTHREAD_LDFLAGS)
+
+LW_SUPPORTS_SEPARATE_DEBUG_INFO = 1
+LIBTESTCLIENT_LD_TARGET = $(LIBTESTCLIENT).unstripped
+LIBTESTCLIENT_DEBUG_INFO = $(LIBTESTCLIENT).debug
+$(eval $(call LW_DEBUG_INFO_CMD, \
+  $(LIBTESTCLIENT_LD_TARGET), \
+  $(LIBTESTCLIENT), \
+  $(LIBTESTCLIENT_DEBUG_INFO)))
+
+LIBTESTCLIENT_LINKER_SCRIPT = $(OUTPUTDIR)/testclient.map
+LIBTESTCLIENT_EXPORTS = $(EGL_TESTCLIENT_DIR)/testclient.export
+
+$(eval $(call LINKER_SCRIPT_RULE, \
+  $(LIBTESTCLIENT_LINKER_SCRIPT), \
+  $(LIBTESTCLIENT_EXPORTS),))
+
+build: $(LIBTESTCLIENT)
+
+$(LIBTESTCLIENT_LD_TARGET): $(LINK_OBJECTS) $(LIBEGL_DSO_STUB) $(LIBTESTCLIENT_LINKER_SCRIPT) $(LW_VERSION_STRING_DEPS)
+	$(call quiet_cmd,LINK) -o $@ $(LINK_OBJECTS) \
+	  -Wl,--version-script=$(LIBTESTCLIENT_LINKER_SCRIPT) \
+	  -Wl,-soname,$(LIBTESTCLIENT_SONAME) \
+	  $(LINK_LDFLAGS) \
+	  $(LINK_DSO_LDFLAGS) \
+	  $(LIBEGL_DSO_STUB)
+	$(call quiet_cmd,POST_LINK) $(LIBTESTCLIENT_EXPORTS)
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

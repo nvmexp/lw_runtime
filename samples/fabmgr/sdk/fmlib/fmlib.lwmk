@@ -1,0 +1,120 @@
+##############################################################################
+#
+# lwmk for fabric manager API interface library
+#
+##############################################################################
+ 
+LWRRENT_DIR = $(LW_SOURCE)/apps/fabricmanager
+LWMLCOMMON_DIR = $(LW_SOURCE)/apps/lwml/common
+LWML_DIR = $(LW_SOURCE)/apps/lwml
+#all the main source code
+LOCAL_SOURCES :=
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_SOURCES += ./sdk/fmlib/fmlib_api.cpp
+LOCAL_SOURCES += ./sdk/fmlib/fmLibClientConnHandler.cpp
+LOCAL_SOURCES += ./infra/logging/fm_log.cpp
+ 
+LOCAL_SOURCES += infra/transport/FmRequest.cpp  
+LOCAL_SOURCES += infra/transport/FmServerRequest.cpp
+ 
+#infra code
+LOCAL_SOURCES += common/FMTimer.cpp
+LOCAL_SOURCES += common/FmThread.cpp
+LOCAL_SOURCES += infra/transport/FmClientConnection.cpp
+LOCAL_SOURCES += infra/transport/FmServerConnection.cpp
+LOCAL_SOURCES += infra/transport/FmConnection.cpp
+LOCAL_SOURCES += infra/transport/FmSocketMessage.cpp
+LOCAL_SOURCES += infra/transport/workqueue.cpp
+endif
+ 
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+ifeq ($(LW_MODS),)
+    ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+        LOCAL_SOURCES += $(LWMLCOMMON_DIR)/Linux/lwosLinux.c
+        LOCAL_SOURCES += $(LWMLCOMMON_DIR)/lwos_common_posix.c
+    endif
+ 
+    ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+        LOCAL_SOURCES += $(LWMLCOMMON_DIR)/win32/lwoswin32.c
+        LOCAL_SOURCES += $(LW_SOURCE)/drivers/common/src/lwSelwreLoadLibrary.c
+    endif
+endif
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/timelib.c
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+ 
+##############################################################################
+## define LOCAL_CFLAGS
+###############################################################################
+ 
+LOCAL_INCLUDES += $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(LWRRENT_DIR)/sdk/public
+LOCAL_INCLUDES += $(LWRRENT_DIR)/infra/logging
+LOCAL_INCLUDES += $(LWRRENT_DIR)/infra/protobuf
+LOCAL_INCLUDES += $(LWRRENT_DIR)/infra/transport
+LOCAL_INCLUDES += $(LWRRENT_DIR)/common
+LOCAL_INCLUDES += $(LWRRENT_DIR)/libs/libevent-2.0.22-stable/include/
+LOCAL_INCLUDES += $(LWRRENT_DIR)/libs/libevent-2.0.22-stable/include/event2/
+LOCAL_INCLUDES += .
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(LWRRENT_DIR)/libs/protobuf-2.6.0/include/
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+ 
+ 
+# Do not modify CFLAGS because it will be global
+LOCAL_CFLAGS := $(FM_GLOBAL_CFLAGS)
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_CFLAGS += -fPIC -Wno-write-strings
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+LOCAL_CFLAGS += /EHsc /w /c /D_WINSOCKAPI_
+endif
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+    LOCAL_CFLAGS += -fPIC
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+    FM_LIB_LIBRARY_NAME:=liblwfm.so
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+    FM_LIB_LIBRARY_NAME:=liblwfm.dll
+endif
+ 
+##############################################################################
+## define LOCAL_LDFLAGS
+###############################################################################
+LOCAL_LDFLAGS += $(FM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+  	LOCAL_LDFLAGS += gdi32.lib
+	LOCAL_LDFLAGS += /DEBUG
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_LDFLAGS += -rdynamic 
+LOCAL_LDFLAGS += -L $(OUTPUTDIR) -levent -lprotobuf -lfmproto -lc
+endif
+ 
+fmlib_TARGET  := $(OUTPUTDIR)/$(FM_LIB_LIBRARY_NAME)
+fmlib_SONAME  := $(FM_LIB_LIBRARY_NAME)
+fmlib_OBJECTS := $(LOCAL_OBJECTS)
+fmlib_CFLAGS  := $(LOCAL_CFLAGS)
+fmlib_LDFLAGS := $(LOCAL_LDFLAGS)
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+fmlib_DEPENDS ?= $(fmproto_TARGET)
+endif
+
+ifeq ($(LW_MODS),)
+  build: $(fmlib_TARGET)
+   
+  fmbuildsyncpoint:: $(fmlib_TARGET)
+  $(eval $(call MAKE_SHARED_LIBRARY,fmlib))
+  build: $(fmlib_TARGET).guardwords
+else
+  $(eval $(call MAKE_MODS_FM_LIBRARY,fmlib))
+endif
+ 
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

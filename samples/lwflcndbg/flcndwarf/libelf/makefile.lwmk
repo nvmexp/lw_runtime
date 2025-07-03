@@ -1,0 +1,52 @@
+include ../build/Common.lwmk
+include elfsources.mk
+
+# source files
+SOURCES += $(ELF_SOURCES)
+
+CFLAGS += -DHAVE_CONFIG_H
+CFLAGS += -D__LIBELF_INTERNAL__
+
+#code search path 
+LW_INCLUDES += $(MSVC_COMPILER_DIR)/include
+LW_INCLUDES += ./
+LW_INCLUDES += ./win32/
+
+ifeq ($(LW_TARGET_ARCH),x86) 
+    L_INCLUDES += $(MSVC_COMPILER_DIR)/lib
+    LIBEXE   := $(MSVC_COMPILER_DIR)/bin/LIB /NOLOGO /LTCG
+else
+    L_INCLUDES += $(MSVC_COMPILER_DIR)/lib/amd64
+    LIBEXE   := $(MSVC_COMPILER_DIR)/bin/amd64/LIB /NOLOGO /LTCG
+endif
+
+# linker options
+LIBFLAGS += -NODEFAULTLIB:libc
+
+LIBFLAGS += -subsystem:console
+
+ifeq ($(LW_TARGET_ARCH),x86)
+  LIBFLAGS += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/lib/wnet/i386/kernel32.lib
+else
+  LIBFLAGS += $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/lib/wnet/amd64/kernel32.lib
+endif
+
+LIBFLAGS += $(addprefix -LIBPATH:,$(L_INCLUDES))
+
+LIBFLAGS += -OUT:./$(OUTPUTDIR)/liblwelf.lib
+#LIBFLAGS += /DEF:"liblwelf.def"
+
+# adding list of obj files
+LIBFLAGS += $(OBJECTS)
+
+# finally... building liblwelf
+$(OUTPUTDIR)/liblwelf.lib: $(OBJECTS)
+	@echo   Building liblwelf
+	@echo   OuputDir  $(OUTPUTDIR)
+	@echo   $(LIBEXE)
+	@echo   $(LIBFLAGS)
+	$(LIBEXE) $(strip $(LIBFLAGS))
+
+build: startTimer   $(OUTPUTDIR)/liblwelf.lib  stopTimer
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

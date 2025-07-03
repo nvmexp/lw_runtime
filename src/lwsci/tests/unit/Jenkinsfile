@@ -1,0 +1,32 @@
+node {
+    stage("checkout") {
+        checkout scm
+    }
+    stage("run unit tests") {
+        dir("drivers/lwsci/tests/lwscisync/unit") {
+            sh "rm **/*_report.html"
+            sh "./batch.sh"
+            publishHTML([allowMissing: false,
+                alwaysLinkToLastBuild: false,
+                keepAll: true,
+                reportDir: pwd(),
+                reportFiles: '**/*_report.html',
+                reportName: "LwSciSync VectorCAST report",
+                reportTitles: "LwSciSync VectorCAST report"])
+        }
+        dir("drivers/lwsci/tests/lwscibuf/unit") {
+            sh "rm **/*_report.html"
+            sh "./batch.sh"
+            publishHTML([allowMissing: false,
+                alwaysLinkToLastBuild: false,
+                keepAll: true,
+                reportDir: pwd(),
+                reportFiles: '**/*_report.html',
+                reportName: "LwSciBuf VectorCAST report",
+                reportTitles: "LwSciBuf VectorCAST report"])
+        }
+        dir("drivers/lwsci/tests") {
+            archiveArtifacts 'lwscibuf/**/*_report.html,lwscibuf/unit/*.log,lwscisync/**/*_report.html,lwscisync/unit/*.log'
+        }
+    }
+}

@@ -1,0 +1,119 @@
+#include <optix_world.h>
+
+#include "rtPrintf_legacy.h"
+
+rtBuffer<int> input;
+rtDeclareVariable( uint3, launch_index, rtLaunchIndex, );
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print()
+{
+    rtPrintfLegacy( "printf successfully exelwted!\n" );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_const()
+{
+    rtPrintfLegacy( "int: %d\n", 7 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_const64()
+{
+    rtPrintfLegacy( "long long int: %lld\n", (long long int)100200300400500 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_multiplePrintfStatements()
+{
+    rtPrintfLegacy( "char: %c\n", 'A' );
+    rtPrintfLegacy( "int: %d\n", -10 );
+    rtPrintfLegacy( "unsigned int: %u\n", 20 );
+    rtPrintfLegacy( "long int: %ld\n", (long int)-30 );
+    rtPrintfLegacy( "long unsigned int: %lu\n", (long unsigned int)40 );
+    rtPrintfLegacy( "long long int: %lld\n", (long long int)-50 );
+    rtPrintfLegacy( "long long unsigned int: %lu\n", (long long unsigned int)60 );
+    rtPrintfLegacy( "float: %f\n", 42.f );
+    rtPrintfLegacy( "double: %f\n", 42.0 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_multiplePrintfParameters()
+{
+    rtPrintfLegacy(
+        "char: %c\nint: %d\nunsigned int: %u\nlong int: %ld\nlong unsigned int: %lu\nlong long int: %lld\nlong long "
+        "unsigned int: %lu\nfloat: %f\ndouble: %f\n",
+        'A', -10, 20, (long int)-30, (long unsigned int)40, (long long int)-50, (long long unsigned int)60, 42.f, 42.0 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+RT_PROGRAM void print_inputFromBuffer()
+{
+    rtPrintfLegacy( "input from buffer: %d\n", input[0] );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_launchindex()
+{
+    rtPrintfLegacy( "launch index: %d %d %d\n", launch_index.x, launch_index.y, launch_index.z );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_exception_details()
+{
+    rtPrintfLegacy(
+        "Caught RT_EXCEPTION_BUFFER_INDEX_OUT_OF_BOUNDS\n"
+        "  launch index   : %d, %d, %d\n"
+        "  buffer address : 0x%llX\n"
+        "  dimensionality : %d\n"
+        "  size           : %lldx%lldx%lld\n"
+        "  element size   : %d\n"
+        "  accessed index : %lld, %lld, %lld\n",
+        1, 2, 3, (long long int)100, 3, (long long int)200, (long long int)200, (long long int)200, 8, (long long int)4,
+        (long long int)5, (long long int)6 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_conditional()
+{
+    if( input[0] > 10 )
+        rtPrintfLegacy( "You should see this.\n" );
+
+    if( input[0] < 5 )
+        rtPrintfLegacy( "This should not have been printed.\n" );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_loop()
+{
+    for( int i = 0, e = input[0]; i < e; ++i )
+        rtPrintfLegacy( "iteration %d\n", i );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// The final rtPrintf force the addition of a prehader to the loop.
+RT_PROGRAM void print_loop_with_final_rtPrintf()
+{
+    for( int i = 0, e = input[0]; i < e; ++i )
+        rtPrintfLegacy( "iteration %d\n", i );
+    rtPrintfLegacy( "Done!\n" );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void print_address()
+{
+    int local_variable = 0;
+    rtPrintfLegacy( "%p", &local_variable );
+}

@@ -1,0 +1,52 @@
+.version 3.1
+.target sm_20
+
+.reg .s32 %ibuf, %obuf;
+//
+// MAD{.cc} and MADC{.cc} instructions - extended-precision multiply
+//
+        
+        .entry ptxtest
+        {
+        .reg .b32       x3, x2, x1, x0;
+        .reg .b32       y3, y2, y1, y0;
+        .reg .b32       z3, z2, z1, z0;
+        .reg .b32       t1;
+	
+
+        // initialize X, Y and Z
+        ld.global.v4.b32 {x3,x2,x1,x0}, [%ibuf+ 16];
+        ld.global.v4.b32 {y3,y2,y1,y0}, [%ibuf+ 32];
+        ld.global.v4.b32 {z3,z2,z1,z0}, [%ibuf+ 48];
+
+        // simple tests
+        mad.lo.s32.cc    x0, x0, y0, z0;
+        neg.s32		 z1, z0;
+        madc.lo.s32.cc   x1, x1, y1, z1;
+        madc.hi.s32.cc   x2, x2, y2, z2;
+        madc.hi.s32      x3, x3, y3, z3;
+
+        st.global.v4.b32 [%obuf    ], {x3,x2,x1,x0};
+
+
+        // extended-precision multiply:  [x3,x2,x1,x0] = [y1,y0] * [z1,z0]
+        //
+        mul.lo.s32     x0,y0,z0;      // x0=(y0*z0).[31:0], no carry-out
+        mul.hi.s32     x1,y0,z0;      // x1=(y0*z0).[63:32], no carry-out
+
+        mad.lo.cc.s32  x1,y1,z0,x1;   // x1+=(y1*z0).[31:0], may carry-out
+        madc.hi.s32    x2,y1,z0,0;    // x2 =(y1*z0).[63:32]+carry-in, no carry-out
+
+        mad.lo.cc.s32   x1,y0,z1,x1;  // x1+=(y0*z1).[31:0], may carry-out
+        madc.hi.cc.s32  x2,y0,z1,x2;  // x2+=(y0*z1).[63:32]+carry-in, may carry-out
+        addc.s32        x3,x3,0;      // x3 = carry-in, no carry-out
+
+        mad.lo.cc.s32   x2,y1,z1,x2;  // x2+=(y1*z1).[31:0], may carry-out
+        madc.hi.s32     x3,y1,z1,x3;  // x3+=(y1*z1).[63:32]+carry-in
+
+        st.global.v4.b32 [%obuf+ 16], {x3,x2,x1,x0};
+
+        ret;
+        }
+
+// end

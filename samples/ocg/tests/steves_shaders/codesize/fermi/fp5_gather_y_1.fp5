@@ -1,0 +1,103 @@
+!!LWfp5.0
+
+# fp5_gather_y_1.fp5
+
+# bug 446117
+
+PARAM misc[3] = {program.local[0..2]};
+INT PARAM ptpx = { -8, +7, -3, +0 };
+INT PARAM ptpy = { -8, +7, +2, +0 };
+TEMP cc, texcoord, texcoord2, lookup, expected, color;
+TEMP icoord, border, lwbewrap, t, t2;
+wrapcoord:
+MOV.S border, 0;
+SEQ.CC cc, misc[0].z, {5,6,7,3};
+IF NE;
+SLT.S.CC cc.xy, icoord, 0;
+ADD.S icoord.xy (NE), -1, -icoord;
+ENDIF;
+SEQ.CC cc, misc[0].z, {0,4,5,6};
+IF NE;
+SLT.S.CC border, icoord, 0;
+SGE.S border (EQ), icoord, 32;
+RET;
+ENDIF;
+SEQ.CC cc, misc[0].z, 1;
+IF NE;
+AND.S icoord.xy, icoord, 31;
+RET;
+ENDIF;
+SEQ.CC cc, misc[0].z, {2,7,7,7};
+IF NE;
+MAX.S icoord.xy, icoord, 0;
+MIN.S icoord.xy, icoord, 31;
+RET;
+ENDIF;
+SGT.S.CC cc.xy, icoord, 31;
+SUB.S icoord.xy (NE), 63, icoord;
+RET;
+texel:
+I2F t.xy, icoord;
+DP2A t.x, t, misc[2], misc[2].z;
+SNE.CC cc, misc[0].y, 0;
+IF NE;
+SUB t.x, 1, t;
+ENDIF;
+SNE.CC cc, misc[0].x, 0;
+IF NE;
+SGE t.x, t, 0.49;
+ENDIF;
+SNE.S.CC cc, border, 0;
+IF NE.xyxy;
+MOV t.x, misc[1].z;
+MOV lwbewrap.x, misc[0].w;
+ENDIF;
+gettexel:
+MAD t2.xy, texcoord, misc[1].x, misc[1].y;
+SEQ.CC cc, misc[0].z, 4;
+IF NE;
+MAX t2.xy, t2, 0;
+MIN t2.xy, t2, 32;
+ENDIF;
+SEQ.CC cc, misc[0].z, 5;
+IF NE;
+MAX t2.xy, t2, -32;
+MIN t2.xy, t2, 32;
+ENDIF;
+ROUND.S icoord.xy, t2;
+ADD.S icoord.xy, icoord, t;
+CAL wrapcoord;
+CAL texel;
+RET;
+main:
+MOV texcoord, fragment.texcoord[0];
+MOV texcoord2, fragment.texcoord[1];
+TXG lookup, texcoord, texture[0].y, 2D;
+MOV lwbewrap, 0;
+MOV.S t, {-1,0};
+CAL gettexel;
+MOV expected.x, t.x;
+MOV.S t, {0,0};
+CAL gettexel;
+MOV expected.y, t.x;
+MOV.S t, {0,-1};
+CAL gettexel;
+MOV expected.z, t.x;
+MOV.S t, {-1,-1};
+CAL gettexel;
+MOV expected.w, t.x;
+SNE.CC cc, lwbewrap.x, 0;
+IF NE;
+MAD result.color, lookup, 0.2, {0.0, 0.7, 0.0, 0.0};
+ELSE;
+SUB expected, expected, lookup;
+SGT.CC cc, |expected|, 0.002;
+IF NE;
+MAD result.color, lookup, 0.1, {1.0, 0.0, 0.0, 0.0};
+ELSE;
+MAD result.color, lookup, 0.2, {0.0, 0.8, 0.0, 0.0};
+ENDIF;
+ENDIF;
+END
+
+

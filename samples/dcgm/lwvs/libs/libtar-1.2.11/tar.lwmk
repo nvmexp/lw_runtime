@@ -1,0 +1,66 @@
+##############################################################################
+# define LOCAL_SOURCES
+# This is not all of hwloc, but just what is needed.  This makefile should
+# only be called for Linux builds.  No support for windows.
+##############################################################################
+
+LWRRENT_DIR := $(LWVS_DIR)/libs/libtar-1.2.11
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += src/append.c
+LOCAL_SOURCES += src/basename.c
+LOCAL_SOURCES += src/block.c
+LOCAL_SOURCES += src/decode.c
+LOCAL_SOURCES += src/dirname.c
+LOCAL_SOURCES += src/encode.c
+LOCAL_SOURCES += src/extract.c
+LOCAL_SOURCES += src/handle.c
+LOCAL_SOURCES += src/libtar_hash.c
+LOCAL_SOURCES += src/libtar_list.c
+LOCAL_SOURCES += src/output.c
+LOCAL_SOURCES += src/strlcpy.c
+LOCAL_SOURCES += src/strmode.c
+LOCAL_SOURCES += src/util.c
+LOCAL_SOURCES += src/wrapper.c
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+LOCAL_INCLUDES += $(LWRRENT_DIR)/src
+LOCAL_INCLUDES += $(LWRRENT_DIR)/include
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+  LOCAL_CFLAGS += /EHsc -D_SCL_SELWRE_NO_WARNINGS
+else
+  LOCAL_CFLAGS += -fPIC
+endif
+
+LOCAL_CFLAGS += -Wno-deprecated-declarations
+LOCAL_CFLAGS += -Wno-error
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+
+##############################################################################
+# build
+###############################################################################
+
+TAR_LIB := libtar$(STATIC_LIBSUFFIX)
+
+tar_TARGET  := $(OUTPUTDIR)/$(TAR_LIB)
+tar_OBJECTS := $(LOCAL_OBJECTS)
+tar_CFLAGS  := $(LOCAL_CFLAGS)
+tar_LDFLAGS  := $(LOCAL_LDFLAGS)
+tar_DEPENDS ?=
+
+build: $(tar_TARGET)
+$(eval $(call MAKE_STATIC_LIBRARY,tar))
+
+clean:
+
+#################################################################################
+## Finish
+##################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

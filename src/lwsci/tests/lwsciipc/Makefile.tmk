@@ -1,0 +1,232 @@
+################################### tell Emacs this is a -*- makefile-gmake -*-
+#
+# Copyright (c) 2018-2021 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+###############################################################################
+
+ifdef LW_COMPONENT_FLAG_DYNAMIC_EXELWTABLE_SECTION
+
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME := test_lwsciipc_perf
+LW_COMPONENT_SOURCES := src/test_lwsciipc_perf.c
+LW_COMPONENT_FLAG_IS_TEST := 1
+LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwscievent
+LW_COMPONENT_INCLUDES += \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc/inc
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_LINUX),1)
+LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += pthread
+endif # compile only for linux
+
+include $(LW_BUILD_DYNAMIC_EXELWTABLE)
+
+
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME := test_lwsciipc_write
+LW_COMPONENT_SOURCES := src/test_lwsciipc_write.c
+LW_COMPONENT_FLAG_IS_TEST := 1
+LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwscievent
+LW_COMPONENT_INCLUDES += \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc/inc
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_LINUX),1)
+LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += pthread
+endif # compile only for linux
+
+ifeq ($(LW_BUILD_CONFIGURATION_IS_SAFETY), 0)
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_QNX), 1)
+LW_COMPONENT_CFLAGS += -DIVC_EVENTLIB
+
+LW_COMPONENT_SOURCES += \
+	src/lwsciipc_eventlib/test_lwsciipc_write_eventlib.c
+
+LW_COMPONENT_NEEDED_INTERFACE_DIRS += \
+	$(LW_SOURCE)/core/utils/eventlib
+
+LW_COMPONENT_FLAG_USES_GENERATED_FILES  += 1
+.INTERMEDIATE: test_lwsciipc_write_events_json.h
+test_lwsciipc_write_events_json.h: $(LW_SOURCE)/gpu/drv/drivers/lwsci/tests/lwsciipc/src/lwsciipc_eventlib/test_lwsciipc_write_events.json
+	/usr/bin/xxd -i $< $@
+	/bin/sed -i 's/\(.*\) \(.*\)test_lwsciipc_write_events_json\(.*\)/\1 test_lwsciipc_write_events_json\3/g' $@
+	$(info making test_lwsciipc_write_events_json.h)
+
+include $(LW_SOURCE)/foundation/meta/schemas/event/Makefile.gen-event-headers.tmk
+$(eval $(call event_header_rules,\
+         $(LW_SOURCE)/gpu/drv/drivers/lwsci/tests/lwsciipc/src/lwsciipc_eventlib/test_lwsciipc_write_events.json,\
+         test_lwsciipc_write))
+endif
+endif
+
+include $(LW_BUILD_DYNAMIC_EXELWTABLE)
+
+
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME := test_lwsciipc_read
+LW_COMPONENT_SOURCES := src/test_lwsciipc_read.c
+LW_COMPONENT_FLAG_IS_TEST := 1
+LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwscievent
+LW_COMPONENT_INCLUDES += \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc/inc
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_QNX), 1)
+LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += slog2
+endif
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_LINUX),1)
+LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += pthread
+endif # compile only for linux
+
+ifeq ($(LW_BUILD_CONFIGURATION_IS_SAFETY), 0)
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_QNX), 1)
+LW_COMPONENT_CFLAGS += -DIVC_EVENTLIB
+
+LW_COMPONENT_SOURCES += \
+	src/lwsciipc_eventlib/test_lwsciipc_read_eventlib.c
+
+LW_COMPONENT_NEEDED_INTERFACE_DIRS += \
+	$(LW_SOURCE)/core/utils/eventlib
+
+LW_COMPONENT_FLAG_USES_GENERATED_FILES  += 1
+.INTERMEDIATE: test_lwsciipc_read_events_json.h
+test_lwsciipc_read_events_json.h: $(LW_SOURCE)/gpu/drv/drivers/lwsci/tests/lwsciipc/src/lwsciipc_eventlib/test_lwsciipc_read_events.json
+	/usr/bin/xxd -i $< $@
+	/bin/sed -i 's/\(.*\) \(.*\)test_lwsciipc_read_events_json\(.*\)/\1 test_lwsciipc_read_events_json\3/g' $@
+	$(info making test_lwsciipc_read_events_json.h)
+
+include $(LW_SOURCE)/foundation/meta/schemas/event/Makefile.gen-event-headers.tmk
+$(eval $(call event_header_rules,\
+         $(LW_SOURCE)/gpu/drv/drivers/lwsci/tests/lwsciipc/src/lwsciipc_eventlib/test_lwsciipc_read_events.json,\
+         test_lwsciipc_read))
+endif
+endif
+
+include $(LW_BUILD_DYNAMIC_EXELWTABLE)
+
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME := test_lwsciipc_lwmap
+LW_COMPONENT_SOURCES := src/test_lwsciipc_lwmap.c
+LW_COMPONENT_FLAG_IS_TEST := 1
+LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_QNX), 1)
+# uncomment to enable func instrumentation
+#LW_COMPONENT_CODE_GENERATION := profile
+ifeq ($(LW_COMPONENT_CODE_GENERATION), profile)
+LW_COMPONENT_SOURCES               += \
+    $(LW_SOURCE)/qnx/src/resmgrs/tracer/tracer.c
+
+LW_COMPONENT_INCLUDES              += \
+    $(LW_SOURCE)/qnx/src/resmgrs/tracer
+
+LW_COMPONENT_NEEDED_INTERFACE_DIRS += $(LW_SOURCE)/core/utils/lwos/qnx/s3
+LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += slog2
+
+LW_COMPONENT_CFLAGS += -DLW_IS_TRACER_ENABLED
+endif
+endif
+
+include $(LW_BUILD_DYNAMIC_EXELWTABLE)
+
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME := test_lwsciipc_readm
+LW_COMPONENT_SOURCES := src/test_lwsciipc_readm.c
+LW_COMPONENT_FLAG_IS_TEST := 1
+LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwscievent
+LW_COMPONENT_INCLUDES += \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc/inc
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_QNX), 1)
+LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += slog2
+endif
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_LINUX),1)
+LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += pthread
+endif # compile only for linux
+
+include $(LW_BUILD_DYNAMIC_EXELWTABLE)
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_QNX),1)
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME := test_lwsciipc_unit
+LW_COMPONENT_SOURCES := src/test_lwsciipc_unit.c
+LW_COMPONENT_FLAG_IS_TEST := 1
+LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwscievent
+LW_COMPONENT_INCLUDES += \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc/inc
+
+include $(LW_BUILD_DYNAMIC_EXELWTABLE)
+endif
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_QNX),1)
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME := test_lwsciipc_cfgblob
+LW_COMPONENT_SOURCES := src/test_lwsciipc_cfgblob.c
+LW_COMPONENT_FLAG_IS_TEST := 1
+LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc
+
+include $(LW_BUILD_DYNAMIC_EXELWTABLE)
+
+
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME := test_lwsciipc_resmgr
+LW_COMPONENT_SOURCES := src/test_lwsciipc_resmgr.c
+LW_COMPONENT_FLAG_IS_TEST := 1
+LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/lwsciipc
+
+LW_COMPONENT_INCLUDES += \
+	$(LW_SOURCE)/qnx/src/libs/include
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_QNX), 1)
+# uncomment to enable func instrumentation
+#LW_COMPONENT_CODE_GENERATION := profile
+ifeq ($(LW_COMPONENT_CODE_GENERATION), profile)
+LW_COMPONENT_SOURCES               += \
+    $(LW_SOURCE)/qnx/src/resmgrs/tracer/tracer.c
+
+LW_COMPONENT_INCLUDES              += \
+    $(LW_SOURCE)/qnx/src/resmgrs/tracer
+
+LW_COMPONENT_NEEDED_INTERFACE_DIRS += $(LW_SOURCE)/core/utils/lwos/qnx/s3
+LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += slog2
+
+LW_COMPONENT_CFLAGS += -DLW_IS_TRACER_ENABLED
+endif
+endif
+
+include $(LW_BUILD_DYNAMIC_EXELWTABLE)
+endif
+
+endif
+
+# Local Variables:
+# indent-tabs-mode: t
+# tab-width: 8
+# End:
+# vi: set tabstop=8 noexpandtab:

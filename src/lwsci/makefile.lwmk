@@ -1,0 +1,136 @@
+###############################################################################
+#
+# Copyright (c) 2020 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+#
+###############################################################################
+
+##############################################################################
+# drivers/lwsci/makefile.lwmk
+##############################################################################
+
+##############################################################################
+# Identify this module to lwCommon.lwmk so it can decide the build type
+##############################################################################
+
+LW_MODULE_BUILD_TYPE_ALIASES = lwsci
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+LW_DIR_RELWRSION_ONLY := 1
+
+##############################################################################
+# string to prepend in unix builds when exelwting rules in this gmake instance
+##############################################################################
+
+LW_MODULE_LOGGING_NAME = "lwsci"
+
+##############################################################################
+# define SUBDIRS
+##############################################################################
+
+ifeq ($(LW_TARGET_ARCH), amd64)
+  ifeq ($(LW_TARGET_OS), Linux)
+    SUBDIRS := lwscibuf
+    SUBDIRS += lwscicommon
+    SUBDIRS += lwscievent
+    SUBDIRS += lwsciipc
+    SUBDIRS += lwscisync
+    SUBDIRS += tests
+    SUBDIRS += lwscistream
+  else
+    $(error "on x86_64 lwsci is only supported on Linux")
+  endif
+else
+  $(error "lwsci is only supported for x86_64 platforms")
+endif
+
+##############################################################################
+# Guardword check
+##############################################################################
+
+LW_CHECK_GUARDWORDS_PATH = $(LW_COMMON)/build
+LW_CHECK_GUARDWORDS_VERBOSE = $(LWCFG_VERBOSE)
+LW_CHECK_GUARDWORDS_PYTHON = $(PYTHON)
+include $(LW_COMMON)/build/lwGuardword.mk
+
+define call_guardword
+  $(eval LW_CHECK_GUARDWORDS_OUTPUTDIR = $1/$(OUTPUTDIR))
+  $(call LW_CHECK_GUARDWORDS_CMD,$1/$(OUTPUTDIR)/lib$1.so)
+endef
+
+##############################################################################
+# Create LwSci Debian package
+##############################################################################
+
+LWSCI_DEB_NAME      := lwsci_pkg.deb
+LWSCI_DEB_PATH      := $(LW_SOURCE)/drivers/lwsci/$(OUTPUTDIR)
+LWSCI_DEB_DIR       := $(LWSCI_DEB_PATH)/lwsci_pkg
+DPKG                := PATH=$(LW_UNIX_BUILD_CHROOT)/bin/ $(LW_UNIX_BUILD_CHROOT)/bin/dpkg-deb-1.17.5
+LWSCI_CONTROL_FILE  := $(LWSCI_DEB_DIR)/DEBIAN/control
+
+LWSCI_LIBS_VERSIONED = \
+  lwscisync/$(OUTPUTDIR)/liblwscisync.so.1 \
+  lwscibuf/$(OUTPUTDIR)/liblwscibuf.so.1 \
+  lwscicommon/$(OUTPUTDIR)/liblwscicommon.so.1 \
+  lwscievent/$(OUTPUTDIR)/liblwscievent.so.1 \
+  lwsciipc/$(OUTPUTDIR)/liblwsciipc.so.1 \
+  lwscistream/$(OUTPUTDIR)/liblwscistream.so.1
+
+LWSCI_LIBS_SYMLINKS = \
+  lwscisync/$(OUTPUTDIR)/liblwscisync.so \
+  lwscibuf/$(OUTPUTDIR)/liblwscibuf.so \
+  lwscicommon/$(OUTPUTDIR)/liblwscicommon.so \
+  lwscievent/$(OUTPUTDIR)/liblwscievent.so \
+  lwsciipc/$(OUTPUTDIR)/liblwsciipc.so \
+  lwscistream/$(OUTPUTDIR)/liblwscistream.so
+
+LWSCI_HEADERS = \
+  inc/public/lwscisync.h \
+  inc/public/lwscibuf.h \
+  inc/public/lwsciipc.h \
+  inc/public/lwscierror.h \
+  inc/public/lwscievent.h \
+  inc/public/lwscistream.h \
+  inc/public/lwscistream_types.h \
+  inc/public/lwscistream_api.h \
+
+LWSCIIPC_CONFIG = \
+  lwsciipc/lwsciipc_dvs.cfg
+
+# target to create lwsci_pkg.deb
+$(LWSCI_DEB_PATH)/$(LWSCI_DEB_NAME): $(LWSCI_LIBS_VERSIONED) $(LWSCI_HEADERS) $(LWSCIIPC_CONFIG)
+	@$(ECHO) "perform GuardWords check"
+	$(foreach dir, $(SUBDIRS), $(if $(filter-out tests, $(dir)), $(call call_guardword,$(dir))))
+	@$(ECHO) "create debian control file"
+	@$(MKDIR) $(LWSCI_DEB_DIR)/usr/lib/x86_64-linux-gnu $(LWSCI_DEB_DIR)/etc $(LWSCI_DEB_DIR)/usr/include $(LWSCI_DEB_DIR)/DEBIAN
+	@$(ECHO) "Package: LwSci" > $(LWSCI_CONTROL_FILE)
+	@$(ECHO) "Version: 1.0" >> $(LWSCI_CONTROL_FILE)
+	@$(ECHO) "Architecture: amd64" >> $(LWSCI_CONTROL_FILE)
+	@$(ECHO) "Maintainer: LWPU LWSCI <Automotive-SW-LwStreams@exchange.lwpu.com>" >> $(LWSCI_CONTROL_FILE)
+	@$(ECHO) "Section: base" >> $(LWSCI_CONTROL_FILE)
+	@$(ECHO) "Priority: optional" >> $(LWSCI_CONTROL_FILE)
+	@$(ECHO) "Description: Installable set of LwSci libraries for x86-64 Linux." >> $(LWSCI_CONTROL_FILE)
+	@$(ECHO) "  This package contains LwSci libraries and headers." >> $(LWSCI_CONTROL_FILE)
+	@$(ECHO) "copy libs"
+	@$(COPY) -a $(LWSCI_LIBS_VERSIONED) $(LWSCI_LIBS_SYMLINKS) $(LWSCI_DEB_DIR)/usr/lib/x86_64-linux-gnu
+	@$(ECHO) "copy cfg file"
+	@$(COPY) $(LWSCIIPC_CONFIG) $(LWSCI_DEB_DIR)/etc/lwsciipc.cfg
+	@$(ECHO) "copy headers"
+	@$(COPY) $(LWSCI_HEADERS) $(LWSCI_DEB_DIR)/usr/include
+	@$(ECHO) "generate debian package"
+	@$(RM) $(OUTPUTDIR)/$(LWSCI_DEB_NAME)
+	@$(DPKG) --build $(LWSCI_DEB_DIR)
+	@$(RM) -r $(LWSCI_DEB_DIR)
+
+build: $(addsuffix .build,$(SUBDIRS))
+
+##############################################################################
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

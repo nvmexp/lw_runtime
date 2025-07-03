@@ -1,0 +1,695 @@
+/*
+ * Copyright (c) 2021, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU Corporation and its licensors retain all intellectual property and proprietary
+ * rights in and to this software, related documentation and any modifications thereto.
+ * Any use, reproduction, disclosure or distribution of this software and related
+ * documentation without an express license agreement from LWPU Corporation is strictly
+ * prohibited.
+ *
+ * TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+ * AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+ * SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+ * LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+ * BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+ * INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGES
+ */
+
+#include <optix_types.h>
+
+#include <rtcore/interface/types.h>
+
+#include <corelib/system/LwdaDriver.h>
+
+// For lwca version > 11.0 the include of lwb should be changed to <lwb/lwb.lwh>.
+// The lwb version, release 1.11.0, in optix/support would no longer be needed for adaptive lwrve splitting.
+#include <support/lwb-1.11.0/lwb/lwb.lwh>
+
+#include <exp/builtinIS/BuiltinISCommon.h>
+#include <exp/builtinIS/LwrvePhantomIntersector.h>
+
+#include <exp/builtinIS/LwrveAdaptiveSplitter.h>
+
+namespace optix_exp {
+
+
+static __device__ __forceinline__ void decodeSegmentRange( int rangeCode, float range[3] )
+{
+    if( rangeCode >= 8 )
+    {
+        range[0] = ( rangeCode - 8 ) * 0.125f;
+        range[2] = range[0] + 0.125f;
+    }
+    else if( rangeCode >= 4 )
+    {
+        range[0] = ( rangeCode - 4 ) * 0.25f;
+        range[2] = range[0] + 0.25f;
+    }
+    else if( rangeCode >= 2 )
+    {
+        range[0] = ( rangeCode - 2 ) * 0.5f;
+        range[2] = range[0] + 0.5f;
+    }
+    else
+    {
+        range[0] = 0.f;
+        range[2] = 1.f;
+    }
+    range[1] = ( range[0] + range[2] ) * 0.5f;
+}
+
+static __global__ void kernel_lwrveSARed1( unsigned int numPrimitives,
+                                           char*        indices,
+                                           unsigned int indexStrideInBytes,
+                                           char*        vertices,
+                                           unsigned int vertexStrideInBytes,
+                                           char*        widths,
+                                           unsigned int widthStrideInBytes,
+                                           float*       SAReds )
+{
+    unsigned int primIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( primIdx >= numPrimitives )
+        return;
+
+    // Index of first lwrve segment point.
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)primIdx * indexStrideInBytes );
+
+    float4 p[2];
+    for( int i = 0; i < 2; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        p[i]     = make_float4( v.x, v.y, v.z, w );
+    }
+
+    const float4 diff_p = p[1] - p[0];
+
+    float4 pt[9];
+    float  r[9];
+    for( int i = 0; i <= 8; ++i )
+    {
+        pt[i] = p[0] + diff_p * (float)i * 0.125f;
+        r[i]  = fmaxf( 0.f, pt[i].w );
+    }
+
+    // Get AABB of lwrve segments endpoints, same for the two halves of the lwrve segment.
+    OptixAabb aabbs[15];
+
+    aabbs[0].minX = fminf( pt[0].x - r[0], pt[8].x - r[8] );
+    aabbs[0].minY = fminf( pt[0].y - r[0], pt[8].y - r[8] );
+    aabbs[0].minZ = fminf( pt[0].z - r[0], pt[8].z - r[8] );
+
+    aabbs[0].maxX = fmaxf( pt[0].x + r[0], pt[8].x + r[8] );
+    aabbs[0].maxY = fmaxf( pt[0].y + r[0], pt[8].y + r[8] );
+    aabbs[0].maxZ = fmaxf( pt[0].z + r[0], pt[8].z + r[8] );
+
+    for( int i = 0, k = 1; i < 8; i += 4, ++k )
+    {
+        aabbs[k].minX = fminf( pt[i].x - r[i], pt[i + 4].x - r[i + 4] );
+        aabbs[k].minY = fminf( pt[i].y - r[i], pt[i + 4].y - r[i + 4] );
+        aabbs[k].minZ = fminf( pt[i].z - r[i], pt[i + 4].z - r[i + 4] );
+
+        aabbs[k].maxX = fmaxf( pt[i].x + r[i], pt[i + 4].x + r[i + 4] );
+        aabbs[k].maxY = fmaxf( pt[i].y + r[i], pt[i + 4].y + r[i + 4] );
+        aabbs[k].maxZ = fmaxf( pt[i].z + r[i], pt[i + 4].z + r[i + 4] );
+    }
+    for( int i = 0, k = 3; i < 8; i += 2, ++k )
+    {
+        aabbs[k].minX = fminf( pt[i].x - r[i], pt[i + 2].x - r[i + 2] );
+        aabbs[k].minY = fminf( pt[i].y - r[i], pt[i + 2].y - r[i + 2] );
+        aabbs[k].minZ = fminf( pt[i].z - r[i], pt[i + 2].z - r[i + 2] );
+
+        aabbs[k].maxX = fmaxf( pt[i].x + r[i], pt[i + 2].x + r[i + 2] );
+        aabbs[k].maxY = fmaxf( pt[i].y + r[i], pt[i + 2].y + r[i + 2] );
+        aabbs[k].maxZ = fmaxf( pt[i].z + r[i], pt[i + 2].z + r[i + 2] );
+    }
+    for( int i = 0, k = 7; i < 8; ++i, ++k )
+    {
+        aabbs[k].minX = fminf( pt[i].x - r[i], pt[i + 1].x - r[i + 1] );
+        aabbs[k].minY = fminf( pt[i].y - r[i], pt[i + 1].y - r[i + 1] );
+        aabbs[k].minZ = fminf( pt[i].z - r[i], pt[i + 1].z - r[i + 1] );
+
+        aabbs[k].maxX = fmaxf( pt[i].x + r[i], pt[i + 1].x + r[i + 1] );
+        aabbs[k].maxY = fmaxf( pt[i].y + r[i], pt[i + 1].y + r[i + 1] );
+        aabbs[k].maxZ = fmaxf( pt[i].z + r[i], pt[i + 1].z + r[i + 1] );
+    }
+
+    // Compute surface area and the difference between the surface area of the full segment and its halves.
+
+    float sas[15];
+    for( int i = 0; i < 15; ++i )
+    {
+        sas[i] = ( ( aabbs[i].maxX - aabbs[i].minX ) * ( aabbs[i].maxY - aabbs[i].minY )
+                   + ( aabbs[i].maxY - aabbs[i].minY ) * ( aabbs[i].maxZ - aabbs[i].minZ )
+                   + ( aabbs[i].maxZ - aabbs[i].minZ ) * ( aabbs[i].maxX - aabbs[i].minX ) )
+                 * 2.f;
+    }
+    for( int i = 0; i < 7; ++i )
+    {
+        float* sa = SAReds + primIdx * 7 + i;
+        *sa       = sas[i] - sas[2 * i + 1] - sas[2 * i + 2];
+    }
+}
+
+static __global__ void kernel_lwrveSARed2( unsigned int numRanges,
+                                           char*        indices,
+                                           unsigned int indexStrideInBytes,
+                                           char*        vertices,
+                                           unsigned int vertexStrideInBytes,
+                                           char*        widths,
+                                           unsigned int widthStrideInBytes,
+                                           float*       SAReds )
+{
+    unsigned int rangeIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( rangeIdx >= numRanges )
+        return;
+
+    const unsigned int primIdx = rangeIdx / 7;
+
+    // Get Bezier segment.
+
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)primIdx * indexStrideInBytes );
+
+    // Get segment vertices.
+    float3 q0 = *reinterpret_cast<float3*>( vertices + c0_idx * vertexStrideInBytes );
+    float4 q[3];
+    q[0] = make_float4( 0.f, 0.f, 0.f, *reinterpret_cast<float*>( widths + c0_idx * widthStrideInBytes ) );
+    for( int i = 1; i < 3; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        q[i]     = make_float4( v.x - q0.x, v.y - q0.y, v.z - q0.z, w );
+    }
+
+    float u[3];
+    decodeSegmentRange( ( rangeIdx % 7 ) + 1, u );
+
+    LwrvePolynom2 pol( q );
+
+    float4 tx1;
+    pol.findExtremums( tx1 );
+
+    // Get AABBs of the endpoints of the lwrves segment halves, aabbs[0] and aabbs[1].
+    OptixAabb aabbs[3];
+
+    aabbs[0]      = pol.paddedBounds( u[0], u[1], tx1 );
+    aabbs[0].minX = __fadd_rd( aabbs[0].minX, q0.x );
+    aabbs[0].minY = __fadd_rd( aabbs[0].minY, q0.y );
+    aabbs[0].minZ = __fadd_rd( aabbs[0].minZ, q0.z );
+    aabbs[0].maxX = __fadd_ru( aabbs[0].maxX, q0.x );
+    aabbs[0].maxY = __fadd_ru( aabbs[0].maxY, q0.y );
+    aabbs[0].maxZ = __fadd_ru( aabbs[0].maxZ, q0.z );
+
+    aabbs[1]      = pol.paddedBounds( u[1], u[2], tx1 );
+    aabbs[1].minX = __fadd_rd( aabbs[1].minX, q0.x );
+    aabbs[1].minY = __fadd_rd( aabbs[1].minY, q0.y );
+    aabbs[1].minZ = __fadd_rd( aabbs[1].minZ, q0.z );
+    aabbs[1].maxX = __fadd_ru( aabbs[1].maxX, q0.x );
+    aabbs[1].maxY = __fadd_ru( aabbs[1].maxY, q0.y );
+    aabbs[1].maxZ = __fadd_ru( aabbs[1].maxZ, q0.z );
+
+    // aabb of the current segment, aabbs[2], is the union of the two aabbs of the halves, aabbs[0] and aabbs[1].
+
+    aabbs[2].minX = fminf( aabbs[0].minX, aabbs[1].minX );
+    aabbs[2].minY = fminf( aabbs[0].minY, aabbs[1].minY );
+    aabbs[2].minZ = fminf( aabbs[0].minZ, aabbs[1].minZ );
+    aabbs[2].maxX = fmaxf( aabbs[0].maxX, aabbs[1].maxX );
+    aabbs[2].maxY = fmaxf( aabbs[0].maxY, aabbs[1].maxY );
+    aabbs[2].maxZ = fmaxf( aabbs[0].maxZ, aabbs[1].maxZ );
+
+    // Compute the surface area and the difference between the surface area of the full segment and its halves.
+
+    float sas[3];
+    for( int i = 0; i < 3; ++i )
+    {
+        sas[i] = ( ( aabbs[i].maxX - aabbs[i].minX ) * ( aabbs[i].maxY - aabbs[i].minY )
+                   + ( aabbs[i].maxY - aabbs[i].minY ) * ( aabbs[i].maxZ - aabbs[i].minZ )
+                   + ( aabbs[i].maxZ - aabbs[i].minZ ) * ( aabbs[i].maxX - aabbs[i].minX ) )
+                 * 2.f;
+    }
+
+    float* sa = SAReds + rangeIdx;
+    *sa       = sas[2] - sas[0] - sas[1];
+}
+
+static __global__ void kernel_lwrveSARed3( unsigned int   numRanges,
+                                           char*          indices,
+                                           unsigned int   indexStrideInBytes,
+                                           char*          vertices,
+                                           unsigned int   vertexStrideInBytes,
+                                           char*          widths,
+                                           unsigned int   widthStrideInBytes,
+                                           float*         SAReds,
+                                           unsigned char* inflectionPoints,
+                                           LwrveBasis     basis )
+{
+    // The surface area reduction by splitting the given segment into 2 halves is computed.
+    // First the aabbs of the two halves and the aabb or their union are computed. The surface area
+    // reduction is given as the difference of the surface area of the union aabb and the sum of the surface areas
+    // of the aabbs of the halves.
+    //
+    // TODO try the following alternative,
+    // each warp would be divided in 4 groups of 8 threads. Each group of 8 threads works on a single input primitive.
+    // First the 8 threads callwlate the 8 AABBs at the lowest level. Then the higher level aabbs and SAH costs are
+    // callwlated in a reduction - like fashion over these 8 threads using lwca shuffles to share the AABBs
+    // between the 8 threads. Each thread would hold 1 aabb (as local variable) so the 8 AABBs would never actually
+    // be stored in gmem or as 8 AABBs per thread. It's not necessary to run a separate pass, as the reduction is done
+    // within the same kernel that computes the lower level aabbs.
+
+    unsigned int rangeIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( rangeIdx >= numRanges )
+        return;
+
+    const unsigned int primIdx = rangeIdx / 7;
+
+    // Get Bezier segment.
+
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)primIdx * indexStrideInBytes );
+
+    float3 q0 = *reinterpret_cast<float3*>( vertices + c0_idx * vertexStrideInBytes );
+    float4 q[4];
+    q[0] = make_float4( 0.f, 0.f, 0.f, *reinterpret_cast<float*>( widths + c0_idx * widthStrideInBytes ) );
+    for( int i = 1; i < 4; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        q[i]     = make_float4( v.x - q0.x, v.y - q0.y, v.z - q0.z, w );
+    }
+
+    // Get segment range (u[0], u[2]), and u[1], the value where the segment will be split.
+    // For range [0,1] the first split can be different from 0.5 if inflection points are
+    // considered for splitting.
+    float  u[3];
+    float2 t = decodeSegmentRangeWithInflection( ( rangeIdx % 7 ) + 1, inflectionPoints[primIdx] );
+    u[0]     = t.x;
+    u[2]     = t.y;
+    u[1]     = ( rangeIdx % 7 ) == 0 ? inflectionPoints[primIdx] / 256.f : ( u[0] + u[2] ) * 0.5f;
+
+    LwrvePolynom3 pol( q, basis );
+
+    float4 tx1, tx2;
+    pol.findExtremums( tx1, tx2 );
+
+    // Get AABBs of the endpoints of the lwrves segment halves, aabbs[0] and aabbs[1].
+    OptixAabb aabbs[3];
+
+    aabbs[0]      = pol.paddedBounds( u[0], u[1], tx1, tx2 );
+    aabbs[0].minX = __fadd_rd( aabbs[0].minX, q0.x );
+    aabbs[0].minY = __fadd_rd( aabbs[0].minY, q0.y );
+    aabbs[0].minZ = __fadd_rd( aabbs[0].minZ, q0.z );
+    aabbs[0].maxX = __fadd_ru( aabbs[0].maxX, q0.x );
+    aabbs[0].maxY = __fadd_ru( aabbs[0].maxY, q0.y );
+    aabbs[0].maxZ = __fadd_ru( aabbs[0].maxZ, q0.z );
+
+    aabbs[1]      = pol.paddedBounds( u[1], u[2], tx1, tx2 );
+    aabbs[1].minX = __fadd_rd( aabbs[1].minX, q0.x );
+    aabbs[1].minY = __fadd_rd( aabbs[1].minY, q0.y );
+    aabbs[1].minZ = __fadd_rd( aabbs[1].minZ, q0.z );
+    aabbs[1].maxX = __fadd_ru( aabbs[1].maxX, q0.x );
+    aabbs[1].maxY = __fadd_ru( aabbs[1].maxY, q0.y );
+    aabbs[1].maxZ = __fadd_ru( aabbs[1].maxZ, q0.z );
+
+    // aabb of the current segment, aabbs[2], is the union of the two aabbs of the halves, aabbs[0] and aabbs[1].
+
+    aabbs[2].minX = fminf( aabbs[0].minX, aabbs[1].minX );
+    aabbs[2].minY = fminf( aabbs[0].minY, aabbs[1].minY );
+    aabbs[2].minZ = fminf( aabbs[0].minZ, aabbs[1].minZ );
+    aabbs[2].maxX = fmaxf( aabbs[0].maxX, aabbs[1].maxX );
+    aabbs[2].maxY = fmaxf( aabbs[0].maxY, aabbs[1].maxY );
+    aabbs[2].maxZ = fmaxf( aabbs[0].maxZ, aabbs[1].maxZ );
+
+    // Compute the surface area and the difference between the surface area of the full segment and its halves.
+
+    float sas[3];
+    for( int i = 0; i < 3; ++i )
+    {
+        sas[i] = ( ( aabbs[i].maxX - aabbs[i].minX ) * ( aabbs[i].maxY - aabbs[i].minY )
+                   + ( aabbs[i].maxY - aabbs[i].minY ) * ( aabbs[i].maxZ - aabbs[i].minZ )
+                   + ( aabbs[i].maxZ - aabbs[i].minZ ) * ( aabbs[i].maxX - aabbs[i].minX ) )
+                 * 2.f;
+    }
+
+    // The surface area reduction is computed as the difference of the surface area
+    // of the union of the aabbs, sas[2], and the sum of sirface areas of the left part, sas[0], and right part, sas[1].
+    // Splitting at inflection points avoids internal splitting inside the phantom intersector,
+    // therefore these splits are enforced by setting their surface area reduction to FTL_MAX.
+    // This is only done at the first splitting level (( rangeIdx % 7 ) == 0).
+
+    float* sa = SAReds + rangeIdx;
+    *sa = ( ( ( rangeIdx % 7 ) == 0 ) && ( inflectionPoints[primIdx] != 128 ) ) ? FLT_MAX : sas[2] - sas[0] - sas[1];
+}
+
+static __global__ void kernel_lwrveInflectionPoints( unsigned int   numPrimitives,
+                                                     char*          indices,
+                                                     unsigned int   indexStrideInBytes,
+                                                     char*          vertices,
+                                                     unsigned int   vertexStrideInBytes,
+                                                     char*          widths,
+                                                     unsigned int   widthStrideInBytes,
+                                                     unsigned char* inflectionPoints,
+                                                     LwrveBasis     basis )
+{
+    unsigned int primIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( primIdx >= numPrimitives )
+        return;
+
+    // Get Bezier segment.
+
+    const size_t c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)primIdx * indexStrideInBytes );
+
+    float3 q0 = *reinterpret_cast<float3*>( vertices + c0_idx * vertexStrideInBytes );
+    float4 q[4];
+    q[0] = make_float4( 0.f, 0.f, 0.f, *reinterpret_cast<float*>( widths + c0_idx * widthStrideInBytes ) );
+    for( int i = 1; i < 4; i++ )
+    {
+        float3 v = *reinterpret_cast<float3*>( vertices + ( c0_idx + i ) * vertexStrideInBytes );
+        float  w = *reinterpret_cast<float*>( widths + ( c0_idx + i ) * widthStrideInBytes );
+        q[i]     = make_float4( v.x - q0.x, v.y - q0.y, v.z - q0.z, w );
+    }
+
+    // Lwrve with a zigzag shape will be split at an approximate inflection point.
+    // If there's no such point, which means -1 is returned by the inflection point computation,
+    // or the inflection point is near 0 or 1, the inflection point is ignored
+    // and potential splitting will be done at 0.5.
+    const Lwrve3ScaledDifferentialBezier lwrve( q, basis );
+    float                                t    = lwrve.approximateInflection();
+    unsigned char*                       infl = inflectionPoints + primIdx;
+    if( ( t >= 1.f / 256.f ) && ( 1.f - t >= 1.f / 256.f ) )
+        *infl = (unsigned char)( (int)ceilf( t * 256.f ) );  // quantized representation of t
+    else
+        *infl = 128;  // split at 0.5f
+}
+
+static __global__ void kernel_initLwrveInfo( unsigned int numPrimitives, unsigned int* lwrveSegmentIndices, float* lwrveSegmentSA, float* saReds )
+{
+    unsigned int primIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( primIdx >= numPrimitives )
+        return;
+
+    unsigned int* index = lwrveSegmentIndices + primIdx;
+    *index              = ( primIdx << 4 ) + 1;
+
+    float* sa = lwrveSegmentSA + primIdx;
+    *sa       = saReds[primIdx * 7];
+}
+
+static __global__ void kernel_splitSegments( unsigned int numSplits, unsigned int numItems, unsigned int* segments, float* sar, float* SAReds )
+{
+    unsigned int segmentIdx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( segmentIdx >= numSplits )
+        return;
+
+    // Split segment.
+
+    const unsigned int lwrSegment = segments[segmentIdx];
+    unsigned int       range      = lwrSegment & 0xF;
+    unsigned int       index      = lwrSegment >> 4;
+
+    if( range <= 7 )
+    {
+        //if (SAReds[7*index + range -1] < 0.f), this means that the segment is split although it doesn't improve SA.
+        // Skipping these splits does not increase performance.
+
+        segments[segmentIdx]            = lwrSegment + range;
+        segments[numItems + segmentIdx] = segments[segmentIdx] + 1;
+
+        unsigned int offset        = 7 * index + ( 2 * range ) - 1;
+        sar[segmentIdx]            = range < 4 ? SAReds[offset] : -FLT_MAX;
+        sar[numItems + segmentIdx] = range < 4 ? SAReds[offset + 1] : -FLT_MAX;
+    }
+    else
+    {
+        // No further subdivision possible.
+        // (We rarely end up here, it can only happen for high splitting factors (~ >= 7), and irregular
+        // SAH cost of the segments, such that the last splitting pass doesn't find enough splittable segments.)
+        // Keep the segment unchanged and create a dummy split segment with range 0. Segments with
+        // range 0 will be ignored by the builder.
+        segments[numItems + segmentIdx] = index << 4;  // ilwalidating new segment by setting range to 0
+        sar[numItems + segmentIdx]      = -FLT_MAX;
+    }
+}
+
+template <typename T>
+static __host__ __forceinline__ void swap( T& a, T& b )
+{
+    const T tmp = a;
+    a           = b;
+    b           = tmp;
+}
+
+// 4-byte alignment for data blocks in adaptive lwrve splitting.
+static __host__ __forceinline__ unsigned int align4( unsigned int size )
+{
+    return ( ( size + 3 ) & ( ~3 ) );
+}
+
+OptixResult computeLwrveSAReductions( LWstream stream, const LwrveAdaptiveSplitInfo& si )
+{
+    // For each input lwrve segment the SA reduction of its 7 split candidates are computed and stored at si.data.
+    // 7 split candidates: one from the whole segment into its halves, two from the halves to the quarters, and four from the quarters to the eigths.
+    // Eights are not further subdivided.
+
+    unsigned int SARedsPerPrim              = 7;
+    unsigned int SARedsPerPrimSizeInBytes   = SARedsPerPrim * sizeof( float );
+    unsigned int inflectionPointSizeInBytes = align4( si.numPrimitives * sizeof( unsigned char ) );
+
+    if( LWresult result = corelib::lwdaDriver().LwMemsetD8Async( si.data, 0, si.memorySize, stream ) )
+        return si.errDetails.logDetails( result, "Initialization of memory for adaptive subdivision failed." );
+
+    LWdeviceptr SAReds           = si.data;  // SA reductions
+    LWdeviceptr inflectionPoints = si.data + si.numPrimitives * SARedsPerPrimSizeInBytes;
+
+    unsigned int* lwrveSegmentIndices =
+        reinterpret_cast<unsigned int*>( si.data + si.numPrimitives * SARedsPerPrimSizeInBytes + inflectionPointSizeInBytes );
+    float*       lwrveSegmentSA = reinterpret_cast<float*>( si.data + si.numPrimitives * SARedsPerPrimSizeInBytes + inflectionPointSizeInBytes
+                                                      + si.numSegments * sizeof( unsigned int ) );
+    unsigned int segmentIndexOffset = 0;
+
+    for( unsigned int i = 0; i < si.numBuildInputs; ++i )
+    {
+        const OptixBuildInput& bi = si.buildInputs[i];
+
+        const unsigned int bi_numPrimitives = bi.lwrveArray.numPrimitives;
+        const unsigned int bi_numSegments   = static_cast<unsigned int>( si.numSplits * bi.lwrveArray.numPrimitives );
+
+        unsigned int vertexStrideInBytes =
+            bi.lwrveArray.vertexStrideInBytes > 0 ? bi.lwrveArray.vertexStrideInBytes : sizeof( float3 );
+        unsigned int widthStrideInBytes = bi.lwrveArray.widthStrideInBytes > 0 ? bi.lwrveArray.widthStrideInBytes : sizeof( float );
+        unsigned int indexStrideInBytes =
+            bi.lwrveArray.indexStrideInBytes > 0 ? bi.lwrveArray.indexStrideInBytes : sizeof( unsigned int );
+
+        if( bi_numPrimitives )
+        {
+            if( bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_LWBIC_BSPLINE
+                || bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_CATMULLROM )
+            {
+                LwrveBasis basis = (bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_CATMULLROM) ? CATMULLROM : BSPLINE;
+                // Get lwrve inflection points.
+                kernel_lwrveInflectionPoints<<<( bi_numPrimitives + 63 ) / 64, 64, 0, stream>>>(
+                    bi_numPrimitives, reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ), indexStrideInBytes,
+                    reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[0] ), vertexStrideInBytes,
+                    reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[0] ), widthStrideInBytes,
+                    reinterpret_cast<unsigned char*>( inflectionPoints ), basis );
+                // Compute SA reductions for all subsegments of the cubic lwrves.
+                kernel_lwrveSARed3<<<( bi_numPrimitives * SARedsPerPrim + 63 ) / 64, 64, 0, stream>>>(
+                    bi_numPrimitives * SARedsPerPrim, reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ),
+                    indexStrideInBytes, reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[0] ), vertexStrideInBytes,
+                    reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[0] ), widthStrideInBytes,
+                    reinterpret_cast<float*>( SAReds ), reinterpret_cast<unsigned char*>( inflectionPoints ), basis );
+            }
+            else if( bi.lwrveArray.lwrveType == OPTIX_PRIMITIVE_TYPE_ROUND_QUADRATIC_BSPLINE )
+                // Compute SA reductions for all subsegments of the quadratic lwrves.
+                kernel_lwrveSARed2<<<( bi_numPrimitives * SARedsPerPrim + 63 ) / 64, 64, 0, stream>>>(
+                    bi_numPrimitives * SARedsPerPrim, reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ),
+                    indexStrideInBytes, reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[0] ), vertexStrideInBytes,
+                    reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[0] ), widthStrideInBytes,
+                    reinterpret_cast<float*>( SAReds ) );
+            else
+                // For degree 1 it is faster to compute all SA reductions of a primitive in a single kernel.
+                kernel_lwrveSARed1<<<( bi_numPrimitives + 63 ) / 64, 64, 0, stream>>>(
+                    bi_numPrimitives, reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ), indexStrideInBytes,
+                    reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[0] ), vertexStrideInBytes,
+                    reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[0] ), widthStrideInBytes,
+                    reinterpret_cast<float*>( SAReds ) );
+
+            kernel_initLwrveInfo<<<( bi_numPrimitives + 63 ) / 64, 64, 0, stream>>>(
+                bi_numPrimitives, lwrveSegmentIndices + segmentIndexOffset, lwrveSegmentSA + segmentIndexOffset,
+                reinterpret_cast<float*>( SAReds ) );
+        }
+
+        SAReds += bi_numPrimitives * SARedsPerPrimSizeInBytes;
+        inflectionPoints += bi_numPrimitives * sizeof( unsigned char );
+        segmentIndexOffset += bi_numSegments;
+    }
+
+    return OPTIX_SUCCESS;
+}
+
+OptixResult splitSegments( LWstream stream, const LwrveAdaptiveSplitInfo& si )
+{
+    // Using the SAH heuristic an approximation of the splitting with minimizes the surface area of the subsegment aabbs
+    // is computed.
+    // Given the number of segments which need to be created during splitting, a fixed number of passes is used. In each of
+    // the passes a fraction N of these new subsegments are created.
+    // A pass consists of sorting and splitting.
+    // In each pass the list of current subsegments is sorted by their potential gain (=reduction of surface area)
+    // from splitting them into halves,
+    // and the N segments with the highest reduction of surface area are split.
+    // The SA reduction of a split of a segment is looked up from the list of SA reductions which was computed in
+    // computeLwrveSAReductions.
+
+    // The memory used for adaptive lwrve splitting starts at si.data.
+    // The first section will be used for storing precomputed SA reductions of potential splits.
+    // Per input lwrve segment there are 7 possible splits, one from the whole segment into the halves,
+    // two from the halves to the quarters, and four from the quarters to the eigths, in total 7 floats per input segment.
+    // This is followed by the segment memory, which consists of a double-buffered list of segment indices and their sa reductions
+    // which is used for the sorting/splitting passes. After the sorting/splitting passes the created segments are stored
+    // in front of the aabb memory inside the temp buffer.
+
+    LWresult result;
+
+    unsigned int SARedsPerPrimSizeInBytes    = 7 * sizeof( float );
+    unsigned int SARedsSizeInBytes           = si.numPrimitives * SARedsPerPrimSizeInBytes;
+    unsigned int inflectionPointsSizeInBytes = align4( si.numPrimitives * sizeof( unsigned char ) );
+
+    unsigned int segmentOffset = SARedsSizeInBytes + inflectionPointsSizeInBytes;
+    LWdeviceptr  segmentData   = si.data + segmentOffset;
+    LWdeviceptr  SAReds        = si.data;  // pre-computed SA reductions
+
+    unsigned int tempStorageOffset = segmentOffset + 4 * si.numSegments * sizeof( int );
+    LWdeviceptr  tempStorage       = si.data + tempStorageOffset;
+
+    unsigned int segmentIndexOffset = 0;
+
+    const unsigned int numPasses = 6;
+
+    for( unsigned int i = 0; i < si.numBuildInputs; ++i )
+    {
+        const OptixBuildInput& bi = si.buildInputs[i];
+
+        const unsigned int bi_numPrimitives = bi.lwrveArray.numPrimitives;
+        const unsigned int bi_numSegments   = (unsigned int)( si.numSplits * bi_numPrimitives );
+        LWdeviceptr        bi_segmentData   = segmentData + segmentIndexOffset * sizeof( int );
+
+        const unsigned int numToBeAddedSegments = bi_numSegments - bi_numPrimitives;
+
+        // Number of passes has to be at least 3 otherwise the max subdivision level couldn't be reached.
+        // The number of passes has to be reduced if the given number of passes is lower than
+        // the number of segments which need to be added.
+        // TODO: The number of passes and the size of the passes needs to be optimized.
+
+        float*        d_keys_in    = reinterpret_cast<float*>( bi_segmentData + si.numSegments * sizeof( int ) );
+        float*        d_keys_out   = d_keys_in + 2 * si.numSegments;
+        unsigned int* d_values_in  = reinterpret_cast<unsigned int*>( bi_segmentData );
+        unsigned int* d_values_out = d_values_in + 2 * si.numSegments;
+
+        const unsigned int bi_numPasses  = min( numPasses, numToBeAddedSegments );
+        unsigned int       numAddedItems = 0;
+
+        for( unsigned int k = 0; k < bi_numPasses; ++k )
+        {
+            // Sort entries ordered by descending sa reduction.
+
+            unsigned int numItems = bi_numPrimitives + numAddedItems;
+
+            // Determine temporary device storage requirements
+
+            size_t tempStorageBytes = 0;
+            if( result = (LWresult)lwb_1_11_0::lwb::DeviceRadixSort::SortPairsDescending(
+                    0, tempStorageBytes, (float*)0, (float*)0, (unsigned int*)0, (unsigned int*)0, numItems, 0,
+                    sizeof( unsigned int ) * 8, stream ) )
+                return si.errDetails.logDetails( result,
+                                                 "LWCA error returned from internal memory computation for adaptive "
+                                                 "lwrve "
+                                                 "subdivision." );
+
+            if( tempStorageBytes + tempStorageOffset > si.memorySize )
+                return si.errDetails.logDetails( result, "Insufficient memory resources for adaptive splitting." );
+
+            if( result = (LWresult)lwb_1_11_0::lwb::DeviceRadixSort::SortPairsDescending(
+                    (void*)tempStorage, tempStorageBytes, d_keys_in, d_keys_out, d_values_in, d_values_out, numItems, 0,
+                    sizeof( unsigned int ) * 8, stream ) )
+                return si.errDetails.logDetails( result,
+                                                 "LWCA error returned from segment sorting for adaptive lwrve "
+                                                 "subdivision." );
+
+            // split
+
+            // Here equally sized passes are used. For some scenes other distributions provide better render performance.
+            unsigned int numSplitsPerPass = min( numToBeAddedSegments / bi_numPasses, numItems );
+            numAddedItems += numSplitsPerPass;
+            if( k + 1 == bi_numPasses )
+                numSplitsPerPass += ( numToBeAddedSegments - numAddedItems );
+
+            if( numSplitsPerPass )
+            {
+                kernel_splitSegments<<<( numSplitsPerPass + 63 ) / 64, 64, 0, stream>>>(
+                    numSplitsPerPass, numItems, d_values_out, d_keys_out, reinterpret_cast<float*>( SAReds ) );
+            }
+
+            swap( d_keys_in, d_keys_out );
+            swap( d_values_in, d_values_out );
+        }
+
+        if( ( numPasses - bi_numPasses ) & 1 )
+        {
+            // The index values are now in d_values_in. They need to be copied to the double buffer d_values_out.
+            if( const LWresult result = corelib::lwdaDriver().LwMemcpyDtoDAsync( ( LWdeviceptr )( (char*)d_values_out ),
+                                                                                 ( LWdeviceptr )( (char*)d_values_in ),
+                                                                                 bi_numSegments * sizeof( int ), stream ) )
+            {
+                return si.errDetails.logDetails( result, "Adaptive lwrve splitting: copying data failed." );
+            }
+            // Rename the result range from d_values_out to d_values_in which will be used by the index sorting below.
+            swap( d_values_in, d_values_out );
+        }
+
+        // sort according to index
+
+        unsigned int* d_index_keys_in = d_values_in;
+        unsigned int* d_index_keys_out = reinterpret_cast<unsigned int*>( bi_segmentData + si.numSegments * sizeof( int ) );
+
+        size_t tempStorageBytes = 0;
+        if( result = (LWresult)lwb_1_11_0::lwb::DeviceRadixSort::SortKeys( 0, tempStorageBytes, (unsigned int*)0,
+
+                                                                           (unsigned int*)0, bi_numSegments, 0,
+                                                                           sizeof( unsigned int ) * 8, stream ) )
+            return si.errDetails.logDetails( result,
+                                             "LWCA error returned from internal memory computation for adaptive lwrve "
+                                             "subdivision." );
+
+        if( tempStorageBytes + tempStorageOffset > si.memorySize )
+            return si.errDetails.logDetails( result, "Insufficient memory resources for adaptive splitting." );
+
+        if( result = (LWresult)lwb_1_11_0::lwb::DeviceRadixSort::SortKeys( (void*)tempStorage, tempStorageBytes,
+                                                                           d_index_keys_in, d_index_keys_out, bi_numSegments,
+                                                                           0, sizeof( unsigned int ) * 8, stream ) )
+            return si.errDetails.logDetails( result,
+                                             "LWCA error returned from segment index sorting for adaptive lwrve "
+                                             "subdivision." );
+
+        SAReds += bi_numPrimitives * SARedsPerPrimSizeInBytes;
+        segmentIndexOffset += bi_numSegments;
+    }
+
+    // Copy inflection points to the data range in front of the segmentMap.
+    if( const LWresult result = corelib::lwdaDriver().LwMemcpyDtoDAsync(
+            ( LWdeviceptr )( segmentData + si.numSegments * sizeof( int ) - inflectionPointsSizeInBytes ),
+            ( LWdeviceptr )( segmentData - inflectionPointsSizeInBytes ), inflectionPointsSizeInBytes, stream ) )
+    {
+        return si.errDetails.logDetails( result, "Adaptive lwrve splitting: copying inflection points data failed." );
+    }
+
+    return OPTIX_SUCCESS;
+}
+
+}  // namespace optix_exp

@@ -1,0 +1,60 @@
+# Testsuite configuration
+# By convention testsuite configuration files use a ".vlct" extension.
+{
+  # Descriptive name for the testsuite (required).
+  "name"      : "LWCA Samples Tests",
+  
+  # Testsuite description (optional).
+  "desc"      : "This testsuite builds and runs all LWCA Samples installed by samples.vlcc",
+  
+  # Testsuite owner's email (required).
+  "owner"     : "sw-lwca-samples@lwpu.com",
+  
+  # Define variables for this testsuite that are available as environment variables
+  # when running tests (optional). 
+  "elw"       : [
+                 { "filter" : { "os" : "Linux" }},
+                 "SAMPLES_TEST_BINDIR=${VULCAN_INSTALL_DIR}/lwca/samples/bin/ppc64le/linux/release",
+                 "DISPLAY=:0"
+                ],
+  
+ # Define paths containing shared libraries required by the tests.
+  "dllpath"   : [ "${VULCAN_INSTALL_DIR}/lwca/${INSTALL_TARGET_DIR}/${SHAREDLIB_DIR}",
+                  "${VULCAN_INSTALL_DIR}/lwca/_internal/driver"
+                ],
+
+
+  # Timeout for entire testsuite, in seconds (optional). If no timeout is specified the
+  # default timeout value of 900 seconds will be used.
+  "timeout" : "12000",
+
+  # Default timeout for individual tests, in seconds (optional).
+  "testtimeout" : "9000",
+
+  # Default working directory for test runs (optional). The directory can be an absolute
+  # or relative path. A relative path is relative to this file's location. Variables can
+  # be used in the path using the ${var} syntax.
+  "cwd"       : "${SAMPLES_TEST_BINDIR}",
+
+
+  # The tests in the testsuite (required).
+  "tests" : [
+              { "init" : "${PYTHON} X_utils.py --start",
+                "cwd" : "${VULCAN_TESTSUITE_DIR}"
+              },
+<<RUN_TEST_CASE>>
+              { "fini" : "${PYTHON} X_utils.py --stop",
+                "cwd" : "${VULCAN_TESTSUITE_DIR}"
+              },
+              {
+               "name" : "Make Clobber (ppc64le)",
+               "exe" : "${MAKE} clobber LWDA_PATH=${VULCAN_INSTALL_DIR}/lwca TARGET_ARCH=ppc64le",
+                "cwd" : "${VULCAN_INSTALL_DIR}/lwca/samples",
+                "attributes" : [
+                  { "filter" : { "os" : "Windows" }},
+                  "result=skip"
+                  ]
+              }
+  ]
+
+}

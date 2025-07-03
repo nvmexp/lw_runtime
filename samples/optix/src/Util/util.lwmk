@@ -1,0 +1,98 @@
+#
+#  Copyright (c) 2017 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+Util_INCLUDES = $(LWVM_LW_SDK_INCLUDES)
+
+Util_SOURCES += $(addprefix $(LW_OPTIX)/src/Util/, \
+  Allocator.cpp \
+  ApiTime.cpp \
+  BitSet.cpp \
+  CodeRange.cpp \
+  digest_md5.cpp \
+  Enum2String.cpp \
+  JsonEscape.cpp \
+  md5_hash.cpp \
+  LWML.cpp \
+  LWMLWrapper.cpp \
+  Memcpy.cpp \
+  MemoryStream.cpp \
+  Metrics.cpp \
+  MotionAabb.cpp \
+  OptimizePermutations.cpp \
+  PersistentStream.cpp \
+  PrintStream.cpp \
+  ProfilerInterface.cpp \
+  ProgressiveHash.cpp \
+  PropertySet.cpp \
+  RangeVector.cpp \
+  RecordCompile.cpp \
+  ResampleMotion.cpp \
+  RuntimeStateDumper.cpp \
+  SystemInfo.cpp \
+  TextureDescriptor.cpp \
+  TransformHelper.cpp \
+  UsageReport.cpp \
+)
+ifneq ($(LW_BUILD_TYPE),release)
+  # only add these file in non-release builds
+  Util_SOURCES += $(addprefix $(LW_OPTIX)/src/Util/, \
+    LayoutPrinter.cpp \
+    NodegraphPrinter.cpp \
+  )
+endif
+
+$(call optix_module,Util)
+
+Uuid_SOURCES = $(LW_OPTIX)/src/Util/optixUuid.cpp
+$(call optix_module,Uuid)
+
+# Windows does not need this flag
+ifeq ($(LW_HOST_OS_FAMILY),Unix)
+  ifeq ($(SSE_41_AVAILABLE),1)
+    $(filter $(addsuffix $(OBJSUFFIX),%Memcpy %BitSet),$(Util_OBJECTS)): CFLAGS += -msse4.1
+  endif
+endif
+
+# Add two more modules here: code that needs to be linked into the shared
+# (dynamic) library version of OptiX and the static library of OptiX.  The
+# BinaryData mechanism in a static library should attempt to load resources from
+# the current exelwtable, not the DLL and vice-versa.  This is controlled by
+# the USE_LWOPTIX_DLL define.
+#
+# These modules only have an implementation on Windows, so the other platforms
+# just get stub functions.
+#
+ifeq ($(LW_HOST_OS_FAMILY),Windows)
+  UtilDynamic_DEFINES = USE_LWOPTIX_DLL
+  UtilDynamic_SOURCES = $(LW_OPTIX)/src/Util/BinaryData.cpp
+
+  UtilStatic_SOURCES = $(LW_OPTIX)/src/Util/BinaryData.cpp
+else
+  UtilDynamic_SOURCES = $(LW_OPTIX)/src/Util/BinaryDataStubs.cpp
+  UtilStatic_SOURCES = $(LW_OPTIX)/src/Util/BinaryDataStubs.cpp
+endif
+$(call optix_module,UtilDynamic)
+$(call optix_module,UtilStatic)
+
+include $(LW_OPTIX)/src/Util/tests/tests.lwmk

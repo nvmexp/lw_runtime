@@ -1,0 +1,319 @@
+//
+// Copyright 2021 LWPU Corporation. All rights reserved.
+//
+
+#include <typeinfo>
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+#include <colw_fused.h>
+
+#include "fp16_emu.h"
+#include "layers.h"
+#ifndef IRAY_BUILD
+#include <g_lwconfig.h>
+#include <corelib/system/LwdaDriver.h>
+#endif
+
+#include "winograd.h"
+
+namespace optix_exp {
+
+// taken from transform_tensor.hxx in lwDNN
+
+template <typename T_IN, typename T_OUT>
+__launch_bounds__( 256 ) static __global__
+    void nchwToNhwcKernel( unsigned int n, unsigned int cOut, unsigned int c, unsigned int h, unsigned int w, const T_IN* input, T_OUT* output )
+{
+    __shared__ T_IN shbuf[32 * ( 32 + 1 )];  // +1 to avoid bank conflicts
+    // Each CTA is responsible for 32 elements per hw image and 32 c values. Each warp reads
+    // 32 contiguous elements in HW space, and each CTA reads 8 c's per iteration, looping at
+    // most 4 times to complete it's assigned quota of reads.
+    // blockIdx.x keeps track of which 32-element hw chunk the current CTA is working on.
+    // blockIdx.y keeps track of which 32-deep c chunk the current CTA is working on.
+    unsigned int tid           = threadIdx.x;
+    unsigned int wid           = tid / 32;  // 8-warp CTA
+    unsigned int withinWarpTid = tid % 32;
+    unsigned int ci_start      = blockIdx.y * 32;
+    unsigned int cStride       = h * w;
+    unsigned int hwi_start     = blockIdx.x * 32;
+    unsigned int ni            = blockIdx.z;
+    unsigned int nStride       = c * h * w;
+
+    const T_IN* A = &( input[( ci_start + wid ) * cStride + hwi_start + ni * nStride] );
+    if( hwi_start + withinWarpTid < h * w )
+    {
+        if( ( ci_start + 32 ) < c )
+        {
+            unsigned int ci = wid;  // between 0 and 7
+#pragma unroll 4
+            for( int cLoopIdx = 0; cLoopIdx < 4; cLoopIdx++ )
+            {  // Again. 8 warp-CTA.
+                shbuf[withinWarpTid * 33 + ci] = A[withinWarpTid];
+                A                              = &A[8 * cStride];
+                ci += 8;
+            }
+        }
+        else
+        {
+            for( unsigned int ci = wid; ci < 32; ci += 8 )
+            {  // Again. 8 warp-CTA.
+                if( ( ci + ci_start ) < c )
+                {
+                    shbuf[withinWarpTid * 33 + ci] = A[withinWarpTid];
+                }
+                A = &A[8 * cStride];
+            }
+        }
+    }
+    __syncthreads();
+
+    unsigned int ciOut      = ci_start + withinWarpTid;
+    unsigned int nStrideOut = cOut * h * w;
+    if( ciOut < c )
+    {
+        if( hwi_start + 32 < h * w )
+        {
+            int hwI = wid;
+#pragma unroll 4
+            for( unsigned int hwLoopIdx = 0; hwLoopIdx < 4; ++hwLoopIdx )
+            {
+                T_OUT* outputAddr = &output[ni * nStrideOut + ( hwi_start + hwI ) * cOut + ciOut];
+                T_IN*  inputAddr  = &shbuf[(hwI)*33 + withinWarpTid];
+                *outputAddr       = *inputAddr;
+                hwI += 8;
+            }
+        }
+        else
+        {
+            for( unsigned int hwI = wid; hwI < 32; hwI += 8 )
+            {
+                if( hwi_start + hwI < h * w )
+                {
+                    T_OUT* outputAddr = &output[ni * nStrideOut + ( hwi_start + hwI ) * cOut + ciOut];
+                    T_IN*  inputAddr  = &shbuf[(hwI)*33 + withinWarpTid];
+                    *outputAddr       = *inputAddr;
+                }
+            }
+        }
+    }
+}
+
+void AEColwolutionLayer::NCHWtoNHWC( void* dst, const void* src, unsigned int n, unsigned int outc, unsigned int c, unsigned int h, unsigned int w, lwdaStream_t stream ) const
+{
+    dim3 block( 256, 1, 1 );
+    unsigned int numHW = roundUp( h * w, 32 );
+    unsigned int numC  = roundUp( c, 32 );
+    dim3 grid( numHW, numC, n );
+
+    if( m_dtype == DATA_HALF )
+        nchwToNhwcKernel<__half, __half><<<grid, block, 0, stream>>>( n, outc, c, h, w, (__half*)src, (__half*)dst );
+}
+
+AEColwolutionLayer::AEColwolutionLayer( const char* lname, const deviceInfo& info )
+    : AELayer( lname, info ), m_xmmaColw( 0 )
+{
+}
+
+OptixResult AEColwolutionLayer::init( const AELayer* input,
+                                      unsigned int   kernelSize,
+                                      unsigned int   outChannels,
+                                      Activation     activation,
+                                      float          alpha,
+                                      ErrorDetails&  errDetails )
+{
+    OptixResult result = AELayer::init( errDetails );
+
+    if( result )
+        return result;
+
+    m_input             = input;
+    m_kernelSize        = kernelSize;
+    m_activ             = activation;
+    m_alpha             = activation == ACTIVATION_LEAKY_RELU ? alpha : 0.0f;
+    m_filterWeights     = 0;
+    m_bias              = 0;
+
+    if( m_kernelSize % 2 != 1 )
+    {
+        OptixResult res = errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "wrong kernel size" );
+        if( !result )
+            result = res;
+    }
+
+    m_outChannels = outChannels;
+    m_outHeight   = m_input->m_outHeight;
+    m_outWidth    = m_input->m_outWidth;
+
+    m_outsize = getBufferTypeSize() * 1 * m_outChannels * m_outHeight * m_outWidth;
+    m_wsize   = getBufferTypeSize() * ( m_kernelSize * m_kernelSize * m_input->m_outChannels * m_outChannels );
+    m_bsize   = getBufferTypeSize() * m_outChannels;
+
+    return result;
+}
+
+AEColwolutionLayer::~AEColwolutionLayer()
+{
+    if( m_xmmaColw )
+        delete m_xmmaColw;
+}
+
+OptixResult AEColwolutionLayer::destroy( ErrorDetails& errDetails )
+{
+    OptixResult result = AELayer::destroy( errDetails );
+
+    m_filterWeights = 0;
+    m_bias          = 0;
+
+    return result;
+}
+
+OptixResult AEColwolutionLayer::setWeights( void*                     smem,
+                                            const std::vector<short>& weights,
+                                            const unsigned int        tdim[4],
+                                            lwdaStream_t              stream,
+                                            ErrorDetails&             errDetails ) const
+{
+    size_t sz = m_kernelSize * m_kernelSize * m_input->m_outChannels * m_outChannels;
+
+    LWresult lwret;
+
+    if( m_tensorFormat == TENSOR_NHWC )
+    {
+        // smem has a size of at least sizeof(__half) * sz
+        if( weights.size() < sz && (
+            lwret = corelib::lwdaDriver().LwMemsetD8Async( (LWdeviceptr)smem, 0, sizeof( __half ) * sz, stream ) ) )
+            return errDetails.logDetails( lwret, "clearing of weights failed" );
+        if( lwret = corelib::lwdaDriver().LwMemcpyHtoDAsync( (LWdeviceptr)smem, &weights[0],
+                                                             sizeof( __half ) * std::min( sz, weights.size() ), stream ) )
+            return errDetails.logDetails( lwret, "copy of weights to scratch memory failed" );
+        if( lwret = corelib::lwdaDriver().LwMemsetD8Async( (LWdeviceptr)m_filterWeights, 0, sizeof( __half ) * sz, stream ) )
+            return errDetails.logDetails( lwret, "clearing of  filter weights failed" );
+        NCHWtoNHWC( m_filterWeights, smem, tdim[0], m_input->m_outChannels, tdim[1], tdim[2], tdim[3], stream );
+    }
+    else
+    {
+        __half* h = (__half*)&weights[0];
+        if( m_dtype == DATA_HALF )
+        {
+            std::vector<__half> colwertedWeights( sz );
+            size_t              i;
+            for( i = 0; i < std::min( colwertedWeights.size(), weights.size() ); ++i )
+                colwertedWeights[i] = h[i];
+            while( i < sz )
+                colwertedWeights[i++] = hzero();
+            if( lwret = corelib::lwdaDriver().LwMemcpyHtoDAsync( (LWdeviceptr)m_filterWeights, &colwertedWeights[0],
+                                                                 sizeof( __half ) * colwertedWeights.size(), stream ) )
+                return errDetails.logDetails( lwret, "copy of colwerted weights failed" );
+        }
+        else
+        {
+            std::vector<float> colwertedWeights( sz, 0 );
+            size_t             i;
+            for( i = 0; i < std::min( colwertedWeights.size(), weights.size() ); ++i )
+                colwertedWeights[i] = cpu_half2float( h[i] );
+            if( lwret = corelib::lwdaDriver().LwMemcpyHtoDAsync( (LWdeviceptr)m_filterWeights, &colwertedWeights[0],
+                                                                 sizeof( float ) * colwertedWeights.size(), stream ) )
+                return errDetails.logDetails( lwret, "copy of colwerted filter weights failed" );
+        }
+    }
+    return OPTIX_SUCCESS;
+}
+
+OptixResult AEColwolutionLayer::setBias( const std::vector<short>& bias, unsigned int tdim, lwdaStream_t stream, ErrorDetails& errDetails ) const
+{
+    LWresult lwret;
+    __half*  b = (__half*)&bias[0];
+    if( m_dtype == DATA_HALF )
+    {
+        std::vector<__half> colwertedBias( m_outChannels );
+        size_t              i;
+        for( i = 0; i < std::min( colwertedBias.size(), bias.size() ); ++i )
+            colwertedBias[i] = b[i];
+        while( i < m_outChannels )
+            colwertedBias[i++] = hzero();
+        if( lwret = corelib::lwdaDriver().LwMemcpyHtoDAsync( (LWdeviceptr)m_bias, &colwertedBias[0],
+                                                             sizeof( __half ) * m_outChannels, stream ) )
+            return errDetails.logDetails( lwret, "copy of bias failed" );
+    }
+    else
+    {
+        std::vector<float> colwertedBias( m_outChannels, 0 );
+        size_t             i;
+        for( i = 0; i < std::min( colwertedBias.size(), bias.size() ); ++i )
+            colwertedBias[i] = cpu_half2float( b[i] );
+        if( lwret = corelib::lwdaDriver().LwMemcpyHtoDAsync( (LWdeviceptr)m_bias, &colwertedBias[0],
+                                                             sizeof( float ) * m_outChannels, stream ) )
+            return errDetails.logDetails( lwret, "copy of colwerted bias failed" );
+    }
+    return OPTIX_SUCCESS;
+}
+
+OptixResult AEColwolutionLayer::getWorkspaceSize( size_t& wss, ErrorDetails& errDetails )
+{
+    wss = 0;
+    if( m_deviceInfo.m_device_capability < 70 )
+    {
+        TensorDesc inT(m_dtype, 1, m_input->m_outChannels, m_input->m_outHeight, m_input->m_outWidth);
+        FilterDesc fT(m_dtype, m_outChannels, m_input->m_outChannels, m_kernelSize, m_kernelSize);
+        wss = winogradGetFilterSizeInBytes(inT, fT);
+    }
+    return OPTIX_SUCCESS;
+}
+
+void AEColwolutionLayer::setupXMMA( int arch, int M, int N, int K )
+{
+    bool fusedPooling = m_nextLayer && typeid( *m_nextLayer ) == typeid( AEPoolingLayer );
+
+    if( fusedPooling )
+        m_nextLayer->setFused( true );
+
+    if( !m_xmmaColw )
+        m_xmmaColw = new Xmma_colw;
+
+    m_xmmaColw->setup( arch, fusedPooling, M, N, K, m_input->m_outChannels, m_outChannels,
+                       m_outWidth, m_outHeight, m_activ, m_alpha );
+}
+
+OptixResult AEColwolutionLayer::fwdEval( void* smem, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    OptixResult result = OPTIX_SUCCESS;
+
+    beginTiming();
+
+    if( m_xmmaColw )
+    {
+        bool fused = m_nextLayer && m_nextLayer->isFused();
+        if( ( result = m_xmmaColw->run( (char*)smem + m_input->m_outDataIndex,
+                                       !fused ? (char*)smem + m_outDataIndex : (char*)smem + m_nextLayer->m_outDataIndex,
+                                       m_filterWeights,
+                                       m_bias,
+                                       stream,
+                                       errDetails ) ) != OPTIX_SUCCESS )
+            return result;
+    }
+    else
+    {
+        float alpha = 1.0f, beta = 0.0f;
+        const unsigned int padA[] = {m_kernelSize / 2, m_kernelSize / 2};
+
+        TensorDesc inT(m_dtype, 1, m_input->m_outChannels, m_input->m_outHeight, m_input->m_outWidth);
+        TensorDesc outT(m_dtype, 1, m_outChannels, m_outHeight, m_outWidth);
+        FilterDesc fT(m_dtype, m_outChannels, m_input->m_outChannels, m_kernelSize, m_kernelSize);
+
+        if( (result = colw2dMaxwellWinograd(stream, (const void*)&alpha,
+             inT, (char*)smem + m_input->m_outDataIndex,
+             fT, m_filterWeights, padA,
+             (char*)smem + m_workMemIndex, m_workMemSize,
+             m_activ, m_alpha,
+             (const void*)&beta,
+             (char*)smem + m_outDataIndex,
+             m_bias, outT, (char*)smem + m_outDataIndex, errDetails) ) != OPTIX_SUCCESS )
+            return result;
+    }
+
+    endTiming();
+
+    return result;
+}
+
+};  // namespace optix_exp

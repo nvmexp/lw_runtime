@@ -1,0 +1,59 @@
+!!ARBvp1.0
+OPTION LW_vertex_program3;
+PARAM pgmElw[256] = { program.elw[0..255] };
+DP4 result.position.x, pgmElw[0], vertex.position;
+DP4 result.position.y, pgmElw[1], vertex.position;
+DP4 result.position.z, pgmElw[2], vertex.position;
+DP4 result.position.w, pgmElw[3], vertex.position;
+TEMP tmpR8;
+DSTC tmpR8, vertex.fogcoord.xyzw, pgmElw[96].xyzw;
+TEMP tmpR13;
+MADC1 tmpR13, -vertex.attrib[6].xyzw, vertex.attrib[6].wzxw, tmpR8.zzzx;
+SGTC result.texcoord[5], -vertex.texcoord[0].wzyx, |pgmElw[187].zzwx|;
+XPD result.texcoord[1], -vertex.position.xyzw, -tmpR13.xyzw;
+SUBC result.pointsize.x, |vertex.attrib[6].xyzw|, tmpR8.zyxy;
+TEMP tmpR11;
+SNEC tmpR11, -tmpR13.zwyx, tmpR8.xzwy;
+TEMP tmpR12;
+SLTC tmpR12, |tmpR8.xzwy|, vertex.position.wzxw;
+DSTC1 tmpR12, vertex.texcoord[6].xyzw, tmpR12.xzwy;
+LG2C1 tmpR12.y, |pgmElw[87].w|;
+TEMP tmpR14;
+FLR tmpR14, vertex.normal.yxzw;
+TEMP tmpR0;
+STRC tmpR0, vertex.attrib[6].wzyx, -|pgmElw[58].zyzx|;
+MAXC1 result.color.back.primary, -|vertex.normal.yzzx|, |tmpR8.xyzw|;
+TEMP tmpR2;
+SINC1 tmpR2.w, vertex.fogcoord.x;
+TEMP tmpR15;
+SLT tmpR15, vertex.attrib[6].xyzw, tmpR14.xyzw;
+TEMP tmpR3;
+DPHC1_SAT tmpR3.w, -tmpR0.xxxy, |tmpR0.wzxy|;
+SEQC1 result.texcoord[0], tmpR3.xwyz, -vertex.color.secondary.wxxw;
+TEMP tmpR9;
+FRC_SAT tmpR9.x, vertex.fogcoord.xzyw;
+TEMP tmpR5;
+LOGC tmpR5.y, -|tmpR13.y|;
+MUL tmpR0 (NE1.yxwx), vertex.attrib[6].xyxx, vertex.attrib[6].xyzw;
+ADD result.texcoord[7], vertex.position.wxzy, tmpR0.xyzw;
+FRCC tmpR3, tmpR14.xyzw;
+TXB_SAT result.texcoord[3], -tmpR0.xyzw, texture[0], 1D;
+ADDRESS addr1;
+ARLC1 addr1, tmpR15.ywxz;
+POW result.clip[4].x, |pgmElw[234].w|, |vertex.texcoord[0].w|;
+SNEC1 result.color.secondary, |vertex.attrib[6].xyzw|, tmpR12.yxwz;
+SGTC1 result.clip[4].x (GT.xyzw), |tmpR13.xyzw|, vertex.texcoord[5].xyzw;
+SSG result.texcoord[6], vertex.color.secondary.zxxx;
+STR result.color.primary, tmpR14.xwxy, vertex.fogcoord.xzyw;
+MOV result.texcoord[4], vertex.texcoord[1].xyzw;
+FRCC result.pointsize.x, vertex.attrib[6].xyzw;
+MADC1 result.texcoord[2], tmpR12.xzwy, |vertex.position.zxzy|, tmpR13.zyxw;
+BRA label_one  (GE0.w);
+ARR addr1, -vertex.attrib[6].zywx;
+label_one:
+BRA label_two  (LE1.x);
+label_two:
+MAXC_SAT result.fogcoord.x, -tmpR9.zzyx, -|tmpR13.wzww|;
+FRCC1_SAT result.color.back.secondary, vertex.normal.xxyz;
+END 
+

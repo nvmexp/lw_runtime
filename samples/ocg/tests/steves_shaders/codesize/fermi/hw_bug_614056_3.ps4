@@ -1,0 +1,25 @@
+ps_4_0
+dcl_sampler s0, mode_default
+dcl_resource_texture2d (float,float,float,float) t0
+dcl_input_ps_siv linear noperspective v0.xy, position
+dcl_input_ps linear v1.xy
+dcl_output o0.xyzw
+dcl_temps 2
+add r0.xy, v1.xyxx, v1.xyxx
+deriv_rtx r0.zw, r0.xxxy
+deriv_rty r0.xy, r0.xyxx
+round_ni r1.xy, v0.xyxx
+mul r1.xy, r1.xyxx, l(0.500000, 0.500000, 0.000000, 0.000000)
+ge r1.zw, r1.xxxy, -r1.xxxy
+frc r1.xy, |r1.xyxx|
+movc r1.xy, r1.zwzz, r1.xyxx, -r1.xyxx
+ne r1.xy, r1.xyxx, l(0.000000, 0.000000, 0.000000, 0.000000)
+and r1.x, r1.y, r1.x
+if_nz r1.x
+  sample_d o0.xyzw, v1.xyxx, t0.xyzw, s0, v1.xyxx, r0.xyxx
+else 
+  mov o0.xyzw, l(0,0,0,0)
+endif
+mov o0.x, l(0,0,0,0)
+ret 
+// Approximately 17 instruction slots used

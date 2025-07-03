@@ -1,0 +1,283 @@
+##############################################################################
+#
+# lwmk for fabric manager
+#
+##############################################################################
+
+LW_MODULE_LOGGING_NAME = "lw-fabricmanager"
+##############################################################################
+# define SOURCES
+##############################################################################
+
+LWRRENT_DIR = $(LW_SOURCE)/apps/fabricmanager
+LWMLCOMMON_DIR = $(LW_SOURCE)/apps/lwml/common
+
+#all the main source code
+LOCAL_SOURCES :=
+ifeq ($(LW_MODS),)
+  ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+    LOCAL_SOURCES += fabricmanager_unix.cpp
+  else
+    LOCAL_SOURCES += fabricmanager_win.cpp
+  endif
+endif
+
+LW_MODS_GDM ?=
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)  #this is temporary
+LOCAL_SOURCES += fm_helper.cpp
+LOCAL_SOURCES += fm_cmd_parser.cpp
+LOCAL_SOURCES += ../../drivers/resman/src/libraries/commandline/commandline.c
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_SOURCES += fm_helper.cpp
+LOCAL_SOURCES += fm_cmd_parser.cpp
+LOCAL_SOURCES += ./config/fm_config_options.cpp
+LOCAL_SOURCES += ./infra/logging/fm_log.cpp
+
+#all the globalFM related source code
+LOCAL_SOURCES += ./globalfm/GlobalFmFabricParser.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFabricManager.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFmFabricConfig.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFmHeartbeat.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFmErrorStatusMsgHndlr.cpp
+LOCAL_SOURCES += ./globalfm/GFMHelper.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFmFabricNode.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFmCommandServer.cpp
+LOCAL_SOURCES += ./globalfm/FMTopologyValidator.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFmErrorHndlr.cpp
+LOCAL_SOURCES += ./globalfm/GFMFabricPartitionMgr.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFMLWLinkConnRepo.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFMLWLinkIntf.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFMLWLinkState.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFMLibCmdServer.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFmHaMgr.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFmDegradedModeMgr.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFMInternalCmdServer.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFmApiHandler.cpp
+LOCAL_SOURCES += ./globalfm/GlobalFmMulticastMgr.cpp
+
+#all the localFM related source code
+# MODS GDM build does not require access to HW and LFM
+ifeq ($(LW_MODS_GDM), )
+  LOCAL_SOURCES += ./localfm/LocalFMGpuMgr.cpp
+  LOCAL_SOURCES += ./localfm/LocalFabricManager.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMSwitchInterface.cpp
+  LOCAL_SOURCES += ./localfm/LocalFabricManagerCoOp.cpp
+  LOCAL_SOURCES += ./localfm/LocalFmCommandServer.cpp
+  LOCAL_SOURCES += ./localfm/LocalFmControlMsgHndl.cpp
+  LOCAL_SOURCES += ./localfm/LocalFmErrorReporter.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMInbandEventHndlr.cpp  
+  LOCAL_SOURCES += ./localfm/LocalFMSwitchEventReader.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMLwcmServer.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMLWLinkMsgHndlr.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMLWLinkDrvIntf.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMLWLinkReqConn.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMLWLinkReqConnTrain.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMLWLinkReqConnTrainParallel.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMLWLinkReqDiscovery.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMLWLinkReqBase.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMLWLinkReqInit.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMMemMgr.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMMemMgrExporter.cpp
+  LOCAL_SOURCES += ./localfm/LocalFmSwitchHeartbeatReporter.cpp
+  LOCAL_SOURCES += ./localfm/LocalFmMulticastHndlr.cpp
+  LOCAL_SOURCES += ./localfm/LocalFMMemMgrImporter.cpp
+endif
+
+#all the common source code
+LOCAL_SOURCES += common/FMTimer.cpp
+LOCAL_SOURCES += common/FmThread.cpp
+LOCAL_SOURCES += common/FMCommandServer.cpp
+LOCAL_SOURCES += common/FMDevInfoMsgHndlr.cpp
+LOCAL_SOURCES += common/FMLwcmClient.cpp
+LOCAL_SOURCES += common/FMConnectionBase.cpp
+LOCAL_SOURCES += common/FMLWLinkDeviceRepo.cpp
+LOCAL_SOURCES += common/FMLWLinkError.cpp
+LOCAL_SOURCES += common/FMReqTracker.cpp
+LOCAL_SOURCES += common/FMGpuDriverVersionCheck.cpp
+LOCAL_SOURCES += common/FMStayResidentOobStateReporter.cpp
+LOCAL_SOURCES += common/FMDeviceProperty.cpp
+LOCAL_SOURCES += common/FMHandleGenerator.cpp
+LOCAL_SOURCES += common/FMUtils.cpp
+
+
+#all the infra related source code
+LOCAL_SOURCES += infra/transport/FmClientConnection.cpp
+LOCAL_SOURCES += infra/transport/FmServerConnection.cpp
+LOCAL_SOURCES += infra/transport/FmConnection.cpp
+LOCAL_SOURCES += infra/transport/FmSocketMessage.cpp
+LOCAL_SOURCES += infra/transport/workqueue.cpp
+LOCAL_SOURCES += infra/transport/FmRequest.cpp
+LOCAL_SOURCES += infra/transport/FmServerRequest.cpp
+
+#all the external dependent source code (like driver, lwml infra structure code etc)
+LOCAL_SOURCES += ../../drivers/resman/src/libraries/commandline/commandline.c
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/common/shared/lwstatus/lwstatus.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/timelib.c
+
+USE_DRIVERS := 0
+ifeq ($(LW_MODS),)
+  USE_DRIVERS := 1
+endif
+ifeq ($(LW_MODS),linux)
+  USE_DRIVERS := 1
+endif
+ifeq ($(USE_DRIVERS),1)
+  # include RMLib API interface layer
+  include $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi.lwmk
+  LOCAL_SOURCES += $(RMAPI_SOURCES)
+
+  # include LWLinkCoreLib driver API interface layer
+  include $(LW_SOURCE)/drivers/lwlink/user/lwlink/lwlinkapi.lwmk
+
+  # include LWSwitch driver API interface layer
+  include $(LW_SOURCE)/drivers/lwswitch/user/lwswitchapi.lwmk
+
+  # LWSWITCHAPI_SOURCES,  RMAPI_SOURCES and LWLINKAPI_SOURCES  have common files like modprobe-utils.
+  # Hence, filter-out redundant files from those API source files
+  LOCAL_SOURCES += $(filter-out $(RMAPI_SOURCES), $(LWLINKAPI_SOURCES))
+  LOCAL_SOURCES += $(filter-out $(RMAPI_SOURCES), $(LWSWITCHAPI_SOURCES))
+endif
+
+ifneq ($(LW_MODS_GDM), )
+  LOCAL_SOURCES += $(LWMLCOMMON_DIR)/Linux/lwosLinux.c
+  LOCAL_SOURCES += $(LWMLCOMMON_DIR)/lwos_common_posix.c
+else
+  ifeq ($(LW_MODS),)
+    LOCAL_SOURCES += $(LWMLCOMMON_DIR)/Linux/lwosLinux.c
+    LOCAL_SOURCES += $(LWMLCOMMON_DIR)/lwos_common_posix.c
+  else
+    LOCAL_SOURCES += $(LWMLCOMMON_DIR)/mods/lwosMods.cpp
+    LOCAL_SOURCES += $(LWMLCOMMON_DIR)/lwos_generic_cv.cpp
+    LOCAL_SOURCES += $(LWMLCOMMON_DIR)/lwos_debug.cpp
+  endif
+endif
+endif
+
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+##############################################################################
+## define LOCAL_CFLAGS
+###############################################################################
+LOCAL_INCLUDES += $(LWRRENT_DIR)/config
+LOCAL_INCLUDES += $(LWRRENT_DIR)/localfm
+LOCAL_INCLUDES += $(LWRRENT_DIR)/globalfm
+LOCAL_INCLUDES += $(LWRRENT_DIR)/infra/logging
+LOCAL_INCLUDES += $(LWRRENT_DIR)/infra/protobuf
+LOCAL_INCLUDES += $(LWRRENT_DIR)/common
+LOCAL_INCLUDES += $(LWRRENT_DIR)/src
+LOCAL_INCLUDES += $(LWRRENT_DIR)/sdk/public
+LOCAL_INCLUDES += $(LWRRENT_DIR)/sdk/fmlib
+LOCAL_INCLUDES += $(LWRRENT_DIR)/fm_internal
+
+LOCAL_INCLUDES += $(LWRRENT_DIR)/libs/libevent-2.0.22-stable/include/
+LOCAL_INCLUDES += $(LWRRENT_DIR)/libs/libevent-2.0.22-stable/include/event2/
+LOCAL_INCLUDES += $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(LW_SOURCE)/apps/lwml
+LOCAL_INCLUDES += $(LWRRENT_DIR)/libs/protobuf-2.6.0/include/
+LOCAL_INCLUDES += $(LWRRENT_DIR)/infra/transport
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc/ctrl/
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc/ctrl/ctrl0000/
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc/ctrl/ctrl2080/
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/
+LOCAL_INCLUDES += $(LWSWITCHAPI_INCLUDES)
+LOCAL_INCLUDES += $(LWLINKAPI_INCLUDES)
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/resman/inc/libraries
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(LWML_DIR)
+ifneq ($(LW_MODS),)
+  LOCAL_INCLUDES += $(LW_SOURCE)/drivers/lwlink/interface
+  LOCAL_INCLUDES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/utils
+  LOCAL_INCLUDES += $(LW_SOURCE)/drivers/unix/common/inc
+  LOCAL_INCLUDES += $(LW_SOURCE)/drivers/lwlink/user/lwlink
+
+  LOCAL_INCLUDES += $(LW_SOURCE)/drivers/lwswitch/interface
+  LOCAL_INCLUDES += $(LW_SOURCE)/drivers/lwswitch/user
+  LOCAL_INCLUDES += $(LW_SOURCE)/drivers/lwswitch/user/MODS
+
+  LOCAL_INCLUDES += $(LW_SOURCE)/diag/mods/core/include
+  ifneq ($(LW_MODS_GDM),)
+    LOCAL_INCLUDES += $(LWMLCOMMON_DIR)/gdm
+  else
+    LOCAL_INCLUDES += $(LWMLCOMMON_DIR)/mods
+  endif
+endif
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+  LOCAL_INCLUDES += $(LW_SOURCE)/drivers/resman/interface/
+  LOCAL_INCLUDES += $(LW_TOOLS)/win32/msvc120/VC/include
+  LOCAL_INCLUDES += $(LW_TOOLS)/ddk/nt8/9600/Include/um
+  LOCAL_INCLUDES += $(PLATFORMSDK_DIR)/Include/km/crt
+endif
+
+# Do not modify CFLAGS because it will be global
+LOCAL_CFLAGS := $(FM_GLOBAL_CFLAGS)
+# Do the RM Client version check ourselves to support whitelisting certain drivers for compatibility.
+LOCAL_CFLAGS += -DCLIENT_PROVIDES_VERSION_COMPAT
+# Skip LWSwitch Driver Shim API version check as FM will only validate RM version
+LOCAL_CFLAGS += -DLWSWITCH_CLIENT_PROVIDES_VERSION_COMPAT
+# Skip LWLinkCoreLib Driver Shim API version check as well
+LOCAL_CFLAGS += -DLWLINK_CLIENT_PROVIDES_VERSION_COMPAT
+LOCAL_CFLAGS += -DDRIVER_MAJOR_VERSION=\"$(DRIVER_VERSION)\"
+LOCAL_CFLAGS += -DMODULE_NAME=\"FABRICMANAGER\"
+LOCAL_CFLAGS += -DMODULE_NAME_LOWERCASE=\"fabricmanager\"
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+  LOCAL_CFLAGS += -fPIC -Wno-write-strings
+endif
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+  LOCAL_CFLAGS += /EHsc /w /c /D_WINSOCKAPI_
+endif
+
+ifneq ($(LW_MODS_GDM), )
+  LOCAL_CFLAGS += -DLW_MODS_GDM_BUILD
+endif
+
+##############################################################################
+## define LOCAL_LDFLAGS
+###############################################################################
+
+LOCAL_LDFLAGS := $(FM_GLOBAL_LDFLAGS)
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+    LOCAL_LDFLAGS += gdi32.lib
+    LOCAL_LDFLAGS += Ws2_32.lib
+    LOCAL_LDFLAGS += advapi32.lib
+    LOCAL_LDFLAGS += Shlwapi.lib
+    LOCAL_LDFLAGS += /DEBUG
+endif
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+LOCAL_LDFLAGS += -rdynamic
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS) -lfmproto -levent -lc
+
+##############################################################################
+
+# build
+
+##############################################################################
+fabricmanager_TARGET  := $(OUTPUTDIR)/lw-fabricmanager$(BINSUFFIX)
+fabricmanager_OBJECTS := $(LOCAL_OBJECTS)
+fabricmanager_CFLAGS  := $(LOCAL_CFLAGS)
+fabricmanager_LDFLAGS := $(LOCAL_LDFLAGS)
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+fabricmanager_DEPENDS ?= $(fmproto_TARGET)
+endif
+
+ifeq ($(LW_MODS),)
+  build: $(fabricmanager_TARGET)
+  fmbuildsyncpoint:: $(fabricmanager_TARGET)
+
+  $(eval $(call MAKE_CXX_EXELWTABLE,fabricmanager))
+  build: $(fabricmanager_TARGET).guardwords
+else
+  $(eval $(call MAKE_MODS_FM_LIBRARY,fabricmanager))
+endif
+
+#################################################################################
+## End of nested lwmk
+##################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

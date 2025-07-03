@@ -1,0 +1,89 @@
+# -*- mode: perl; -*-
+
+# TEGRASYS Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $tegrasysHal = [
+
+    # per-GPU defaults for TEGRASYS for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ pre_FERMI, FERMI_and_later, tAURORA, ],
+    ],
+
+    # Object Interfaces Section
+    # ********************************************************************************
+
+    OBJECT_INTERFACES => [
+
+        PARSE_RELOCATION_TABLE => [
+
+            DESCRIPTION   => "parses relocation table and fills out pTegraRelocTable",
+            RETURN_TYPE   =>  U032,
+            ARGUMENTS     => "PTEGRASYS, LwU64 *, PDEVICE_LIST, LwU32",
+            FLAGS         => ":NO_STATIC", # fn is defined in tegrasys.c
+        ],
+
+        GET_DEVICE_RELOC => [
+
+            DESCRIPTION   => "retrieves relocation info for a specified device",
+            RETURN_TYPE   =>  PDEVICE_RELOCATION,
+            ARGUMENTS     => "PTEGRASYS, const char * const, U032",
+            FLAGS         => ":NO_STATIC", # fn is defined in tegrasys.c
+        ],
+
+        LIST_ALL_DEVS => [
+
+            DESCRIPTION   => "Lists all the available cheetah Devices",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "PTEGRASYS",
+            FLAGS         => ":NO_STATIC", # fn is defined in tegrasys.c
+        ],
+
+    ], # OBJECT_INTERFACES
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+        INIT => [
+
+            DESCRIPTION   => "parses relocation table and fills out pTegraRelocTable",
+            RETURN_TYPE   =>  U032,
+            ARGUMENTS     => "PTEGRASYS",
+            STUB_RETURNS  => ZERO,
+
+            _LW50        => [ TESLA, FERMI_and_later, ],
+            _T30         => [ T30, ],
+            _T114        => [ T114, ],
+            _T124        => [ T124_and_later, ],
+        ],
+
+        GET_DEVICE_BROADCAST_INDEX => [
+
+            DESCRIPTION   => "Get the CheetAh MC broadcast device index",
+            RETURN_TYPE   =>  U032,
+            ARGUMENTS     => "PTEGRASYS, const char * const devName",
+            STUB_RETURNS  => ZERO,
+
+            _T114      => [ T114, ],
+            _STUB      => [ CHEETAH, -T114, ],
+        ],
+
+        DEVICE_ON => [
+
+            DESCRIPTION   => "Check if device is powered on",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "PTEGRASYS, const char * const devName, LwU32 devInst",
+            STUB_RETURNS  => TRUE,
+
+            _T124        => [ T124_and_later, ],
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $tegrasysHal;

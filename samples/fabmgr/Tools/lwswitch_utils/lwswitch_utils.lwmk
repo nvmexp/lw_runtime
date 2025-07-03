@@ -1,0 +1,103 @@
+##############################################################################
+#
+# lwmk for the lwswitch_utils tool
+#
+##############################################################################
+
+##############################################################################
+# define SOURCES
+##############################################################################
+
+LWML_DIR := $(LW_SOURCE)/apps/lwml/
+
+LWRRENT_DIR = $(LW_SOURCE)/apps/fabricmanager/Tools/lwswitch_utils
+LWMLCOMMON_DIR = $(LW_SOURCE)/apps/lwml/common
+
+include $(LWML_DIR)/lwml_headers.lwmk
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += lwswitchUtils.cpp
+LOCAL_SOURCES += lwswitchUtilsParser.cpp
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/src/libraries/commandline/commandline.c
+
+include $(LW_SOURCE)/drivers/lwswitch/user/lwswitchapi.lwmk
+include $(LW_SOURCE)/drivers/lwlink/user/lwlink/lwlinkapi.lwmk
+include $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi.lwmk
+LOCAL_SOURCES += $(RMAPI_SOURCES)
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/Linux/lwosLinux.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/lwos_common_posix.c
+LOCAL_SOURCES += $(FM_DIR)/infra/logging/fm_log.cpp
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/common/shared/lwstatus/lwstatus.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/simple_encryption.c
+
+# LWSWITCHAPI_SOURCES,  RMAPI_SOURCES and LWLINKAPI_SOURCES  have common files like modprobe-.
+# Hence, filter-out redundant files from those API source files
+LOCAL_SOURCES += $(filter-out $(RMAPI_SOURCES), $(LWLINKAPI_SOURCES))
+LOCAL_SOURCES += $(filter-out $(RMAPI_SOURCES), $(LWSWITCHAPI_SOURCES))
+
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+##############################################################################
+## define LOCAL_CFLAGS
+###############################################################################
+LOCAL_INCLUDES :=
+LOCAL_INCLUDES += $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(LWRRENT_DIR)/../Tools/
+LOCAL_INCLUDES += $(FM_DIR)/common/
+LOCAL_INCLUDES += $(FM_DIR)/infra/logging
+LOCAL_INCLUDES += $(FM_DIR)/infra/
+LOCAL_INCLUDES += $(FM_DIR)/src/
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/hwref/lwswitch/
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(FM_DIR)/Tools/fabricTool
+LOCAL_INCLUDES += $(LWLINKAPI_INCLUDES)
+LOCAL_INCLUDES += $(LWSWITCHAPI_INCLUDES)
+LOCAL_INCLUDES += $(FM_DIR)
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/resman/inc/libraries/
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/resman/inc/libraries/commandline/
+
+LOCAL_CFLAGS := $(FM_GLOBAL_CFLAGS)
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+    LOCAL_CFLAGS += /EHsc -D_SCL_SELWRE_NO_WARNINGS
+endif
+LOCAL_CFLAGS += -Wno-write-strings
+LOCAL_CFLAGS += -DDRIVER_MAJOR_VERSION=\"$(DRIVER_VERSION)\"
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+##############################################################################
+## define LOCAL_LDFLAGS
+###############################################################################
+LOCAL_LDFLAGS := $(FM_GLOBAL_LDFLAGS)
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+    LOCAL_LDFLAGS += $(LWML_DIR)/$(OUTPUTDIR)/lwml.lib $(LWML_DIR)/$(OUTPUTDIR)/zlib.lib
+else
+    LOCAL_LDFLAGS += -L $(LWML_DIR)/$(OUTPUTDIR) -rdynamic
+    LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+endif
+
+##############################################################################
+# build
+##############################################################################
+lwswitch_utils_TARGET  := $(OUTPUTDIR)/lwswitch_utils$(BINSUFFIX)
+lwswitch_utils_OBJECTS := $(LOCAL_OBJECTS)
+lwswitch_utils_CFLAGS  := $(LOCAL_CFLAGS)
+lwswitch_utils_LDFLAGS := $(LOCAL_LDFLAGS)
+lwswitch_utils_DEPENDS ?= $(LWML_H_OUT) $(LWML_GRID_H_OUT)
+
+build: $(lwswitch_utils_TARGET) $(LW_VER_H)
+fmbuildsyncpoint:: $(lwswitch_utils_TARGET) $(LW_VER_H) 
+
+$(eval $(call MAKE_CXX_EXELWTABLE,lwswitch_utils))
+build: $(lwswitch_utils_TARGET).guardwords
+
+#################################################################################
+## End of nested lwmk
+##################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

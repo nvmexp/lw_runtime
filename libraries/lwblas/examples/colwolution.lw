@@ -1,0 +1,503 @@
+
+#include "../include/lwtensor/internal/operators.h"
+
+#include <lwtensor.h>
+#include <lwda_runtime.h>
+#include <lwdnn.h>
+
+#include <omp.h>
+#include <assert.h>
+
+#include <vector>
+#include <numeric>
+#include <unordered_map>
+
+
+#define HANDLE_LWDNN(x) {auto x2 = x; if( x2 != LWDNN_STATUS_SUCCESS ) {printf("LWDNN ERROR: %s in line %d\n", lwdnnGetErrorString(x2), __LINE__); exit(-1);}}
+#define HANDLE_ERROR(x) {auto x2 = x; if( x2 != lwdaSuccess) {printf("LWCA ERROR: %s in line %d\n", lwdaGetErrorString(x2), __LINE__); exit(-1);}}
+#define HANDLE_LWTENSOR(x) {auto x2 = x; if( x2 != LWTENSOR_STATUS_SUCCESS) {printf("LWTENSOR ERROR: %s in line %d\n", lwtensorGetErrorString(x2), __LINE__); exit(-1);}}
+
+template<typename typeCompute>
+bool isNAN( typeCompute x )
+{
+    return false;
+}
+template<>
+bool isNAN( float x )
+{
+    return isnan(x);
+}
+template<>
+bool isNAN( double x )
+{
+    return isnan(x);
+}
+template<>
+bool isNAN( lwComplex x )
+{
+    return isnan(lwCimagf(x)) || isnan(lwCrealf(x));
+}
+template<>
+bool isNAN( lwDoubleComplex x )
+{
+    return isnan(lwCimag(x)) || isnan(lwCreal(x));
+}
+template<typename typeCompute>
+double RelativeError( typeCompute lhs, typeCompute rhs )
+{
+    using namespace LWTENSOR_NAMESPACE;
+    auto isnanLHS = isNAN(lhs);
+    auto isnanRHS = isNAN(rhs);
+    if( isnanRHS != isnanLHS )
+    {
+        return 1.0;
+    }
+    double x = lw2Norm( lwSub( lhs, rhs ) );
+    double y = std::max( lw2Norm( lhs ), lw2Norm( rhs ) );
+    if( y == 0.0 )
+        return 0.0;
+    return x / y;
+}
+
+
+template<typename typeCompute>
+double SquareError( typeCompute lhs, typeCompute rhs )
+{
+    using namespace LWTENSOR_NAMESPACE;
+    auto x = lwSub( lhs, rhs );
+    return lwSquare2Norm( x );
+}
+
+template<typename typeA>
+std::pair<double, double> verify( typeA *A, typeA *B, size_t m, double tol )
+{
+    using namespace LWTENSOR_NAMESPACE;
+    std::pair<double, double> relError( (double)0, (double)0 );
+    double norm = 0;
+    double normA = 0;
+    double normB = 0;
+    /** Error logs. */
+    std::vector<int> errors;
+    for ( int i = 0; i < m; i ++ )
+    {
+        auto a = A[ i ];
+        auto b = B[ i ];
+
+        auto rel = RelativeError( a, b );
+        if ( rel > tol )
+        {
+            if( errors.size() < 10 )
+            {
+                printf( "error: %d A %f B %f relative %lf tolerance %lf\n", i,
+                        lwGet<float>(*(float*)&a), lwGet<float>(*(float*)&b), rel, tol );
+            }
+            errors.push_back( i );
+        }
+        relError.second = std::max( relError.second, rel );
+        norm  += SquareError( a, b );
+        normA += lwSquare2Norm( a );
+        normB += lwSquare2Norm( b );
+    }
+    /** Compute relative error. */
+    norm  = std::sqrt( norm );
+    normA = std::sqrt( normA );
+    normB = std::sqrt( normB );
+
+    /* Both normA and normB are either -inf, +inf, or nan. */
+    if ((std::isinf(normA) && std::isinf(normB)) || (isNAN(normA) && isNAN(normB)))
+    {
+        if (*reinterpret_cast<uint64_t*>(&normA) ^ *reinterpret_cast<uint64_t*>(&normB) == (uint64_t)0U)
+        {
+            return std::pair<double, double>(0.0, 0.0);
+        }
+        else
+        {
+            return std::pair<double, double>(1.0, 1.0);
+        }
+    }
+
+    if( isNAN(normA) != isNAN(normB) )
+    {
+        relError.first = 1.0;
+        return relError;
+    }
+    auto maxValue = std::max( normA, normB );
+    if( maxValue > 0 )
+        relError.first = norm / maxValue;
+    else
+        relError.first = 0;
+    /** Report error log. */
+    if ( errors.size() )
+    {
+        printf( "log: " );
+        for ( int i = 0; i < std::min( 5, (int)errors.size() ); i ++ )
+            printf( "%d, ", errors[ i ] );
+        printf( "\033[93mWARNING: \x1B[0m%ld/%ld %E tolerance: %E\n", errors.size(), m, relError.second, tol );
+    }
+    /** Return the relative 2-norm and element-wise error. */
+    return relError;
+}
+
+std::pair<double, double> verify( void*A, void *B, size_t m, lwdaDataType_t type, double tol )
+{
+    switch ( type )
+    {
+        case LWDA_R_8U:
+            return verify<uint8_t>( (uint8_t*)A, (uint8_t*)B, m, tol );
+        case LWDA_R_8I:
+            return verify<int8_t>( (int8_t*)A, (int8_t*)B, m, tol );
+        case LWDA_R_32U:
+            return verify<uint32_t>( (uint32_t*)A, (uint32_t*)B, m, tol );
+        case LWDA_R_32I:
+            return verify<int32_t>( (int32_t*)A, (int32_t*)B, m, tol );
+        case LWDA_R_16F:
+            return verify<half>( (half*)A, (half*)B, m, tol );
+        case LWDA_R_32F:
+            return verify<float>( (float*)A, (float*)B, m, tol );
+        case LWDA_R_64F:
+            return verify<double>( (double*)A, (double*)B, m, tol );
+        case LWDA_C_32F:
+            return verify<lwComplex>( (lwComplex*)A, (lwComplex*)B, m, tol );
+        case LWDA_C_64F:
+            return verify<lwDoubleComplex>( (lwDoubleComplex*)A, (lwDoubleComplex*)B, m, tol );
+        default:
+            printf("TYPE UNKNOWN\n");
+            exit(0);
+    }
+}
+
+/// computes random numbers via:
+/// x_i+1 = (a*x_i)mod m;
+/// m must be prim
+/// a must be a primative root modulo m
+///
+/// to prevent overflow we use the algorithm by Schrage
+int32_t linearCongruentialGenerator(int32_t &seed)
+{
+    constexpr int32_t a = 16807;
+    constexpr int32_t m = 2147483647;
+
+    constexpr int32_t q = 127773;
+    constexpr int32_t r = 2836;
+
+    int32_t tmp1 = a*(seed % q);
+    int32_t tmp2 = -r*(seed / q);
+    seed = tmp1 + tmp2;
+    if( seed < 0 )
+        seed += m;
+
+    return seed;
+}
+
+/** Generate random number in uniform [a, b] distribution. */
+template<typename typeCompute>
+typeCompute UniformRandomNumber( double a, double b, int32_t &seed )
+{
+   /** Generate uniform [ 0, 1 ] first. */
+   auto u01 = (double)( linearCongruentialGenerator(seed) % 1000000 ) / 1000000;
+   /** Scale and shift. */
+   return ( b - a ) * u01 + a;
+}
+
+#define MY_TEST_MAX_NUM_THREADS 4
+static int32_t LWTENSOR_TEST_RANDOM_SEEDS[MY_TEST_MAX_NUM_THREADS] = { 1,2,3,4 };
+
+void initialize( void* A, lwdaDataType_t typeA, size_t numElements, float value = 999 )
+{
+    double a = 0.5;
+    double b = 20;
+    if ( value != 999 )
+    {
+        a = value;
+        b = value;
+    }
+    else if( typeA == LWDA_R_8I )
+    {
+        a = 0;
+        b = 30;
+    }
+    else if( typeA == LWDA_R_8U )
+    {
+        a = 0;
+        b = 40;
+    }
+    else if( typeA == LWDA_R_32I )
+    {
+        a = 0;
+        b = 600;
+    }
+    else if( typeA == LWDA_R_32U )
+    {
+        a = 0;
+        b = 1000;
+    }
+
+#pragma omp parallel num_threads(MY_TEST_MAX_NUM_THREADS)
+    {
+        int threadId = omp_get_thread_num();
+        int32_t &mySeed = LWTENSOR_TEST_RANDOM_SEEDS[threadId];
+#pragma omp for
+        for ( size_t i = 0; i < numElements; i++)
+        {
+            switch ( typeA )
+            {
+                case LWDA_R_32F:
+                    ((float*)A)[ i ] = UniformRandomNumber<float>( a, b, mySeed );
+                    break;
+                case LWDA_R_64F:
+                    ((double*)A)[ i ] = UniformRandomNumber<double>( a, b, mySeed );
+                    break;
+                default:
+                    printf( "ERROR: TYPE UNKNOWN. %d\n", typeA );
+                    exit(-1);
+            }
+        }
+    }
+}
+
+std::vector<int64_t> colwertTo64bit( std::vector<int> input )
+{
+    std::vector<int64_t> output;
+    for(auto a : input)
+        output.push_back(a);
+    return output;
+}
+
+
+int main(int argc, char** argv)
+{
+    int nRuns = 3;
+    
+    const int padding = 0;
+    const int filterStride = 1;
+    const int dilation = 2;
+    const int numGroups = 2;
+
+    constexpr int N = 64;
+    constexpr int H = 64;
+    constexpr int W = 128;
+    constexpr int C = 16;
+    constexpr int Cg = C/numGroups;
+    constexpr int K = 2048;
+    constexpr int R = 8;
+    constexpr int S = 8;
+    std::vector<int> extentActivation{N,C,H,W};
+    std::vector<int> strideActivation{H*W*C, H*W, W, 1};
+    std::vector<int> extentFilter{K,Cg,R,S}; // ATTENTION: strides must match KCRS format
+    lwdnnTensorFormat_t filterFormat = LWDNN_TENSOR_NCHW;
+    std::vector<int> strideFilter(extentFilter.size());
+    if( filterFormat == LWDNN_TENSOR_NCHW )
+    {
+        strideFilter[0] = Cg*R*S;
+        strideFilter[1] = R*S;
+        strideFilter[2] = S;
+        strideFilter[3] = 1;
+    }else if( filterFormat == LWDNN_TENSOR_NHWC ){
+        strideFilter[0] = Cg*R*S;
+        strideFilter[1] = 1;
+        strideFilter[2] = Cg*S;
+        strideFilter[3] = Cg;
+    }
+
+    /**********************************************
+     * LWDNN
+     **********************************************/
+    lwdnnHandle_t lwdnnHandle;
+    HANDLE_LWDNN(lwdnnCreate(&lwdnnHandle));
+    lwdnnTensorDescriptor_t descX, descY;
+    lwdnnFilterDescriptor_t descW;
+    HANDLE_LWDNN(lwdnnCreateTensorDescriptor(&descX));
+    HANDLE_LWDNN(lwdnnCreateTensorDescriptor(&descY));
+    HANDLE_LWDNN(lwdnnCreateFilterDescriptor(&descW));
+    HANDLE_LWDNN(lwdnnSetTensorNdDescriptor( descX, LWDNN_DATA_FLOAT, 4, extentActivation.data(), strideActivation.data()));
+    HANDLE_LWDNN(lwdnnSetFilterNdDescriptor( descW, LWDNN_DATA_FLOAT, filterFormat, 4, extentFilter.data()));
+
+    lwdnnColwolutionDescriptor_t colwDesc;
+    HANDLE_LWDNN(lwdnnCreateColwolutionDescriptor(&colwDesc));
+    HANDLE_LWDNN(lwdnnSetColwolution2dDescriptor( colwDesc, padding, padding,
+                filterStride, filterStride, dilation, dilation,
+                LWDNN_CROSS_CORRELATION, LWDNN_DATA_FLOAT));
+
+    HANDLE_LWDNN(lwdnnSetColwolutionGroupCount( colwDesc, numGroups));
+//    int P = H-R+1;
+//    int Q = W-S+1;
+    std::vector<int> extentOutput(4);//{N,K,P,Q}; 
+    HANDLE_LWDNN(lwdnnGetColwolutionNdForwardOutputDim( colwDesc, descX, descW, 4, extentOutput.data()));
+    std::vector<int> strideOutput{extentOutput[1]*extentOutput[2]*extentOutput[3],
+        extentOutput[2]*extentOutput[3], extentOutput[3], 1};
+    HANDLE_LWDNN(lwdnnSetTensorNdDescriptor( descY, LWDNN_DATA_FLOAT, 4, extentOutput.data(), strideOutput.data()));
+    /*************************************************/
+
+
+    // GEMM-equivalent problem-size
+    int P = extentOutput[2];
+    int Q = extentOutput[3];
+    int m = N * P * Q;
+    int k = R * R * Cg;
+    int n = K;
+    printf("m= %d, n = %d, k = %d\n",m, n, k);
+    float gflops = ((float)m)*n*k / 1e9;
+
+    /*********************************************
+     * Allocate & init
+     *********************************************/
+
+    size_t numElementsX = std::accumulate(extentActivation.begin(), extentActivation.end(), 1UL, std::multiplies<size_t>());
+    size_t numElementsW = std::accumulate(extentFilter.begin(), extentFilter.end(), 1UL, std::multiplies<size_t>());
+    size_t numElementsY = std::accumulate(extentOutput.begin(), extentOutput.end(), 1UL, std::multiplies<size_t>());
+    size_t sizeX = numElementsX * sizeof(float);
+    size_t sizeY = numElementsY * sizeof(float);
+    size_t sizeW = numElementsW * sizeof(float);
+    printf("%.4f %.4f %.4f GB\n", sizeX / 1e9, sizeW / 1e9, sizeY / 1e9);
+
+    float *x_h, *w_h, *y_h, *y_lwdnn_h;
+    x_h = (float*) malloc(sizeX);
+    y_h = (float*) malloc(sizeY);
+    y_lwdnn_h = (float*) malloc(sizeY);
+    w_h = (float*) malloc(sizeW);
+
+    initialize( x_h, LWDA_R_32F, numElementsX);
+    initialize( y_h, LWDA_R_32F, numElementsY);
+    initialize( w_h, LWDA_R_32F, numElementsW);
+
+    float *x_d, *w_d, *y_d;
+    lwdaMalloc(&x_d, sizeX);
+    lwdaMalloc(&y_d, sizeY);
+    lwdaMalloc(&w_d, sizeW);
+    float alpha= 1;
+    float beta= 0;
+
+    HANDLE_ERROR( lwdaMemcpy(x_d, x_h, sizeX, lwdaMemcpyHostToDevice) );
+    HANDLE_ERROR( lwdaMemcpy(y_d, y_h, sizeY, lwdaMemcpyHostToDevice) );
+    HANDLE_ERROR( lwdaMemcpy(w_d, w_h, sizeW, lwdaMemcpyHostToDevice) );
+
+    /*********************************************
+     * Run LWDNN
+     *********************************************/
+    lwdnnColwolutionFwdAlgo_t lwdnnAlgo = LWDNN_COLWOLUTION_FWD_ALGO_IMPLICIT_GEMM;
+    double minLWDNN = 1e100;
+    for(int i=0; i < nRuns; ++i){
+        HANDLE_ERROR( lwdaMemcpy(y_d, y_h, sizeY, lwdaMemcpyHostToDevice) );
+        lwdaDeviceSynchronize();
+        auto start = omp_get_wtime();
+        HANDLE_LWDNN(lwdnnColwolutionForward(
+                    lwdnnHandle, &alpha, descX, x_d, descW, w_d,
+                    colwDesc, lwdnnAlgo, nullptr, 0UL, &beta, descY, y_d));
+        lwdaDeviceSynchronize();
+        auto time = omp_get_wtime() - start;
+        minLWDNN = std::min(minLWDNN, time);
+    }
+    HANDLE_ERROR( lwdaMemcpy(y_lwdnn_h, y_d, sizeY, lwdaMemcpyDeviceToHost) );
+    printf("lwdnn: %f %f\n", minLWDNN, gflops/minLWDNN);
+
+    /**********************************************
+     * LWTENSOR
+     **********************************************/
+
+    void* workspace = nullptr;
+    size_t workspaceSize = 1024UL*1024*128;
+    lwdaMalloc(&workspace, workspaceSize);
+
+    lwtensorHandle_t lwtensorHandle;
+    HANDLE_LWTENSOR(lwtensorInit(&lwtensorHandle));
+    lwtensorTensorDescriptor_t descActivation, descFilter, descOutput;
+
+    const lwtensorOperator_t opOut = LWTENSOR_OP_IDENTITY;
+    const lwtensorComputeType_t typeCompute = LWTENSOR_R_MIN_32F;
+
+    const int32_t modeActivation[] = {'n','c','h','w'};
+    const int32_t modeFilter[]     = {'k','c','r','s'};
+    const int32_t modeOutput[]     = {'n','k','p','q'};
+    const uint32_t numColwolvedModes = 2;
+    lwtensorColwolvedMode_t colwolvedModes[numColwolvedModes];
+    lwtensorInitColwolvedMode( &lwtensorHandle, &colwolvedModes[0], padding, filterStride, dilation, 'h', 'r', 'p');
+    lwtensorInitColwolvedMode( &lwtensorHandle, &colwolvedModes[1], padding, filterStride, dilation, 'w', 's', 'q');
+
+
+    HANDLE_LWTENSOR( lwtensorInitTensorDescriptor(&lwtensorHandle, &descActivation,
+                     extentActivation.size(),
+                     colwertTo64bit(extentActivation).data(),
+                     colwertTo64bit(strideActivation).data(),
+                     LWDA_R_32F, LWTENSOR_OP_IDENTITY) );
+
+    HANDLE_LWTENSOR( lwtensorInitTensorDescriptor(&lwtensorHandle, &descFilter,
+                     extentFilter.size(),
+                     colwertTo64bit(extentFilter).data(),
+                     colwertTo64bit(strideFilter).data(),
+                     LWDA_R_32F, LWTENSOR_OP_IDENTITY) );
+
+    HANDLE_LWTENSOR( lwtensorInitTensorDescriptor(&lwtensorHandle, &descOutput,
+                     extentOutput.size(),
+                     colwertTo64bit(extentOutput).data(),
+                     colwertTo64bit(strideOutput).data(),
+                     LWDA_R_32F, LWTENSOR_OP_IDENTITY) );
+
+    uint32_t  alignmentRequirementA = 128;
+    uint32_t  alignmentRequirementB = 128;
+    uint32_t  alignmentRequirementC = 128;
+
+    lwtensorContractionDescriptor_t desc;
+    HANDLE_LWTENSOR( lwtensorInitColwolutionDescriptor(
+                &lwtensorHandle,
+                &desc,
+                &descActivation, modeActivation, alignmentRequirementA,
+                &descFilter, modeFilter, alignmentRequirementB,
+                &descOutput, modeOutput, alignmentRequirementC,
+                numColwolvedModes, colwolvedModes, numGroups,
+                typeCompute, opOut));
+
+    /**************************
+     * Set the algorithm to use
+     ***************************/
+    const lwtensorAlgo_t algo = LWTENSOR_ALGO_DEFAULT;
+
+    lwtensorContractionFind_t find;
+    HANDLE_LWTENSOR( lwtensorInitContractionFind( 
+                &lwtensorHandle, &find, 
+                algo) );
+
+    /**************************
+     * Create Contraction Plan
+     **************************/
+    lwtensorContractionPlan_t plan;
+    HANDLE_LWTENSOR( lwtensorInitContractionPlan(&lwtensorHandle,
+                &plan,
+                &desc,
+                &find,
+                workspaceSize) );
+
+
+    const lwdaStream_t stream = 0;
+
+//    int64_t extentOutput_tmp[8];
+//    HANDLE_LWTENSOR(lwtensorGetColwolutionOutput(
+//                descColw,
+//                descActivation,
+//                descFilter,
+//                4,
+//                extentOutput_tmp));
+    double minLWTENSOR = 1e100;
+    for(int i=0; i < nRuns; ++i){
+        HANDLE_ERROR( lwdaMemcpy(y_d, y_h, sizeY, lwdaMemcpyHostToDevice) );
+        lwdaDeviceSynchronize();
+        auto start = omp_get_wtime();
+        HANDLE_LWTENSOR( lwtensorContraction(&lwtensorHandle,
+                    &plan,
+                    &alpha, x_d, w_d,
+                    &beta,  y_d, y_d, 
+                    workspace, workspaceSize, stream) );
+        lwdaDeviceSynchronize();
+        auto time = omp_get_wtime() - start;
+        minLWTENSOR= std::min(minLWTENSOR, time);
+    }
+    HANDLE_ERROR( lwdaMemcpy(y_h, y_d, sizeY, lwdaMemcpyDeviceToHost) );
+    printf("lwtensor: %f %f\n", minLWTENSOR, gflops/minLWTENSOR);
+
+    auto rel = verify( y_lwdnn_h, y_h, numElementsY, LWDA_R_32F, 1e-4);
+    printf("%e %e\n", rel.first, rel.second);
+
+    lwdaFree(workspace);
+    lwdaFree(x_d);
+    lwdaFree(y_d);
+    lwdaFree(w_d);
+}

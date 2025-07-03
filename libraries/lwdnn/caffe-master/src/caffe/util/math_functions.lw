@@ -1,0 +1,615 @@
+#include <algorithm>
+#include <device_launch_parameters.h>
+
+#include "caffe/util/half.lwh"
+#include "caffe/util/math_functions.hpp"
+#include "caffe/util/gpu_math_functions.lwh"
+#include "caffe/type.hpp"
+
+namespace caffe {
+
+template<>
+void caffe_gpu_gemm<float>(const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE TransB, const int M, const int N, const int K,
+    const float alpha, const float* A, const float* B, const float beta,
+    float* C) {
+  // Note that lwblas follows fortran order.
+  int lda = (TransA == CblasNoTrans) ? K : M;
+  int ldb = (TransB == CblasNoTrans) ? N : K;
+  lwblasOperation_t lwTransA =
+      (TransA == CblasNoTrans) ? LWBLAS_OP_N : LWBLAS_OP_T;
+  lwblasOperation_t lwTransB =
+      (TransB == CblasNoTrans) ? LWBLAS_OP_N : LWBLAS_OP_T;
+  LWBLAS_CHECK(lwblasSgemm(Caffe::lwblas_handle(0), lwTransB, lwTransA,
+      N, M, K, &alpha, B, ldb, A, lda, &beta, C, N));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream(0)));
+}
+
+template<>
+void caffe_gpu_gemm<double>(const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE TransB, const int M, const int N, const int K,
+    const double alpha, const double* A, const double* B, const double beta,
+    double* C) {
+  // Note that lwblas follows fortran order.
+  int lda = (TransA == CblasNoTrans) ? K : M;
+  int ldb = (TransB == CblasNoTrans) ? N : K;
+  lwblasOperation_t lwTransA =
+      (TransA == CblasNoTrans) ? LWBLAS_OP_N : LWBLAS_OP_T;
+  lwblasOperation_t lwTransB =
+      (TransB == CblasNoTrans) ? LWBLAS_OP_N : LWBLAS_OP_T;
+  LWBLAS_CHECK(lwblasDgemm(Caffe::lwblas_handle(0), lwTransB, lwTransA,
+      N, M, K, &alpha, B, ldb, A, lda, &beta, C, N));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream(0)));
+}
+
+template<>
+void caffe_gpu_gemm<float16>(const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE TransB, const int M, const int N, const int K,
+    const float16 alpha, const float16* A, const float16* B, const float16 beta,
+    float16* C) {
+  lwblasHandle_t handle = Caffe::lwblas_handle(0);
+  // Note that lwblas follows fortran order.
+  const int lda = (TransA == CblasNoTrans) ? K : M;
+  const int ldb = (TransB == CblasNoTrans) ? N : K;
+  lwblasOperation_t lwTransA =
+      (TransA == CblasNoTrans) ? LWBLAS_OP_N : LWBLAS_OP_T;
+  lwblasOperation_t lwTransB =
+      (TransB == CblasNoTrans) ? LWBLAS_OP_N : LWBLAS_OP_T;
+
+  if (Caffe::device_capability(Caffe::device()) >= 503) {
+#if LWDA_VERSION >= 9000
+    lwblasMath_t math_mode;
+    LWBLAS_CHECK(lwblasGetMathMode(handle, &math_mode));
+    LWBLAS_CHECK(lwblasSetMathMode(handle, LWBLAS_TENSOR_OP_MATH));
+    const float alpha_fp32 = static_cast<float>(alpha);
+    const float beta_fp32 = static_cast<float>(beta);
+    LWBLAS_CHECK(lwblasGemmEx(handle, lwTransB, lwTransA,
+        N, M, K, &alpha_fp32, B->gethp<half>(), LWDA_R_16F, ldb,
+        A->gethp<half>(), LWDA_R_16F, lda, &beta_fp32, C->gethp<half>(),
+        LWDA_R_16F, N, LWDA_R_32F, LWBLAS_GEMM_DFALT_TENSOR_OP));
+    LWBLAS_CHECK(lwblasSetMathMode(handle, math_mode));
+#else
+    LWBLAS_CHECK(lwblasHgemm(handle, lwTransB, lwTransA,
+    N, M, K, alpha.gethp<half>(), B->gethp<half>(), ldb,
+    A->gethp<half>(), lda, beta.gethp<half>(), C->gethp<half>(), N));
+#endif
+  } else {
+    float alpha_fp32 = static_cast<float>(alpha);
+    float beta_fp32 = static_cast<float>(beta);
+    LWBLAS_CHECK(lwblasSgemmEx(handle, lwTransB, lwTransA,
+        N, M, K, &alpha_fp32, B->gethp<half>(), CAFFE_DATA_HALF, ldb,
+        A->gethp<half>(), CAFFE_DATA_HALF, lda, &beta_fp32, C->gethp<half>(),
+        CAFFE_DATA_HALF, N));
+  }
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream(0)));
+}
+
+template<>
+void caffe_gpu_gemv<float>(const CBLAS_TRANSPOSE TransA, const int M,
+    const int N, const float alpha, const float* A, const float* x,
+    const float beta, float* y) {
+  lwblasOperation_t lwTransA =
+      (TransA == CblasNoTrans) ? LWBLAS_OP_T : LWBLAS_OP_N;
+  LWBLAS_CHECK(lwblasSgemv(Caffe::lwblas_handle(0), lwTransA, N, M, &alpha,
+      A, N, x, 1, &beta, y, 1));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream(0)));
+}
+
+template<>
+void caffe_gpu_gemv<double>(const CBLAS_TRANSPOSE TransA, const int M,
+    const int N, const double alpha, const double* A, const double* x,
+    const double beta, double* y) {
+  lwblasOperation_t lwTransA =
+      (TransA == CblasNoTrans) ? LWBLAS_OP_T : LWBLAS_OP_N;
+  LWBLAS_CHECK(lwblasDgemv(Caffe::lwblas_handle(0), lwTransA, N, M, &alpha,
+      A, N, x, 1, &beta, y, 1));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream(0)));
+}
+
+template<>
+void caffe_gpu_gemv<float16>(const CBLAS_TRANSPOSE TransA, const int M,
+    const int N, const float16 alpha, const float16* A, const float16* x,
+    const float16 beta, float16* y) {
+  lwblasHandle_t handle = Caffe::lwblas_handle(0);
+  lwblasOperation_t lwTransA = TransA == CblasNoTrans ? LWBLAS_OP_T : LWBLAS_OP_N;
+  int m = lwTransA == LWBLAS_OP_N ? N : M;
+  int k = lwTransA == LWBLAS_OP_N ? M : N;
+  int LDA = lwTransA == LWBLAS_OP_N ? m : k;
+  int LDC = m;
+
+  if (Caffe::device_capability(Caffe::device()) >= 503) {
+#if LWDA_VERSION >= 9000
+    lwblasMath_t math_mode;
+    LWBLAS_CHECK(lwblasGetMathMode(handle, &math_mode));
+    LWBLAS_CHECK(lwblasSetMathMode(handle, LWBLAS_TENSOR_OP_MATH));
+    const float alpha_fp32 = static_cast<float>(alpha);
+    const float beta_fp32 = static_cast<float>(beta);
+    LWBLAS_CHECK(lwblasGemmEx(handle, lwTransA, LWBLAS_OP_N,
+        m, 1, k, &alpha_fp32, A->gethp<half>(), LWDA_R_16F, LDA,
+        x->gethp<half>(), LWDA_R_16F, k, &beta_fp32, y->gethp<half>(),
+        LWDA_R_16F, LDC, LWDA_R_32F, LWBLAS_GEMM_DFALT_TENSOR_OP));
+    LWBLAS_CHECK(lwblasSetMathMode(handle, math_mode));
+#else
+    LWBLAS_CHECK(lwblasHgemm(handle, lwTransA, LWBLAS_OP_N,
+        m, 1, k, alpha.gethp<half>(), A->gethp<half>(), LDA,
+        x->gethp<half>(), k, beta.gethp<half>(),
+        y->gethp<half>(), LDC));
+#endif
+  } else {
+    float alpha_fp32 = static_cast<float>(alpha);
+    float beta_fp32 = static_cast<float>(beta);
+    LWBLAS_CHECK(lwblasSgemmEx(Caffe::lwblas_handle(0), lwTransA, LWBLAS_OP_N,
+        m, 1, k, &alpha_fp32, A, CAFFE_DATA_HALF, LDA,
+        x, CAFFE_DATA_HALF, k, &beta_fp32,
+        y, CAFFE_DATA_HALF, LDC));
+  }
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream(0)));
+}
+
+template<>
+void caffe_gpu_axpy<float>(const int N, const float alpha, const float* X,
+    float* Y, void* handle) {
+  lwblasHandle_t lwblas_handle =
+      handle == nullptr ? Caffe::lwblas_handle(0) : reinterpret_cast<lwblasHandle_t>(handle);
+  lwdaStream_t stream;
+  LWBLAS_CHECK(lwblasGetStream(lwblas_handle, &stream));
+  LWBLAS_CHECK(lwblasSaxpy(lwblas_handle, N, &alpha, X, 1, Y, 1));
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_axpy<double>(const int N, const double alpha, const double* X,
+    double* Y, void* handle) {
+  lwblasHandle_t lwblas_handle =
+      handle == nullptr ? Caffe::lwblas_handle(0) : reinterpret_cast<lwblasHandle_t>(handle);
+  lwdaStream_t stream;
+  LWBLAS_CHECK(lwblasGetStream(lwblas_handle, &stream));
+  LWBLAS_CHECK(lwblasDaxpy(lwblas_handle, N, &alpha, X, 1, Y, 1));
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<typename Dtype, typename Mtype>
+__global__
+void axpy_kernel(const int N, const Mtype alpha, const Dtype* x, Dtype* y) {
+  for (int idx = threadIdx.x + blockDim.x * blockIdx.x; idx < N;
+       idx += blockDim.x * gridDim.x) {
+    y[idx] = alpha * (Mtype) x[idx] + (Mtype) y[idx];
+  }
+}
+
+template<>
+__global__
+void axpy_kernel<half, half>(const int N, const half alpha, const half* x, half* y) {
+#if __LWDA_ARCH__ >= 530
+  LWDA_KERNEL_LOOP(idx, N) {
+    y[idx] = __hfma(alpha, x[idx], y[idx]);
+  }
+#else
+  LWDA_KERNEL_LOOP(idx, N) {
+    y[idx] = float2half_clip(__half2float(y[idx]) + __half2float(alpha) * __half2float(x[idx]));
+  }
+#endif
+}
+
+template<>
+void caffe_gpu_axpy<float16>(const int N, const float16 alpha, const float16* x, float16* y,
+    void* handle) {
+  lwblasHandle_t lwblas_handle =
+      handle == nullptr ? Caffe::lwblas_handle(0) : reinterpret_cast<lwblasHandle_t>(handle);
+  lwdaStream_t stream;
+  LWBLAS_CHECK(lwblasGetStream(lwblas_handle, &stream));
+  half ha;
+  ha.setx(alpha.getx());
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  axpy_kernel<<<CAFFE_GET_BLOCKS_HALF(N), CAFFE_LWDA_NUM_THREADS_HALF, 0, stream>>>
+      (N, ha, reinterpret_cast<const half*>(x), reinterpret_cast<half*>(y));
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+void caffe_gpu_memcpy(const size_t N, const void* X, void* Y, int group) {
+  if (X != Y) {
+    lwdaStream_t stream = Caffe::thread_stream(group);
+    LWDA_CHECK(lwdaMemcpyAsync(Y, X, N, lwdaMemcpyDefault, stream));
+    LWDA_CHECK_ARG(lwdaStreamSynchronize(stream), group);
+  }
+}
+
+__global__
+void scale_in_place_kernel(const int n, const half alpha, half* x) {
+  LWDA_KERNEL_LOOP(idx, n) {
+    x[idx] = hmul(alpha, x[idx]);
+  }
+}
+
+template<>
+void caffe_gpu_scal<float>(const int N, const float alpha, float* X, lwblasHandle_t lwblas_handle) {
+  if (alpha == 1.F) { return; }
+  lwdaStream_t stream;
+  LWBLAS_CHECK(lwblasGetStream(lwblas_handle, &stream));
+  LWBLAS_CHECK(lwblasSscal(lwblas_handle, N, &alpha, X, 1));
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_scal<double>(const int N, const double alpha, double* X,
+    lwblasHandle_t lwblas_handle) {
+  if (alpha == 1.0) { return; }
+  lwdaStream_t stream;
+  LWBLAS_CHECK(lwblasGetStream(lwblas_handle, &stream));
+  LWBLAS_CHECK(lwblasDscal(lwblas_handle, N, &alpha, X, 1));
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_scal<float16>(const int n, const float16 alpha, float16* x,
+    lwblasHandle_t lwblas_handle) {
+  if (alpha.getx() == 0x3c00U) { return; }
+  lwdaStream_t stream;
+  LWBLAS_CHECK(lwblasGetStream(lwblas_handle, &stream));
+  half ha;
+  ha.setx(alpha.getx());
+  // use lwblasHscal when it will become available
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  scale_in_place_kernel <<<CAFFE_GET_BLOCKS_HALF(n), CAFFE_LWDA_NUM_THREADS_HALF, 0, stream>>>
+      (n, ha, reinterpret_cast<half*>(x));
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_scal<float>(const int N, const float alpha, float* X) {
+  caffe_gpu_scal(N, alpha, X, Caffe::lwblas_handle(0));
+}
+
+template<>
+void caffe_gpu_scal<double>(const int N, const double alpha, double* X) {
+  caffe_gpu_scal(N, alpha, X, Caffe::lwblas_handle(0));
+}
+
+template<>
+void caffe_gpu_scal<float16>(const int N, const float16 alpha, float16* X) {
+  caffe_gpu_scal(N, alpha, X, Caffe::lwblas_handle(0));
+}
+
+template<>
+void caffe_gpu_axpby<float>(const int N, const float alpha, const float* X,
+    const float beta, float* Y) {
+  caffe_gpu_scal<float>(N, beta, Y);
+  caffe_gpu_axpy<float>(N, alpha, X, Y);
+}
+
+template<>
+void caffe_gpu_axpby<double>(const int N, const double alpha, const double* X,
+    const double beta, double* Y) {
+  caffe_gpu_scal<double>(N, beta, Y);
+  caffe_gpu_axpy<double>(N, alpha, X, Y);
+}
+
+template<typename Dtype, typename Mtype>
+__global__
+void axpby_kernel(const int N, const Mtype alpha, const Dtype* X, const Mtype beta, Dtype* Y) {
+  LWDA_KERNEL_LOOP(idx, N) {
+    Y[idx] = alpha * X[idx] + beta * Y[idx];
+  }
+}
+
+template<>
+void caffe_gpu_axpby<float16>(const int N, const float16 alpha,
+    const float16* X, const float16 beta, float16* Y) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  axpby_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_LWDA_NUM_THREADS, 0, stream>>>(N, alpha, X, beta, Y);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_dot<float, float>(const int n, const float* x, const float* y, float* out) {
+  LWBLAS_CHECK(lwblasSdot(Caffe::lwblas_handle(0), n, x, 1, y, 1, out));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream()));
+}
+
+template<>
+void caffe_gpu_dot<double, double>(const int n, const double* x, const double* y, double* out) {
+  LWBLAS_CHECK(lwblasDdot(Caffe::lwblas_handle(0), n, x, 1, y, 1, out));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream()));
+}
+
+template<>
+void caffe_gpu_dot<double, float>(const int n, const double* x, const double* y, float* outf) {
+  double out = 0.;
+  LWBLAS_CHECK(lwblasDdot(Caffe::lwblas_handle(0), n, x, 1, y, 1, &out));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream()));
+  *outf = static_cast<float>(out);
+}
+
+template<typename Dtype, typename Mtype>
+__global__
+void gpu_dot_kernel(const int N, const Dtype* x, const Dtype* y, Mtype* out) {
+  __shared__
+  Mtype cache[CAFFE_LWDA_NUM_THREADS];
+  const int tidx = threadIdx.x;
+  cache[tidx] = 0.;
+  __syncthreads();
+  for (int i = tidx; i < N; i += blockDim.x) {
+    cache[tidx] += static_cast<Mtype>(x[i]) * static_cast<Mtype>(y[i]);
+  }
+  __syncthreads();
+  for (int s = CAFFE_LWDA_NUM_THREADS / 2; s > 0; s >>= 1) {
+    if (tidx < s) cache[tidx] += cache[tidx + s];
+    __syncthreads();
+  }
+  if (tidx == 0) *out = cache[tidx];
+}
+
+template<>
+void
+caffe_gpu_dot<float16, float16>(const int n, const float16* x, const float16* y, float16* out) {
+  float fres;
+  GPUMemory::Workspace ws(sizeof(float), Caffe::device());
+  float* res = reinterpret_cast<float*>(ws.data());
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  gpu_dot_kernel<<<1, CAFFE_LWDA_NUM_THREADS, 0, stream>>>(n, x, y, res);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaMemcpyAsync(&fres, res, ws.size(), lwdaMemcpyDeviceToHost, stream));
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+  *out = static_cast<float16>(fres);
+}
+
+template<>
+void caffe_gpu_dot<float16, float>(const int n, const float16* x, const float16* y, float* out) {
+  GPUMemory::Workspace ws(sizeof(float), Caffe::device());
+  float* res = reinterpret_cast<float*>(ws.data());
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  gpu_dot_kernel<<<1, CAFFE_LWDA_NUM_THREADS, 0, stream>>>(n, x, y, res);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaMemcpyAsync(out, res, ws.size(), lwdaMemcpyDeviceToHost, stream));
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_asum<float, float>(const int n, const float* x, float* y, int group) {
+  LWBLAS_CHECK(lwblasSasum(Caffe::lwblas_handle(group), n, x, 1, y));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream(group)));
+}
+
+template<>
+void caffe_gpu_asum<float, double>(const int n, const float* x, double* y, int group) {
+  float yf;
+  LWBLAS_CHECK(lwblasSasum(Caffe::lwblas_handle(group), n, x, 1, &yf));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream(group)));
+  *y = yf;
+}
+template<>
+void caffe_gpu_asum<double, double>(const int n, const double* x, double* y, int group) {
+  LWBLAS_CHECK(lwblasDasum(Caffe::lwblas_handle(group), n, x, 1, y));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream(group)));
+}
+template<>
+void caffe_gpu_asum<double, float>(const int n, const double* x, float* y, int group) {
+  double yd;
+  LWBLAS_CHECK(lwblasDasum(Caffe::lwblas_handle(group), n, x, 1, &yd));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream(group)));
+  *y = yd;
+}
+
+template<>
+void caffe_gpu_scale<double>(const int n, const double alpha, const double* x, double* y) {
+  LWBLAS_CHECK(lwblasDcopy(Caffe::lwblas_handle(0), n, x, 1, y, 1));
+  LWBLAS_CHECK(lwblasDscal(Caffe::lwblas_handle(0), n, &alpha, y, 1));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream()));
+}
+
+template<>
+void caffe_gpu_scale<float>(const int n, const float alpha, const float* x, float* y) {
+  LWBLAS_CHECK(lwblasScopy(Caffe::lwblas_handle(0), n, x, 1, y, 1));
+  LWBLAS_CHECK(lwblasSscal(Caffe::lwblas_handle(0), n, &alpha, y, 1));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream()));
+}
+
+__global__
+void scale_kernel(const int n, const half alpha, const half* x, half* y) {
+  LWDA_KERNEL_LOOP(idx, n) {
+    y[idx] = hmul(alpha, x[idx]);
+  }
+}
+
+template<>
+void caffe_gpu_scale<float16>(const int n, const float16 alpha, const float16* x, float16* y) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  half ha;
+  ha.setx(alpha.getx());
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  scale_kernel <<<CAFFE_GET_BLOCKS_HALF(n), CAFFE_LWDA_NUM_THREADS_HALF, 0, stream>>>
+      (n, ha, reinterpret_cast<const half*>(x), reinterpret_cast<half*>(y));
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<typename Dtype>
+__global__ void set_kernel(const size_t n, const Dtype alpha, Dtype* y) {
+  LWDA_KERNEL_LOOP(index, n) {
+    y[index] = alpha;
+  }
+}
+
+template<typename Dtype>
+void caffe_gpu_set(const size_t N, const Dtype alpha, Dtype* Y) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  if (alpha == 0) {
+    LWDA_CHECK(lwdaMemsetAsync(Y, 0, sizeof(Dtype) * N, stream));  // NOLINT(caffe/alt_fn)
+  } else {
+    // NOLINT_NEXT_LINE(whitespace/operators)
+    set_kernel <<<CAFFE_GET_BLOCKS(N), CAFFE_LWDA_NUM_THREADS, 0, stream>>> (N, alpha, Y);
+    LWDA_POST_KERNEL_CHECK;
+  }
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template void
+caffe_gpu_set<int>(const size_t N, const int alpha, int* Y);
+template void
+caffe_gpu_set<float>(const size_t N, const float alpha, float* Y);
+template void
+caffe_gpu_set<double>(const size_t N, const double alpha, double* Y);
+template void
+caffe_gpu_set<float16>(const size_t N, const float16 alpha, float16* Y);
+
+template<typename Dtype>
+__global__ void add_scalar_kernel(const int n, const Dtype alpha, Dtype* y) {
+  LWDA_KERNEL_LOOP(index, n) {
+    y[index] += alpha;
+  }
+}
+
+template<>
+void caffe_gpu_add_scalar(const int N, const float alpha, float* Y) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators
+  add_scalar_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_LWDA_NUM_THREADS, 0, stream>>>(N, alpha, Y);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_add_scalar(const int N, const double alpha, double* Y) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  add_scalar_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_LWDA_NUM_THREADS, 0, stream>>>(N, alpha, Y);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_add_scalar(const int N, const float16 alpha, float16* Y) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  add_scalar_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_LWDA_NUM_THREADS, 0, stream>>>(N, alpha, Y);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<typename Dtype>
+__global__ void add_kernel(const int n, const Dtype* a, const Dtype* b, Dtype* y) {
+  LWDA_KERNEL_LOOP(index, n) {
+    y[index] = a[index] + b[index];
+  }
+}
+
+template<>
+__global__ void add_kernel<half>(const int n, const half* a, const half* b, half* y) {
+  LWDA_KERNEL_LOOP(index, n) {
+    y[index] = hadd(a[index], b[index]);
+  }
+}
+
+template<>
+void caffe_gpu_add<float>(const int N, const float* a, const float* b, float* y) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  add_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_LWDA_NUM_THREADS, 0, stream>>>(N, a, b, y);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_add<double>(const int N, const double* a, const double* b, double* y) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  add_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_LWDA_NUM_THREADS, 0, stream>>>(N, a, b, y);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_add<float16>(const int N, const float16* a, const float16* b, float16* y) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  add_kernel<<<CAFFE_GET_BLOCKS_HALF(N), CAFFE_LWDA_NUM_THREADS_HALF, 0, stream>>>
+      (N, reinterpret_cast<const half*>(a), reinterpret_cast<const half*>(b),
+       reinterpret_cast<half*>(y));
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<typename Dtype>
+__global__ void incr_kernel(const int n, const Dtype* a, Dtype* b) {
+  LWDA_KERNEL_LOOP(index, n) {
+    b[index] += a[index];
+  }
+}
+
+template<>
+__global__ void incr_kernel<half>(const int n, const half* a, half* b) {
+  LWDA_KERNEL_LOOP(index, n) {
+    b[index] = hadd(a[index], b[index]);
+  }
+}
+
+template<>
+void caffe_gpu_incr<float>(const int N, const float* a, float* b) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  incr_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_LWDA_NUM_THREADS, 0, stream>>>(N, a, b);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_incr<double>(const int N, const double* a, double* b) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  incr_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_LWDA_NUM_THREADS, 0, stream>>>(N, a, b);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_incr<float16>(const int N, const float16* a, float16* b) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  incr_kernel<<<CAFFE_GET_BLOCKS_HALF(N), CAFFE_LWDA_NUM_THREADS_HALF, 0, stream>>>
+      (N, reinterpret_cast<const half*>(a), reinterpret_cast<half*>(b));
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<typename Dtype>
+__global__ void sub_kernel(const int n, const Dtype* a,
+    const Dtype* b, Dtype* y) {
+  LWDA_KERNEL_LOOP(index, n) {
+    y[index] = a[index] - b[index];
+  }
+}
+
+template<>
+void caffe_gpu_sub<float>(const int N, const float* a, const float* b, float* y) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  sub_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_LWDA_NUM_THREADS, 0, stream>>>(N, a, b, y);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_sub<double>(const int N, const double* a, const double* b, double* y) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  sub_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_LWDA_NUM_THREADS, 0, stream>>>(N, a, b, y);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+template<>
+void caffe_gpu_sub<float16>(const int N, const float16* a, const float16* b, float16* y) {
+  lwdaStream_t stream = Caffe::thread_stream();
+  // NOLINT_NEXT_LINE(whitespace/operators)
+  sub_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_LWDA_NUM_THREADS, 0, stream>>>(N, a, b, y);
+  LWDA_POST_KERNEL_CHECK;
+  LWDA_CHECK(lwdaStreamSynchronize(stream));
+}
+
+}  // namespace caffe

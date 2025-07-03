@@ -1,0 +1,347 @@
+# -*- mode: perl; -*-
+
+# FB Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $fbHal = [
+
+    # per-GPU defaults for FB engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+      READ  => [
+
+            DESCRIPTION   => "fb_Read",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU64 offset, void* buffer, LwU32 length",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+      WRITE  => [
+
+            DESCRIPTION   => "fb_Write",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU64 offset, void* buffer, LwU32 length",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+       DISASSEMBLE_VIRTUAL => [
+
+            DESCRIPTION   => "Disassemble Virtual",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 chId, LwU64 vAddr, LwU32 length, LwU32 shaderType",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL_and_later, ],
+        ],
+
+       TEST  => [
+
+            DESCRIPTION   => "fb test",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL_and_later, ],
+            _T124         => [ tAMPERE_and_later, ],
+        ],
+
+       TEST_SYSMEM  => [
+
+            DESCRIPTION   => "fb test sysmem",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ ALL, ],
+        ],
+
+
+        TEST_TLB  => [
+
+            DESCRIPTION   => "TLB test",
+            INTERFACE_TAG => "fbTestTLB",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ ALL, ],
+        ],
+
+        READ_ZBC  => [
+
+            DESCRIPTION   => "Read ZBC Color && Depth Table/Index",
+            INTERFACE_TAG => "fbReadZBC",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL_and_later, ],
+        ],
+
+        READ_DS_COLOR_ZBC_INDEX => [
+
+            DESCRIPTION   => "Read DS Color ZBC Index",
+            INTERFACE_TAG => "fbReadDSColorZBCindex",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ MAXWELL_thru_VOLTA, ],
+            _TU10X        => [ TURING_and_later, ],
+        ],
+
+        READ_DS_DEPTH_ZBC_INDEX => [
+
+            DESCRIPTION   => "Read DS Depth ZBC Table",
+            INTERFACE_TAG => "fbReadDSDepthZBCindex",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ MAXWELL_thru_VOLTA, ],
+            _TU10X        => [ TURING_and_later, ],
+        ],
+
+        READ_L2_COLOR_ZBC_INDEX => [
+
+            DESCRIPTION   => "Read L2 Color ZBC Index",
+            INTERFACE_TAG => "fbReadL2ColorZBCindex",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ ],
+            _GM107        => [ MAXWELL_and_later, ],
+        ],
+
+        READ_L2_DEPTH_ZBC_INDEX => [
+
+            DESCRIPTION   => "Read L2 Depth ZBC Table",
+            INTERFACE_TAG => "fbReadL2DepthZBCindex",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ ],
+            _GM107        => [ MAXWELL_and_later, ],
+        ],
+
+        GET_MEM_SIZE_MB => [
+
+            DESCRIPTION   => "getramsize mb",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ dMAXWELL, ],
+            _GP100        => [ dPASCAL_and_later, ],
+        ],
+
+        L2_ILWAL_EVICT => [
+            DESCRIPTION   => "Ilwalidate L2 cache by force eviction",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 scaleTime",
+            STUB_RETURNS  => ERROR,
+
+            _GK104       => [ ],
+            _GM107       => [ MAXWELL_and_later, ],
+        ],
+
+        MONITOR_ACCESS => [
+            DESCRIPTION   => "Monitor accesses to fb and show the count",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 nFbp, BOOL bReadback",
+            STUB_RETURNS  => ERROR,
+
+            _GK104       => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_PM_ENABLE_WRITES => [
+
+            DESCRIPTION   => "Get table of FBPA PM enable writes to use for fbMonitorAccess",
+            INTERFACE_TAG => "fbGetPMEnableWrites",
+            RETURN_TYPE   => "setup_writes_t *",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => NULL,
+
+            _GK104        => [ dMAXWELL, ],
+            _GP100        => [ dPASCAL_and_later, ],
+            _STUB         => [ CHEETAH, ],
+        ],
+
+        GET_ECC_INFO => [
+            DESCRIPTION   => "Get ecc info",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "BOOL",
+
+            _GK104        => [ dMAXWELL_and_later, ],
+        ],
+
+        L2_STATE => [
+            DESCRIPTION   => "read l2 cache state",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ERROR,
+
+            _GK104       => [ ],
+            _GM107       => [ MAXWELL_and_later, ],
+        ],
+
+        L2_STATE_FOR_CACHE_LINES => [
+            DESCRIPTION   => "Read L2 cache lines for tag and state.",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32, LwU32",
+            STUB_RETURNS  => ERROR,
+
+            _GM107       => [ MAXWELL, ],
+            _GP100       => [ PASCAL_and_later, ],
+            _STUB        => [ pre_MAXWELL, ],
+        ],
+
+        IS_MEM_REQ => [
+            DESCRIPTION   => "check whether there are pending mem requests",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 nFbp",
+            STUB_RETURNS  => ERROR,
+
+            _GK104       => [ ],
+            _GM200       => [ MAXWELL_and_later, ],
+        ],
+
+        L2_BYPASS_ENABLE  => [
+
+            DESCRIPTION   => "Enable/Disable L2 bypass",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "BOOL",
+
+            _GK104        => [ ],
+            _GM200        => [ MAXWELL_and_later, ],
+        ],
+
+        GET_ACTIVE_FBP_COUNT  => [
+
+            DESCRIPTION   => "Return Active FB Partition Count",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        GET_ACTIVE_LTC_COUNT_LWW => [
+            DESCRIPTION   => "Gets the active LTC count.",
+            INTERFACE_TAG => "fbGetActiveLTCCountLwW",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "",
+            STUB_RETURNS  => ZERO,
+
+            _GK104       => [ GM10X, ],
+            _GM200       => [ GM20X_thru_TURING, GA100, ],
+            _GA102       => [ AMPERE_and_later, -GA100, ]
+        ],
+
+        GET_ACTIVE_LTC_MASK_FOR_FBP => [
+            DESCRIPTION   => "Gets the active LTC mask for an FBP",
+            INTERFACE_TAG => "fbGetActiveLtcMaskforFbp",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32 fbpIdx",
+            STUB_RETURNS  => ZERO,
+
+            _GM107       => [ GM10X, ],
+            _GM200       => [ GM20X, PASCAL_thru_TURING, GA100, ],
+            _GA102       => [ AMPERE_and_later, -GA100, ]
+        ],
+
+        GET_LTS_PER_LTC_COUNT_LWW => [
+
+            DESCRIPTION   => "Gets the LTS per LTC count.",
+            INTERFACE_TAG => "fbGetLTSPerLTCCountLwW",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ GM10X, ],
+            _GK208        => [ ],
+            _T124         => [ ],
+            _GM200        => [ GM20X_and_later, tAMPERE_and_later, ],
+        ],
+
+        GET_ACTIVE_LTS_MASK_FOR_LTC => [
+
+            DESCRIPTION   => "Returns the mask of active LTS for an LTC",
+            INTERFACE_TAG => "fbGetActiveLtsMaskForLTC",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "LwU32 ltcIdx",
+            STUB_RETURNS  => ZERO,
+
+            _GM107        => [ MAXWELL_thru_VOLTA, GA100, ],
+            _TU102        => [ TURING ],
+            _GA102        => [ AMPERE_and_later, -GA100 ]
+        ],
+
+        GET_LINES_PER_LTS_COUNT_LWW => [
+
+            DESCRIPTION   => "Gets the lines per LTS count.",
+            INTERFACE_TAG => "fbGetLinesPerLTSCountLwW",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GM107        => [ GM10X, ],
+            _GM200        => [ GM20X_and_later, tAMPERE_and_later, ],
+            _STUB         => [ pre_MAXWELL, ],
+        ],
+
+        GET_FBIO_BROADCAST_DDR_MODE => [
+
+            DESCRIPTION   => "Read LW_PFB_FBPA_FBIO_BROADCAST_DDR_MODE",
+            INTERFACE_TAG => "fbGetFBIOBroadcastDDRMode",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ dMAXWELL, ],
+            _GP100        => [ dPASCAL_and_later, ],
+            _STUB         => [ CHEETAH, ],
+        ],
+
+        GET_BAR0_WINDOW_REG_ADDRESS => [
+
+            DESCRIPTION   => "Return BAR0 window register address",
+            INTERFACE_TAG => "fbGetBAR0WindowRegAddress",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ERROR,
+            _GK104        => [ MAXWELL_thru_ADA, ],
+            _GH100        => [ HOPPER_and_later, ],
+        ],
+
+        SET_BAR0_WINDOW_BASE => [
+
+            DESCRIPTION   => "Set the BASE field of BAR0 window register",
+            INTERFACE_TAG => "fbSetBAR0WindowBase",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LwU32",
+            _GK104        => [ MAXWELL_thru_ADA, ],
+            _GH202        => [ GH202, ],
+            _GH100        => [ HOPPER_and_later, -GH202, ],
+        ],
+    ],  # HAL_INTERFACES
+
+];
+
+
+# return a reference to the Hal definition
+return $fbHal;

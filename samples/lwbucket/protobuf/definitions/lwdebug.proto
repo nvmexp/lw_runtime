@@ -1,0 +1,177 @@
+// _LWRM_COPYRIGHT_BEGIN_
+//
+// Copyright 2009-2017 by LWPU Corporation.  All rights reserved.  All
+// information contained herein is proprietary and confidential to LWPU
+// Corporation.  Any use, reproduction, or disclosure without the written
+// permission of LWPU Corporation is prohibited.
+//
+// _LWRM_COPYRIGHT_END_
+
+//
+// LWDebug dump message definitions
+//
+// - Each engine is wrapped in its own message.
+// - LwDump wraps all of the dump options into one message
+//   that completely describes the LWDebug dump file.
+//
+
+package LwDebug;
+
+import "all_dcl.proto";
+import "engines.proto";
+import "regs.proto";
+import "rtos.proto";
+
+enum OsType
+{
+    OS_NT = 1;
+    OS_UNIX = 2;
+    OS_MAC = 3;
+    OS_MODS = 4;
+    OS_QNX = 5;
+    OS_UNITTEST = 6;
+    OS_UNK = 7;
+};
+
+message SystemInfo
+{
+    message NorthBridgeInfo
+    {
+        optional uint32 id   = 1;
+        optional uint32 ssid = 2;
+    };
+
+    message SocInfo
+    {
+        optional uint32 vendorId = 1;
+        optional uint32 chipId = 2;
+    };
+
+    message CpuInfo
+    {
+        optional uint32 cpu_type = 1;
+        optional uint32 num_cpu_cores = 2;
+        optional uint32 num_logical_cpus = 3;
+        optional uint32 cpu_caps = 4;
+    };
+
+    message GpuInfo
+    {
+        optional uint32 num_gpus = 1;
+        repeated uint32 gpu_id = 2;
+        repeated string gpu_uuid = 3;    // Binary version is really bytes.
+        repeated uint32 device_id = 4;
+        repeated uint32 pmcBoot0 = 5;
+        repeated uint32 junction_temp = 6;
+        repeated uint32 subdev_id = 7;
+    };
+
+    message OsInfo
+    {
+        optional OsType family  = 1;
+        //
+        // Windows is identified by Major, Minor, and Bld Num
+        // Unix can use the same system, for example: 2.6.35
+        // (osMajorVersion=2, osMinorVersion=6, osBldNum=35)
+        //
+        optional uint32 osMajorVersion = 2;
+        optional uint32 osMinorVersion = 3;
+        optional uint32 osBldNum = 4;
+        optional uint32 winProductType = 5;
+        //
+        // On Linux, buildVersion might look like this:
+        // "2.6.18-194.el5-custom+"
+        //
+        optional string buildVersion = 6;
+        //
+        // On Linux, for example, buildDatePlus might look like:
+        // "#1 SMP Tue Jan 18 17:27:59 PST 2011"
+        //
+        optional string buildDatePlus = 7;
+    };
+
+    message DriverInfo
+    {
+        optional bool   is_release          = 1;
+        optional string version             = 2;
+        optional string branch              = 3;
+        optional uint32 changelist          = 4;
+        optional string previous_version    = 5;
+        optional string previous_branch     = 6;
+        optional uint32 previous_changelist = 7;
+        optional uint32 load_count          = 8;
+    };
+
+    message Config
+    {
+        // First is master id
+        optional uint32 master_id = 1;
+        repeated uint32 gpu_id = 2;
+    };
+
+    message ErrorState
+    {
+        optional uint32 bugcheck_code = 1;
+        optional bool got_rm_lock = 2;
+        optional uint32 dump_buffer_size = 3;
+    };
+
+    message TimeInfo
+    {
+        optional uint64 timestamp_freq        = 1;  // Divide by this to get seconds.
+        optional uint64 timestamp_dump        = 2;  // Follows timestamp_format.
+        optional uint64 system_time_dump      = 3;  // Always microseconds since 1/1/1970.
+        optional uint32 time_since_boot_us    = 4 [deprecated = true];  // BROKEN
+        optional uint32 time_since_boot_sec   = 5;
+    };
+
+    optional uint64          timestamp        =  1 [deprecated = true];
+    optional NorthBridgeInfo northbridge_info =  2;
+    optional CpuInfo         cpu_info         =  3;
+    optional GpuInfo         gpu_info         =  4;
+    optional OsInfo          os_info          =  5;
+    optional DriverInfo      driver_info      =  6;
+    repeated Config          gpu_config       =  7;
+    optional ErrorState      error_state      =  8;
+    optional SocInfo         soc_info         =  9;
+    optional uint32          time_since_boot  = 10 [deprecated = true];
+    optional TimeInfo        time_info        = 11;
+    optional uint32          bugcheck_count   = 12;
+};
+
+message GpuInfo
+{
+    optional LwDebug.Eng.Gpu           eng_gpu          = 1;
+    repeated LwDebug.Eng.Mc            eng_mc           = 2;
+    optional LwDebug.Eng.EngFifo       eng_fifo         = 3;
+    repeated Regs.RegsAndMem           raw_memory       = 4;
+    repeated LwDebug.Eng.Gr            eng_gr           = 5;
+    optional LwDebug.Eng.Fb            eng_fb           = 6;
+    optional LwDebug.Eng.Disp          eng_disp         = 7;
+    optional LwDebug.Eng.Fan           eng_fan          = 8;
+    optional LwDebug.Eng.Thermal       eng_thermal      = 9;
+    optional LwDebug.Eng.Fuse          eng_fuse         = 10;
+    optional LwDebug.Eng.VBios         eng_vbios        = 11;
+    optional LwDebug.Eng.Perf          eng_perf         = 12;
+    optional LwDebug.Eng.Bus           eng_bus          = 13;
+    optional LwDebug.Eng.Pmu_Obsolete  eng_pmu_obsolete = 14 [deprecated = true];
+    optional LwDebug.Eng.Ce            eng_ce           = 15;
+    repeated LwDebug.Eng.RtosFlcn      eng_rtos_flcn    = 16;
+    optional LwDebug.Eng.Lpwr          eng_lpwr         = 17;
+    repeated LwDebug.Eng.Lwd           eng_lwd          = 18;
+    optional LwDebug.Eng.Volt          eng_volt         = 19;
+    optional LwDebug.Eng.Clk           eng_clk          = 20;
+};
+
+
+// Note: Any changes to dcl_msg must also be made to
+// common/inc/protobuf/umd_lwdebug.proto since UMDs don't include kernel
+// protobuf definitions.
+
+message LwDump
+{
+    optional SystemInfo system_info = 1;
+    repeated Dcl.DclMsg dcl_msg     = 2;
+    repeated GpuInfo    gpu_info    = 3;
+    repeated uint64     exception_address = 4;
+};

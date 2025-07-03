@@ -1,0 +1,173 @@
+# -*- mode: perl; -*-
+
+# MSENC Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $msencHal = [
+
+    # per-GPU defaults for MSENC engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ GM108, ], # GM108 has no video encode engines
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+        IS_VALID_ENGINE_ID => [
+
+            DESCRIPTION   => "Determine if MSENC engine ID is valid on this GPU",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _v08_02       => [ dADA_and_later, -GH100, -CHEETAH, ],
+            _STUB         => [ pre_dADA, CHEETAH, GH100, ],
+        ],
+
+        IS_SUPPORTED => [
+
+            DESCRIPTION   => "Determine if MSENC is supported on this GPU",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _v01_00     => [ ],
+            _v02_00     => [ T234_and_later, ],
+            _v04_00     => [ GM10X, ],
+            _v05_00     => [ GM20X, ],
+            _v06_00     => [ GP100, ],
+            _v06_02     => [ dPASCAL, -GP100, ],
+            _v06_04     => [ dVOLTA, ],
+            _v07_02     => [ dTURING_thru_dAMPERE, -CHEETAH, ],
+            _v08_02     => [ dADA_and_later, -GH100, -CHEETAH, ],
+            _STUB       => [ GH100, ],
+        ],
+
+        DUMP_PRIV => [
+
+            DESCRIPTION   => "Dump MSENC priv space",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v01_00          => [ ],
+            _v02_00          => [ T234_and_later, ],
+            _v04_00          => [ GM10X, -GM108 ],
+            _v05_00          => [ GM20X, ],
+            _v06_00          => [ GP10X_and_later,  -GH100, -CHEETAH, ],
+            _STUB            => [ GH100, ],
+        ],
+
+        DUMP_FUSE => [
+
+            DESCRIPTION   => "Dump MSENC related fuse registers",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v08_02       => [ dADA_and_later, -GH100, -CHEETAH, ],
+            _STUB         => [ pre_dADA, CHEETAH, GH100, ],
+        ],
+
+        IS_PRIV_BLOCKED => [
+
+            DESCRIPTION   => "Determine if MSENC priv registers are accessible on this GPU",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _v08_02       => [ dADA_and_later, -GH100, -CHEETAH, -GH202, -GB100],
+            _STUB         => [ pre_dADA, CHEETAH, GH100, GH202, GB100],
+        ],
+
+        DUMP_IMEM => [
+
+            DESCRIPTION   => "Dump MSENC instruction memory",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => DUMP_PRIV,
+        ],
+
+        DUMP_DMEM => [
+
+            DESCRIPTION   => "Dump MSENC data memory",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v01_00     => [ ],
+            _v02_00     => [ T234_and_later, ],
+            _v04_00     => [ GM10X, -GM108 ],
+            _v05_00     => [ GM20X, ],
+            _v06_00     => [ GP100, ],
+            _v06_02     => [ GP10X_and_later, -GP100,  -GH100, ],
+            _STUB       => [ GH100, ],
+        ],
+
+        GET_CLASS_ID => [
+
+            DESCRIPTION   => "Retuns class ID",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _v06_02     => [ dPASCAL, -GP100, ],
+            _v06_04     => [ dVOLTA, ],
+            _v07_02     => [ dTURING_thru_dAMPERE, -CHEETAH, ],
+            _v08_02     => [ dADA_and_later, -GH100, -CHEETAH, ],
+            _STUB       => [ pre_GP102, CHEETAH, GH100, ],
+        ],
+
+
+        PRINT_PRIV => [
+
+            DESCRIPTION   => "Print MSENC priv space",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LwU32, char*, LwU32",
+
+            LIKE_INTERFACE => DUMP_PRIV,
+        ],
+
+        TEST_STATE => [
+
+            DESCRIPTION   => "Test if MSENC engine is in a valid state",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => DUMP_PRIV,
+        ],
+
+        DISPLAY_HWCFG => [
+
+            DESCRIPTION   => "Display MSENC hardware configuration",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => DUMP_PRIV,
+        ],
+
+        DISPLAY_FLCN_SPR => [
+
+            DESCRIPTION   => "Dump MSENC Special Purpose Registers",
+            INTERFACE_TAG => "msencDisplayFlcnSPR",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => DUMP_PRIV,
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $msencHal;

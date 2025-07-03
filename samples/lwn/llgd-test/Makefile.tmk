@@ -1,0 +1,157 @@
+################################### tell Emacs this is a -*- makefile-gmake -*-
+#
+# Copyright (c) 2017-2020, LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+# tmake for SW Mobile component makefile
+#
+###############################################################################
+
+ifdef LW_COMPONENT_FLAG_LWTEST_LIBRARY_SECTION
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME := llgd-test
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_HOS),1)
+	LLGD_TEST_UTIL_DISPLAY := src/LlgdTestUtilDisplay_hos.cpp
+else
+	LLGD_TEST_UTIL_DISPLAY := src/LlgdTestUtilDisplay_linux.cpp
+endif
+
+LW_COMPONENT_SOURCES := \
+	src/LlgdTestMain.cpp \
+	src/LlgdTestUtil.cpp \
+	src/LlgdTestUtilEditState.cpp \
+	src/LlgdTestUtilLWN.cpp \
+	$(LLGD_TEST_UTIL_DISPLAY) \
+	src/LlgdTestUtilPool.cpp \
+	src/LlgdTest.cpp \
+	\
+	src/LlgdTestBlendMode.cpp \
+	src/LlgdTestDecodeDepthStencilTarget.cpp \
+	src/LlgdTestDecodeGraphicsShader.cpp \
+	src/LlgdTestDecodeMemoryPool.cpp \
+	src/LlgdTestDecodeQueue.cpp \
+	src/LlgdTestDecodeRenderTarget.cpp \
+	src/LlgdTestDeviceFlagBits.cpp \
+	src/LlgdTestEmpty.cpp \
+	src/LlgdTestFastColor.cpp \
+	src/LlgdTestGetDepthMode.cpp \
+	src/LlgdTestGetDeviceFromLWN.cpp \
+	src/LlgdTestGetWindowOriginMode.cpp \
+	src/LlgdTestGrCtx.cpp \
+	src/LlgdTestHeaderSize.cpp \
+	src/LlgdTestInterception.cpp \
+	src/LlgdTestPageKinds.cpp \
+	src/LlgdTestRLE.cpp \
+	src/LlgdTestShaderInfo.cpp \
+	src/LlgdTestSubmitCommandsSegmented.cpp \
+	src/LlgdTestTextureHeader.cpp \
+	src/LlgdTestTrackMemoryPoolFlags.cpp \
+        src/LlgdTestPteObserver.cpp
+
+# Enable replay-relevant tests on HOS
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_HOS),1)
+LW_COMPONENT_SOURCES += \
+	src/LlgdTestDevice.cpp \
+	src/LlgdTestEditBarrierInsert.cpp \
+	src/LlgdTestEditBarrierRemove.cpp \
+	src/LlgdTestEditBarrierEditFlags.cpp \
+	src/LlgdTestEditBlitRemove.cpp \
+	src/LlgdTestEditClearRemove.cpp \
+	src/LlgdTestEditDispatchRemove.cpp \
+	src/LlgdTestEditDrawRemove.cpp \
+	src/LlgdTestEditPixelState.cpp \
+	src/LlgdTestEditProgramReplacer.cpp \
+	src/LlgdTestEditRasterizerState.cpp \
+	src/LlgdTestEditStateWithBookends.cpp \
+	src/LlgdTestEditStateWithMultiGPFIFOs.cpp \
+	src/LlgdTestEditStateWithPassthroughMode.cpp \
+	src/LlgdTestEditStateWithTokens.cpp \
+	src/LlgdTestEditTransformState.cpp \
+	src/LlgdTestEditVertexSpecificationState.cpp \
+	src/LlgdTestReplayQueue.cpp \
+	src/LlgdTestReserveVa.cpp \
+	src/LlgdTestReswizzle.cpp \
+	src/LlgdTestShaderProfilerCommandPatcher.cpp \
+	src/LlgdTestWriteTextureHeader.cpp
+endif
+
+LW_COMPONENT_INCLUDES := \
+	./inc \
+	$(LW_SOURCE)/core/include \
+	$(LW_SOURCE)/gpu/drv/drivers/lwn/ \
+	$(LW_SOURCE)/gpu/drv/drivers/lwn/public/ \
+	$(LW_SOURCE)/gpu/drv/drivers/lwn/public/lwn \
+	$(LW_SOURCE)/gpu/drv/drivers/lwn/interface \
+	$(LW_SOURCE)/gpu/drv/drivers/lwn/devtools \
+	$(LW_SOURCE)/gpu/drv/drivers/lwn/devtools/llgd/shared/inc \
+	$(LW_SOURCE)/gpu/drv/drivers/lwn/devtools/llgd/llgd-target/inc \
+	$(LW_SOURCE)/gpu/drv/sdk/lwpu/inc
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_HOS),1)
+	LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+		$(LW_INTERFACE_CORE_LWOS) \
+		$(LW_SOURCE)/hos/services/src/resmgrs/lwrm/utils \
+		$(LW_INTERFACE_GPU_GRAPHICS_LWN) \
+		$(LW_SOURCE)/gpu/drv/drivers/lwn/devtools/llgd/liblwn-llgd
+
+	LW_COMPONENT_CFLAGS += \
+		-DLW_HOS
+endif
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_LINUX),1)
+	LW_COMPONENT_SOURCES += \
+		../common/lwnWin/lwn_win.cpp \
+		../common/lwnWin/lwwinsys_win.cpp \
+		../common/lwnWin/wayland_win.cpp \
+		../common/lwnWin/dmabuf-protocol.c \
+		../common/lwnWin/synchronization-protocol.c
+
+	LW_COMPONENT_INCLUDES += \
+		../samples/common \
+		../common/lwnWin \
+		$(LW_TOOLS)/embedded/external-prebuilt/wayland-1.14.0/Linux-aarch64/include \
+		$(LW_TOOLS)/embedded/external-prebuilt/wayland-protocols-1.17/include \
+		$(LW_TOOLS)/embedded/external-prebuilt/wayland-protocols-1.17/src
+
+	LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+		$(LW_INTERFACE_CORE_LWOS) \
+		$(LW_INTERFACE_GPU_GRAPHICS_LWN) \
+		$(LW_INTERFACE_GPU_GRAPHICS_LWWINSYS_PRIVATE) \
+		$(LW_SOURCE)/gpu/drv/drivers/lwn/devtools/llgd/liblwn-llgd \
+		$(LW_SOURCE)/gpu/drv/drivers/unix/dso-stubs/wayland/libwayland-dso-stubs/wayland-client \
+		$(LW_SOURCE)/gpu/drv/drivers/unix/dso-stubs/wayland/libwayland-dso-stubs/wayland-egl
+
+	LW_COMPONENT_CFLAGS += \
+		-DLW_LINUX
+
+	LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += stdc++
+endif
+
+LW_COMPONENT_POST_PROCESS_INPUT += \
+       llgd-test.desc
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_HOS),1)
+ifeq ($(LW_TARGET_ARCH),hos_64)
+LW_COMPONENT_POST_PROCESS_INPUT += \
+       llgd-test.aarch64.lp64.nmeta
+else
+LW_COMPONENT_POST_PROCESS_INPUT += \
+       llgd-test.arm.ilp32.nmeta
+endif
+endif
+
+include $(LW_BUILD_DYNAMIC_EXELWTABLE)
+endif
+
+# Local Variables:
+# indent-tabs-mode: t
+# tab-width: 8
+# End:
+# vi: set tabstop=8 noexpandtab:

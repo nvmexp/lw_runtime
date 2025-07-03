@@ -1,0 +1,127 @@
+/* _LWRM_COPYRIGHT_BEGIN_
+ *
+ * Copyright 2019 by LWPU Corporation.  All rights reserved.  All information
+ * contained herein is proprietary and confidential to LWPU Corporation.  Any
+ * use, reproduction, or disclosure without the written permission of LWPU
+ * Corporation is prohibited.
+ *
+ * _LWRM_COPYRIGHT_END_
+ */
+
+#ifndef _RISCV_CSRS_H
+#define _RISCV_CSRS_H
+
+#include "riscv_prv.h"
+
+#include "ampere/ga102/dev_pmu_riscv_csr_64.h"
+
+#define MK_CSR(X) { #X, LW_RISCV_CSR_##X }
+#define MK_INDEXED_CSR(X) { #X, LW_RISCV_CSR_##X(0) }
+
+static const struct NamedCsr _csrs[] =
+{
+    MK_CSR(MISA),
+    MK_CSR(MVENDORID),
+    MK_CSR(MARCHID),
+    MK_CSR(MIMPID),
+    MK_CSR(MHARTID),
+    MK_CSR(MSTATUS),
+    MK_CSR(MTVEC),
+    MK_CSR(MEDELEG),
+    MK_CSR(MIDELEG),
+    MK_CSR(MIP),
+    MK_CSR(MIE),
+    MK_INDEXED_CSR(MHPMCOUNTER),
+    MK_CSR(MCOUNTEREN),
+    MK_INDEXED_CSR(MHPMEVENT),
+    MK_CSR(MSCRATCH),
+    MK_CSR(MSCRATCH2),
+    MK_CSR(MEPC),
+    MK_CSR(MCAUSE),
+    MK_CSR(MCAUSE2),
+    MK_CSR(MTVAL),
+    MK_CSR(PMPCFG0),
+    MK_CSR(PMPCFG2),
+    MK_INDEXED_CSR(PMPADDR),
+    MK_CSR(MEXTPMPCFG0),
+    MK_CSR(MEXTPMPCFG2),
+    MK_INDEXED_CSR(MEXTPMPADDR),
+    MK_CSR(MTIMECMP),
+    MK_CSR(MCFG),
+    MK_CSR(MBPCFG),
+    MK_CSR(MDCACHEOP),
+    MK_CSR(MMPUCTL),
+    MK_CSR(MLWRRUID),
+    MK_CSR(MOPT),
+    MK_CSR(MMISCOPEN),
+    MK_CSR(MLDSTATTR),
+    MK_CSR(MFETCHATTR),
+    MK_CSR(FFLAGS),
+    MK_CSR(FRM),
+    MK_CSR(FCSR),
+    MK_INDEXED_CSR(HPMCOUNTER),
+    MK_CSR(MSPM),
+    MK_CSR(MDBGCTL),
+    MK_CSR(MRSP),
+    MK_CSR(SPM),
+    MK_CSR(RSP),
+    MK_CSR(TSELECT),
+    MK_CSR(TDATA1),
+    MK_CSR(TDATA2),
+    MK_CSR(DCSR),
+    MK_CSR(MBIND),
+    MK_CSR(MTLBILWDATA1),
+    MK_CSR(MTLBILWOP),
+    MK_CSR(MFLUSH),
+    MK_CSR(ML2SYSILW),
+    MK_CSR(ML2PEERILW),
+    MK_CSR(ML2CLNCOMP),
+    MK_CSR(ML2FLHDTY),
+    MK_CSR(MSYSOPEN),
+    MK_CSR(MROMPROT),
+    MK_CSR(BIND),
+    MK_CSR(TLBILWDATA1),
+    MK_CSR(TLBILWOP),
+    MK_CSR(FLUSH),
+    MK_CSR(L2SYSILW),
+    MK_CSR(L2PEERILW),
+    MK_CSR(L2CLNCOMP),
+    MK_CSR(L2FLHDTY),
+    MK_CSR(LWFENCEIO),
+    MK_CSR(LWFENCEMEM),
+    MK_CSR(LWFENCEALL),
+    MK_CSR(SSTATUS),
+    MK_CSR(STVEC),
+    MK_CSR(SSCRATCH),
+    MK_CSR(SSCRATCH2),
+    MK_CSR(SIP),
+    MK_CSR(SIE),
+    MK_CSR(STVAL),
+    MK_CSR(SEPC),
+    MK_CSR(SCAUSE),
+    MK_CSR(SCAUSE2),
+    MK_CSR(SATP),
+    MK_CSR(SCOUNTEREN),
+    MK_CSR(SSPM),
+    MK_CSR(SRSP),
+    MK_CSR(SLWRRUID),
+    MK_CSR(SCFG),
+    MK_CSR(SBPCFG),
+    MK_CSR(SMISCOPEN),
+    MK_CSR(SMPUCTL),
+    MK_CSR(SMPUIDX),
+    MK_CSR(SMPUVA),
+    MK_CSR(SMPUPA),
+    MK_CSR(SMPURNG),
+    MK_CSR(SMPUATTR),
+    MK_CSR(SMPUIDX2),
+    MK_CSR(SMPUVLD),
+    MK_CSR(SMPUDTY),
+    MK_CSR(SMPUACC),
+    MK_CSR(SSYSOPEN),
+    MK_CSR(DCACHEOP),
+    MK_CSR(LWRRUID),
+    { NULL, 0 }
+};
+
+#endif // _RISCV_CSRS_H

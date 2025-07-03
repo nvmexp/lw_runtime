@@ -1,0 +1,655 @@
+// Copyright LWPU Corporation 2015
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "ApexPointMapConstructorKernels.hpp"
+#include "ApexPointMapDirections.hpp"
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+// Initialization of the output ApexPointMap structure.
+
+static __global__
+void ApexPointMapInit(APMConstructParams p)
+{
+    int idx = threadIdx.x + (blockIdx.x << 5);
+    if (idx >= p.numDirections)
+        return;
+
+    // Initialize the dot product array.
+
+    unsigned long long initValue;
+    if (p.inModel.numPrimitives != 0)
+        initValue = ((unsigned long long)ApexPointMap::encodeFloat(FLT_MAX)) | (((unsigned long long)ApexPointMap::encodeFloat(-FLT_MAX)) << 32);
+    else
+        initValue = ((unsigned long long)ApexPointMap::encodeFloat(LWDART_NAN_F)) | (((unsigned long long)ApexPointMap::encodeFloat(LWDART_NAN_F)) << 32);
+
+    *((unsigned long long*)&p.outApexPointMap->m_dots[idx]) = initValue;
+
+    // Clear the work counter and initialize the remaining output fields.
+
+    if (idx == 0)
+    {
+        p.outApexPointMap->m_resolution = p.apmResolution;
+        *p.workCounter = 0;
+    }
+}
+
+//------------------------------------------------------------------------
+// Indexed input, high APM resolution.
+// Deduplicate based on both indices and vertex positions.
+
+template <int DIRS_PER_THREAD> static __global__
+void APMConstructIndexed(APMConstructParams p)
+{
+    INIT_SHUFFLE_EMULATION(APM_CONSTRUCT_WARPS_PER_BLOCK)
+
+    int dbase = threadIdx.x * DIRS_PER_THREAD;
+    int tbase = 0;
+
+    if (threadIdx.x == 0)
+        tbase = atomicAdd(p.workCounter, APM_CONSTRUCT_BATCH_SIZE);
+    tbase = __shfl_nosync(tbase, 0);
+    if (tbase >= p.inModel.numPrimitives)
+        return;
+
+    __shared__ float4 s_hashBuffer[APM_CONSTRUCT_HASH_PER_WARP / 4 * APM_CONSTRUCT_WARPS_PER_BLOCK];
+    float4* hashPtr  = &s_hashBuffer[threadIdx.y * APM_CONSTRUCT_HASH_PER_WARP / 4];
+    int     hashSize = APM_CONSTRUCT_HASH_PER_WARP / 4;
+
+    float4* hashClearPtr = hashPtr + threadIdx.x;
+    for (int i = 0; i < hashSize; i += 32)
+        hashClearPtr[i] = make_float4(LWDART_NAN_F, LWDART_NAN_F, LWDART_NAN_F, __int_as_float(-1)); // Clear the position+index hash.
+
+    float3 d[DIRS_PER_THREAD];
+    float2 b[DIRS_PER_THREAD];
+
+    float rcpResolution = 1.f / (float)p.apmResolution;
+    for (int i=0; i < DIRS_PER_THREAD; i++)
+    {
+        int idx = dbase + i;
+        d[i] = (idx < p.numDirections) ? ApexPointMap::decodeDirection(g_apexPointMapDirections[p.apmResolution][idx], rcpResolution) : make_float3(0.f, 0.f, 0.f);
+        b[i] = make_float2(FLT_MAX, -FLT_MAX);
+    }
+
+    float3 vlane = make_float3(LWDART_NAN_F, LWDART_NAN_F, LWDART_NAN_F);
+    uint3  vidx3 = loadCachedAlign4((uint3*)p.inModel.indices);
+    while (tbase < p.inModel.numPrimitives)
+    {
+        int tend = min(tbase + APM_CONSTRUCT_BATCH_SIZE, p.inModel.numPrimitives);
+        unsigned int tofs = (tbase + threadIdx.x) * p.inModel.indexStride;
+
+        while (tbase < tend)
+        {
+            if (tbase + threadIdx.x < tend)
+                vidx3 = loadCachedAlign4((uint3*)((unsigned char*)p.inModel.indices + tofs));
+
+            for (int k = 0; k < 3; k++)
+            {
+                unsigned int vidx = (k == 0) ? vidx3.x : (k == 1) ? vidx3.y : vidx3.z;
+                unsigned int vofs = vidx * p.inModel.vertexStride;
+
+                // De-duplicate vertex indices.
+
+                int hashSlot = vidx & (hashSize - 1);
+                bool kill = (atomicExch((int*)&hashPtr[hashSlot].w, vidx) == vidx);
+
+                // De-duplicate vertex positions.
+
+                if (!kill)
+                {
+                    vlane = loadCachedAlign4((float3*)((unsigned char*)p.inModel.vertices + vofs));
+                    unsigned int hashSlot = (__float_as_int(vlane.x) + __float_as_int(vlane.y) + __float_as_int(vlane.z)) & (hashSize - 1);
+                    bool mx = (atomicExch(&hashPtr[hashSlot].x, vlane.x) == vlane.x);
+                    bool my = (atomicExch(&hashPtr[hashSlot].y, vlane.y) == vlane.y);
+                    bool mz = (atomicExch(&hashPtr[hashSlot].z, vlane.z) == vlane.z);
+                    kill = (mx && my && mz);
+                }
+                unsigned int keepMask = ~__ballot(kill);
+
+                // Process vertices.
+
+                while (keepMask)
+                {
+                    unsigned int tsub = 31 - __clz(keepMask);
+                    keepMask &= ~(1 << tsub);
+
+                    float3 v;
+                    v.x = __shfl_nosync(vlane.x, tsub);
+                    v.y = __shfl_nosync(vlane.y, tsub);
+                    v.z = __shfl_nosync(vlane.z, tsub);
+
+                    for (int i=0; i < DIRS_PER_THREAD; i++)
+                    {
+                        float t = d[i].x * v.x + d[i].y * v.y + d[i].z * v.z;
+                        b[i].x = min(b[i].x, t);
+                        b[i].y = max(b[i].y, t);
+                    }
+                }
+            }
+
+            tbase += 32;
+            tofs  += 32 * p.inModel.indexStride;
+        }
+
+        if (threadIdx.x == 0)
+            tbase = atomicAdd(p.workCounter, APM_CONSTRUCT_BATCH_SIZE);
+        tbase = __shfl_nosync(tbase, 0);
+    }
+
+    for (int i=0; i < DIRS_PER_THREAD; i++)
+    {
+        int idx = dbase + i;
+        if (idx < p.numDirections)
+        {
+            atomicMin(&p.outApexPointMap->m_dots[idx].x, ApexPointMap::encodeFloat(b[i].x));
+            atomicMax(&p.outApexPointMap->m_dots[idx].y, ApexPointMap::encodeFloat(b[i].y));
+        }
+    }
+}
+
+//------------------------------------------------------------------------
+// Indexed input, low APM resolution.
+// Deduplicate based on vertex indices only.
+
+template <int DIRS_PER_THREAD> static __global__
+void APMConstructIndexedSmall(APMConstructParams p)
+{
+    INIT_SHUFFLE_EMULATION(APM_CONSTRUCT_WARPS_PER_BLOCK)
+
+    int tbase = 0;
+    if (threadIdx.x == 0)
+        tbase = atomicAdd(p.workCounter, APM_CONSTRUCT_BATCH_SIZE);
+    tbase = __shfl_nosync(tbase, 0);
+    if (tbase >= p.inModel.numPrimitives)
+        return;
+
+    __shared__ int s_indexHashBuffer[APM_CONSTRUCT_HASH_PER_WARP * APM_CONSTRUCT_WARPS_PER_BLOCK];
+    int* indexHash = &s_indexHashBuffer[threadIdx.y * APM_CONSTRUCT_HASH_PER_WARP];
+    int  hashSize  = APM_CONSTRUCT_HASH_PER_WARP;
+
+    int* indexHashClear = indexHash + threadIdx.x;
+    for (int i = 0; i < hashSize; i += 32)
+        indexHashClear[i] = -1; // Clear the index hash.
+
+    float3 d[DIRS_PER_THREAD];
+    float2 b[DIRS_PER_THREAD];
+
+    float rcpResolution = 1.f / (float)p.apmResolution;
+    for (int i=0; i < DIRS_PER_THREAD; i++)
+    {
+        d[i] = ApexPointMap::decodeDirection(g_apexPointMapDirections[p.apmResolution][i], rcpResolution);
+        b[i] = make_float2(FLT_MAX, -FLT_MAX);
+    }
+
+    float3 v0 = make_float3(LWDART_NAN_F, LWDART_NAN_F, LWDART_NAN_F);
+    float3 v1 = make_float3(LWDART_NAN_F, LWDART_NAN_F, LWDART_NAN_F);
+    float3 v2 = make_float3(LWDART_NAN_F, LWDART_NAN_F, LWDART_NAN_F);
+    uint3 vidx3 = loadCachedAlign4((uint3*)p.inModel.indices);
+
+    while (tbase < p.inModel.numPrimitives)
+    {
+        int tend = min(tbase + APM_CONSTRUCT_BATCH_SIZE, p.inModel.numPrimitives);
+        unsigned int tofs = (tbase + threadIdx.x) * p.inModel.indexStride;
+
+        while (tbase < tend)
+        {
+            if (tbase + threadIdx.x < tend)
+                vidx3 = loadCachedAlign4((uint3*)((unsigned char*)p.inModel.indices + tofs));
+
+            // De-duplicate indices to avoid unnecessary vertex fetches.
+
+            if (atomicExch(&indexHash[vidx3.x & (hashSize - 1)], vidx3.x) != vidx3.x) v0 = loadCachedAlign4((float3*)((unsigned char*)p.inModel.vertices + vidx3.x * p.inModel.vertexStride));
+            if (atomicExch(&indexHash[vidx3.y & (hashSize - 1)], vidx3.y) != vidx3.y) v1 = loadCachedAlign4((float3*)((unsigned char*)p.inModel.vertices + vidx3.y * p.inModel.vertexStride));
+            if (atomicExch(&indexHash[vidx3.z & (hashSize - 1)], vidx3.z) != vidx3.z) v2 = loadCachedAlign4((float3*)((unsigned char*)p.inModel.vertices + vidx3.z * p.inModel.vertexStride));
+
+            for (int i = 0; i < DIRS_PER_THREAD; i++)
+            {
+                float t0 = d[i].x * v0.x + d[i].y * v0.y + d[i].z * v0.z;
+                float t1 = d[i].x * v1.x + d[i].y * v1.y + d[i].z * v1.z;
+                float t2 = d[i].x * v2.x + d[i].y * v2.y + d[i].z * v2.z;
+                b[i].x = min(min(b[i].x, t0), min(t1, t2));
+                b[i].y = max(max(b[i].y, t0), max(t1, t2));
+            }
+
+            tbase += 32;
+            tofs  += 32 * p.inModel.indexStride;
+        }
+
+        if (threadIdx.x == 0)
+            tbase = atomicAdd(p.workCounter, APM_CONSTRUCT_BATCH_SIZE);
+        tbase = __shfl_nosync(tbase, 0);
+    }
+
+    for (int i=0; i < DIRS_PER_THREAD; i++)
+    {
+        atomicMin(&p.outApexPointMap->m_dots[i].x, ApexPointMap::encodeFloat(b[i].x));
+        atomicMax(&p.outApexPointMap->m_dots[i].y, ApexPointMap::encodeFloat(b[i].y));
+    }
+}
+
+//------------------------------------------------------------------------
+// Non-indexed input, high APM resolution.
+// Deduplicate based on vertex positions.
+
+template <int DIRS_PER_THREAD> static __global__
+void APMConstructUnindexed(APMConstructParams p)
+{
+    INIT_SHUFFLE_EMULATION(APM_CONSTRUCT_WARPS_PER_BLOCK)
+
+    int dbase = threadIdx.x * DIRS_PER_THREAD;
+    int vbase = 0;
+    int numVertices = p.inModel.numPrimitives * 3;
+
+    if (threadIdx.x == 0)
+        vbase = atomicAdd(p.workCounter, APM_CONSTRUCT_BATCH_SIZE);
+    vbase = __shfl_nosync(vbase, 0);
+    if (vbase >= numVertices)
+        return;
+
+    __shared__ float4 s_positionHashBuffer[APM_CONSTRUCT_HASH_PER_WARP / 4 * APM_CONSTRUCT_WARPS_PER_BLOCK];
+    float4* positionHash = &s_positionHashBuffer[threadIdx.y * APM_CONSTRUCT_HASH_PER_WARP / 4];
+    int     hashSize     = APM_CONSTRUCT_HASH_PER_WARP / 4;
+
+    float4* positionHashClear = positionHash + threadIdx.x;
+    for (int i = 0; i < hashSize; i += 32)
+        positionHashClear[i] = make_float4(LWDART_NAN_F, LWDART_NAN_F, LWDART_NAN_F, 0.f); // Clear the position hash.
+
+    float3 d[DIRS_PER_THREAD];
+    float2 b[DIRS_PER_THREAD];
+
+    float rcpResolution = 1.f / (float)p.apmResolution;
+    for (int i=0; i < DIRS_PER_THREAD; i++)
+    {
+        int idx = dbase + i;
+        d[i] = (idx < p.numDirections) ? ApexPointMap::decodeDirection(g_apexPointMapDirections[p.apmResolution][idx], rcpResolution) : make_float3(0.f, 0.f, 0.f);
+        b[i] = make_float2(FLT_MAX, -FLT_MAX);
+    }
+
+    float3 vlane = make_float3(LWDART_NAN_F, LWDART_NAN_F, LWDART_NAN_F);
+    while (vbase < numVertices)
+    {
+        int vend = min(vbase + APM_CONSTRUCT_BATCH_SIZE, numVertices);
+        unsigned int vofs = (vbase + threadIdx.x) * p.inModel.vertexStride;
+
+        while (vbase < vend)
+        {
+            if (vbase + threadIdx.x < vend)
+                vlane = loadCachedAlign4((float3*)((unsigned char*)p.inModel.vertices + vofs));
+
+            // De-duplicate vertex positions.
+
+            unsigned int hashSlot = (__float_as_int(vlane.x) + __float_as_int(vlane.y) + __float_as_int(vlane.z)) & (hashSize - 1);
+            bool mx = (atomicExch(&positionHash[hashSlot].x, vlane.x) == vlane.x);
+            bool my = (atomicExch(&positionHash[hashSlot].y, vlane.y) == vlane.y);
+            bool mz = (atomicExch(&positionHash[hashSlot].z, vlane.z) == vlane.z);
+            unsigned int keepMask = ~__ballot(mx && my && mz);
+
+            // Process vertices.
+
+            while (keepMask)
+            {
+                unsigned int tsub = 31 - __clz(keepMask);
+                keepMask &= ~(1 << tsub);
+
+                float3 v;
+                v.x = __shfl_nosync(vlane.x, tsub);
+                v.y = __shfl_nosync(vlane.y, tsub);
+                v.z = __shfl_nosync(vlane.z, tsub);
+
+                for (int i=0; i < DIRS_PER_THREAD; i++)
+                {
+                    float t = d[i].x * v.x + d[i].y * v.y + d[i].z * v.z;
+                    b[i].x = min(b[i].x, t);
+                    b[i].y = max(b[i].y, t);
+                }
+            }
+
+            vbase += 32;
+            vofs  += 32 * p.inModel.vertexStride;
+        }
+
+        if (threadIdx.x == 0)
+            vbase = atomicAdd(p.workCounter, APM_CONSTRUCT_BATCH_SIZE);
+        vbase = __shfl_nosync(vbase, 0);
+    }
+
+    for (int i=0; i < DIRS_PER_THREAD; i++)
+    {
+        int idx = dbase + i;
+        if (idx < p.numDirections)
+        {
+            atomicMin(&p.outApexPointMap->m_dots[idx].x, ApexPointMap::encodeFloat(b[i].x));
+            atomicMax(&p.outApexPointMap->m_dots[idx].y, ApexPointMap::encodeFloat(b[i].y));
+        }
+    }
+}
+
+//------------------------------------------------------------------------
+// Non-indexed input, low APM resolution.
+// No deduplication.
+
+template <int DIRS_PER_THREAD> static __global__
+void APMConstructUnindexedSmall(APMConstructParams p)
+{
+    INIT_SHUFFLE_EMULATION(APM_CONSTRUCT_WARPS_PER_BLOCK)
+
+    int vbase = 0;
+    int numVertices = p.inModel.numPrimitives * 3;
+
+    if (threadIdx.x == 0)
+        vbase = atomicAdd(p.workCounter, APM_CONSTRUCT_BATCH_SIZE);
+    vbase = __shfl_nosync(vbase, 0);
+    if (vbase >= numVertices)
+        return;
+
+    float3 d[DIRS_PER_THREAD];
+    float2 b[DIRS_PER_THREAD];
+
+    float rcpResolution = 1.f / (float)p.apmResolution;
+    for (int i=0; i < DIRS_PER_THREAD; i++)
+    {
+        d[i] = ApexPointMap::decodeDirection(g_apexPointMapDirections[p.apmResolution][i], rcpResolution);
+        b[i] = make_float2(FLT_MAX, -FLT_MAX);
+    }
+
+    float3 v = make_float3(LWDART_NAN_F, LWDART_NAN_F, LWDART_NAN_F);
+    while (vbase < numVertices)
+    {
+        int vend = min(vbase + APM_CONSTRUCT_BATCH_SIZE, numVertices);
+        unsigned int vofs = (vbase + threadIdx.x) * p.inModel.vertexStride;
+        vbase += threadIdx.x;
+
+        while (vbase < vend)
+        {
+            v = loadCachedAlign4((float3*)((unsigned char*)p.inModel.vertices + vofs));
+
+            // Process all vertices.
+
+            for (int i = 0; i < DIRS_PER_THREAD; i++)
+            {
+                float t = d[i].x * v.x + d[i].y * v.y + d[i].z * v.z;
+                b[i].x = min(b[i].x, t);
+                b[i].y = max(b[i].y, t);
+            }
+
+            vbase += 32;
+            vofs  += 32 * p.inModel.vertexStride;
+        }
+
+        if (threadIdx.x == 0)
+            vbase = atomicAdd(p.workCounter, APM_CONSTRUCT_BATCH_SIZE);
+        vbase = __shfl_nosync(vbase, 0);
+    }
+
+    for (int i=0; i < DIRS_PER_THREAD; i++)
+    {
+        atomicMin(&p.outApexPointMap->m_dots[i].x, ApexPointMap::encodeFloat(b[i].x));
+        atomicMax(&p.outApexPointMap->m_dots[i].y, ApexPointMap::encodeFloat(b[i].y));
+    }
+}
+
+//------------------------------------------------------------------------
+// AABB input, high APM resolution.
+// No deduplication.
+
+template <int DIRS_PER_THREAD> static __global__
+void APMConstructAABBs(APMConstructParams p)
+{
+    INIT_SHUFFLE_EMULATION(APM_CONSTRUCT_WARPS_PER_BLOCK)
+
+    int dbase = threadIdx.x * DIRS_PER_THREAD;
+    int pbase = 0;
+
+    if (threadIdx.x == 0)
+        pbase = atomicAdd(p.workCounter, APM_CONSTRUCT_BATCH_SIZE);
+    pbase = __shfl_nosync(pbase, 0);
+    if (pbase >= p.inModel.numPrimitives)
+        return;
+
+    float3 d[DIRS_PER_THREAD];
+    float2 b[DIRS_PER_THREAD];
+
+    float rcpResolution = 1.f / (float)p.apmResolution;
+    for (int i=0; i < DIRS_PER_THREAD; i++)
+    {
+        int idx = dbase + i;
+        d[i] = (idx < p.numDirections) ? ApexPointMap::decodeDirection(g_apexPointMapDirections[p.apmResolution][idx], rcpResolution) : make_float3(0.f, 0.f, 0.f);
+        b[i] = make_float2(FLT_MAX, -FLT_MAX);
+    }
+
+    float3 laneCenter   = make_float3(LWDART_NAN_F, LWDART_NAN_F, LWDART_NAN_F);
+    float3 laneHalfDiag = make_float3(LWDART_NAN_F, LWDART_NAN_F, LWDART_NAN_F);
+
+    while (pbase < p.inModel.numPrimitives)
+    {
+        int pend = min(pbase + APM_CONSTRUCT_BATCH_SIZE, p.inModel.numPrimitives);
+        unsigned int pofs = (pbase + threadIdx.x) * sizeof(PrimitiveAABB);
+
+        while (pbase < pend)
+        {
+            if (pbase + threadIdx.x < pend)
+            {
+                PrimitiveAABB aabb;
+                aabb.f4[0] = loadCachedAlign16(&((PrimitiveAABB*)((unsigned char*)p.inModel.aabbs + pofs))->f4[0]);
+                aabb.f4[1] = loadCachedAlign16(&((PrimitiveAABB*)((unsigned char*)p.inModel.aabbs + pofs))->f4[1]);
+                laneCenter.x   = .5f * (aabb.lox + aabb.hix);
+                laneCenter.y   = .5f * (aabb.loy + aabb.hiy);
+                laneCenter.z   = .5f * (aabb.loz + aabb.hiz);
+                laneHalfDiag.x = .5f * (aabb.hix - aabb.lox);
+                laneHalfDiag.y = .5f * (aabb.hiy - aabb.loy);
+                laneHalfDiag.z = .5f * (aabb.hiz - aabb.loz);
+            }
+
+            // Process vertices.
+
+            for (unsigned int psub = 0; psub < 32; psub++)
+            {
+                float cx = __shfl_nosync(laneCenter.x, psub);
+                float cy = __shfl_nosync(laneCenter.y, psub);
+                float cz = __shfl_nosync(laneCenter.z, psub);
+                float hx = __shfl_nosync(laneHalfDiag.x, psub);
+                float hy = __shfl_nosync(laneHalfDiag.y, psub);
+                float hz = __shfl_nosync(laneHalfDiag.z, psub);
+
+                for (int i=0; i < DIRS_PER_THREAD; i++)
+                {
+                    float tc = d[i].x * cx + d[i].y * cy + d[i].z * cz;
+                    float th = fabsf(d[i].x) * hx + fabsf(d[i].y) * hy + fabsf(d[i].z) * hz;
+                    b[i].x = min(b[i].x, tc - th);
+                    b[i].y = max(b[i].y, tc + th);
+                }
+            }
+
+            pbase += 32;
+            pofs  += 32 * sizeof(PrimitiveAABB);
+        }
+
+        if (threadIdx.x == 0)
+            pbase = atomicAdd(p.workCounter, APM_CONSTRUCT_BATCH_SIZE);
+        pbase = __shfl_nosync(pbase, 0);
+    }
+
+    for (int i=0; i < DIRS_PER_THREAD; i++)
+    {
+        int idx = dbase + i;
+        if (idx < p.numDirections)
+        {
+            atomicMin(&p.outApexPointMap->m_dots[idx].x, ApexPointMap::encodeFloat(b[i].x));
+            atomicMax(&p.outApexPointMap->m_dots[idx].y, ApexPointMap::encodeFloat(b[i].y));
+        }
+    }
+}
+
+//------------------------------------------------------------------------
+// AABB input, low APM resolution.
+// No deduplication.
+
+template <int DIRS_PER_THREAD> static __global__
+void APMConstructAABBsSmall(APMConstructParams p)
+{
+    INIT_SHUFFLE_EMULATION(APM_CONSTRUCT_WARPS_PER_BLOCK)
+
+    int pbase = 0;
+    if (threadIdx.x == 0)
+        pbase = atomicAdd(p.workCounter, APM_CONSTRUCT_BATCH_SIZE);
+    pbase = __shfl_nosync(pbase, 0);
+    if (pbase >= p.inModel.numPrimitives)
+        return;
+
+    float3 d[DIRS_PER_THREAD];
+    float2 b[DIRS_PER_THREAD];
+
+    float rcpResolution = 1.f / (float)p.apmResolution;
+    for (int i=0; i < DIRS_PER_THREAD; i++)
+    {
+        d[i] = ApexPointMap::decodeDirection(g_apexPointMapDirections[p.apmResolution][i], rcpResolution);
+        b[i] = make_float2(FLT_MAX, -FLT_MAX);
+    }
+
+    float3 center   = make_float3(LWDART_NAN_F, LWDART_NAN_F, LWDART_NAN_F);
+    float3 halfDiag = make_float3(LWDART_NAN_F, LWDART_NAN_F, LWDART_NAN_F);
+
+    while (pbase < p.inModel.numPrimitives)
+    {
+        int pend = min(pbase + APM_CONSTRUCT_BATCH_SIZE, p.inModel.numPrimitives);
+        unsigned int pofs = (pbase + threadIdx.x) * sizeof(PrimitiveAABB);
+
+        while (pbase < pend)
+        {
+            if (pbase + threadIdx.x < pend)
+            {
+                PrimitiveAABB aabb;
+                aabb.f4[0] = loadCachedAlign16(&((PrimitiveAABB*)((unsigned char*)p.inModel.aabbs + pofs))->f4[0]);
+                aabb.f4[1] = loadCachedAlign16(&((PrimitiveAABB*)((unsigned char*)p.inModel.aabbs + pofs))->f4[1]);
+                center.x   = .5f * (aabb.lox + aabb.hix);
+                center.y   = .5f * (aabb.loy + aabb.hiy);
+                center.z   = .5f * (aabb.loz + aabb.hiz);
+                halfDiag.x = .5f * (aabb.hix - aabb.lox);
+                halfDiag.y = .5f * (aabb.hiy - aabb.loy);
+                halfDiag.z = .5f * (aabb.hiz - aabb.loz);
+            }
+
+            // Process all vertices.
+
+            for (int i = 0; i < DIRS_PER_THREAD; i++)
+            {
+                float tc = d[i].x * center.x + d[i].y * center.y + d[i].z * center.z;
+                float th = fabsf(d[i].x) * halfDiag.x + fabsf(d[i].y) * halfDiag.y + fabsf(d[i].z) * halfDiag.z;
+                b[i].x = min(b[i].x, tc - th);
+                b[i].y = max(b[i].y, tc + th);
+            }
+
+            pbase += 32;
+            pofs  += 32 * sizeof(PrimitiveAABB);
+        }
+
+        if (threadIdx.x == 0)
+            pbase = atomicAdd(p.workCounter, APM_CONSTRUCT_BATCH_SIZE);
+        pbase = __shfl_nosync(pbase, 0);
+    }
+
+    for (int i=0; i < DIRS_PER_THREAD; i++)
+    {
+        atomicMin(&p.outApexPointMap->m_dots[i].x, ApexPointMap::encodeFloat(b[i].x));
+        atomicMax(&p.outApexPointMap->m_dots[i].y, ApexPointMap::encodeFloat(b[i].y));
+    }
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchAPMInit(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const APMConstructParams& p)
+{
+    if (blockDim.x != 32 || blockDim.y != 1 || blockDim.z != 1 || gridDim.y != 1 || gridDim.z != 1)
+        return false; // Kernel expects (32 x 1) blocks and (N x 1) grid.
+
+    if (lwdaFuncSetCacheConfig(ApexPointMapInit, lwdaFuncCachePreferL1) != lwdaSuccess)
+        return false;
+
+    ApexPointMapInit<<<gridDim, blockDim, 0, stream>>>(p);
+
+    return true;
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchAPMConstruct(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const APMConstructParams& p)
+{
+    if (blockDim.x != 32)
+        return false; // Kernel expects 32-wide blocks.
+
+    void (*kernel)(APMConstructParams) = NULL;
+
+    // Select kernel.
+
+    if (p.inModel.aabbs != NULL)
+    {
+        // Input is AABBs.
+
+        switch(p.apmResolution)
+        {
+            case 1:  kernel = APMConstructAABBsSmall<3>;  break;
+            case 2:  kernel = APMConstructAABBsSmall<9>;  break;
+            case 3:  kernel = APMConstructAABBsSmall<19>; break;
+            case 4:  kernel = APMConstructAABBsSmall<33>; break;
+            case 5:  kernel = APMConstructAABBs<2>;       break;
+            case 6:  kernel = APMConstructAABBs<3>;       break;
+            case 7:  kernel = APMConstructAABBs<4>;       break;
+            case 8:  kernel = APMConstructAABBs<5>;       break;
+        }
+    }
+    else if (p.inModel.indices != NULL)
+    {
+        // Input is indexed vertices.
+
+        switch(p.apmResolution)
+        {
+            case 1:  kernel = APMConstructIndexedSmall<3>;  break;
+            case 2:  kernel = APMConstructIndexedSmall<9>;  break;
+            case 3:  kernel = APMConstructIndexedSmall<19>; break;
+            case 4:  kernel = APMConstructIndexed<2>;       break;
+            case 5:  kernel = APMConstructIndexed<2>;       break;
+            case 6:  kernel = APMConstructIndexed<3>;       break;
+            case 7:  kernel = APMConstructIndexed<4>;       break;
+            case 8:  kernel = APMConstructIndexed<5>;       break;
+        }
+    }
+    else
+    {
+        // Input is unindexed vertices.
+
+        switch(p.apmResolution)
+        {
+            case 1:  kernel = APMConstructUnindexedSmall<3>;  break;
+            case 2:  kernel = APMConstructUnindexedSmall<9>;  break;
+            case 3:  kernel = APMConstructUnindexedSmall<19>; break;
+            case 4:  kernel = APMConstructUnindexed<2>;       break;
+            case 5:  kernel = APMConstructUnindexed<2>;       break;
+            case 6:  kernel = APMConstructUnindexed<3>;       break;
+            case 7:  kernel = APMConstructUnindexed<4>;       break;
+            case 8:  kernel = APMConstructUnindexed<5>;       break;
+        }
+    }
+
+    if (!kernel)
+        return false; // A mysterious failure.
+
+    // Set cache configuration and launch.
+
+    if (lwdaFuncSetCacheConfig(kernel, lwdaFuncCachePreferShared) != lwdaSuccess)
+        return false;
+
+    kernel<<<gridDim, blockDim, 0, stream>>>(p);
+
+    return true;
+}
+
+//------------------------------------------------------------------------

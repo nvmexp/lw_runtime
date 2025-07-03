@@ -1,0 +1,102 @@
+/*
+ * Copyright (c) 2019, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#if !defined(LDPC2_C2V_CACHE_SPLIT_LWH_INCLUDED_)
+#define LDPC2_C2V_CACHE_SPLIT_LWH_INCLUDED_
+
+#include "ldpc2.lwh"
+
+namespace ldpc2
+{
+
+////////////////////////////////////////////////////////////////////////
+// c2v_cache_split
+// Check to variable (C2V) messages are stored in both shared memory
+// and global memory.
+// BG: Base graph (1 or 2)
+// NUM_SMEM_C2V_NODES: Number of cC2V nodes stored in shared memory
+// TC2V: Check to variable node class
+template <int BG, int Z, int NUM_SMEM_C2V_NODES, class TC2V>
+struct c2v_cache_split
+{
+    //------------------------------------------------------------------
+    // C2V message type
+    typedef TC2V                  c2v_t;
+    typedef typename c2v_t::app_t app_t;
+    //------------------------------------------------------------------
+    template <int CHECK_IDX>
+    __device__
+    void process_row_init(const LDPC_kernel_params& params,
+                          word_t                    (&app)[app_max_words<app_t, BG>::value],
+                          int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        // Assuming all APP data in shared memory, so use max_parity_nodes<> here
+        c2v_.process_row_init<CHECK_IDX, max_parity_nodes<BG>::value>(params, app, app_addr);
+        if(CHECK_IDX < NUM_SMEM_C2V_NODES)
+        {
+            c2v_.store_shared(params, CHECK_IDX, params.Z_var_szelem);
+        }
+        else
+        {
+            // Using global layout here as if ALL C2V nodes were stored
+            // there, but some are in shared.
+            c2v_.store_global(params, CHECK_IDX);
+        }
+    }
+    //------------------------------------------------------------------
+    template <int CHECK_IDX>
+    __device__
+    void process_row(const LDPC_kernel_params& params,
+                     word_t                   (&app)[app_max_words<app_t, BG>::value],
+                     int                      (&app_addr)[max_row_degree<BG>::value])
+    {
+        if(CHECK_IDX < NUM_SMEM_C2V_NODES)
+        {
+            c2v_.load_shared(params, CHECK_IDX, params.Z_var_szelem);
+        }
+        else
+        {
+            // Using global layout here as if ALL C2V nodes were stored
+            // there, but actually some are in shared.
+            // TODO: Use only the amount of global memory that is needed and
+            // adjust the offset based on the fact that some of the cC2V
+            // data is in shared memory.
+            c2v_.load_global(params, CHECK_IDX);
+        }
+        // Assuming all APP data in shared memory, so use max_parity_nodes<> here
+        c2v_.process_row<CHECK_IDX, max_parity_nodes<BG>::value>(params, app, app_addr);
+        if(CHECK_IDX < NUM_SMEM_C2V_NODES)
+        {
+            c2v_.store_shared(params, CHECK_IDX, params.Z_var_szelem);
+        }
+        else
+        {
+            c2v_.store_global(params, CHECK_IDX);
+        }
+            
+    }
+    //------------------------------------------------------------------
+    // get_c2v_size_bytes()
+    // Return the size, in bytes, required to store the given number of
+    // parity nodes.
+    static
+    uint32_t get_c2v_size_bytes(int /*num_parity_nodes*/)
+    {
+        //return (num_parity_nodes * Z * sizeof(typename c2v_t::c2v_storage_t));
+        return (NUM_SMEM_C2V_NODES * Z * sizeof(typename c2v_t::c2v_storage_t));
+    }
+    //------------------------------------------------------------------
+    // Data
+    c2v_t c2v_;
+};
+
+} // namespace ldpc2
+
+#endif // !defined(LDPC2_C2V_CACHE_SPLIT_LWH_INCLUDED_)

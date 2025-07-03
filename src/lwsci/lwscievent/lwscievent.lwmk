@@ -1,0 +1,152 @@
+##############################################################################
+# Copyright (c) 2019-2021, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+##############################################################################
+
+##############################################################################
+# drivers/lwsci/lwscievent/lwscievent.lwmk
+##############################################################################
+
+##############################################################################
+# Identify this module to lwCommon.lwmk so it can decide the build type
+##############################################################################
+
+LW_MODULE_BUILD_TYPE_ALIASES = lwscievent
+
+include $(LW_SOURCE)/drivers/lwsci/lwsci.lwmk
+
+ifdef RMAPI_TEGRA_MIRROR_LWMK
+  # Include header from rmapi_tegra mirror
+  CFLAGS += -DRMAPI_TEGRA_MIRROR
+endif
+
+CFLAGS += -DLINUX
+
+# Any warnings to outright disable
+LW_WARNINGS_DISABLE += unused-parameter
+
+##############################################################################
+# string to prepend in unix builds when exelwting rules in this gmake instance
+##############################################################################
+
+LW_MODULE_LOGGING_NAME = "lwscievent"
+
+##############################################################################
+# Build liblwscievent as position-independent code
+##############################################################################
+
+LW_BUILD_PIC = 1
+
+##############################################################################
+# Path shorthands
+##############################################################################
+
+LWSCI_PATH    = $(LW_SOURCE)/drivers/lwsci
+LWSCIEVENT_PATH = $(LWSCI_PATH)/lwscievent
+
+##############################################################################
+# define SOURCES
+##############################################################################
+
+LWSCIEVENT_SOURCES += lwscievent_linux.c
+
+SOURCES += $(addprefix $(LWSCIEVENT_PATH)/,$(LWSCIEVENT_SOURCES))
+
+##############################################################################
+# define LW_INCLUDES
+##############################################################################
+
+ifeq ($(LW_BACKEND_RESMAN), 1)
+  include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+endif
+LW_INCLUDES += $(LWSCI_PATH)/inc/public
+LW_INCLUDES += $(LWSCI_PATH)/inc/internal
+
+LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+
+LW_INCLUDES += $(OUTPUTDIR)
+
+##############################################################################
+# define LW_DEFINES
+##############################################################################
+
+# For lwmake builds, lwcfg feature flags are available to LWSCI.
+ifdef LWCFG_INITIALIZED
+  LW_DEFINES += LWCFG_ENABLED
+endif
+
+# Embedded defines this on the command line for their builds.
+LW_BUILD_EMBEDDED ?= 0
+
+LW_DEFINES += LW_BUILD_EMBEDDED=1
+
+##############################################################################
+# Definitions for the LWID string
+##############################################################################
+
+LWID_STRINGNAME = "LW_LWSCIEVENT_ID"
+LWID_MODULENAME = "LwSciEvent Shared Library"
+
+SOURCES += $(LWIDSTRING)
+
+##############################################################################
+# define DSO stubs
+##############################################################################
+include $(LWSCI_PATH)/lwsciipc/lwsciipc-dso-stub.lwmk
+
+DSO_STUBS += $(LWSCIIPC_DSO_STUB)
+
+##############################################################################
+# Colwert the mobile exports file to the desktop format.
+##############################################################################
+
+LWSCIEVENT_EXPORTS = $(OUTPUTDIR_COMMON)/liblwscievent-exports.txt
+
+LWSCIEVENT_EXPORTS_SOURCES = liblwscievent.export
+
+
+$(LWSCIEVENT_EXPORTS): $(LWSCIEVENT_EXPORTS_SOURCES)
+	$(CAT) $(LWSCIEVENT_EXPORTS_SOURCES) | \
+	$(SORT) | $(UNIQ) | \
+	$(SED) -e 's/@[0-9]\+//' \
+	    -e 's/^\([^#].\+\)$$/\1 func/' > $@
+
+##############################################################################
+# define how to mangle the object files
+##############################################################################
+
+ifeq ($(LW_MANGLE_SYMBOLS),1)
+  # If the component has symbols needing mangling, such as internal API entry
+  # points, generate a mangle list and define the mangling rule here.
+
+  # liblwscievent contains no exposed symbols requiring mangling.
+  LINK_OBJECTS = $(OBJECTS)
+  LWSCIEVENT_MANGLE_FILE =
+else
+  # If symbol mangling is disabled, LINK_OBJECTS == OBJECTS and there is
+  # no mangle file.
+  LINK_OBJECTS = $(OBJECTS)
+  LWSCIEVENT_MANGLE_FILE =
+endif
+
+##############################################################################
+# define how to build the linker script used when linking liblwscievent
+##############################################################################
+
+LWSCIEVENT_LINKER_SCRIPT = $(OUTPUTDIR_COMMON)/liblwscievent.map$(MANGLE_SUFFIX)
+
+$(eval $(call LINKER_SCRIPT_RULE, \
+  $(LWSCIEVENT_LINKER_SCRIPT), \
+  $(LWSCIEVENT_EXPORTS), \
+  $(LWSCIEVENT_MANGLE_FILE)))
+
+##############################################################################
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk
+

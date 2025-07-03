@@ -1,0 +1,125 @@
+##############################################################################
+# lwntest/build/winxp_common.lwmk
+#
+# Include file for lwntest/build/wddm_*.lwmk, with shared defines for
+# all Windows builds.
+#
+##############################################################################
+
+LW_DDK_VER    = nt8
+LW_DDK_SUBVER = 9600
+
+include $(LW_SOURCE)/drivers/common/build/msvc141u3_tools_$(LW_TARGET_ARCH).lwmk
+
+CFLAGS := -nologo
+CFLAGS += $(addprefix -I,$(GENINCDIRS))
+CFLAGS += -Od
+CFLAGS += -D"_DEBUG"
+CFLAGS += -D"WIN32"
+CFLAGS += -D"_CONSOLE"
+CFLAGS += -D"_MBCS"
+CFLAGS += -D"GLUT_NO_LIB_PRAGMA"
+CFLAGS += -D"GLSLC_LIB_DYNAMIC_LOADING"
+CFLAGS += -D"HAS_DEVTOOLS"
+CFLAGS += -D"DXC_ENABLED"
+
+# glslang sources require this flag.
+CFLAGS += -D"ENABLE_HLSL"
+
+ifeq ($(LW_LWN_ENABLE_SPIRV),1)
+CFLAGS += -D"SPIRV_ENABLED"
+endif
+
+LW_LWN_FORCE_FASTPATH ?= 0
+ifeq ($(LW_LWN_FORCE_FASTPATH),1)
+CFLAGS += -D"LWN_FORCE_FASTPATH"
+endif
+
+CFLAGS += -EHsc
+CFLAGS += -MTd
+CFLAGS += -GS
+CFLAGS += -Fo"$(OUTPUTDIR)/"
+CFLAGS += -Fd"$(OUTPUTDIR)/"
+
+# With MSVC120, using the -Fd option to write to a shared .pdb file prevents
+# multiple cl.exe processes from writing to that shared file by default.
+# Microsoft recommends using the "FS" option which uses the tool "mspdbsrv.exe"
+# to serialize writes from multiple compiler processes.
+# Apparently MSVC100 didn't have this issue, but MSVC120 and beyond require it.
+# https://msdn.microsoft.com/en-us/library/dn502518.aspx
+CFLAGS += -FS
+CFLAGS += -Zi
+CFLAGS += -Zm1000
+ifeq ($(LW_GEN_BSC),1)
+  CFLAGS += -FR$(SBR_DIR)/
+endif
+
+# HOS lwrrently uses C++14
+CFLAGS += /std:c++14
+
+# Visual Studio does not enforce const correctness for string literals by default,
+# but the L4T and HOS builds do.
+CFLAGS += /Zc:strictStrings
+
+# compiler warning info - SEE NOTES FURTHER BELOW WHERE THE FLAGS ARE
+# C4100 [disable]  unreferenced formal parameter
+# C4127 [disable]  conditional expression is constant
+# C4244 [disable]  possible loss of data
+# C4305 [disable]  VC++ 5.0 version of C4244
+# C4063 [enable]   case value is not a valid value for switch of enum
+# C4130 [enable]   logical operation on address of string constant
+# C4131 [enable]   function uses old-style declarator
+# C4189 [enable]   local variable is initialized but not referenced
+# C4205 [enable]   nonstandard extension used : static function declaration in function scope
+# C4211 [enable]   nonstandard extension used : redefined extern to static
+# C4310 [enable]   cast truncates constant value
+# C4351 [disable]  new behavior: elements of array 'array' will be default initialized (glslang)
+# C4505 [enable]   unreferenced local function has been removed
+# C4701 [enable]   local variable may be used without having been initialized
+# C4706 [enable]   assignment within conditional expression
+# C4838 [disable]  colwersion from 'type_1' to 'type_2' requires narrowing colwersion
+# C4996 [disable]  warn about "unsafe" built-in function/variable usage
+#
+# From Matt Craighead:
+# Other warnings that might be useful are C4132, C4210, C4213, C4295, C4389,
+# C4611, and C4709 -- TBD which ones should be turned on.
+
+# Set compiler warnings. We're effectively adopting a "coding convention"
+# not to trigger these warnings.
+# 
+# PLEASE IMPORTANT NOTE #1: It's most helpful if these warnings match the
+# ones in //sw/main/diag/mods/makedefs.inc - then MSVC-based builds for
+# MODS and Windows will have the same warnings.
+#
+# NOTE #2: MODS does not disable the two "-wdN" warnings below (related
+# to loss-of-data colwersions). But lwntest has a zillion cases of these
+# warnings, so we disable these checks in ogtest.h
+#
+CFLAGS += -W3
+#CFLAGS += -wd4244    -- done in ogtest.h
+#CFLAGS += -wd4305    -- done in ogtest.h
+
+CFLAGS += -wd4996
+CFLAGS += -w34063
+CFLAGS += -w34130
+CFLAGS += -w34131
+CFLAGS += -w34189
+CFLAGS += -w34205
+CFLAGS += -w34211
+CFLAGS += -w34310
+CFLAGS += -w34505
+CFLAGS += -w34701
+CFLAGS += -w34706
+CFLAGS += -wd4351
+CFLAGS += -wd4838
+
+# set up options for linker
+LFLAGS := -NOLOGO
+LFLAGS += -NODEFAULTLIB:"libc"
+LFLAGS += -NODEFAULTLIB:"libcd"
+LFLAGS += -NODEFAULTLIB:"libcp"
+LFLAGS += -NODEFAULTLIB:"libcmt"
+LFLAGS += -DEBUG
+LFLAGS += -PDB:"$(OUTPUTDIR)/$(TARGET).pdb"
+LFLAGS += -MAP:"$(OUTPUTDIR)/$(TARGET).map"
+LFLAGS += -SUBSYSTEM:CONSOLE

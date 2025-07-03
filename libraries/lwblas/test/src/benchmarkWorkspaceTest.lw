@@ -1,0 +1,208 @@
+/*  
+ * Copyright (c) 2019, LWPU CORPORATION.  All rights reserved.
+ * 
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
+ *  - Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  - Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  - Neither the name(s) of the copyright holder(s) nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */  
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <assert.h>
+
+#include <unordered_map>
+#include <vector>
+#include <algorithm>
+#include <chrono>
+
+#include <lwda_runtime.h>
+#include <lwda_fp16.h>
+#include <lwtensor.h>
+
+#define HANDLE_ERROR(x)                                               \
+{ const auto err = x;                                                 \
+  if( err != LWTENSOR_STATUS_SUCCESS )                                \
+  { printf("Error (%s:%d): %s\n", __FILE__, __LINE__, lwtensorGetErrorString(err)); return err; } \
+};
+
+#define HANDLE_LWDA_ERROR(x)                                      \
+{ const auto err = x;                                             \
+  if( err != lwdaSuccess )                                        \
+  { printf("Error (%s:%d): %s\n", __FILE__, __LINE__, lwdaGetErrorString(err)); return err; } \
+};
+
+int main(int argc, char** argv)
+{
+    typedef double floatTypeA;
+    typedef double floatTypeB;
+    typedef double floatTypeC;
+    typedef double floatTypeCompute;
+
+    lwdaDataType_t typeA = LWDA_R_64F;
+    lwdaDataType_t typeB = LWDA_R_64F;
+    lwdaDataType_t typeC = LWDA_R_64F;
+    lwtensorComputeType_t typeCompute = LWTENSOR_R_MIN_64F;
+
+    /**********************
+     * Computing: C_{m,u,n,v} = alpha * A_{m,h,k,n} B_{u,k,v,h} + beta * C_{m,u,n,v}
+     **********************/
+
+    std::vector<int> modeC{'0', '1'};
+    std::vector<int> modeA{'3', '2', '1'};
+    std::vector<int> modeB{'2', '3', '0'};
+    int nmodeA = modeA.size();
+    int nmodeB = modeB.size();
+    int nmodeC = modeC.size();
+
+    std::unordered_map<int, int64_t> extent;
+    extent['0'] = argc < 2 ? 2 : atoi(argv[1]);
+    extent['1'] = argc < 3 ? 2 : atoi(argv[2]);
+    extent['2'] = argc < 4 ? 2 : atoi(argv[3]);
+    extent['3'] = argc < 5 ? 2 : atoi(argv[4]);
+
+    std::vector<int64_t> extentC;
+    for (auto mode : modeC)
+        extentC.push_back(extent[mode]);
+    std::vector<int64_t> extentA;
+    for (auto mode : modeA)
+        extentA.push_back(extent[mode]);
+    std::vector<int64_t> extentB;
+    for (auto mode : modeB)
+        extentB.push_back(extent[mode]);
+
+    /**********************
+     * Allocating data
+     **********************/
+
+    size_t elementsA = 1;
+    for (auto mode : modeA)
+        elementsA *= extent[mode];
+    size_t elementsB = 1;
+    for (auto mode : modeB)
+        elementsB *= extent[mode];
+    size_t elementsC = 1;
+    for (auto mode : modeC)
+        elementsC *= extent[mode];
+
+    void *mem_d;
+    HANDLE_LWDA_ERROR(lwdaMalloc((void**) &mem_d, 128));
+
+    /*************************
+     * lwTENSOR
+     *************************/ 
+
+    lwtensorHandle_t handle;
+    HANDLE_ERROR(lwtensorInit(&handle));
+
+    /**********************
+     * Create Tensor Descriptors
+     **********************/
+
+    lwtensorTensorDescriptor_t descA;
+    HANDLE_ERROR(lwtensorInitTensorDescriptor(&handle,
+                 &descA,
+                 nmodeA,
+                 extentA.data(),
+                 NULL,/*stride*/
+                 typeA, LWTENSOR_OP_IDENTITY));
+
+    lwtensorTensorDescriptor_t descB;
+    HANDLE_ERROR(lwtensorInitTensorDescriptor(&handle,
+                 &descB,
+                 nmodeB,
+                 extentB.data(),
+                 NULL,/*stride*/
+                 typeB, LWTENSOR_OP_IDENTITY));
+
+    lwtensorTensorDescriptor_t descC;
+    HANDLE_ERROR(lwtensorInitTensorDescriptor( &handle,
+                 &descC,
+                 nmodeC,
+                 extentC.data(),
+                 NULL,/*stride*/
+                 typeC, LWTENSOR_OP_IDENTITY));
+
+    /**********************************************
+     * Retrieve the memory alignment for each tensor
+     **********************************************/ 
+
+     uint32_t alignmentRequirementA;
+     HANDLE_ERROR(lwtensorGetAlignmentRequirement(&handle,
+                  mem_d,
+                  &descA,
+                  &alignmentRequirementA));
+
+     uint32_t alignmentRequirementB;
+     HANDLE_ERROR(lwtensorGetAlignmentRequirement(&handle,
+                  mem_d,
+                  &descB,
+                  &alignmentRequirementB));
+
+     uint32_t alignmentRequirementC;
+     HANDLE_ERROR(lwtensorGetAlignmentRequirement(&handle,
+                  mem_d,
+                  &descC, 
+                  &alignmentRequirementC));
+
+    /*******************************
+     * Create Contraction Descriptor
+     *******************************/
+
+    lwtensorContractionDescriptor_t desc;
+    HANDLE_ERROR(lwtensorInitContractionDescriptor(&handle, 
+                 &desc,
+                 &descA, modeA.data(), alignmentRequirementA,
+                 &descB, modeB.data(), alignmentRequirementB,
+                 &descC, modeC.data(), alignmentRequirementC,
+                 &descC, modeC.data(), alignmentRequirementC,
+                 typeCompute));
+
+    /**************************
+    * Set the algorithm to use
+    ***************************/
+
+    lwtensorContractionFind_t find;
+    HANDLE_ERROR(lwtensorInitContractionFind( 
+                 &handle, &find, 
+                 (lwtensorAlgo_t) 0));
+
+    /**********************
+     * Query workspace
+     **********************/
+
+    auto start = std::chrono::steady_clock::now(); 
+    volatile size_t worksize = 0;
+    int reps = 10000000;
+    for (int i = 0; i < reps; i++) {
+        HANDLE_ERROR(lwtensorContractionGetWorkspace(&handle,
+                     &desc,
+                     &find,
+                     LWTENSOR_WORKSPACE_RECOMMENDED, (size_t*)&worksize));
+    }
+    auto end = std::chrono::steady_clock::now(); 
+    std::chrono::duration<double> diff = end-start;
+    printf("workspace duration: %e\n", diff.count() / reps);
+
+    return 0;
+}

@@ -1,0 +1,21 @@
+!!LWfp5.0
+TEXTURE textures[] = { texture[0..31] };
+ATTRIB tc = fragment.texcoord[0];
+ATTRIB tc2 = fragment.texcoord[1];
+ATTRIB expected[4] = { fragment.texcoord[2..5] };
+TEMP texval, t, u;
+MOV u.x, 0;
+# test wmask=5
+TEX t.xz, tc, texture[22], 2D;
+ADD u.x, u.x, t.x;
+ADD u.x, u.x, t.z;
+# test wmask=6
+TEX t.yz, tc, texture[23], 2D;
+ADD u.x, u.x, t.y;
+ADD u.x, u.x, t.z;
+# test TEX that gets optimized to wmask=6
+TEX t.xyz, tc, texture[24], 2D;
+ADD u.x, u.x, t.y;
+ADD u.x, u.x, t.z;
+MOV result.color, u.x;
+END

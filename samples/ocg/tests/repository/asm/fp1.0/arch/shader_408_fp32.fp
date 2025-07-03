@@ -1,0 +1,35 @@
+!!FP1.0
+MOVR R1.xyz, f[TEX6];
+MOVR R3.w, {0.333333, 0.000000, 0.000000, 0.000000}.x;
+MULR R3.xyz, f[COL0], {0.333333, 0.000000, 0.000000, 0.000000}.x;
+TEX R2, f[TEX2], TEX4, 2D;
+TEX R0, f[TEX0], TEX0, 2D;
+MULR R3.xyz, R0, R3;
+MULR R3.xyz, R3, {0.333333, 0.000000, 0.000000, 0.000000}.x;
+ADDR R3.xyz, R3, R3;
+MADR R0.xyz, {0.333333, 0.000000, 0.000000, 0.000000}.x, R0, -R3;
+MADR R3.xyz, R0.w, R0, R3;
+DP3R R0.x, f[TEX6], f[TEX6];
+RCPR R1.w, R0.x;
+DP3R R0.x, R1, f[TEX3];
+MULR R1.w, R1, R0.x;
+ADDR R1.w, R1, R1;
+MADR R0.xy, R1.w, R1, -f[TEX3];
+TEX R0, R0, TEX7, LWBE;
+MULR R0.xyz, R0, R2;
+MULR R0.xyz, R0, {0.333333, 0.000000, 0.000000, 0.000000}.x;
+MADR R1.xyz, R0, R0, -R0;
+MADR R0.xyz, {0.333333, 0.000000, 0.000000, 0.000000}.x, R1, R0;
+DP3R R0.w, R0, {0.333333, 0.000000, 0.000000, 0.000000}.x;
+MADR R1.xyz, {0.333333, 0, 0, 0}, -R0.w, R0.w;
+MADR R0.xyz, {0.333333, 0, 0, 0}, R0, R1;
+ADDR R3.xyz, R0, R3;
+MOVR R0, R3;
+MOVR o[COLR], R0; 
+END
+
+# Passes = 21 
+
+# Registers = 4 
+
+# Textures = 4 

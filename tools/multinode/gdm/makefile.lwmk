@@ -1,0 +1,137 @@
+#
+# LWIDIA_COPYRIGHT_BEGIN
+#
+# Copyright 2021 by LWPU Corporation.  All rights reserved.  All
+# information contained herein is proprietary and confidential to LWPU
+# Corporation.  Any use, reproduction, or disclosure without the written
+# permission of LWPU Corporation is prohibited.
+#
+# LWIDIA_COPYRIGHT_END
+#
+
+LW_MODS_MODULE := gdm bin
+
+LW_SOURCE:=$(LW_TOOLS)/../dev/gpu_drv/chips_a
+override this_component := gdm
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+SOURCES += src/gdm_main.cpp
+SOURCES += src/gdm_server.cpp
+SOURCES += src/gdm_logger.cpp
+SOURCES += src/gdm_handlers.cpp
+SOURCES += src/heart_beat_monitor.cpp
+SOURCES += src/global_fm_mgr.cpp
+SOURCES += src/gdm_configurator.cpp
+SOURCES += $(OUTPUTDIR_ABSOLUTE)/message_handler.cpp
+
+LW_INCLUDES += inc
+LW_INCLUDES += $(OUTPUTDIR_ABSOLUTE)
+LW_INCLUDES += $(LW_SOURCE)/diag/mods
+LW_INCLUDES += $(LW_SOURCE)/diag/mods/core/include
+LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LW_INCLUDES += $(LW_SOURCE)/diag/utils
+LW_INCLUDES += $(LW_SOURCE)/apps/dcgm/libs/protobuf-2.6.0/
+LW_INCLUDES += $(LW_SOURCE)/apps/fabricmanager/globalfm/
+LW_INCLUDES += $(LW_SOURCE)/apps/fabricmanager/localfm/
+LW_INCLUDES += $(LW_SOURCE)/apps/fabricmanager/common/
+LW_INCLUDES += $(LW_SOURCE)/apps/fabricmanager/config/
+LW_INCLUDES += $(LW_SOURCE)/apps/fabricmanager/sdk/public/
+LW_INCLUDES += $(LW_SOURCE)/drivers/lwlink/interface/
+LW_INCLUDES += $(LW_SOURCE)/drivers/lwlink/user/lwlink/
+LW_INCLUDES += $(LW_SOURCE)/drivers/lwswitch/user
+LW_INCLUDES += $(LW_SOURCE)/drivers/lwswitch/interface
+LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc
+LW_INCLUDES += $(LW_SOURCE)/apps/fabricmanager/libs/libevent-2.0.22-stable/include/
+LW_INCLUDES += $(LW_SOURCE)/apps/fabricmanager/libs/protobuf-2.6.0/include/
+LW_INCLUDES += $(LW_SOURCE)/apps/fabricmanager/libevent-2.0.22-stable/include/event2/
+LW_INCLUDES += $(LW_SOURCE)/apps/lwml/common/
+LW_INCLUDES += $(LW_SOURCE)/apps/lwml/common/gdm
+LW_INCLUDES += $(LW_SOURCE)/apps/fabricmanager/infra/transport/
+LW_INCLUDES += $(LW_SOURCE)/diag/multinode/transport/inc
+LW_INCLUDES += $(LW_SOURCE)/diag/multinode/common/inc
+LW_INCLUDES += $(LW_SOURCE)/apps/fabricmanager/mods/$(OUTPUTDIR)
+LW_INCLUDES += $(LW_TOOLS)/mods/boost2
+
+ifeq ($(LW_TARGET_OS), Linux)
+    LDFLAGS += -ldl -lpthread -lrt -lboost
+endif
+
+ifeq ($(LW_OUTPUT_ROOT),)
+    TRANSPORT_LOCATION = $(LW_SOURCE)/diag/multinode/transport/$(OUTPUTDIR)
+    LWDIAG_LOCATION    = $(LW_SOURCE)/diag/utils/$(OUTPUTDIR)
+    FM_LOCATION        = $(LW_SOURCE)/apps/fabricmanager/mods/$(OUTPUTDIR)
+else
+    TRANSPORT_LOCATION = $(OUTPUTDIR_ROOT)/diag/multinode/transport
+    LWDIAG_LOCATION = $(OUTPUTDIR_ROOT)/diag/utils
+    FM_LOCATION     = $(OUTPUTDIR_ROOT)/apps/fabricmanager/mods
+endif
+
+ifeq ($(LW_TARGET_OS_FAMILY), Windows)
+    BIN_LDFLAGS += -LIBPATH:$(TRANSPORT_LOCATION)
+    BIN_LDFLAGS += -LIBPATH:$(LWDIAG_LOCATION)
+    BIN_LDFLAGS += -LIBPATH:$(FM_LOCATION)
+else
+    BIN_LDFLAGS += -L$(TRANSPORT_LOCATION)
+    BIN_LDFLAGS += -L$(LWDIAG_LOCATION)
+    BIN_LDFLAGS += -L$(FM_LOCATION)
+endif
+
+
+LW_MODS_LIBS += multinode_transport lwdiag_utils fabricmanager
+
+$(MODS_FULL_TARGET_PATH): $(TRANSPORT_LOCATION)/libmultinode_transport$$(LIBSUFFIX)
+$(MODS_FULL_TARGET_PATH): $(LWDIAG_LOCATION)/liblwdiag_utils$$(LIBSUFFIX)
+$(MODS_FULL_TARGET_PATH): $(FM_LOCATION)/libfabricmanager$$(LIBSUFFIX)
+
+$(TRANSPORT_LOCATION)/libmultinode_transport$$(LIBSUFFIX):
+	$(MAKE) -C $(LW_SOURCE)/diag/multinode/transport -f makefile.lwmk $*
+
+$(LWDIAG_LOCATION)/liblwdiag_utils$$(LIBSUFFIX):
+	$(MAKE) -C $(LW_SOURCE)/diag/utils -f makefile.lwmk $*
+
+$(FM_LOCATION)/libfabricmanager$$(LIBSUFFIX):
+	$(MAKE) -C $(LW_SOURCE)/apps/fabricmanager/mods -f makefile.lwmk $* LW_MODS_GDM=1
+
+protobuf_gen_files  = $(OUTPUTDIR_ABSOLUTE)/message_reader.h
+protobuf_gen_files += $(OUTPUTDIR_ABSOLUTE)/message_writer.h
+protobuf_gen_files += $(OUTPUTDIR_ABSOLUTE)/message_structs.h
+protobuf_gen_files += $(OUTPUTDIR_ABSOLUTE)/message_gen.h
+protobuf_gen_files += $(OUTPUTDIR_ABSOLUTE)/message_handler.h
+protobuf_gen_files += $(OUTPUTDIR_ABSOLUTE)/message_handler.cpp
+
+mle_gen_files  = $(OUTPUTDIR_ABSOLUTE)/mle_protobuf_writer.h
+mle_gen_files += $(OUTPUTDIR_ABSOLUTE)/mle.h
+
+$(OBJECTS) : $(protobuf_gen_files) $(mle_gen_files)
+
+$(protobuf_gen_files): $(LW_SOURCE)/diag/multinode/common/messages.proto $(LW_SOURCE)/diag/utils/protobuf/protobuf.py
+	@$(ECHO) Generating Messages protobuf interface
+	@$(PYTHON) $(LW_SOURCE)/diag/utils/protobuf/protobuf.py        \
+            --reader_filename=$(OUTPUTDIR_ABSOLUTE)/message_reader.h   \
+            --reader_namespace=MessageReader                           \
+            --writer_filename=$(OUTPUTDIR_ABSOLUTE)/message_writer.h   \
+            --writer_namespace=MessageWriter                           \
+            --struct_filename=$(OUTPUTDIR_ABSOLUTE)/message_structs.h  \
+            --struct_namespace=Messages                                \
+            --header_filename=$(OUTPUTDIR_ABSOLUTE)/message_gen.h      \
+            --handler_basename=$(OUTPUTDIR_ABSOLUTE)/message_handler   \
+            --handler_namespace=MessageHandler                         \
+            $(LW_SOURCE)/diag/multinode/common/messages.proto
+
+$(mle_gen_files): $(LW_SOURCE)/diag/mle/mle.proto $(LW_SOURCE)/diag/utils/protobuf/protobuf.py
+	@$(ECHO) Generating MLE protobuf interface
+	@$(PYTHON) $(LW_SOURCE)/diag/utils/protobuf/protobuf.py              \
+            --writer_filename=$(OUTPUTDIR_ABSOLUTE)/mle_protobuf_writer.h    \
+            --writer_namespace=Mle                                           \
+            --header_filename=$(OUTPUTDIR_ABSOLUTE)/mle.h                    \
+            $(LW_SOURCE)/diag/mle/mle.proto
+
+LW_WARNINGS_AS_ERRORS  := 1
+LW_AGGRESSIVE_WARNINGS := 1
+
+ifeq ($(LW_TARGET_OS_FAMILY), Unix)
+    CFLAGS += -Wno-switch
+endif
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

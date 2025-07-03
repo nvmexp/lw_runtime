@@ -1,0 +1,2415 @@
+// BEGIN_SHADER
+//     BEGIN_SECTION SHADER_ID
+//         DIRECTX: 11.0
+//         TYPE: PIXEL 
+//         SHADER_HASH: 0xe0b5ab7ff6e8c972
+//         FINGERPRINTER_HASH: 0x0000000000000000
+//         UCODE_HASH: 0x1fae7645682e9053
+//         POOL: HAND_TUNED
+//         VERSION: 20
+//         # USES: 218
+//         # Constant Folding: 0
+//         # Disable 595261: 0
+//         # Reduction Hack: 0
+//         # Tex / Tld vectorized: 0
+//         # Texture Filtering: 0
+//     END_SECTION
+//     BEGIN_SECTION CHIP_ID
+//         CLASS: FERMI
+//         CHIP_ID: GF100
+//         SM_VERSION: SMClassic  // SM 2.0
+//     END_SECTION
+//     BEGIN_SECTION RESOURCES
+//         REGISTER_COUNT: 22
+//         TEXTURE_SLOTS: 4
+//         SAMPLER_SLOTS: 2
+//     END_SECTION
+//     BEGIN_SECTION FERMI_SHADER_HEADER
+//         SPHType: TYPE_02_PS
+//         Version: 3
+//         ShaderType: PIXEL
+//         SassVersion: 1
+//         PROPERTIES:
+//             MRT_ENABLE
+//         IMAP:
+//             POSITION_X
+//             POSITION_Y
+//             POSITION_W
+//             GENERIC00_X          PERSPECTIVE
+//             GENERIC00_Y          PERSPECTIVE
+//             GENERIC00_Z          PERSPECTIVE
+//             GENERIC00_W          PERSPECTIVE
+//         OMAP:
+//             TARGET00_R
+//             TARGET00_G
+//             TARGET00_B
+//             TARGET00_A
+//     END_SECTION
+//     BEGIN_SECTION APP_SHADER_INFO
+        ps_5_0
+        dcl_globalflags refactoringAllowed
+        dcl_constantbuffer cb0[6].xyzw, immediateIndexed
+        dcl_constantbuffer cb1[21].xyzw, immediateIndexed
+        dcl_constantbuffer cb2[3].xyzw, immediateIndexed
+        dcl_sampler s0, mode_comparison
+        dcl_sampler s1, mode_default
+        dcl_resource t0, texture2d, (float, float, float, float)
+        dcl_resource t1, texture2dms (4), (float, float, float, float)
+        dcl_resource t2, texture2d, (float, float, float, float)
+        dcl_input_ps v0.zw, linear
+        dcl_input_ps_siv v2.xy, position, linear noperspective
+        dcl_output o0.xyzw
+        dcl_temps 5 
+        ftoi r0.xy, v2.xyxx
+        mov r0.zw, l(0, 0, 0, 0)
+        ldms (texture2dms) (float,float,float,float) r0.z, r0.xyzw, t1.xyzw, l(0)
+        mad r1.xy, v2.xyxx, cb1[20].zwzz, -cb1[20].xyxx
+        mul r0.xy, r0.zzzz, r1.xyxx
+        sample (texture2d) (float,float,float,float) r1.x, v0.zwzz, t2.xyzw, s1
+        mad r1.x, -r1.x, l(2.00000000), l(40.00000000)
+        mul r1.x, r1.x, l(0.00062500)
+        mul r1.yzw, r0.xxyz, r1.xxxx
+        mov r0.w, l(0x3f800000)
+        dp4 r2.x, cb0[0].xyzw, r0.xyzw
+        dp4 r2.y, cb0[1].xyzw, r0.xyzw
+        dp4 r2.z, cb0[2].xyzw, r0.xyzw
+        dp4 r2.w, cb0[3].xyzw, r0.xyzw
+        dp3 r3.x, cb0[0].xyzx, r1.yzwy
+        dp3 r3.y, cb0[1].xyzx, r1.yzwy
+        dp3 r3.z, cb0[2].xyzx, r1.yzwy
+        dp3 r3.w, cb0[3].xyzx, r1.yzwy
+        mul r0.x, cb0[5].x, l(0.02500000)
+        lt r0.y, r0.z, l(0.00010000)
+        and r0.y, r0.y, cb0[5].x
+        lt r0.w, l(0.30000001), r0.z
+        if_nz r0.w
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r0.w, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.xy, r1.yzyy, l(0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, -0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r0.w, r0.w, r4.x
+          add r0.w, r4.y, r0.w
+          add r0.w, r1.y, r0.w
+          mul r0.w, r0.x, r0.w
+          mad r0.y, r0.w, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.z
+        add r2.xyzw, r2.xyzw, -r3.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.w, -r0.z, r1.x, r0.w
+        add r2.xyzw, -r3.xyzw, r2.xyzw
+        lt r1.y, l(0.30000001), r0.w
+        if_nz r1.y
+          div r1.yzw, r2.xxyz, r2.wwww
+          add r4.xy, r1.yzyy, l(-0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t0.xxxx, s0, r1.w
+          add r4.yz, r1.yyzy, l(0.00000000, 0.00029297, -0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r4.y, r4.yzyy, t0.xxxx, s0, r1.w
+          add r4.zw, r1.yyyz, l(0.00000000, 0.00000000, -0.00029297, 0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r4.z, r4.zwzz, t0.xxxx, s0, r1.w
+          add r1.yz, r1.yyzy, l(0.00000000, 0.00029297, 0.00029297, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.y, r1.yzyy, t0.xxxx, s0, r1.w
+          add r1.z, r4.y, r4.x
+          add r1.z, r4.z, r1.z
+          add r1.y, r1.y, r1.z
+          mul r1.y, r0.x, r1.y
+          mad r0.y, r1.y, l(0.25000000), r0.y
+        endif 
+        mad r0.z, -r0.z, r1.x, r0.w
+        lt r0.z, l(0.30000001), r0.z
+        if_nz r0.z
+          add r1.xyzw, -r3.xyzw, r2.xyzw
+          div r1.xyz, r1.xyzx, r1.wwww
+          add r0.zw, r1.xxxy, l(0.00000000, 0.00000000, -0.00029297, -0.00029297)
+          sample_c_lz (texture2d) (float,float,float,float) r0.z, r0.zwzz, t0.xxxx, s0, r1.z
+          add r2.xy, r1.xyxx, l(0.00029297, -0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r0.w, r2.xyxx, t0.xxxx, s0, r1.z
+          add r2.xy, r1.xyxx, l(-0.00029297, 0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.w, r2.xyxx, t0.xxxx, s0, r1.z
+          add r1.xy, r1.xyxx, l(0.00029297, 0.00029297, 0.00000000, 0.00000000)
+          sample_c_lz (texture2d) (float,float,float,float) r1.x, r1.xyxx, t0.xxxx, s0, r1.z
+          add r0.z, r0.w, r0.z
+          add r0.z, r1.w, r0.z
+          add r0.z, r1.x, r0.z
+          mul r0.x, r0.x, r0.z
+          mad r0.y, r0.x, l(0.25000000), r0.y
+        endif 
+        mad r0.x, cb2[2].z, l(-0.50000000), l(0.50000000)
+        mad r0.x, r0.x, l(0.80000001), l(0.20000000)
+        mul r0.x, r0.x, r0.y
+        mul o0.xyzw, r0.xxxx, cb2[0].xyzw
+        ret 
+//     END_SECTION
+//     BEGIN_SECTION COP_CONSTANTS
+//         COP_CONST[0]: 0x38d1b717 // 0.000100
+//         COP_CONST[1]: 0x3e99999a // 0.300000
+//         COP_CONST[2]: 0xb999999a // -0.000293
+//         COP_CONST[3]: 0x3f4ccccd // 0.800000
+//     END_SECTION
+//     # Exelwtion Time: 472.104ms [13.256 percent]
+//     BEGIN_SECTION USER_CONSTANT_HISTOGRAM_INFO
+//                  c[0][0] = 33.33%@0.00167501 33.33%@0.00000000 33.33%@-0.00065211
+//                  c[0][1] = 33.33%@-0.00854139 33.33%@0.00000000 33.33%@0.03589489
+//                  c[0][2] = 33.33%@0.00935228 33.33%@0.00000000 33.33%@-0.03798194
+//                  c[0][3] = 33.33%@-0.00036945 33.33%@0.00000000 33.33%@1.00244212
+//                  c[0][4] = 33.33%@0.00341528 33.33%@0.00000000 33.33%@-0.02731338
+//                  c[0][5] = 33.33%@-0.00317087 33.33%@0.00000000 33.33%@-0.00305914
+//                  c[0][6] = 33.33%@0.00404951 33.33%@0.00000000 33.33%@-0.00242210
+//                  c[0][7] = 33.33%@0.08746219 33.33%@0.00000000 33.33%@0.53857410
+//                  c[0][8] = 33.33%@0.00000185 33.33%@0.00000000 33.33%@0.00013798
+//                  c[0][9] = 33.33%@-0.00000944 33.33%@0.00000000 33.33%@-0.00070358
+//                  c[0][10] = 33.33%@-0.00000924 33.33%@0.00000000 33.33%@-0.00066728
+//                  c[0][11] = 33.33%@0.00688901 33.33%@0.00000000 33.33%@0.99999988
+//                  c[0][12] = 66.67%@0.00000000 33.33%@0.00137643
+//                  c[0][13] = 66.67%@0.00000000 33.33%@-0.00701884
+//                  c[0][14] = 66.67%@0.00000000 33.33%@0.00768518
+//                  c[0][15] = 33.33%@0.16598594 33.33%@0.00000000 33.33%@1.00000000
+//                  c[0][20] = 66.67%@0.30000001 33.33%@0.00000000
+//                  c[1][80] = 66.67%@1.06908584 33.33%@0.00000000
+//                  c[1][81] = 66.67%@-0.66817862 33.33%@0.00000000
+//                  c[1][82] = 66.67%@0.00111363 33.33%@0.00000000
+//                  c[1][83] = 66.67%@-0.00111363 33.33%@0.00000000
+//                  c[2][0] = 66.67%@0.90588200 33.33%@0.00000000
+//                  c[2][1] = 66.67%@0.83921599 33.33%@0.00000000
+//                  c[2][2] = 66.67%@0.69411802 33.33%@0.00000000
+//                  c[2][3] = 100.00%@0.00000000
+//                  c[2][10] = 100.00%@0.00000000
+//                  c[0][21] = 66.67%@0x3e99999a 33.33%@0x0
+//                  c[0][22] = 66.67%@0x3e99999a 33.33%@0x0
+//                  c[0][23] = 100.00%@0x0
+//     END_SECTION
+//     BEGIN_SECTION TEXTURE_STATE_HISTOGRAM_INFO
+//         TEXTURE_SLOT 0x0
+//         100.00% width=0x800, height=0x800, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         TEXTURE_SLOT 0x1
+//         100.00% width=0x780, height=0x4b0, mips=0x1, DXGI_FORMAT_R16G16B16A16_FLOAT
+//         TEXTURE_SLOT 0x2
+//         100.00% width=0x40, height=0x40, mips=0x1, DXGI_FORMAT_R8G8B8A8_SNORM
+//         TEXTURE_SLOT 0x3
+//         100.00% width=0x400, height=0x400, mips=0x1, DXGI_FORMAT_R32G32_FLOAT
+//     END_SECTION
+//     BEGIN_SECTION SAMPLER_STATE_INFO
+//         SAMPLER_SLOT 0x0
+//         100.00%  min=Linear, mag=Linear, mip=Point aniso=1, minLOD=-340282346638528860000000000000000000000.000000, maxLOD=340282346638528860000000000000000000000.000000
+//         addressU=CLAMP, addressV=CLAMP, addressW=CLAMP comparisonFunc=LESS_EQUAL
+//         SAMPLER_SLOT 0x1
+//         100.00%  min=Point, mag=Point, mip=Point aniso=1, minLOD=-340282346638528860000000000000000000000.000000, maxLOD=340282346638528860000000000000000000000.000000
+//         addressU=WRAP, addressV=WRAP, addressW=WRAP
+//     END_SECTION
+//     BEGIN_SECTION UCODE
+//     	!!SPA2.1
+//     	.THREAD_TYPE pixel
+//     	MOV R1, c[0x11][0x100c];         # [  0][000000]
+//     	IPA.PASS R0, a[0x74];            # [  1][000008] POSITION_Y
+//     	IPA.PASS R4, a[0x70];            # [  2][000010] POSITION_X
+//     	SHL.W R1, R1, 0x4;               # [  3][000018]
+//     	LDC.64 R6, c[0x11][R1];          # [  4][000020]
+//     	F2I.TRUNC R2, R0;                # [  5][000028]
+//     	F2I.TRUNC R1, R4;                # [  6][000030]
+//     	ISCADD R3, R2, R7, 0x1;          # [  7][000038]
+//     	ISCADD R2, R1, R6, 0x1;          # [  8][000040]
+//     	TLD.LZ.T R14, R2, 0x1, 2D, 0x4;  # [  9][000048]
+//     	IPA.PASS R1, a[0x7c];            # [ 10][000050] POSITION_W
+//     	MUFU.RCP R1, R1;                 # [ 11][000058]
+//     	IPA R3, a[0x8c], R1;             # [ 12][000060] GENERIC_ATTRIBUTE_00_W
+//     	IPA R2, a[0x88], R1;             # [ 13][000068] GENERIC_ATTRIBUTE_00_Z
+//     	TEX.T R2, R2, 0x2, 0x1, 2D, 0x1; # [ 14][000070]
+//     	MOV32I R1, 0x3ccccccd;           # [ 15][000078]
+//     	MOV R6, c[0x1][0x140];           # [ 16][000080]
+//     	MOV R5, c[0x1][0x144];           # [ 17][000088]
+//     	FMUL.FTZ R13, R1, c[0x0][0x50];  # [ 18][000090]
+//     	FFMA.FTZ R1, R4, c[0x1][0x148], -R6; # [ 19][000098]
+//     	FFMA.FTZ R0, R0, c[0x1][0x14c], -R5; # [ 20][0000a0]
+//     	MOV32I R3, 0x42200000;           # [ 21][0000a8]
+//     	FMUL.FTZ R1, R14, R1;            # [ 22][0000b0]
+//     	FMUL.FTZ R0, R14, R0;            # [ 23][0000b8]
+//     	FSETP.LT.FTZ.AND P1, PT, R14, c[0x10][0x0], PT; # [ 24][0000c0]
+//     	FMUL.FTZ R5, R1, c[0x0][0x20];   # [ 25][0000c8]
+//     	FMUL.FTZ R4, R1, c[0x0][0x30];   # [ 26][0000d0]
+//     	FMUL.FTZ R7, R1, c[0x0][0x0];    # [ 27][0000d8]
+//     	FFMA.FTZ R5, R0, c[0x0][0x24], R5; # [ 28][0000e0]
+//     	FFMA.FTZ R4, R0, c[0x0][0x34], R4; # [ 29][0000e8]
+//     	FMUL.FTZ R6, R1, c[0x0][0x10];   # [ 30][0000f0]
+//     	FFMA.FTZ R5, R14, c[0x0][0x28], R5; # [ 31][0000f8]
+//     	FFMA.FTZ R4, R14, c[0x0][0x38], R4; # [ 32][000100]
+//     	FFMA.FTZ R7, R0, c[0x0][0x4], R7; # [ 33][000108]
+//     	FFMA.FTZ R6, R0, c[0x0][0x14], R6; # [ 34][000110]
+//     	FADD.FTZ R9, R5, c[0x0][0x2c];   # [ 35][000118]
+//     	FADD.FTZ R8, R4, c[0x0][0x3c];   # [ 36][000120]
+//     	FFMA.FTZ R7, R14, c[0x0][0x8], R7; # [ 37][000128]
+//     	FFMA.FTZ R2, R2, -2, R3;         # [ 38][000130]
+//     	FFMA.FTZ R6, R14, c[0x0][0x18], R6; # [ 39][000138]
+//     	FSETP.GT.FTZ.AND P0, PT, R14, c[0x10][0x4], PT; # [ 40][000140]
+//     	FMUL32I.FTZ R12, R2, 0.000625;   # [ 41][000148]
+//     	FADD.FTZ R11, R7, c[0x0][0xc];   # [ 42][000150]
+//     	FADD.FTZ R10, R6, c[0x0][0x1c];  # [ 43][000158]
+//     	FMUL.FTZ R1, R1, R12;            # [ 44][000160]
+//     	FMUL.FTZ R2, R0, R12;            # [ 45][000168]
+//     	FMUL.FTZ R0, R14, R12;           # [ 46][000170]
+//     	FMUL.FTZ R5, R1, c[0x0][0x0];    # [ 47][000178]
+//     	FMUL.FTZ R4, R1, c[0x0][0x10];   # [ 48][000180]
+//     	FMUL.FTZ R3, R1, c[0x0][0x20];   # [ 49][000188]
+//     	FMUL.FTZ R1, R1, c[0x0][0x30];   # [ 50][000190]
+//     	FFMA.FTZ R5, R2, c[0x0][0x4], R5; # [ 51][000198]
+//     	FFMA.FTZ R4, R2, c[0x0][0x14], R4; # [ 52][0001a0]
+//     	FFMA.FTZ R3, R2, c[0x0][0x24], R3; # [ 53][0001a8]
+//     	FFMA.FTZ R1, R2, c[0x0][0x34], R1; # [ 54][0001b0]
+//     	FFMA.FTZ R7, R0, c[0x0][0x8], R5; # [ 55][0001b8]
+//     	FFMA.FTZ R6, R0, c[0x0][0x18], R4; # [ 56][0001c0]
+//     	SEL R19, RZ, c[0x0][0x50], !P1;  # [ 57][0001c8]
+//     	FFMA.FTZ R5, R0, c[0x0][0x28], R3; # [ 58][0001d0]
+//     	FFMA.FTZ R4, R0, c[0x0][0x38], R1; # [ 59][0001d8]
+//     	@!P0 BRA.U L02c8;                # [ 60][0001e0]
+//     	@P0 MUFU.RCP R17, R8;            # [ 61][0001e8]
+//     	@P0 FMUL.FTZ R16, R9, R17;       # [ 62][0001f0]
+//     	@P0 FFMA.FTZ R1, R10, R17, c[0x10][0x8]; # [ 63][0001f8]
+//     	@P0 FFMA.FTZ R0, R11, R17, c[0x10][0x8]; # [ 64][000200]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [ 65][000208]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [ 66][000210]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [ 67][000218]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [ 68][000220]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [ 69][000228]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [ 70][000230]
+//     	@!P0 BRA.U L02c8;                # [ 71][000238]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [ 72][000240]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [ 73][000248]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [ 74][000250]
+//     	@!P0 BRA.U L02c8;                # [ 75][000258]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [ 76][000260]
+//     	@P0 FFMA.FTZ R2, R11, R17, -c[0x10][0x8]; # [ 77][000268]
+//     	@P0 MOV R3, R1;                  # [ 78][000270]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [ 79][000278]
+//     	@P0 FFMA.FTZ R1, R10, R17, -c[0x10][0x8]; # [ 80][000280]
+//     	@P0 TEX.LZ.DC.NODEP R17, R0, R16, 0x0, 0x0, 2D, 0x1; # [ 81][000288]
+//     	@P0 MOV R0, R2;                  # [ 82][000290]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [ 83][000298]
+//     	@P0 FADD.FTZ R1, R15, R3;        # [ 84][0002a0]
+//     	@P0 FADD.FTZ R1, R17, R1;        # [ 85][0002a8]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [ 86][0002b0]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [ 87][0002b8]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [ 88][0002c0]
+//     L02c8:
+//     	FFMA.FTZ R15, R14, -R12, R14;    # [ 89][0002c8]
+//     	FADD.FTZ R8, R8, -R4;            # [ 90][0002d0]
+//     	FADD.FTZ R9, R9, -R5;            # [ 91][0002d8]
+//     	FSETP.GT.FTZ.AND P0, PT, R15, c[0x10][0x4], PT; # [ 92][0002e0]
+//     	FADD.FTZ R10, R10, -R6;          # [ 93][0002e8]
+//     	FADD.FTZ R17, R11, -R7;          # [ 94][0002f0]
+//     	@!P0 BRA.U L03e0;                # [ 95][0002f8]
+//     	@P0 MUFU.RCP R18, R8;            # [ 96][000300]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [ 97][000308]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [ 98][000310]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [ 99][000318]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [100][000320]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [101][000328]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [102][000330]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [103][000338]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [104][000340]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [105][000348]
+//     	@!P0 BRA.U L03e0;                # [106][000350]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [107][000358]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [108][000360]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [109][000368]
+//     	@!P0 BRA.U L03e0;                # [110][000370]
+//     	@P0 TEX.LZ.DC.NODEP R11, R0, R16, 0x0, 0x0, 2D, 0x1; # [111][000378]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [112][000380]
+//     	@P0 MOV R3, R1;                  # [113][000388]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [114][000390]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [115][000398]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [116][0003a0]
+//     	@P0 MOV R0, R2;                  # [117][0003a8]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [118][0003b0]
+//     	@P0 FADD.FTZ R1, R3, R11;        # [119][0003b8]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [120][0003c0]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [121][0003c8]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [122][0003d0]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [123][0003d8]
+//     L03e0:
+//     	FFMA.FTZ R11, R14, -R12, R15;    # [124][0003e0]
+//     	FADD.FTZ R8, -R4, R8;            # [125][0003e8]
+//     	FADD.FTZ R9, -R5, R9;            # [126][0003f0]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [127][0003f8]
+//     	FADD.FTZ R10, -R6, R10;          # [128][000400]
+//     	FADD.FTZ R17, -R7, R17;          # [129][000408]
+//     	@!P0 BRA.U L04f8;                # [130][000410]
+//     	@P0 MUFU.RCP R18, R8;            # [131][000418]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [132][000420]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [133][000428]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [134][000430]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [135][000438]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [136][000440]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [137][000448]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [138][000450]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [139][000458]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [140][000460]
+//     	@!P0 BRA.U L04f8;                # [141][000468]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [142][000470]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [143][000478]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [144][000480]
+//     	@!P0 BRA.U L04f8;                # [145][000488]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [146][000490]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [147][000498]
+//     	@P0 MOV R3, R1;                  # [148][0004a0]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [149][0004a8]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [150][0004b0]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [151][0004b8]
+//     	@P0 MOV R0, R2;                  # [152][0004c0]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [153][0004c8]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [154][0004d0]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [155][0004d8]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [156][0004e0]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [157][0004e8]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [158][0004f0]
+//     L04f8:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [159][0004f8]
+//     	FADD.FTZ R8, -R4, R8;            # [160][000500]
+//     	FADD.FTZ R9, -R5, R9;            # [161][000508]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [162][000510]
+//     	FADD.FTZ R10, -R6, R10;          # [163][000518]
+//     	FADD.FTZ R17, -R7, R17;          # [164][000520]
+//     	@!P0 BRA.U L0610;                # [165][000528]
+//     	@P0 MUFU.RCP R18, R8;            # [166][000530]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [167][000538]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [168][000540]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [169][000548]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [170][000550]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [171][000558]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [172][000560]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [173][000568]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [174][000570]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [175][000578]
+//     	@!P0 BRA.U L0610;                # [176][000580]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [177][000588]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [178][000590]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [179][000598]
+//     	@!P0 BRA.U L0610;                # [180][0005a0]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [181][0005a8]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [182][0005b0]
+//     	@P0 MOV R3, R1;                  # [183][0005b8]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [184][0005c0]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [185][0005c8]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [186][0005d0]
+//     	@P0 MOV R0, R2;                  # [187][0005d8]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [188][0005e0]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [189][0005e8]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [190][0005f0]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [191][0005f8]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [192][000600]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [193][000608]
+//     L0610:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [194][000610]
+//     	FADD.FTZ R8, -R4, R8;            # [195][000618]
+//     	FADD.FTZ R9, -R5, R9;            # [196][000620]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [197][000628]
+//     	FADD.FTZ R10, -R6, R10;          # [198][000630]
+//     	FADD.FTZ R17, -R7, R17;          # [199][000638]
+//     	@!P0 BRA.U L0728;                # [200][000640]
+//     	@P0 MUFU.RCP R18, R8;            # [201][000648]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [202][000650]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [203][000658]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [204][000660]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [205][000668]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [206][000670]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [207][000678]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [208][000680]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [209][000688]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [210][000690]
+//     	@!P0 BRA.U L0728;                # [211][000698]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [212][0006a0]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [213][0006a8]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [214][0006b0]
+//     	@!P0 BRA.U L0728;                # [215][0006b8]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [216][0006c0]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [217][0006c8]
+//     	@P0 MOV R3, R1;                  # [218][0006d0]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [219][0006d8]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [220][0006e0]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [221][0006e8]
+//     	@P0 MOV R0, R2;                  # [222][0006f0]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [223][0006f8]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [224][000700]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [225][000708]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [226][000710]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [227][000718]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [228][000720]
+//     L0728:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [229][000728]
+//     	FADD.FTZ R8, -R4, R8;            # [230][000730]
+//     	FADD.FTZ R9, -R5, R9;            # [231][000738]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [232][000740]
+//     	FADD.FTZ R10, -R6, R10;          # [233][000748]
+//     	FADD.FTZ R17, -R7, R17;          # [234][000750]
+//     	@!P0 BRA.U L0840;                # [235][000758]
+//     	@P0 MUFU.RCP R18, R8;            # [236][000760]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [237][000768]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [238][000770]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [239][000778]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [240][000780]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [241][000788]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [242][000790]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [243][000798]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [244][0007a0]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [245][0007a8]
+//     	@!P0 BRA.U L0840;                # [246][0007b0]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [247][0007b8]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [248][0007c0]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [249][0007c8]
+//     	@!P0 BRA.U L0840;                # [250][0007d0]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [251][0007d8]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [252][0007e0]
+//     	@P0 MOV R3, R1;                  # [253][0007e8]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [254][0007f0]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [255][0007f8]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [256][000800]
+//     	@P0 MOV R0, R2;                  # [257][000808]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [258][000810]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [259][000818]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [260][000820]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [261][000828]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [262][000830]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [263][000838]
+//     L0840:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [264][000840]
+//     	FADD.FTZ R8, -R4, R8;            # [265][000848]
+//     	FADD.FTZ R9, -R5, R9;            # [266][000850]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [267][000858]
+//     	FADD.FTZ R10, -R6, R10;          # [268][000860]
+//     	FADD.FTZ R17, -R7, R17;          # [269][000868]
+//     	@!P0 BRA.U L0958;                # [270][000870]
+//     	@P0 MUFU.RCP R18, R8;            # [271][000878]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [272][000880]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [273][000888]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [274][000890]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [275][000898]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [276][0008a0]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [277][0008a8]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [278][0008b0]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [279][0008b8]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [280][0008c0]
+//     	@!P0 BRA.U L0958;                # [281][0008c8]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [282][0008d0]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [283][0008d8]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [284][0008e0]
+//     	@!P0 BRA.U L0958;                # [285][0008e8]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [286][0008f0]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [287][0008f8]
+//     	@P0 MOV R3, R1;                  # [288][000900]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [289][000908]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [290][000910]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [291][000918]
+//     	@P0 MOV R0, R2;                  # [292][000920]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [293][000928]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [294][000930]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [295][000938]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [296][000940]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [297][000948]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [298][000950]
+//     L0958:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [299][000958]
+//     	FADD.FTZ R8, -R4, R8;            # [300][000960]
+//     	FADD.FTZ R9, -R5, R9;            # [301][000968]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [302][000970]
+//     	FADD.FTZ R10, -R6, R10;          # [303][000978]
+//     	FADD.FTZ R17, -R7, R17;          # [304][000980]
+//     	@!P0 BRA.U L0a70;                # [305][000988]
+//     	@P0 MUFU.RCP R18, R8;            # [306][000990]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [307][000998]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [308][0009a0]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [309][0009a8]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [310][0009b0]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [311][0009b8]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [312][0009c0]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [313][0009c8]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [314][0009d0]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [315][0009d8]
+//     	@!P0 BRA.U L0a70;                # [316][0009e0]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [317][0009e8]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [318][0009f0]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [319][0009f8]
+//     	@!P0 BRA.U L0a70;                # [320][000a00]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [321][000a08]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [322][000a10]
+//     	@P0 MOV R3, R1;                  # [323][000a18]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [324][000a20]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [325][000a28]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [326][000a30]
+//     	@P0 MOV R0, R2;                  # [327][000a38]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [328][000a40]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [329][000a48]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [330][000a50]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [331][000a58]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [332][000a60]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [333][000a68]
+//     L0a70:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [334][000a70]
+//     	FADD.FTZ R8, -R4, R8;            # [335][000a78]
+//     	FADD.FTZ R9, -R5, R9;            # [336][000a80]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [337][000a88]
+//     	FADD.FTZ R10, -R6, R10;          # [338][000a90]
+//     	FADD.FTZ R17, -R7, R17;          # [339][000a98]
+//     	@!P0 BRA.U L0b88;                # [340][000aa0]
+//     	@P0 MUFU.RCP R18, R8;            # [341][000aa8]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [342][000ab0]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [343][000ab8]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [344][000ac0]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [345][000ac8]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [346][000ad0]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [347][000ad8]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [348][000ae0]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [349][000ae8]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [350][000af0]
+//     	@!P0 BRA.U L0b88;                # [351][000af8]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [352][000b00]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [353][000b08]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [354][000b10]
+//     	@!P0 BRA.U L0b88;                # [355][000b18]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [356][000b20]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [357][000b28]
+//     	@P0 MOV R3, R1;                  # [358][000b30]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [359][000b38]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [360][000b40]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [361][000b48]
+//     	@P0 MOV R0, R2;                  # [362][000b50]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [363][000b58]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [364][000b60]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [365][000b68]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [366][000b70]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [367][000b78]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [368][000b80]
+//     L0b88:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [369][000b88]
+//     	FADD.FTZ R8, -R4, R8;            # [370][000b90]
+//     	FADD.FTZ R9, -R5, R9;            # [371][000b98]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [372][000ba0]
+//     	FADD.FTZ R10, -R6, R10;          # [373][000ba8]
+//     	FADD.FTZ R17, -R7, R17;          # [374][000bb0]
+//     	@!P0 BRA.U L0ca0;                # [375][000bb8]
+//     	@P0 MUFU.RCP R18, R8;            # [376][000bc0]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [377][000bc8]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [378][000bd0]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [379][000bd8]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [380][000be0]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [381][000be8]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [382][000bf0]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [383][000bf8]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [384][000c00]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [385][000c08]
+//     	@!P0 BRA.U L0ca0;                # [386][000c10]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [387][000c18]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [388][000c20]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [389][000c28]
+//     	@!P0 BRA.U L0ca0;                # [390][000c30]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [391][000c38]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [392][000c40]
+//     	@P0 MOV R3, R1;                  # [393][000c48]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [394][000c50]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [395][000c58]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [396][000c60]
+//     	@P0 MOV R0, R2;                  # [397][000c68]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [398][000c70]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [399][000c78]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [400][000c80]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [401][000c88]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [402][000c90]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [403][000c98]
+//     L0ca0:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [404][000ca0]
+//     	FADD.FTZ R8, -R4, R8;            # [405][000ca8]
+//     	FADD.FTZ R9, -R5, R9;            # [406][000cb0]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [407][000cb8]
+//     	FADD.FTZ R10, -R6, R10;          # [408][000cc0]
+//     	FADD.FTZ R17, -R7, R17;          # [409][000cc8]
+//     	@!P0 BRA.U L0db8;                # [410][000cd0]
+//     	@P0 MUFU.RCP R18, R8;            # [411][000cd8]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [412][000ce0]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [413][000ce8]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [414][000cf0]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [415][000cf8]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [416][000d00]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [417][000d08]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [418][000d10]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [419][000d18]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [420][000d20]
+//     	@!P0 BRA.U L0db8;                # [421][000d28]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [422][000d30]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [423][000d38]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [424][000d40]
+//     	@!P0 BRA.U L0db8;                # [425][000d48]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [426][000d50]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [427][000d58]
+//     	@P0 MOV R3, R1;                  # [428][000d60]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [429][000d68]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [430][000d70]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [431][000d78]
+//     	@P0 MOV R0, R2;                  # [432][000d80]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [433][000d88]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [434][000d90]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [435][000d98]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [436][000da0]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [437][000da8]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [438][000db0]
+//     L0db8:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [439][000db8]
+//     	FADD.FTZ R8, -R4, R8;            # [440][000dc0]
+//     	FADD.FTZ R9, -R5, R9;            # [441][000dc8]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [442][000dd0]
+//     	FADD.FTZ R10, -R6, R10;          # [443][000dd8]
+//     	FADD.FTZ R17, -R7, R17;          # [444][000de0]
+//     	@!P0 BRA.U L0ed0;                # [445][000de8]
+//     	@P0 MUFU.RCP R18, R8;            # [446][000df0]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [447][000df8]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [448][000e00]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [449][000e08]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [450][000e10]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [451][000e18]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [452][000e20]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [453][000e28]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [454][000e30]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [455][000e38]
+//     	@!P0 BRA.U L0ed0;                # [456][000e40]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [457][000e48]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [458][000e50]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [459][000e58]
+//     	@!P0 BRA.U L0ed0;                # [460][000e60]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [461][000e68]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [462][000e70]
+//     	@P0 MOV R3, R1;                  # [463][000e78]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [464][000e80]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [465][000e88]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [466][000e90]
+//     	@P0 MOV R0, R2;                  # [467][000e98]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [468][000ea0]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [469][000ea8]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [470][000eb0]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [471][000eb8]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [472][000ec0]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [473][000ec8]
+//     L0ed0:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [474][000ed0]
+//     	FADD.FTZ R8, -R4, R8;            # [475][000ed8]
+//     	FADD.FTZ R9, -R5, R9;            # [476][000ee0]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [477][000ee8]
+//     	FADD.FTZ R10, -R6, R10;          # [478][000ef0]
+//     	FADD.FTZ R17, -R7, R17;          # [479][000ef8]
+//     	@!P0 BRA.U L0fe8;                # [480][000f00]
+//     	@P0 MUFU.RCP R18, R8;            # [481][000f08]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [482][000f10]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [483][000f18]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [484][000f20]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [485][000f28]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [486][000f30]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [487][000f38]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [488][000f40]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [489][000f48]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [490][000f50]
+//     	@!P0 BRA.U L0fe8;                # [491][000f58]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [492][000f60]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [493][000f68]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [494][000f70]
+//     	@!P0 BRA.U L0fe8;                # [495][000f78]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [496][000f80]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [497][000f88]
+//     	@P0 MOV R3, R1;                  # [498][000f90]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [499][000f98]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [500][000fa0]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [501][000fa8]
+//     	@P0 MOV R0, R2;                  # [502][000fb0]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [503][000fb8]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [504][000fc0]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [505][000fc8]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [506][000fd0]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [507][000fd8]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [508][000fe0]
+//     L0fe8:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [509][000fe8]
+//     	FADD.FTZ R8, -R4, R8;            # [510][000ff0]
+//     	FADD.FTZ R9, -R5, R9;            # [511][000ff8]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [512][001000]
+//     	FADD.FTZ R10, -R6, R10;          # [513][001008]
+//     	FADD.FTZ R17, -R7, R17;          # [514][001010]
+//     	@!P0 BRA.U L1100;                # [515][001018]
+//     	@P0 MUFU.RCP R18, R8;            # [516][001020]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [517][001028]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [518][001030]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [519][001038]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [520][001040]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [521][001048]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [522][001050]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [523][001058]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [524][001060]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [525][001068]
+//     	@!P0 BRA.U L1100;                # [526][001070]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [527][001078]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [528][001080]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [529][001088]
+//     	@!P0 BRA.U L1100;                # [530][001090]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [531][001098]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [532][0010a0]
+//     	@P0 MOV R3, R1;                  # [533][0010a8]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [534][0010b0]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [535][0010b8]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [536][0010c0]
+//     	@P0 MOV R0, R2;                  # [537][0010c8]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [538][0010d0]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [539][0010d8]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [540][0010e0]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [541][0010e8]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [542][0010f0]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [543][0010f8]
+//     L1100:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [544][001100]
+//     	FADD.FTZ R8, -R4, R8;            # [545][001108]
+//     	FADD.FTZ R9, -R5, R9;            # [546][001110]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [547][001118]
+//     	FADD.FTZ R10, -R6, R10;          # [548][001120]
+//     	FADD.FTZ R17, -R7, R17;          # [549][001128]
+//     	@!P0 BRA.U L1218;                # [550][001130]
+//     	@P0 MUFU.RCP R18, R8;            # [551][001138]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [552][001140]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [553][001148]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [554][001150]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [555][001158]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [556][001160]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [557][001168]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [558][001170]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [559][001178]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [560][001180]
+//     	@!P0 BRA.U L1218;                # [561][001188]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [562][001190]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [563][001198]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [564][0011a0]
+//     	@!P0 BRA.U L1218;                # [565][0011a8]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [566][0011b0]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [567][0011b8]
+//     	@P0 MOV R3, R1;                  # [568][0011c0]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [569][0011c8]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [570][0011d0]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [571][0011d8]
+//     	@P0 MOV R0, R2;                  # [572][0011e0]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [573][0011e8]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [574][0011f0]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [575][0011f8]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [576][001200]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [577][001208]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [578][001210]
+//     L1218:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [579][001218]
+//     	FADD.FTZ R8, -R4, R8;            # [580][001220]
+//     	FADD.FTZ R9, -R5, R9;            # [581][001228]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [582][001230]
+//     	FADD.FTZ R10, -R6, R10;          # [583][001238]
+//     	FADD.FTZ R17, -R7, R17;          # [584][001240]
+//     	@!P0 BRA.U L1330;                # [585][001248]
+//     	@P0 MUFU.RCP R18, R8;            # [586][001250]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [587][001258]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [588][001260]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [589][001268]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [590][001270]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [591][001278]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [592][001280]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [593][001288]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [594][001290]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [595][001298]
+//     	@!P0 BRA.U L1330;                # [596][0012a0]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [597][0012a8]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [598][0012b0]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [599][0012b8]
+//     	@!P0 BRA.U L1330;                # [600][0012c0]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [601][0012c8]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [602][0012d0]
+//     	@P0 MOV R3, R1;                  # [603][0012d8]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [604][0012e0]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [605][0012e8]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [606][0012f0]
+//     	@P0 MOV R0, R2;                  # [607][0012f8]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [608][001300]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [609][001308]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [610][001310]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [611][001318]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [612][001320]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [613][001328]
+//     L1330:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [614][001330]
+//     	FADD.FTZ R8, -R4, R8;            # [615][001338]
+//     	FADD.FTZ R9, -R5, R9;            # [616][001340]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [617][001348]
+//     	FADD.FTZ R10, -R6, R10;          # [618][001350]
+//     	FADD.FTZ R17, -R7, R17;          # [619][001358]
+//     	@!P0 BRA.U L1448;                # [620][001360]
+//     	@P0 MUFU.RCP R18, R8;            # [621][001368]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [622][001370]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [623][001378]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [624][001380]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [625][001388]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [626][001390]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [627][001398]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [628][0013a0]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [629][0013a8]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [630][0013b0]
+//     	@!P0 BRA.U L1448;                # [631][0013b8]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [632][0013c0]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [633][0013c8]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [634][0013d0]
+//     	@!P0 BRA.U L1448;                # [635][0013d8]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [636][0013e0]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [637][0013e8]
+//     	@P0 MOV R3, R1;                  # [638][0013f0]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [639][0013f8]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [640][001400]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [641][001408]
+//     	@P0 MOV R0, R2;                  # [642][001410]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [643][001418]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [644][001420]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [645][001428]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [646][001430]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [647][001438]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [648][001440]
+//     L1448:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [649][001448]
+//     	FADD.FTZ R8, -R4, R8;            # [650][001450]
+//     	FADD.FTZ R9, -R5, R9;            # [651][001458]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [652][001460]
+//     	FADD.FTZ R10, -R6, R10;          # [653][001468]
+//     	FADD.FTZ R17, -R7, R17;          # [654][001470]
+//     	@!P0 BRA.U L1560;                # [655][001478]
+//     	@P0 MUFU.RCP R18, R8;            # [656][001480]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [657][001488]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [658][001490]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [659][001498]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [660][0014a0]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [661][0014a8]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [662][0014b0]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [663][0014b8]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [664][0014c0]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [665][0014c8]
+//     	@!P0 BRA.U L1560;                # [666][0014d0]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [667][0014d8]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [668][0014e0]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [669][0014e8]
+//     	@!P0 BRA.U L1560;                # [670][0014f0]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [671][0014f8]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [672][001500]
+//     	@P0 MOV R3, R1;                  # [673][001508]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [674][001510]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [675][001518]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [676][001520]
+//     	@P0 MOV R0, R2;                  # [677][001528]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [678][001530]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [679][001538]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [680][001540]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [681][001548]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [682][001550]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [683][001558]
+//     L1560:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [684][001560]
+//     	FADD.FTZ R8, -R4, R8;            # [685][001568]
+//     	FADD.FTZ R9, -R5, R9;            # [686][001570]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [687][001578]
+//     	FADD.FTZ R10, -R6, R10;          # [688][001580]
+//     	FADD.FTZ R17, -R7, R17;          # [689][001588]
+//     	@!P0 BRA.U L1678;                # [690][001590]
+//     	@P0 MUFU.RCP R18, R8;            # [691][001598]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [692][0015a0]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [693][0015a8]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [694][0015b0]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [695][0015b8]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [696][0015c0]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [697][0015c8]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [698][0015d0]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [699][0015d8]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [700][0015e0]
+//     	@!P0 BRA.U L1678;                # [701][0015e8]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [702][0015f0]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [703][0015f8]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [704][001600]
+//     	@!P0 BRA.U L1678;                # [705][001608]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [706][001610]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [707][001618]
+//     	@P0 MOV R3, R1;                  # [708][001620]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [709][001628]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [710][001630]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [711][001638]
+//     	@P0 MOV R0, R2;                  # [712][001640]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [713][001648]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [714][001650]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [715][001658]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [716][001660]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [717][001668]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [718][001670]
+//     L1678:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [719][001678]
+//     	FADD.FTZ R8, -R4, R8;            # [720][001680]
+//     	FADD.FTZ R9, -R5, R9;            # [721][001688]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [722][001690]
+//     	FADD.FTZ R10, -R6, R10;          # [723][001698]
+//     	FADD.FTZ R17, -R7, R17;          # [724][0016a0]
+//     	@!P0 BRA.U L1790;                # [725][0016a8]
+//     	@P0 MUFU.RCP R18, R8;            # [726][0016b0]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [727][0016b8]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [728][0016c0]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [729][0016c8]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [730][0016d0]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [731][0016d8]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [732][0016e0]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [733][0016e8]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [734][0016f0]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [735][0016f8]
+//     	@!P0 BRA.U L1790;                # [736][001700]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [737][001708]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [738][001710]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [739][001718]
+//     	@!P0 BRA.U L1790;                # [740][001720]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [741][001728]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [742][001730]
+//     	@P0 MOV R3, R1;                  # [743][001738]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [744][001740]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [745][001748]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [746][001750]
+//     	@P0 MOV R0, R2;                  # [747][001758]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [748][001760]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [749][001768]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [750][001770]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [751][001778]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [752][001780]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [753][001788]
+//     L1790:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [754][001790]
+//     	FADD.FTZ R8, -R4, R8;            # [755][001798]
+//     	FADD.FTZ R9, -R5, R9;            # [756][0017a0]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [757][0017a8]
+//     	FADD.FTZ R10, -R6, R10;          # [758][0017b0]
+//     	FADD.FTZ R17, -R7, R17;          # [759][0017b8]
+//     	@!P0 BRA.U L18a8;                # [760][0017c0]
+//     	@P0 MUFU.RCP R18, R8;            # [761][0017c8]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [762][0017d0]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [763][0017d8]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [764][0017e0]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [765][0017e8]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [766][0017f0]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [767][0017f8]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [768][001800]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [769][001808]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [770][001810]
+//     	@!P0 BRA.U L18a8;                # [771][001818]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [772][001820]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [773][001828]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [774][001830]
+//     	@!P0 BRA.U L18a8;                # [775][001838]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [776][001840]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [777][001848]
+//     	@P0 MOV R3, R1;                  # [778][001850]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [779][001858]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [780][001860]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [781][001868]
+//     	@P0 MOV R0, R2;                  # [782][001870]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [783][001878]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [784][001880]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [785][001888]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [786][001890]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [787][001898]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [788][0018a0]
+//     L18a8:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [789][0018a8]
+//     	FADD.FTZ R8, -R4, R8;            # [790][0018b0]
+//     	FADD.FTZ R9, -R5, R9;            # [791][0018b8]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [792][0018c0]
+//     	FADD.FTZ R10, -R6, R10;          # [793][0018c8]
+//     	FADD.FTZ R17, -R7, R17;          # [794][0018d0]
+//     	@!P0 BRA.U L19c0;                # [795][0018d8]
+//     	@P0 MUFU.RCP R18, R8;            # [796][0018e0]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [797][0018e8]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [798][0018f0]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [799][0018f8]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [800][001900]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [801][001908]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [802][001910]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [803][001918]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [804][001920]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [805][001928]
+//     	@!P0 BRA.U L19c0;                # [806][001930]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [807][001938]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [808][001940]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [809][001948]
+//     	@!P0 BRA.U L19c0;                # [810][001950]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [811][001958]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [812][001960]
+//     	@P0 MOV R3, R1;                  # [813][001968]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [814][001970]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [815][001978]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [816][001980]
+//     	@P0 MOV R0, R2;                  # [817][001988]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [818][001990]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [819][001998]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [820][0019a0]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [821][0019a8]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [822][0019b0]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [823][0019b8]
+//     L19c0:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [824][0019c0]
+//     	FADD.FTZ R8, -R4, R8;            # [825][0019c8]
+//     	FADD.FTZ R9, -R5, R9;            # [826][0019d0]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [827][0019d8]
+//     	FADD.FTZ R10, -R6, R10;          # [828][0019e0]
+//     	FADD.FTZ R17, -R7, R17;          # [829][0019e8]
+//     	@!P0 BRA.U L1ad8;                # [830][0019f0]
+//     	@P0 MUFU.RCP R18, R8;            # [831][0019f8]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [832][001a00]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [833][001a08]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [834][001a10]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [835][001a18]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [836][001a20]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [837][001a28]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [838][001a30]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [839][001a38]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [840][001a40]
+//     	@!P0 BRA.U L1ad8;                # [841][001a48]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [842][001a50]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [843][001a58]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [844][001a60]
+//     	@!P0 BRA.U L1ad8;                # [845][001a68]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [846][001a70]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [847][001a78]
+//     	@P0 MOV R3, R1;                  # [848][001a80]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [849][001a88]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [850][001a90]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [851][001a98]
+//     	@P0 MOV R0, R2;                  # [852][001aa0]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [853][001aa8]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [854][001ab0]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [855][001ab8]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [856][001ac0]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [857][001ac8]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [858][001ad0]
+//     L1ad8:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [859][001ad8]
+//     	FADD.FTZ R8, -R4, R8;            # [860][001ae0]
+//     	FADD.FTZ R9, -R5, R9;            # [861][001ae8]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [862][001af0]
+//     	FADD.FTZ R10, -R6, R10;          # [863][001af8]
+//     	FADD.FTZ R17, -R7, R17;          # [864][001b00]
+//     	@!P0 BRA.U L1bf0;                # [865][001b08]
+//     	@P0 MUFU.RCP R18, R8;            # [866][001b10]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [867][001b18]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [868][001b20]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [869][001b28]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [870][001b30]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [871][001b38]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [872][001b40]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [873][001b48]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [874][001b50]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [875][001b58]
+//     	@!P0 BRA.U L1bf0;                # [876][001b60]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [877][001b68]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [878][001b70]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [879][001b78]
+//     	@!P0 BRA.U L1bf0;                # [880][001b80]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [881][001b88]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [882][001b90]
+//     	@P0 MOV R3, R1;                  # [883][001b98]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [884][001ba0]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [885][001ba8]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [886][001bb0]
+//     	@P0 MOV R0, R2;                  # [887][001bb8]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [888][001bc0]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [889][001bc8]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [890][001bd0]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [891][001bd8]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [892][001be0]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [893][001be8]
+//     L1bf0:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [894][001bf0]
+//     	FADD.FTZ R8, -R4, R8;            # [895][001bf8]
+//     	FADD.FTZ R9, -R5, R9;            # [896][001c00]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [897][001c08]
+//     	FADD.FTZ R10, -R6, R10;          # [898][001c10]
+//     	FADD.FTZ R17, -R7, R17;          # [899][001c18]
+//     	@!P0 BRA.U L1d08;                # [900][001c20]
+//     	@P0 MUFU.RCP R18, R8;            # [901][001c28]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [902][001c30]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [903][001c38]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [904][001c40]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [905][001c48]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [906][001c50]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [907][001c58]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [908][001c60]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [909][001c68]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [910][001c70]
+//     	@!P0 BRA.U L1d08;                # [911][001c78]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [912][001c80]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [913][001c88]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [914][001c90]
+//     	@!P0 BRA.U L1d08;                # [915][001c98]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [916][001ca0]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [917][001ca8]
+//     	@P0 MOV R3, R1;                  # [918][001cb0]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [919][001cb8]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [920][001cc0]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [921][001cc8]
+//     	@P0 MOV R0, R2;                  # [922][001cd0]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [923][001cd8]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [924][001ce0]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [925][001ce8]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [926][001cf0]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [927][001cf8]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [928][001d00]
+//     L1d08:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [929][001d08]
+//     	FADD.FTZ R8, -R4, R8;            # [930][001d10]
+//     	FADD.FTZ R9, -R5, R9;            # [931][001d18]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [932][001d20]
+//     	FADD.FTZ R10, -R6, R10;          # [933][001d28]
+//     	FADD.FTZ R17, -R7, R17;          # [934][001d30]
+//     	@!P0 BRA.U L1e20;                # [935][001d38]
+//     	@P0 MUFU.RCP R18, R8;            # [936][001d40]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [937][001d48]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [938][001d50]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [939][001d58]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [940][001d60]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [941][001d68]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [942][001d70]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [943][001d78]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [944][001d80]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [945][001d88]
+//     	@!P0 BRA.U L1e20;                # [946][001d90]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [947][001d98]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [948][001da0]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [949][001da8]
+//     	@!P0 BRA.U L1e20;                # [950][001db0]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [951][001db8]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [952][001dc0]
+//     	@P0 MOV R3, R1;                  # [953][001dc8]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [954][001dd0]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [955][001dd8]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [956][001de0]
+//     	@P0 MOV R0, R2;                  # [957][001de8]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [958][001df0]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [959][001df8]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [960][001e00]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [961][001e08]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [962][001e10]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [963][001e18]
+//     L1e20:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [964][001e20]
+//     	FADD.FTZ R8, -R4, R8;            # [965][001e28]
+//     	FADD.FTZ R9, -R5, R9;            # [966][001e30]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [967][001e38]
+//     	FADD.FTZ R10, -R6, R10;          # [968][001e40]
+//     	FADD.FTZ R17, -R7, R17;          # [969][001e48]
+//     	@!P0 BRA.U L1f38;                # [970][001e50]
+//     	@P0 MUFU.RCP R18, R8;            # [971][001e58]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [972][001e60]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [973][001e68]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [974][001e70]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [975][001e78]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [976][001e80]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [977][001e88]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [978][001e90]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [979][001e98]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [980][001ea0]
+//     	@!P0 BRA.U L1f38;                # [981][001ea8]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [982][001eb0]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [983][001eb8]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [984][001ec0]
+//     	@!P0 BRA.U L1f38;                # [985][001ec8]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [986][001ed0]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [987][001ed8]
+//     	@P0 MOV R3, R1;                  # [988][001ee0]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [989][001ee8]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [990][001ef0]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [991][001ef8]
+//     	@P0 MOV R0, R2;                  # [992][001f00]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [993][001f08]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [994][001f10]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [995][001f18]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [996][001f20]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [997][001f28]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [998][001f30]
+//     L1f38:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [999][001f38]
+//     	FADD.FTZ R8, -R4, R8;            # [1000][001f40]
+//     	FADD.FTZ R9, -R5, R9;            # [1001][001f48]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [1002][001f50]
+//     	FADD.FTZ R10, -R6, R10;          # [1003][001f58]
+//     	FADD.FTZ R17, -R7, R17;          # [1004][001f60]
+//     	@!P0 BRA.U L2050;                # [1005][001f68]
+//     	@P0 MUFU.RCP R18, R8;            # [1006][001f70]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [1007][001f78]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [1008][001f80]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [1009][001f88]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1010][001f90]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1011][001f98]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [1012][001fa0]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [1013][001fa8]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1014][001fb0]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1015][001fb8]
+//     	@!P0 BRA.U L2050;                # [1016][001fc0]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [1017][001fc8]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1018][001fd0]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1019][001fd8]
+//     	@!P0 BRA.U L2050;                # [1020][001fe0]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [1021][001fe8]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [1022][001ff0]
+//     	@P0 MOV R3, R1;                  # [1023][001ff8]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [1024][002000]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [1025][002008]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [1026][002010]
+//     	@P0 MOV R0, R2;                  # [1027][002018]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [1028][002020]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [1029][002028]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [1030][002030]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1031][002038]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1032][002040]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1033][002048]
+//     L2050:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [1034][002050]
+//     	FADD.FTZ R8, -R4, R8;            # [1035][002058]
+//     	FADD.FTZ R9, -R5, R9;            # [1036][002060]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [1037][002068]
+//     	FADD.FTZ R10, -R6, R10;          # [1038][002070]
+//     	FADD.FTZ R17, -R7, R17;          # [1039][002078]
+//     	@!P0 BRA.U L2168;                # [1040][002080]
+//     	@P0 MUFU.RCP R18, R8;            # [1041][002088]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [1042][002090]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [1043][002098]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [1044][0020a0]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1045][0020a8]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1046][0020b0]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [1047][0020b8]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [1048][0020c0]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1049][0020c8]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1050][0020d0]
+//     	@!P0 BRA.U L2168;                # [1051][0020d8]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [1052][0020e0]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1053][0020e8]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1054][0020f0]
+//     	@!P0 BRA.U L2168;                # [1055][0020f8]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [1056][002100]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [1057][002108]
+//     	@P0 MOV R3, R1;                  # [1058][002110]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [1059][002118]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [1060][002120]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [1061][002128]
+//     	@P0 MOV R0, R2;                  # [1062][002130]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [1063][002138]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [1064][002140]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [1065][002148]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1066][002150]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1067][002158]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1068][002160]
+//     L2168:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [1069][002168]
+//     	FADD.FTZ R8, -R4, R8;            # [1070][002170]
+//     	FADD.FTZ R9, -R5, R9;            # [1071][002178]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [1072][002180]
+//     	FADD.FTZ R10, -R6, R10;          # [1073][002188]
+//     	FADD.FTZ R17, -R7, R17;          # [1074][002190]
+//     	@!P0 BRA.U L2280;                # [1075][002198]
+//     	@P0 MUFU.RCP R18, R8;            # [1076][0021a0]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [1077][0021a8]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [1078][0021b0]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [1079][0021b8]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1080][0021c0]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1081][0021c8]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [1082][0021d0]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [1083][0021d8]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1084][0021e0]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1085][0021e8]
+//     	@!P0 BRA.U L2280;                # [1086][0021f0]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [1087][0021f8]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1088][002200]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1089][002208]
+//     	@!P0 BRA.U L2280;                # [1090][002210]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [1091][002218]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [1092][002220]
+//     	@P0 MOV R3, R1;                  # [1093][002228]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [1094][002230]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [1095][002238]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [1096][002240]
+//     	@P0 MOV R0, R2;                  # [1097][002248]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [1098][002250]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [1099][002258]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [1100][002260]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1101][002268]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1102][002270]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1103][002278]
+//     L2280:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [1104][002280]
+//     	FADD.FTZ R8, -R4, R8;            # [1105][002288]
+//     	FADD.FTZ R9, -R5, R9;            # [1106][002290]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [1107][002298]
+//     	FADD.FTZ R10, -R6, R10;          # [1108][0022a0]
+//     	FADD.FTZ R17, -R7, R17;          # [1109][0022a8]
+//     	@!P0 BRA.U L2398;                # [1110][0022b0]
+//     	@P0 MUFU.RCP R18, R8;            # [1111][0022b8]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [1112][0022c0]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [1113][0022c8]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [1114][0022d0]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1115][0022d8]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1116][0022e0]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [1117][0022e8]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [1118][0022f0]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1119][0022f8]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1120][002300]
+//     	@!P0 BRA.U L2398;                # [1121][002308]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [1122][002310]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1123][002318]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1124][002320]
+//     	@!P0 BRA.U L2398;                # [1125][002328]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [1126][002330]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [1127][002338]
+//     	@P0 MOV R3, R1;                  # [1128][002340]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [1129][002348]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [1130][002350]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [1131][002358]
+//     	@P0 MOV R0, R2;                  # [1132][002360]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [1133][002368]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [1134][002370]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [1135][002378]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1136][002380]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1137][002388]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1138][002390]
+//     L2398:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [1139][002398]
+//     	FADD.FTZ R8, -R4, R8;            # [1140][0023a0]
+//     	FADD.FTZ R9, -R5, R9;            # [1141][0023a8]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [1142][0023b0]
+//     	FADD.FTZ R10, -R6, R10;          # [1143][0023b8]
+//     	FADD.FTZ R17, -R7, R17;          # [1144][0023c0]
+//     	@!P0 BRA.U L24b0;                # [1145][0023c8]
+//     	@P0 MUFU.RCP R18, R8;            # [1146][0023d0]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [1147][0023d8]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [1148][0023e0]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [1149][0023e8]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1150][0023f0]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1151][0023f8]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [1152][002400]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [1153][002408]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1154][002410]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1155][002418]
+//     	@!P0 BRA.U L24b0;                # [1156][002420]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [1157][002428]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1158][002430]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1159][002438]
+//     	@!P0 BRA.U L24b0;                # [1160][002440]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [1161][002448]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [1162][002450]
+//     	@P0 MOV R3, R1;                  # [1163][002458]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [1164][002460]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [1165][002468]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [1166][002470]
+//     	@P0 MOV R0, R2;                  # [1167][002478]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [1168][002480]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [1169][002488]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [1170][002490]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1171][002498]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1172][0024a0]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1173][0024a8]
+//     L24b0:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [1174][0024b0]
+//     	FADD.FTZ R8, -R4, R8;            # [1175][0024b8]
+//     	FADD.FTZ R9, -R5, R9;            # [1176][0024c0]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [1177][0024c8]
+//     	FADD.FTZ R10, -R6, R10;          # [1178][0024d0]
+//     	FADD.FTZ R17, -R7, R17;          # [1179][0024d8]
+//     	@!P0 BRA.U L25c8;                # [1180][0024e0]
+//     	@P0 MUFU.RCP R18, R8;            # [1181][0024e8]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [1182][0024f0]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [1183][0024f8]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [1184][002500]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1185][002508]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1186][002510]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [1187][002518]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [1188][002520]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1189][002528]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1190][002530]
+//     	@!P0 BRA.U L25c8;                # [1191][002538]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [1192][002540]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1193][002548]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1194][002550]
+//     	@!P0 BRA.U L25c8;                # [1195][002558]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [1196][002560]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [1197][002568]
+//     	@P0 MOV R3, R1;                  # [1198][002570]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [1199][002578]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [1200][002580]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [1201][002588]
+//     	@P0 MOV R0, R2;                  # [1202][002590]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [1203][002598]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [1204][0025a0]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [1205][0025a8]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1206][0025b0]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1207][0025b8]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1208][0025c0]
+//     L25c8:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [1209][0025c8]
+//     	FADD.FTZ R8, -R4, R8;            # [1210][0025d0]
+//     	FADD.FTZ R9, -R5, R9;            # [1211][0025d8]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [1212][0025e0]
+//     	FADD.FTZ R10, -R6, R10;          # [1213][0025e8]
+//     	FADD.FTZ R17, -R7, R17;          # [1214][0025f0]
+//     	@!P0 BRA.U L26e0;                # [1215][0025f8]
+//     	@P0 MUFU.RCP R18, R8;            # [1216][002600]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [1217][002608]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [1218][002610]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [1219][002618]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1220][002620]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1221][002628]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [1222][002630]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [1223][002638]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1224][002640]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1225][002648]
+//     	@!P0 BRA.U L26e0;                # [1226][002650]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [1227][002658]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1228][002660]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1229][002668]
+//     	@!P0 BRA.U L26e0;                # [1230][002670]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [1231][002678]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [1232][002680]
+//     	@P0 MOV R3, R1;                  # [1233][002688]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [1234][002690]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [1235][002698]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [1236][0026a0]
+//     	@P0 MOV R0, R2;                  # [1237][0026a8]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [1238][0026b0]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [1239][0026b8]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [1240][0026c0]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1241][0026c8]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1242][0026d0]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1243][0026d8]
+//     L26e0:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [1244][0026e0]
+//     	FADD.FTZ R8, -R4, R8;            # [1245][0026e8]
+//     	FADD.FTZ R9, -R5, R9;            # [1246][0026f0]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [1247][0026f8]
+//     	FADD.FTZ R10, -R6, R10;          # [1248][002700]
+//     	FADD.FTZ R17, -R7, R17;          # [1249][002708]
+//     	@!P0 BRA.U L27f8;                # [1250][002710]
+//     	@P0 MUFU.RCP R18, R8;            # [1251][002718]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [1252][002720]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [1253][002728]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [1254][002730]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1255][002738]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1256][002740]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [1257][002748]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [1258][002750]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1259][002758]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1260][002760]
+//     	@!P0 BRA.U L27f8;                # [1261][002768]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [1262][002770]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1263][002778]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1264][002780]
+//     	@!P0 BRA.U L27f8;                # [1265][002788]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [1266][002790]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [1267][002798]
+//     	@P0 MOV R3, R1;                  # [1268][0027a0]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [1269][0027a8]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [1270][0027b0]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [1271][0027b8]
+//     	@P0 MOV R0, R2;                  # [1272][0027c0]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [1273][0027c8]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [1274][0027d0]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [1275][0027d8]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1276][0027e0]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1277][0027e8]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1278][0027f0]
+//     L27f8:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [1279][0027f8]
+//     	FADD.FTZ R8, -R4, R8;            # [1280][002800]
+//     	FADD.FTZ R9, -R5, R9;            # [1281][002808]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [1282][002810]
+//     	FADD.FTZ R10, -R6, R10;          # [1283][002818]
+//     	FADD.FTZ R17, -R7, R17;          # [1284][002820]
+//     	@!P0 BRA.U L2910;                # [1285][002828]
+//     	@P0 MUFU.RCP R18, R8;            # [1286][002830]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [1287][002838]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [1288][002840]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [1289][002848]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1290][002850]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1291][002858]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [1292][002860]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [1293][002868]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1294][002870]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1295][002878]
+//     	@!P0 BRA.U L2910;                # [1296][002880]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [1297][002888]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1298][002890]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1299][002898]
+//     	@!P0 BRA.U L2910;                # [1300][0028a0]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [1301][0028a8]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [1302][0028b0]
+//     	@P0 MOV R3, R1;                  # [1303][0028b8]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [1304][0028c0]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [1305][0028c8]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [1306][0028d0]
+//     	@P0 MOV R0, R2;                  # [1307][0028d8]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [1308][0028e0]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [1309][0028e8]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [1310][0028f0]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1311][0028f8]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1312][002900]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1313][002908]
+//     L2910:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [1314][002910]
+//     	FADD.FTZ R8, -R4, R8;            # [1315][002918]
+//     	FADD.FTZ R9, -R5, R9;            # [1316][002920]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [1317][002928]
+//     	FADD.FTZ R10, -R6, R10;          # [1318][002930]
+//     	FADD.FTZ R17, -R7, R17;          # [1319][002938]
+//     	@!P0 BRA.U L2a28;                # [1320][002940]
+//     	@P0 MUFU.RCP R18, R8;            # [1321][002948]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [1322][002950]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [1323][002958]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [1324][002960]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1325][002968]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1326][002970]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [1327][002978]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [1328][002980]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1329][002988]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1330][002990]
+//     	@!P0 BRA.U L2a28;                # [1331][002998]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [1332][0029a0]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1333][0029a8]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1334][0029b0]
+//     	@!P0 BRA.U L2a28;                # [1335][0029b8]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [1336][0029c0]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [1337][0029c8]
+//     	@P0 MOV R3, R1;                  # [1338][0029d0]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [1339][0029d8]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [1340][0029e0]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [1341][0029e8]
+//     	@P0 MOV R0, R2;                  # [1342][0029f0]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [1343][0029f8]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [1344][002a00]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [1345][002a08]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1346][002a10]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1347][002a18]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1348][002a20]
+//     L2a28:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [1349][002a28]
+//     	FADD.FTZ R8, -R4, R8;            # [1350][002a30]
+//     	FADD.FTZ R9, -R5, R9;            # [1351][002a38]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [1352][002a40]
+//     	FADD.FTZ R10, -R6, R10;          # [1353][002a48]
+//     	FADD.FTZ R17, -R7, R17;          # [1354][002a50]
+//     	@!P0 BRA.U L2b40;                # [1355][002a58]
+//     	@P0 MUFU.RCP R18, R8;            # [1356][002a60]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [1357][002a68]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [1358][002a70]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [1359][002a78]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1360][002a80]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1361][002a88]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [1362][002a90]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [1363][002a98]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1364][002aa0]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1365][002aa8]
+//     	@!P0 BRA.U L2b40;                # [1366][002ab0]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [1367][002ab8]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1368][002ac0]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1369][002ac8]
+//     	@!P0 BRA.U L2b40;                # [1370][002ad0]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [1371][002ad8]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [1372][002ae0]
+//     	@P0 MOV R3, R1;                  # [1373][002ae8]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [1374][002af0]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [1375][002af8]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [1376][002b00]
+//     	@P0 MOV R0, R2;                  # [1377][002b08]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [1378][002b10]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [1379][002b18]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [1380][002b20]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1381][002b28]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1382][002b30]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1383][002b38]
+//     L2b40:
+//     	FFMA.FTZ R11, R14, -R12, R11;    # [1384][002b40]
+//     	FADD.FTZ R8, -R4, R8;            # [1385][002b48]
+//     	FADD.FTZ R9, -R5, R9;            # [1386][002b50]
+//     	FSETP.GT.FTZ.AND P0, PT, R11, c[0x10][0x4], PT; # [1387][002b58]
+//     	FADD.FTZ R10, -R6, R10;          # [1388][002b60]
+//     	FADD.FTZ R17, -R7, R17;          # [1389][002b68]
+//     	@!P0 BRA.U L2c58;                # [1390][002b70]
+//     	@P0 MUFU.RCP R18, R8;            # [1391][002b78]
+//     	@P0 FMUL.FTZ R16, R9, R18;       # [1392][002b80]
+//     	@P0 FFMA.FTZ R1, R10, R18, c[0x10][0x8]; # [1393][002b88]
+//     	@P0 FFMA.FTZ R0, R17, R18, c[0x10][0x8]; # [1394][002b90]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1395][002b98]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1396][002ba0]
+//     	@P0 TEX.T R20, R0, 0x7f, 0xf, 2D, 0x3; # [1397][002ba8]
+//     	@P0 FSETP.GT.AND P3, PT, R16, R20, PT; # [1398][002bb0]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1399][002bb8]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1400][002bc0]
+//     	@!P0 BRA.U L2c58;                # [1401][002bc8]
+//     	@P0 FSETP.LE.AND P2, PT, R16, R21, PT; # [1402][002bd0]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1403][002bd8]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1404][002be0]
+//     	@!P0 BRA.U L2c58;                # [1405][002be8]
+//     	@P0 TEX.LZ.DC.NODEP R15, R0, R16, 0x0, 0x0, 2D, 0x1; # [1406][002bf0]
+//     	@P0 FFMA.FTZ R2, R17, R18, -c[0x10][0x8]; # [1407][002bf8]
+//     	@P0 MOV R3, R1;                  # [1408][002c00]
+//     	@P0 TEX.LZ.DC.NODEP R3, R2, R16, 0x0, 0x0, 2D, 0x1; # [1409][002c08]
+//     	@P0 FFMA.FTZ R1, R10, R18, -c[0x10][0x8]; # [1410][002c10]
+//     	@P0 TEX.LZ.DC.NODEP R18, R0, R16, 0x0, 0x0, 2D, 0x1; # [1411][002c18]
+//     	@P0 MOV R0, R2;                  # [1412][002c20]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R16, 0x0, 0x0, 2D, 0x1; # [1413][002c28]
+//     	@P0 FADD.FTZ R1, R3, R15;        # [1414][002c30]
+//     	@P0 FADD.FTZ R1, R18, R1;        # [1415][002c38]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1416][002c40]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1417][002c48]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1418][002c50]
+//     L2c58:
+//     	FFMA.FTZ R0, R14, -R12, R11;     # [1419][002c58]
+//     	FSETP.GT.FTZ.AND P0, PT, R0, c[0x10][0x4], PT; # [1420][002c60]
+//     	@!P0 BRA.U L2d78;                # [1421][002c68]
+//     	@P0 FADD.FTZ R0, -R4, R8;        # [1422][002c70]
+//     	@P0 FADD.FTZ R1, -R5, R9;        # [1423][002c78]
+//     	@P0 FADD.FTZ R3, -R6, R10;       # [1424][002c80]
+//     	@P0 MUFU.RCP R2, R0;             # [1425][002c88]
+//     	@P0 FADD.FTZ R0, -R7, R17;       # [1426][002c90]
+//     	@P0 FMUL.FTZ R6, R1, R2;         # [1427][002c98]
+//     	@P0 FFMA.FTZ R8, R0, R2, c[0x10][0x8]; # [1428][002ca0]
+//     	@P0 FFMA.FTZ R9, R3, R2, c[0x10][0x8]; # [1429][002ca8]
+//     	FSETP.NE.AND P2, PT, R0, R0, PT; # [1430][002cb0]
+//     	FSETP.NE.AND P3, PT, R0, R0, PT; # [1431][002cb8]
+//     	@P0 TEX.T R20, R8, 0x7f, 0xf, 2D, 0x3; # [1432][002cc0]
+//     	@P0 FSETP.GT.AND P3, PT, R6, R20, PT; # [1433][002cc8]
+//     	@P3 FFMA.FTZ R19, R13, -0x0, R19; # [1434][002cd0]
+//     	@P3 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1435][002cd8]
+//     	@!P0 BRA.U L2d78;                # [1436][002ce0]
+//     	@P0 FSETP.LE.AND P2, PT, R6, R21, PT; # [1437][002ce8]
+//     	@P2 FFMA.FTZ R19, R13, 1, R19;   # [1438][002cf0]
+//     	@P2 ISETP.NE.AND P0, PT, RZ, RZ, PT; # [1439][002cf8]
+//     	@!P0 BRA.U L2d78;                # [1440][002d00]
+//     	@P0 TEX.LZ.DC.NODEP R5, R8, R6, 0x0, 0x0, 2D, 0x1; # [1441][002d08]
+//     	@P0 FFMA.FTZ R0, R0, R2, -c[0x10][0x8]; # [1442][002d10]
+//     	@P0 MOV R1, R9;                  # [1443][002d18]
+//     	@P0 TEX.LZ.DC.NODEP R4, R0, R6, 0x0, 0x0, 2D, 0x1; # [1444][002d20]
+//     	@P0 FFMA.FTZ R3, R3, R2, -c[0x10][0x8]; # [1445][002d28]
+//     	@P0 MOV R2, R8;                  # [1446][002d30]
+//     	@P0 TEX.LZ.DC.NODEP R1, R2, R6, 0x0, 0x0, 2D, 0x1; # [1447][002d38]
+//     	@P0 MOV R2, R0;                  # [1448][002d40]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R2, R6, 0x0, 0x0, 2D, 0x1; # [1449][002d48]
+//     	@P0 FADD.FTZ R2, R4, R5;         # [1450][002d50]
+//     	@P0 FADD.FTZ R1, R1, R2;         # [1451][002d58]
+//     	@P0 FADD.FTZ R0, R0, R1;         # [1452][002d60]
+//     	@P0 FMUL.FTZ R0, R13, R0;        # [1453][002d68]
+//     	@P0 FFMA.FTZ R19, R0, 0.25, R19; # [1454][002d70]
+//     L2d78:
+//     	MOV32I R0, -0x41000000;          # [1455][002d78]
+//     	MOV32I R1, 0x3e4ccccd;           # [1456][002d80]
+//     	FFMA.FTZ R0, R0, c[0x2][0x28], -R0; # [1457][002d88]
+//     	FFMA.FTZ R0, R0, c[0x10][0xc], R1; # [1458][002d90]
+//     	FMUL.FTZ R0, R0, R19;            # [1459][002d98]
+//     	FMUL.FTZ R3, R0, c[0x2][0xc];    # [1460][002da0]
+//     	FMUL.FTZ R2, R0, c[0x2][0x8];    # [1461][002da8]
+//     	FMUL.FTZ R1, R0, c[0x2][0x4];    # [1462][002db0]
+//     	FMUL.FTZ R0, R0, c[0x2][0x0];    # [1463][002db8]
+//     	EXIT;                            # [1464][002dc0]
+//     	END
+//     END_SECTION
+// END_SHADER
+// 

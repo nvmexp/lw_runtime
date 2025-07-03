@@ -1,0 +1,277 @@
+//
+// Copyright 2020 LWPU Corporation. All rights reserved.
+//
+
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+#include "layers.h"
+#include "layers_inline.h"
+
+namespace optix_exp {
+
+// k_MaxPooling_NHWC adapted from src_dltss_encoder_maxpooling_kernel.lw in
+// https://gitlab-master.lwpu.com/dlarch-fastkernels/lwda_dlaa_colwolutions
+
+static __global__ void k_MaxPooling_NHWC( const __half* in, __half* out, int inWidth, int inHeight, int outWidth, int outHeight, int channels )
+{
+#if( __LWDA_ARCH__ >= 530 || !defined( __LWDA_ARCH__ ) )
+    // The coordinates of the image pixel written by this thread.
+    int out_p = ( blockIdx.z * blockDim.z + threadIdx.z );
+    int out_q = ( blockIdx.y * blockDim.y + threadIdx.y );
+    int out_k = ( blockIdx.x * blockDim.x + threadIdx.x ) * 8;
+
+    // The coordinates of the image pixels read by this thread.
+    int img_h = out_p * 2;
+    int img_w = out_q * 2;
+    int img_k = out_k;
+
+    // Compute the image offset.
+    const int img_offset = img_h * inWidth * channels + img_w * channels + img_k;
+
+    // Read the 4 image pixels (4x8 fp16s per thread).
+    int4 img_fetch[2][2];
+    for( int hi = 0; hi < 2; ++hi )
+    {
+        for( int wi = 0; wi < 2; ++wi )
+        {
+            if( img_h + hi < inHeight && img_w + wi < inWidth && img_k < channels )
+            {
+                int             offset = img_offset + hi * inWidth * channels + wi * channels;
+                const uint16_t* ptr    = (const uint16_t*)&in[offset];
+                img_fetch[hi][wi]      = reinterpret_cast<const int4*>( ptr )[0];
+            }
+        }
+    }
+
+    // Do the pooling.
+    img_fetch[0][0] = hmax8( img_fetch[0][0], img_fetch[0][1] );
+    img_fetch[0][0] = hmax8( img_fetch[0][0], img_fetch[1][0] );
+    img_fetch[0][0] = hmax8( img_fetch[0][0], img_fetch[1][1] );
+
+    // Compute the output offset.
+    const int out_offset = out_p * outWidth * channels + out_q * channels + out_k;
+
+    // Store the result.
+    if( out_p < outHeight && out_q < outWidth && out_k < channels )
+    {
+        uint16_t* ptr                     = (uint16_t*)&out[out_offset];
+        reinterpret_cast<int4*>( ptr )[0] = img_fetch[0][0];
+    }
+#endif
+}
+
+// average pooling with 4-channel buffers, two fp16x2 operations per access
+static __global__ void k_AvgPooling_4_NHWC( const __half* in, __half* out, int inWidth, int inHeight, int outWidth, int outHeight, int channels )
+{
+#if( __LWDA_ARCH__ >= 530 || !defined( __LWDA_ARCH__ ) )
+    // The coordinates of the image pixel written by this thread.
+    int out_p = ( blockIdx.z * blockDim.z + threadIdx.z );
+    int out_q = ( blockIdx.y * blockDim.y + threadIdx.y );
+    int out_k = ( blockIdx.x * blockDim.x + threadIdx.x ) * 4;
+
+    // The coordinates of the image pixels read by this thread.
+    int img_h = out_p * 2;
+    int img_w = out_q * 2;
+    int img_k = out_k;
+
+    // Compute the image offset.
+    const int img_offset = img_h * inWidth * channels + img_w * channels + img_k;
+
+    // Read the 4 image pixels (4x8 fp16s per thread).
+    int2 img_fetch[2][2];
+    for( int hi = 0; hi < 2; ++hi )
+    {
+        for( int wi = 0; wi < 2; ++wi )
+        {
+            if( img_h + hi < inHeight && img_w + wi < inWidth && img_k < channels )
+            {
+                int             offset = img_offset + hi * inWidth * channels + wi * channels;
+                const uint16_t* ptr    = (const uint16_t*)&in[offset];
+                img_fetch[hi][wi]      = reinterpret_cast<const int2*>( ptr )[0];
+            }
+        }
+    }
+
+    // first multiply all values with 0.25, then add. this avoid fp16 overflow
+    img_fetch[0][0] = fma4( img_fetch[0][0], img_fetch[0][1], 0x34003400u );
+    img_fetch[1][0] = fma4( img_fetch[1][0], img_fetch[1][1], 0x34003400u );
+    img_fetch[0][0] = hadd4( img_fetch[0][0], img_fetch[1][0] );
+
+    // Compute the output offset.
+    const int out_offset = out_p * outWidth * channels + out_q * channels + out_k;
+
+    // Store the result.
+    if( out_p < outHeight && out_q < outWidth && out_k < channels )
+    {
+        uint16_t* ptr                     = (uint16_t*)&out[out_offset];
+        reinterpret_cast<int2*>( ptr )[0] = img_fetch[0][0];
+    }
+#endif
+}
+
+// not used at the moment, 3 channel average pooling
+/*
+static __global__ void k_AvgPooling_NHWC( const __half* in, __half* out, int inWidth, int inHeight, int outWidth, int outHeight, int channels )
+{
+#if( __LWDA_ARCH__ >= 530 || !defined( __LWDA_ARCH__ ) )
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int hrx = x * 2;
+    int hry = y * 2;
+
+    if( x < outWidth && y < outHeight )
+    {
+        for( int c=0; c < channels; c++ )
+        {
+            __half v00 = in[addrNHWC( channels, inHeight, inWidth, 0, c, hry, hrx )];
+            __half v01 = in[addrNHWC( channels, inHeight, inWidth, 0, c, hry, hrx + 1 )];
+            __half v10 = in[addrNHWC( channels, inHeight, inWidth, 0, c, hry + 1, hrx )];
+            __half v11 = in[addrNHWC( channels, inHeight, inWidth, 0, c, hry + 1, hrx + 1 )];
+
+            const __half c025 = __float2half( 0.25f );
+            out[addrNHWC( channels, outHeight, outWidth, 0, c, y, x )] = v00 * c025 + v01 * c025 + v10 * c025 + v11 * c025;
+        }
+    }
+#endif
+}
+*/
+
+template <typename dtype>
+static __global__ void k_Pooling_NCHW( const dtype* in, dtype* out, int inWidth, int inHeight, int outWidth, int outHeight, int channels, bool avgPooling, const dtype c025 )
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    const int hrx = x * 2;
+    const int hry = y * 2;
+
+    if( x < outWidth && y < outHeight )  // Note, this assumes scaling rounds resolution down
+    {
+        for( int i = 0; i < channels; ++i )
+        {
+            const dtype v00 = in[i * inHeight * inWidth + hry * inWidth + hrx];
+            const dtype v01 = in[i * inHeight * inWidth + hry * inWidth + ( hrx + 1 )];
+            const dtype v10 = in[i * inHeight * inWidth + ( hry + 1 ) * inWidth + hrx];
+            const dtype v11 = in[i * inHeight * inWidth + ( hry + 1 ) * inWidth + ( hrx + 1 )];
+
+            if( avgPooling )
+            {
+                out[i * outHeight * outWidth + y * outWidth + x] = v00 * c025 + v01 * c025 + v10 * c025 + v11 * c025;
+            }
+            else
+            {
+                dtype maxval = v00;
+                if( v01 > maxval )
+                    maxval = v01;
+                if( v10 > maxval )
+                    maxval = v10;
+                if( v11 > maxval )
+                    maxval = v11;
+                out[i * outHeight * outWidth + y * outWidth + x] = maxval;
+            }
+        }
+    }
+}
+
+AEPoolingLayer::AEPoolingLayer( const char* name, const deviceInfo& info )
+    : AELayer( name, info )
+{
+}
+
+OptixResult AEPoolingLayer::init( const AELayer* input, bool avgPooling, ErrorDetails& errDetails )
+{
+    OptixResult result = AELayer::init( errDetails );
+
+    if( result )
+        return result;
+
+    m_avgPooling = avgPooling;
+
+    const int poolSize = 2;
+
+    m_input       = input;
+    m_outWidth    = m_input->m_outWidth / poolSize;
+    m_outHeight   = m_input->m_outHeight / poolSize;
+    m_outChannels = m_input->m_outChannels;
+
+    m_outsize = getBufferTypeSize() * 1 * m_outChannels * m_outHeight * m_outWidth;
+
+    return result;
+}
+
+AEPoolingLayer::~AEPoolingLayer()
+{
+}
+
+OptixResult AEPoolingLayer::destroy( ErrorDetails& errDetails )
+{
+    return AELayer::destroy( errDetails );
+}
+
+OptixResult AEPoolingLayer::fwdEval( void* smem, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    beginTiming();
+
+    if( m_tensorFormat == TENSOR_NHWC )
+    {
+        if( !m_avgPooling )
+        {
+            if( m_outChannels < 8 || m_outChannels%8 != 0 )
+                return errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "wrong channel setup in maxpool" );
+
+            dim3 dimBlock;
+            dimBlock.x     = m_outChannels / 8;
+            dimBlock.y     = 4;
+            dimBlock.z     = 256 / dimBlock.x / dimBlock.y;
+            dim3 blockGrid = dim3( 1, roundUp( m_outWidth, dimBlock.y ), roundUp( m_outHeight, dimBlock.z ) );
+            k_MaxPooling_NHWC<<<blockGrid, dimBlock, 0, stream>>>( (__half*)( (char*)smem + m_input->m_outDataIndex ),
+                                                                   (__half*)( (char*)smem + m_outDataIndex ), m_input->m_outWidth,
+                                                                   m_input->m_outHeight, m_outWidth, m_outHeight, m_outChannels );
+        }
+        else    // used for channels >= 3 and < 8, code above does not work in this case
+        {
+            dim3 dimBlock;
+            dimBlock.x     = m_outChannels / 4;
+            dimBlock.y     = 4;
+            dimBlock.z     = 256 / dimBlock.x / dimBlock.y;
+            dim3 blockGrid = dim3( 1, roundUp( m_outWidth, dimBlock.y ), roundUp( m_outHeight, dimBlock.z ) );
+            k_AvgPooling_4_NHWC <<<blockGrid, dimBlock, 0, stream>>>( (__half*)( (char*)smem + m_input->m_outDataIndex ),
+                                                                      (__half*)( (char*)smem + m_outDataIndex ),
+                                                                      m_input->m_outWidth, m_input->m_outHeight,
+                                                                      m_outWidth, m_outHeight, m_outChannels );
+        }
+    }
+    else
+    {
+        dim3 dimBlock( LWDA_BLOCK, LWDA_BLOCK );
+        dim3 blockGrid = dim3( roundUp( m_outWidth, dimBlock.x ), roundUp( m_outHeight, dimBlock.y ), 1 );
+        if( m_dtype == DATA_HALF )
+        {
+#if( __LWDA_ARCH__ >= 530 || !defined( __LWDA_ARCH__ ) )
+            k_Pooling_NCHW<__half> <<<blockGrid, dimBlock, 0, stream>>>( (__half*)( (char*)smem + m_input->m_outDataIndex ),
+                                                                (__half*)( (char*)smem + m_outDataIndex ),
+                                                                m_input->m_outWidth, m_input->m_outHeight,
+                                                                m_outWidth, m_outHeight,
+                                                                m_avgPooling ? 3 : m_outChannels, m_avgPooling,
+                                                                __float2half( 0.25f ) );
+#endif
+        }
+        else
+        {
+            k_Pooling_NCHW<float> <<<blockGrid, dimBlock, 0, stream>>>( (float*)( (char*)smem + m_input->m_outDataIndex ),
+                                                                (float*)( (char*)smem + m_outDataIndex ),
+                                                                m_input->m_outWidth, m_input->m_outHeight,
+                                                                m_outWidth, m_outHeight,
+                                                                m_avgPooling ? 3 : m_outChannels, m_avgPooling,
+                                                                0.25f );
+        }
+    }
+
+    endTiming();
+
+    return OPTIX_SUCCESS;
+}
+
+};  // namespace optix_exp

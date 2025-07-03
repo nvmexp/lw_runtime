@@ -1,0 +1,88 @@
+
+LOCAL_LWDA_DIR := $(LW_SOURCE)/apps/dcgm/lwvs/lwca
+
+include $(LW_SOURCE)/apps/dcgm/lwda_loader/lwca-loader.lwmk
+
+DCGMPROFTESTER_PTX_FILENAME := DcgmProfTesterKernels.ptx
+DCGMPROFTESTER_PTX_TARGET := $(OUTPUTDIR)/$(DCGMPROFTESTER_PTX_FILENAME)
+
+#Copy prof tester PTX file to the output folder
+$(DCGMPROFTESTER_PTX_TARGET):
+	@$(COPY) $(DCGM_DIR)/dcgmproftester/$(DCGMPROFTESTER_PTX_FILENAME) $(DCGMPROFTESTER_PTX_TARGET)
+
+##############################################################################
+# define SOURCES
+##############################################################################
+LWRRENT_DIR := dcgmproftester
+
+LOCAL_SOURCES := 
+LOCAL_SOURCES += DcgmProfTester.cpp
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+LOCAL_OBJECTS += $(OUTPUTDIR)/lwca-loader.o
+
+##############################################################################
+# define LOCAL_CFLAGS
+##############################################################################
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += .
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/common
+LOCAL_INCLUDES += $(DCGM_DIR)/common/protobuf
+LOCAL_INCLUDES += $(DCGM_DIR)/common/transport
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/src
+LOCAL_INCLUDES += $(DCGM_DIR)/lwvs/lwca/include
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/lwda_loader
+LOCAL_INCLUDES += $(DCGM_DIR)/libs
+
+# Do not modify CFLAGS because it will be global
+# All other files with LOCAL_CFLAGS use $(DCGM_GLOBAL_CFLAGS) as the base.
+# In this case, that would cause gcc to complain about an "undefined reference"
+LOCAL_CFLAGS :=
+LOCAL_CFLAGS += -DLWML_STATIC_IMPORT=1
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+##############################################################################
+# define LOCAL_LDFLAGS
+##############################################################################
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += -L $(LWML_DIR)/$(OUTPUTDIR) -rdynamic
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+LOCAL_LDFLAGS += -L $(OUTPUTDIR) -ldcgm
+LOCAL_LDFLAGS += -lstdc++ -lgcc_s #-lpthread
+#lwblas -> lwdart -> rt,stdc++, c, lwlibos, pthread
+LOCAL_LDFLAGS += -L $(LOCAL_LWDA_DIR)/lwda100/lib/$(LW_TARGET_ARCH) -llwblas_static -llwdart_static -lrt -lstdc++ -lc -llwlibos
+#Backup flags - LOCAL_LDFLAGS += -lstdc++ -lgcc_s -ljsonc -lz
+
+##############################################################################
+# build
+##############################################################################
+
+dcgmproftester_TARGET  := $(OUTPUTDIR)/dcgmproftester$(BINSUFFIX)
+dcgmproftester_OBJECTS := $(LOCAL_OBJECTS)
+dcgmproftester_CFLAGS  := $(LOCAL_CFLAGS)
+dcgmproftester_LDFLAGS := $(LOCAL_LDFLAGS)
+dcgmproftester_DEPENDS := $(dcgm_TARGET)
+
+build: $(dcgmproftester_TARGET) $(DCGMPROFTESTER_PTX_TARGET)
+dcgmbuildsyncpoint:: $(dcgmproftester_TARGET) $(DCGMPROFTESTER_PTX_TARGET)
+$(eval $(call MAKE_EXELWTABLE,dcgmproftester))
+
+##############################################################################
+# export directory
+##############################################################################
+
+#export: $(EXPORT_DIR)/dcgmproftester$(BINSUFFIX)
+
+#################################################################################
+# End of nested lwmk
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

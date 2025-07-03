@@ -1,0 +1,67 @@
+# lwtensor test suite configuration.
+{ 
+  # Descriptive name for the component
+  "name"        : "lwtensor Test Suite",
+  "version" : "2",
+  "extrapath" : [ ],
+  # Testsuite owner (email address)
+  "owner"       : "blelbach@lwpu.com",
+  # Environment variables
+  "elw"         : [ 
+    "LWTENSOR_DVS_OUTPUT=1",
+    "USE_NUMA=/usr/bin/numactl -C all",
+    { "filter" : { "os" : "Windows"}},
+        "USE_NUMA="
+   ],
+  # The default working directory for all tests. If given as a
+  # relative path it is relative to the location of this file.
+  "cwd"         : "{TR_INSTALL_DIR}/liblwtensor",
+  # Set the testsuite timeout to 180 minutes
+  "timeout"     : "10800",
+  # Set the default test timeout to 180 minutes
+  "testtimeout" : "10800",
+  # Define paths containing shared libraries required by the tests. Use elwvar {INSTALL_TARGET_DIR}/{SHAREDLIB_DIR} to refer 
+  # to the platform specific portion of the path (e.g. bin/ for windows, lib64 for 64-bit 
+  # Linux, etc.)
+  "librarypath"   : [ "{TR_INSTALL_DIR}/lwca/lib64",
+                      "{TR_INSTALL_DIR}/liblwtensor/lib"
+                    ],
+  # The list of tests. Each test has an optional name an
+  # description. If name is not given the exelwtable is used, and if
+  # no test-specific exelwable is given a name is derived from the
+  # args.
+  "tests" : [
+              {
+                "init" : "{PYTHON} {TR_INSTALL_DIR}/GPUConfMgr/GPUConfMgr.py -caseName=set -clock=P0 -VULCAN_INSTALL={TR_INSTALL_DIR}"
+              }, 
+              {
+                "exe" : "{USE_NUMA} ./bin/lwtensorTest -Pas -Pbs -Pcs -Pcomps -file ./test/regression/elementwise/permute.sh"
+              },
+              {
+                "exe" : "{USE_NUMA} ./bin/lwtensorTest -Pad -Pbd -Pcd -Pcompd -algo-4 -file ./test/regression/contraction/rand1000.sh"
+              },
+              {
+                "exe" : "LWTENSOR_DISABLE_LWBLAS=1 {USE_NUMA} ./bin/lwtensorTest -Pah -Pbh -Pch -Pcomph -algo-4 -file ./test/regression/contraction/gemm_sq_nn.sh"
+              },
+              {
+                "exe" : "LWTENSOR_DISABLE_LWBLAS=1 {USE_NUMA} ./bin/lwtensorTest -Pas -Pbs -Pcs -Pcomps -algo-4 -file ./test/regression/contraction/gemm_sq_nt.sh"
+              },
+              {
+                "exe" : "LWTENSOR_DISABLE_LWBLAS=1 {USE_NUMA} ./bin/lwtensorTest -Pad -Pbd -Pcd -Pcompd -algo-4 -file ./test/regression/contraction/gemm_sq_nt.sh"
+              },
+              {
+                "exe" : "/usr/bin/numactl -N 0 -m 0 ./bin/latencyTest",
+                "attributes" : [
+                  {"filter" : { "!gpu" : "Volta" }},
+                  "result=skip",
+                  "comment= Only support Volta chips",
+                  {"filter" : { "arch" : "ppc64le" }},
+                  "result=skip",
+                  "comment= Only support x86 archs"
+                  ]
+              },
+              {
+               "fini" : "{PYTHON} {TR_INSTALL_DIR}/GPUConfMgr/GPUConfMgr.py -caseName=reset -clock=P0 -VULCAN_INSTALL={TR_INSTALL_DIR}"
+              }              
+   ]
+}

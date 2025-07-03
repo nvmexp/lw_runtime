@@ -1,0 +1,122 @@
+// Copyright LWPU Corporation 2016
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "SorterKernels.hpp"
+#include <prodlib/exceptions/Assert.h>
+#include <prodlib/exceptions/LwdaError.h>
+#include <support/lwb/lwb/device/device_radix_sort.lwh>
+
+#ifdef BVHTOOLS_USE_CPU
+#  include <shared/Util/Qsort.h>
+#endif
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------------
+
+size_t prodlib::bvhtools::radixSortTempSize(size_t key_bytes, size_t value_bytes, unsigned int num_elements)
+{
+  void* d_temp_storage(nullptr);
+  size_t temp_storage_bytes(0);
+
+  if ((key_bytes == sizeof(unsigned int)) && (value_bytes == sizeof(unsigned int)))
+  {
+    unsigned int* d_keys_in(nullptr);
+    unsigned int* d_keys_out(nullptr);
+    unsigned int* d_values_in(nullptr);
+    unsigned int* d_values_out(nullptr);
+    lwdaError_t err = lwb::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, d_values_in, d_values_out, num_elements);
+    if (err != lwdaSuccess)
+    {
+      throw prodlib::LwdaRuntimeError(RT_EXCEPTION_INFO, "radix_sort_temp_size -> lwb::DeviceRadixSort::SortPairs", err);
+    }
+  }
+  else if((key_bytes == sizeof(unsigned long long)) && (value_bytes == sizeof(unsigned int)))
+  {
+    unsigned long long* d_keys_in(nullptr);
+    unsigned long long* d_keys_out(nullptr);
+    unsigned int* d_values_in(nullptr);
+    unsigned int* d_values_out(nullptr);
+    lwdaError_t err = lwb::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, d_values_in, d_values_out, num_elements);
+    if (err != lwdaSuccess)
+    {
+      throw prodlib::LwdaRuntimeError(RT_EXCEPTION_INFO, "radix_sort_temp_size -> lwb::DeviceRadixSort::SortPairs", err);
+    }
+  }
+  else
+  {
+    RT_ASSERT_MSG(0, "radix_sort_temp_size: Invalid arguments: key_bytes, value_bytes");
+  }
+
+  return temp_storage_bytes;
+}
+
+//------------------------------------------------------------------------------
+  
+void prodlib::bvhtools::radixSort(void* d_temp_storage, size_t temp_storage_bytes,
+  unsigned int * d_keys_in, unsigned int * d_keys_out,
+  unsigned int * d_values_in, unsigned int * d_values_out,
+  unsigned int num_elements, void* stream)
+{
+#ifdef BVHTOOLS_USE_CPU
+  unsigned int* h_keys   = (unsigned int*)malloc(num_elements*sizeof(unsigned int));
+  unsigned int* h_values = (unsigned int*)malloc(num_elements*sizeof(unsigned int));
+
+  lwdaMemcpy(h_keys, d_keys_in,   num_elements*sizeof(unsigned int), lwdaMemcpyDeviceToHost);
+  lwdaMemcpy(h_values, d_values_in, num_elements*sizeof(unsigned int), lwdaMemcpyDeviceToHost);
+
+  corelib::qsort<unsigned int, unsigned int>(0, num_elements, h_keys, h_values);
+
+  lwdaMemcpy(d_keys_out,   h_keys,   num_elements*sizeof(unsigned int), lwdaMemcpyHostToDevice);
+  lwdaMemcpy(d_values_out, h_values, num_elements*sizeof(unsigned int), lwdaMemcpyHostToDevice);
+
+  free(h_keys);
+  free(h_values);
+#else
+  lwdaError_t err = lwb::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, d_values_in, d_values_out, num_elements, 0, sizeof(unsigned int)*CHAR_BIT, (lwdaStream_t)stream, false);
+  if (err != lwdaSuccess)
+  {
+    throw prodlib::LwdaRuntimeError(RT_EXCEPTION_INFO, "lwb::DeviceRadixSort::SortPairs", err);
+  }
+#endif
+}
+
+//------------------------------------------------------------------------------
+
+void prodlib::bvhtools::radixSort(void* d_temp_storage, size_t temp_storage_bytes,
+  unsigned long long * d_keys_in, unsigned long long * d_keys_out,
+  unsigned int * d_values_in, unsigned int * d_values_out,
+  unsigned int num_elements, void* stream)
+{
+#ifdef BVHTOOLS_USE_CPU
+  unsigned long long* h_keys   = (unsigned long long*)malloc(num_elements*sizeof(unsigned long long));
+  unsigned int*       h_values = (unsigned int*      )malloc(num_elements*sizeof(unsigned int      ));
+
+  lwdaMemcpy(h_keys, d_keys_in,   num_elements*sizeof(unsigned long long), lwdaMemcpyDeviceToHost);
+  lwdaMemcpy(h_values, d_values_in, num_elements*sizeof(unsigned int      ), lwdaMemcpyDeviceToHost);
+
+  corelib::qsort<unsigned long long, unsigned int>(0, num_elements, h_keys, h_values);
+
+  lwdaMemcpy(d_keys_out,   h_keys,   num_elements*sizeof(unsigned long long), lwdaMemcpyHostToDevice);
+  lwdaMemcpy(d_values_out, h_values, num_elements*sizeof(unsigned int      ), lwdaMemcpyHostToDevice);
+
+  free(h_keys);
+  free(h_values);
+#else
+  lwdaError_t err = lwb::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out, d_values_in, d_values_out, num_elements, 0, sizeof(unsigned long long)*CHAR_BIT, (lwdaStream_t)stream, false);
+  if (err != lwdaSuccess)
+  {
+    throw prodlib::LwdaRuntimeError(RT_EXCEPTION_INFO, "lwb::DeviceRadixSort::SortPairs", err);
+  }
+#endif
+}
+
+//------------------------------------------------------------------------------

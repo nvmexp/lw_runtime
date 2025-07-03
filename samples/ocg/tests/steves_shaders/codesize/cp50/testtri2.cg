@@ -1,0 +1,72 @@
+
+struct tri {
+  float3 v0;
+  float3 v1;
+  float3 v2;
+};
+
+struct ray {
+  float3 o;
+  float3 d;
+};
+
+tri T : global;
+
+float4 image[400] : global;
+
+
+//    varying struct lwc_thread_id {
+//        uint threadId0:16;	// dimension 0 index
+//        uint threadId1:10;	// dimension 1 index
+//        unit threadId2:6;	// dimension 2 index
+//    } threadId : thread_id;
+
+void main (int threadID: thread_id) {
+   float triNum, det, ilw_det;
+   float3 edge1, edge2, pvec, tvec, qvec;
+   int x,y,addr;
+   float4 myout;
+   float valid;
+   float uu, vv, tHit;
+
+   float3 r_o;
+   float3 r_d;
+   float3 T_v0 = T.v0;
+   float3 T_v1 = T.v1;
+   float3 T_v2 = T.v2;
+
+   y = threadID >> 16;
+   x = threadID - (y << 16);
+   
+   addr = y*20 + x;
+   
+   r_o = float3(0.1 * x, 0.1 * y, 0.1);
+   r_d = float3(0, 0, -1);
+
+   edge1    = T_v1 - T_v0;
+   edge2    = T_v2 - T_v0;
+   pvec     = cross(r_d, edge2);
+   det      = dot(edge1, pvec);
+   ilw_det  = 1.0f/det;
+   tvec     = r_o - T_v0;
+   qvec     = cross( tvec, edge1 );
+   
+   tHit = dot(edge2, qvec) * ilw_det;   // ray tHit
+   uu   = dot(tvec, pvec)  * ilw_det;   // uu
+   vv   = dot(r_d, qvec) * ilw_det;     // vv
+
+   if (uu < 0.0f ||
+       vv < 0.0f ||
+       uu+vv > 1.0f ||
+       tHit < 0.0f) {
+       
+       myout = float4(0.0, 0.0, 0.0, 0.0);
+   } else {
+       myout.x = uu   * valid;
+       myout.y = vv   * valid;
+       myout.z = tHit * valid;
+       myout.w = 1.0f;
+   }
+
+   image[addr] = myout;
+}

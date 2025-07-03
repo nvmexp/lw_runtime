@@ -1,0 +1,446 @@
+// Copyright LWPU Corporation 2015
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "AacBuilderKernels.hpp"
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+static INLINE float evaluateMergeCost(AacClusterEntry a, AacClusterEntry b, AacExecParams p)
+{
+    // Walter's original cost function.
+
+    float cost = AABB(a.aabb, b.aabb).getHalfArea();
+
+    // Penalty term.
+
+    float penalty = 0.0f;
+
+#pragma unroll
+    for (int c = 0; c < 3; c++)
+    {
+        float        v0 = chooseComponent(a.aabb.lo, c) + chooseComponent(a.aabb.hi, c);
+        float        v1 = chooseComponent(b.aabb.lo, c) + chooseComponent(b.aabb.hi, c);
+        unsigned int b0 = (unsigned int)(v0 * (float)(1ull << 31));
+        unsigned int b1 = (unsigned int)(v1 * (float)(1ull << 31));
+        int          sh = findLeadingOne(b0 ^ b1);
+        unsigned int s0 = shf_r_clamp(0, b0, sh);
+        unsigned int s1 = shf_r_clamp(0, b1, sh);
+        unsigned int dd = min((unsigned int)abs((int)s0), (unsigned int)abs((int)s1));
+        penalty        += (float)dd * __int_as_float((32 << 23) + (sh << 24));
+    }
+    cost += penalty * p.penaltyTermCoef;
+
+    return cost; // Note: Result must be bitwise-identical if a and b are swapped.
+}
+
+//------------------------------------------------------------------------
+// Left subtree covers [leafA, leafB[, right subtree covers [leafB, leafC[
+
+template <int MaxClusterSize, int GroupSize>
+static INLINE void mergeClusters(int leafA, int leafB, int leafC, AacExecParams p, Range inPrimRange)
+{
+    INIT_SHUFFLE_EMULATION(AAC_EXEC_WARPS_PER_BLOCK)
+
+    // Collaborate on a given operation by a group of GroupSize conselwtive threads.
+
+    int          lane        = threadIdx.x;
+    int          groupBase   = (GroupSize == 32) ? 0     : lane & ~(GroupSize - 1);
+    int          laneRel     = (GroupSize == 32) ? lane  : lane &  (GroupSize - 1);
+    unsigned int groupMask   = (GroupSize == 32) ? ~0u   : ((unsigned int)(1ull << GroupSize) - 1u) << groupBase;
+
+    // Determine cluster size and terminate unnecessary lanes.
+
+    int numAB = min(leafB - leafA, MaxClusterSize);
+    int numBC = min(leafC - leafB, MaxClusterSize);
+    int clusterSize = numAB + numBC;
+    if (laneRel >= clusterSize)
+        return;
+
+    // Fetch cluster entries.
+    // Not initialized yet => setup new entries for the corresponding leaves.
+    // Note: Flipping the if-else blocks causes LWCC 8.0 to generate incorrect SASS.
+
+    int inIdx = laneRel + ((laneRel < numAB) ? leafA : leafB - numAB);
+    int inClusterIdx = loadUncachedAlign4(&p.clusterIndices[inIdx]);
+    AacClusterEntry clusterEntry;
+
+    if (inClusterIdx < 0)
+    {
+        inClusterIdx = inIdx;
+        int primitiveIdx = loadCachedAlign4(&p.inPrimOrder[inClusterIdx + inPrimRange.start]);
+        AABB modelAABB = p.inApexPointMap->getAABB();
+        AABB primAABB = p.inModel.loadPrimitiveAABB(primitiveIdx);
+
+        clusterEntry.childPairIdx = ~primitiveIdx;
+        clusterEntry.subtreePrims = 1;
+        clusterEntry.aabb         = modelAABB.transformRelative(primAABB);
+    }
+    else
+    {
+        clusterEntry = loadUncachedAlign16(&p.clusterEntries[inClusterIdx]);
+    }
+
+    // BVH root => special case.
+
+    int clusterLimit = MaxClusterSize;
+    if (leafA == 0 && leafC == inPrimRange.span())
+    {
+        clusterLimit = 1;                                                           // Merge clusters all the way.
+        if (laneRel < 2)
+        {
+            inClusterIdx = 0;                                                       // Ensure that the child nodes are written at indices 0 and 1.
+            storeUncachedAlign4(&p.outNodes[laneRel + 2].childPairIdx, INT_MIN);    // Nodes 2 and 3 are always unused.
+            if (laneRel == 0) inClusterIdx = -1;                                    // Prevent the last cluster entry from overwriting the child nodes.
+        }
+    }
+
+    // Perform merges until the cluster is small enough.
+    // Note: Lanes that no longer have an active cluster are indicated by mergesLeft<0.
+    // They still participate in subsequent loop iterations to make shfl(inClusterIdx, ...) produce correct results.
+
+    int mergesLeft = clusterSize - clusterLimit;
+    do
+    {
+        // Find the best pair for each lane.
+        // Note: Reinterpreting the floats as unsigned integers ensures that
+        // the comparison stays robust even if the input contains NaNs/Infs.
+
+        unsigned int bestCostU32 = ~0u;
+        int          pair        = -1;
+        unsigned int activeMask  = __ballot(mergesLeft > 0) & groupMask;
+        int          numRounds   = __popc(activeMask) >> 1;
+        int          next        = lane;
+        int          prev        = lane;
+
+        // With n active lanes, we do n/2 rounds. Assume first that the active lanes
+        // are 0 .. n-1. On each round r in [1 .. n/2], each lane computes merge cost between
+        // node i and (i+r) % n. Each lane then looks at the cost it computed, and the cost
+        // that lane (i-r) % n computed, and uses these to determine the smallest cost related
+        // to node i so far. The bit twiddling makes this work on any set of active lanes.
+
+        while (numRounds--)
+        {
+            next -= findLeadingOne(__brev(shf_r_wrap(activeMask, activeMask, next + 1)));
+            prev += findLeadingOne(shf_r_wrap(activeMask, activeMask, prev));
+
+            float nextCost = evaluateMergeCost(clusterEntry, shfl(clusterEntry, next), p);
+            unsigned int nextCostU32 = __float_as_int(fmaxf(nextCost, 0.0f));
+            unsigned int prevCostU32 = shfl(nextCostU32, prev);
+
+            next &= 31;
+            prev &= 31;
+
+            unsigned int minCostU32 = min(min(bestCostU32, nextCostU32), prevCostU32);
+            if (bestCostU32 != minCostU32) pair = -1;
+            if (nextCostU32 == minCostU32) pair = max(pair, next);
+            if (prevCostU32 == minCostU32) pair = max(pair, prev);
+            bestCostU32 = minCostU32;
+        }
+
+        // Decide which lanes to merge.
+        // We merge a given lane with its pair if the pairing is mutual.
+        // Too many merges => break pairs of the highest lanes and try again.
+
+        bool doMerge = (shfl(pair, pair) == lane && pair >= 0);
+        unsigned int mergeMaskHi = __ballot(doMerge && lane > pair) & groupMask;
+        if (__popc(mergeMaskHi & getLaneMaskLt()) >= mergesLeft)
+            pair = -1;
+        doMerge = (shfl(pair, pair) == lane && pair >= 0);
+        mergeMaskHi &= __ballot(doMerge);
+        mergesLeft -= __popc(mergeMaskHi);
+
+        // Choose the order in which the nodes should appear in the output BVH.
+        // We place the node with the higher surface area first to speed up any-hit traversal.
+
+        float halfArea = clusterEntry.aabb.getHalfArea();
+        unsigned int halfAreaU32 = __float_as_int(fmaxf(halfArea, 0.0f));
+        unsigned int pairHalfAreaU32 = shfl(halfAreaU32, pair);
+        bool firstInPair = (halfAreaU32 != pairHalfAreaU32) ? (halfAreaU32 > pairHalfAreaU32) : (lane < pair);
+
+        // Allocate output node for each lane that participates in a merge.
+        // The nodes are overlaid on top of the cluster entries, so we need to be very careful about indexing.
+        // In practice, we grab last unused cluster indices, and repurpose each cluster index to represent two nodes.
+
+        int outClusterSlot = __popc(activeMask) - __popc(mergeMaskHi & getLaneMaskGe());
+        int outClusterIdx = shfl(inClusterIdx, groupBase + shfl(outClusterSlot, max(lane, pair)));
+        int outNodeIdx = outClusterIdx * 2 + ((firstInPair) ? 0 : 1);
+
+        // Perform all merges in parallel.
+
+        if (doMerge)
+        {
+            // Write out the node.
+
+            PlannerBinaryNode node;
+            node.childPairIdx             = clusterEntry.childPairIdx;
+            node.beforePlan.parentIdx     = -1; // filled in by the parent
+            node.beforePlan.halfArea      = halfArea;
+            node.beforePlan.primitiveCost = 0.0f; // don't care
+            storeUncachedAlign16(&p.outNodes[outNodeIdx], node);
+
+            // Update parent pointers.
+
+            if (node.childPairIdx >= 0)
+            {
+                storeUncachedAlign4(&p.outNodes[node.childPairIdx + 0].beforePlan.parentIdx, outNodeIdx);
+                storeUncachedAlign4(&p.outNodes[node.childPairIdx + 1].beforePlan.parentIdx, outNodeIdx);
+            }
+
+            // Form the merged cluster entry.
+
+            clusterEntry.childPairIdx = outNodeIdx;
+            clusterEntry.subtreePrims += shfl(clusterEntry.subtreePrims, pair);
+            clusterEntry.aabb = AABB(clusterEntry.aabb, shfl(clusterEntry.aabb, pair));
+
+            // Deactivate the lane corresponding to the second output node.
+
+            if (!firstInPair)
+                mergesLeft = -1;
+        }
+    }
+    while (__any(mergesLeft > 0));
+
+    // Write out the remaining cluster entries.
+
+    int outClusterSlot = __popc(__ballot(mergesLeft == 0) & groupMask & getLaneMaskLt());
+    int outClusterIdx = shfl(inClusterIdx, groupBase + outClusterSlot);
+    int outIdx = leafA + outClusterSlot;
+
+    if (mergesLeft == 0 && outClusterIdx >= 0)
+    {
+        storeUncachedAlign4(&p.clusterIndices[outIdx], outClusterIdx);
+        storeUncachedAlign16(&p.clusterEntries[outClusterIdx], clusterEntry);
+    }
+}
+
+//------------------------------------------------------------------------
+
+template <class MortonCode, int MaxClusterSize, int GroupSize>
+static __global__ __launch_bounds__(AAC_EXEC_WARPS_PER_BLOCK * 32, AAC_EXEC_BLOCKS_PER_SM)
+void AacExec(AacExecParams p)
+{
+    INIT_SHUFFLE_EMULATION(AAC_EXEC_WARPS_PER_BLOCK)
+    __shared__ volatile AacExecWarpSh s_warpSh[AAC_EXEC_WARPS_PER_BLOCK];
+    volatile AacExecWarpSh& warpSh = s_warpSh[threadIdx.y];
+
+    Range inPrimRange = *p.inPrimRange;
+    warpSh.inPrimRangeStart = inPrimRange.start;
+    warpSh.inPrimRangeEnd = inPrimRange.end;
+    warpSh.simdTimer = 0;
+
+    // Less than 2 primitives => special case.
+
+    if (inPrimRange.span() < 2)
+    {
+        if (blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.y == 0)
+        {
+            int i = threadIdx.x;
+            if (i < 2)
+            {
+                PlannerBinaryNode node;
+                node.childPairIdx              = INT_MIN;
+                node.beforePlan.halfArea       = 0.0f;
+                node.beforePlan.parentIdx      = -1;
+                node.beforePlan.primitiveCost  = 0.0f;
+
+                if (i < inPrimRange.span())
+                    node.childPairIdx = ~loadCachedAlign4(&p.inPrimOrder[i + inPrimRange.start]);
+                storeUncachedAlign16(&p.outNodes[i], node);
+            }
+        }
+        return;
+    }
+
+    // Parallel bottom-up traversal/construction of LBVH nodes using persistent warps.
+
+    int2 nodePrimRange = make_int2(-1, -1); // active LBVH traversal => (firstPrimIncl, lastPrimExcl); looking for work => (-1, -1); out of work => (>=inPrimRange.span(), -1)
+    int mergeSplitIdx = -1; // need to merge clusters in the current LBVH node => (split position); otherwise => (-1)
+
+    do
+    {
+        // Enough lanes are inactive => fetch more work.
+
+        if (__popc(__ballot(nodePrimRange.y != -1)) < AAC_EXEC_SIMD_MIN_LANES && nodePrimRange.x == -1)
+        {
+            // Increment global work counter.
+
+            unsigned int workMask = __ballot(true);
+            int workSum = __popc(workMask & getLaneMaskGt());
+
+            if (workSum == 0)
+                nodePrimRange.x = atomicAdd(p.workCounter, __popc(workMask));
+
+            nodePrimRange.x = shfl(nodePrimRange.x, findLeadingOne(workMask)) + workSum;
+            nodePrimRange.y = (nodePrimRange.x < inPrimRange.span()) ? nodePrimRange.x + 1 : -1;
+        }
+
+        // Lane is active and is not waiting to merge => traverse to parent LBVH node.
+
+        if (nodePrimRange.y != -1 && mergeSplitIdx == -1)
+        {
+            // Compare Morton codes against their neighbors at each end of current range.
+
+            const MortonCode* morton = (const MortonCode*)p.inMortonCodes + inPrimRange.start;
+            MortonCode diffLo = (nodePrimRange.x > 0)                  ? (morton[nodePrimRange.x] ^ morton[nodePrimRange.x - 1]) : ~(MortonCode)1;
+            MortonCode diffHi = (nodePrimRange.y < inPrimRange.span()) ? (morton[nodePrimRange.y] ^ morton[nodePrimRange.y - 1]) : ~(MortonCode)0;
+
+            // All Morton codes are identical => tie-break using leaf indices.
+
+            if (diffLo == diffHi)
+            {
+                diffLo = nodePrimRange.x ^ (nodePrimRange.x - 1);
+                diffHi = nodePrimRange.y ^ (nodePrimRange.y - 1);
+            }
+
+            // The parent node inherits nodePrimRange.x from its left child and nodePrimRange.y from its right child.
+            // Swap the components temporarily so that nodePrimRange.x will come from the current node and nodePrimRange.y from its sibling.
+
+            if (diffLo < diffHi)
+                nodePrimRange = make_int2(nodePrimRange.y, nodePrimRange.x);
+
+            // Determine mergeSplitIdx and (swapped) nodePrimRange of the parent node.
+            // The sibling node is not ready yet => leave this branch for now.
+
+            mergeSplitIdx = nodePrimRange.y;
+            nodePrimRange.y = atomicExch(&p.nodePrimRanges[mergeSplitIdx], nodePrimRange.x);
+            if (nodePrimRange.y == -1)
+                nodePrimRange.x = -1;
+
+            // Undo the swapping.
+
+            if (diffLo < diffHi)
+                nodePrimRange = make_int2(nodePrimRange.y, nodePrimRange.x);
+
+            // Cluster does not exceed limit => no need to merge.
+
+            int clusterLimit = (nodePrimRange.x == 0 && nodePrimRange.y == inPrimRange.span()) ? 1 : MaxClusterSize;
+            if (nodePrimRange.y - nodePrimRange.x <= clusterLimit)
+                mergeSplitIdx = -1;
+        }
+
+        // Warp-wide collaboration => perform each pending merge right away.
+
+        if (GroupSize == 32)
+        {
+            unsigned int mergeMask = __ballot(mergeSplitIdx != -1);
+            warpSh.nodePrimRangeX[threadIdx.x] = nodePrimRange.x;
+            warpSh.nodePrimRangeY[threadIdx.x] = nodePrimRange.y;
+
+            if (mergeMask != 0) do
+            {
+                int srcLane = findLeadingOne(mergeMask);
+                mergeMask ^= 1u << srcLane;
+                mergeClusters<MaxClusterSize, GroupSize>(shfl(nodePrimRange.x, srcLane), shfl(mergeSplitIdx, srcLane), shfl(nodePrimRange.y, srcLane), p, inPrimRange);
+
+                __threadfence();
+
+                inPrimRange = Range(warpSh.inPrimRangeStart, warpSh.inPrimRangeEnd);
+                nodePrimRange.x = warpSh.nodePrimRangeX[threadIdx.x];
+                nodePrimRange.y = warpSh.nodePrimRangeY[threadIdx.x];
+            }
+            while (mergeMask != 0);
+            mergeSplitIdx = -1;
+        }
+
+        // Otherwise => wait for partner groups, and distribute the pending merges among them.
+
+        else
+        {
+            // Who wants to merge clusters?
+
+            unsigned int mergeMask = __ballot(mergeSplitIdx != -1);
+            int numMerges = __popc(mergeMask);
+            const int maxMerges = 32 / GroupSize;
+
+            // Merge now, or wait for SIMD partners?
+
+            bool doMerges;
+            {
+                int simdTimer = warpSh.simdTimer;
+                doMerges = (numMerges >= maxMerges || (numMerges != 0 && simdTimer >= AAC_EXEC_SIMD_TIMEOUT));
+                simdTimer++;
+                if (doMerges)
+                    simdTimer = 0;
+                warpSh.simdTimer = simdTimer;
+            }
+
+            // Perform the merges in a warp-synchronous fashion.
+
+            if (doMerges)
+            {
+                // Lane acts as a source => record index in the temporary array.
+
+                int mergeIdx = __popc(mergeMask & getLaneMaskLt());
+                bool isSrcLane = (mergeSplitIdx != -1 && mergeIdx < maxMerges);
+                if (isSrcLane)
+                    warpSh.srcLanes[mergeIdx] = threadIdx.x;
+
+                // For each lane, select the source lane to use.
+
+                int groupIdx = threadIdx.x / GroupSize;
+                int mySrcLane = (groupIdx < numMerges) ? warpSh.srcLanes[groupIdx] : -1;
+
+                // Grab data from the source lane.
+
+                int leafA = shfl(nodePrimRange.x, mySrcLane);
+                int leafB = shfl(mergeSplitIdx, mySrcLane);
+                int leafC = shfl(nodePrimRange.y, mySrcLane);
+
+                // Lane acts as a source => mark the merge operation as done.
+
+                if (isSrcLane)
+                    mergeSplitIdx = -1;
+
+                // Perform the merges in parallel, one by each group.
+
+                warpSh.nodePrimRangeX[threadIdx.x] = nodePrimRange.x;
+                warpSh.nodePrimRangeY[threadIdx.x] = nodePrimRange.y;
+                warpSh.mergeSplitIdx[threadIdx.x]  = mergeSplitIdx;
+
+                if (mySrcLane != -1)
+                {
+                    mergeClusters<MaxClusterSize, GroupSize>(leafA, leafB, leafC, p, inPrimRange);
+                    __threadfence();
+                }
+
+                inPrimRange = Range(warpSh.inPrimRangeStart, warpSh.inPrimRangeEnd);
+                nodePrimRange.x = warpSh.nodePrimRangeX[threadIdx.x];
+                nodePrimRange.y = warpSh.nodePrimRangeY[threadIdx.x];
+                mergeSplitIdx   = warpSh.mergeSplitIdx[threadIdx.x];
+            }
+        }
+    }
+    while (__any(nodePrimRange.x < inPrimRange.span()));
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchAacExec(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const AacExecParams& p, int bytesPerMortonCode, int maxClusterSize)
+{
+    void (*kernel)(AacExecParams) = NULL;
+
+    if (bytesPerMortonCode == 4 && maxClusterSize == 4 ) kernel = AacExec<unsigned int,       4,  16>; // GroupSize = fastest of [8, 16, 32]
+    if (bytesPerMortonCode == 4 && maxClusterSize == 8 ) kernel = AacExec<unsigned int,       8,  32>; // GroupSize = fastest of [16, 32]
+    if (bytesPerMortonCode == 4 && maxClusterSize == 16) kernel = AacExec<unsigned int,       16, 32>; // GroupSize must be 32
+    if (bytesPerMortonCode == 8 && maxClusterSize == 4 ) kernel = AacExec<unsigned long long, 4,  16>; // GroupSize = fastest of [8, 16, 32]
+    if (bytesPerMortonCode == 8 && maxClusterSize == 8 ) kernel = AacExec<unsigned long long, 8,  32>; // GroupSize = fastest of [16, 32]
+    if (bytesPerMortonCode == 8 && maxClusterSize == 16) kernel = AacExec<unsigned long long, 16, 32>; // GroupSize must be 32
+
+    if (!kernel) return false;
+
+    if (lwdaFuncSetCacheConfig(kernel, lwdaFuncCachePreferShared) != lwdaSuccess) return false;
+    kernel<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

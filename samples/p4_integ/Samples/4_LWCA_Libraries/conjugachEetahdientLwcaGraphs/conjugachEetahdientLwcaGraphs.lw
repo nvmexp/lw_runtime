@@ -1,0 +1,424 @@
+/* Copyright (c) 2022, LWPU CORPORATION. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *  * Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  * Neither the name of LWPU CORPORATION nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*
+ * This sample implements a conjugate gradient solver on GPU
+ * using LWBLAS and LWSPARSE with LWCA Graphs
+ *
+ */
+
+// includes, system
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Using updated (v2) interfaces to lwblas */
+#include <lwblas_v2.h>
+#include <lwda_runtime.h>
+#include <lwsparse.h>
+
+// Utilities and system includes
+#include <helper_lwda.h>  // helper function LWCA error checking and initialization
+#include <helper_functions.h>  // helper for shared functions common to LWCA Samples
+
+const char *sSDKname = "conjugateGradientLwdaGraphs";
+
+#ifndef WITH_GRAPH
+#define WITH_GRAPH 1
+#endif
+
+/* genTridiag: generate a random tridiagonal symmetric matrix */
+void genTridiag(int *I, int *J, float *val, int N, int nz) {
+  I[0] = 0, J[0] = 0, J[1] = 1;
+  val[0] = (float)rand() / RAND_MAX + 10.0f;
+  val[1] = (float)rand() / RAND_MAX;
+  int start;
+
+  for (int i = 1; i < N; i++) {
+    if (i > 1) {
+      I[i] = I[i - 1] + 3;
+    } else {
+      I[1] = 2;
+    }
+
+    start = (i - 1) * 3 + 2;
+    J[start] = i - 1;
+    J[start + 1] = i;
+
+    if (i < N - 1) {
+      J[start + 2] = i + 1;
+    }
+
+    val[start] = val[start - 1];
+    val[start + 1] = (float)rand() / RAND_MAX + 10.0f;
+
+    if (i < N - 1) {
+      val[start + 2] = (float)rand() / RAND_MAX;
+    }
+  }
+
+  I[N] = nz;
+}
+
+__global__ void initVectors(float *rhs, float *x, int N) {
+  size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+
+  for (size_t i = gid; i < N; i += gridDim.x * blockDim.x) {
+    rhs[i] = 1.0;
+    x[i] = 0.0;
+  }
+}
+
+__global__ void r1_div_x(float *r1, float *r0, float *b) {
+  int gid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (gid == 0) {
+    b[0] = r1[0] / r0[0];
+  }
+}
+
+__global__ void a_minus(float *a, float *na) {
+  int gid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (gid == 0) {
+    na[0] = -(a[0]);
+  }
+}
+
+int main(int argc, char **argv) {
+  int N = 0, nz = 0, *I = NULL, *J = NULL;
+  float *val = NULL;
+  const float tol = 1e-5f;
+  const int max_iter = 10000;
+  float *x;
+  float *rhs;
+  float r1;
+
+  int *d_col, *d_row;
+  float *d_val, *d_x;
+  float *d_r, *d_p, *d_Ax;
+  int k;
+  float alpha, beta, alpham1;
+
+  lwdaStream_t stream1, streamForGraph;
+
+  // This will pick the best possible LWCA capable device
+  lwdaDeviceProp deviceProp;
+  int devID = findLwdaDevice(argc, (const char **)argv);
+
+  if (devID < 0) {
+    printf("exiting...\n");
+    exit(EXIT_SUCCESS);
+  }
+
+  checkLwdaErrors(lwdaGetDeviceProperties(&deviceProp, devID));
+
+  // Statistics about the GPU device
+  printf(
+      "> GPU device has %d Multi-Processors, SM %d.%d compute capabilities\n\n",
+      deviceProp.multiProcessorCount, deviceProp.major, deviceProp.minor);
+
+  /* Generate a random tridiagonal symmetric matrix in CSR format */
+  N = 1048576;
+  nz = (N - 2) * 3 + 4;
+  checkLwdaErrors(lwdaMallocHost(&I, sizeof(int) * (N + 1)));
+  checkLwdaErrors(lwdaMallocHost(&J, sizeof(int) * nz));
+  checkLwdaErrors(lwdaMallocHost(&val, sizeof(float) * nz));
+  genTridiag(I, J, val, N, nz);
+
+  checkLwdaErrors(lwdaMallocHost(&x, sizeof(float) * N));
+  rhs = (float *)malloc(sizeof(float) * N);
+
+  for (int i = 0; i < N; i++) {
+    rhs[i] = 1.0;
+    x[i] = 0.0;
+  }
+
+  /* Get handle to the LWBLAS context */
+  lwblasHandle_t lwblasHandle = 0;
+  lwblasStatus_t lwblasStatus;
+  lwblasStatus = lwblasCreate(&lwblasHandle);
+
+  checkLwdaErrors(lwblasStatus);
+
+  /* Get handle to the LWSPARSE context */
+  lwsparseHandle_t lwsparseHandle = 0;
+  lwsparseStatus_t lwsparseStatus;
+  lwsparseStatus = lwsparseCreate(&lwsparseHandle);
+
+  checkLwdaErrors(lwsparseStatus);
+
+  checkLwdaErrors(lwdaStreamCreate(&stream1));
+
+  checkLwdaErrors(lwdaMalloc((void **)&d_col, nz * sizeof(int)));
+  checkLwdaErrors(lwdaMalloc((void **)&d_row, (N + 1) * sizeof(int)));
+  checkLwdaErrors(lwdaMalloc((void **)&d_val, nz * sizeof(float)));
+  checkLwdaErrors(lwdaMalloc((void **)&d_x, N * sizeof(float)));
+  checkLwdaErrors(lwdaMalloc((void **)&d_r, N * sizeof(float)));
+  checkLwdaErrors(lwdaMalloc((void **)&d_p, N * sizeof(float)));
+  checkLwdaErrors(lwdaMalloc((void **)&d_Ax, N * sizeof(float)));
+
+  float *d_r1, *d_r0, *d_dot, *d_a, *d_na, *d_b;
+  checkLwdaErrors(lwdaMalloc((void **)&d_r1, sizeof(float)));
+  checkLwdaErrors(lwdaMalloc((void **)&d_r0, sizeof(float)));
+  checkLwdaErrors(lwdaMalloc((void **)&d_dot, sizeof(float)));
+  checkLwdaErrors(lwdaMalloc((void **)&d_a, sizeof(float)));
+  checkLwdaErrors(lwdaMalloc((void **)&d_na, sizeof(float)));
+  checkLwdaErrors(lwdaMalloc((void **)&d_b, sizeof(float)));
+
+  /* Wrap raw data into lwSPARSE generic API objects */
+  lwsparseSpMatDescr_t matA = NULL;
+  checkLwdaErrors(lwsparseCreateCsr(&matA, N, N, nz, d_row, d_col, d_val,
+                                    LWSPARSE_INDEX_32I, LWSPARSE_INDEX_32I,
+                                    LWSPARSE_INDEX_BASE_ZERO, LWDA_R_32F));
+  lwsparseDlwecDescr_t vecx = NULL;
+  checkLwdaErrors(lwsparseCreateDlwec(&vecx, N, d_x, LWDA_R_32F));
+  lwsparseDlwecDescr_t vecp = NULL;
+  checkLwdaErrors(lwsparseCreateDlwec(&vecp, N, d_p, LWDA_R_32F));
+  lwsparseDlwecDescr_t vecAx = NULL;
+  checkLwdaErrors(lwsparseCreateDlwec(&vecAx, N, d_Ax, LWDA_R_32F));
+
+  /* Allocate workspace for lwSPARSE */
+  size_t bufferSize = 0;
+  checkLwdaErrors(lwsparseSpMV_bufferSize(
+      lwsparseHandle, LWSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matA, vecx,
+      &beta, vecAx, LWDA_R_32F, LWSPARSE_SPMV_ALG_DEFAULT, &bufferSize));
+  void *buffer = NULL;
+  checkLwdaErrors(lwdaMalloc(&buffer, bufferSize));
+
+  lwsparseMatDescr_t descr = 0;
+  checkLwdaErrors(lwsparseCreateMatDescr(&descr));
+
+  checkLwdaErrors(lwsparseSetMatType(descr, LWSPARSE_MATRIX_TYPE_GENERAL));
+  checkLwdaErrors(lwsparseSetMatIndexBase(descr, LWSPARSE_INDEX_BASE_ZERO));
+
+  int numBlocks = 0, blockSize = 0;
+  checkLwdaErrors(
+      lwdaOclwpancyMaxPotentialBlockSize(&numBlocks, &blockSize, initVectors));
+
+  checkLwdaErrors(lwdaMemcpyAsync(d_col, J, nz * sizeof(int),
+                                  lwdaMemcpyHostToDevice, stream1));
+  checkLwdaErrors(lwdaMemcpyAsync(d_row, I, (N + 1) * sizeof(int),
+                                  lwdaMemcpyHostToDevice, stream1));
+  checkLwdaErrors(lwdaMemcpyAsync(d_val, val, nz * sizeof(float),
+                                  lwdaMemcpyHostToDevice, stream1));
+
+  initVectors<<<numBlocks, blockSize, 0, stream1>>>(d_r, d_x, N);
+
+  alpha = 1.0;
+  alpham1 = -1.0;
+  beta = 0.0;
+
+  checkLwdaErrors(lwsparseSetStream(lwsparseHandle, stream1));
+  checkLwdaErrors(lwsparseSpMV(lwsparseHandle, LWSPARSE_OPERATION_NON_TRANSPOSE,
+                               &alpha, matA, vecx, &beta, vecAx, LWDA_R_32F,
+                               LWSPARSE_SPMV_ALG_DEFAULT, buffer));
+
+  checkLwdaErrors(lwblasSetStream(lwblasHandle, stream1));
+  checkLwdaErrors(lwblasSaxpy(lwblasHandle, N, &alpham1, d_Ax, 1, d_r, 1));
+
+  checkLwdaErrors(
+      lwblasSetPointerMode(lwblasHandle, LWBLAS_POINTER_MODE_DEVICE));
+  checkLwdaErrors(lwblasSdot(lwblasHandle, N, d_r, 1, d_r, 1, d_r1));
+
+  k = 1;
+  // First Iteration when k=1 starts
+  checkLwdaErrors(lwblasScopy(lwblasHandle, N, d_r, 1, d_p, 1));
+  checkLwdaErrors(lwsparseSpMV(lwsparseHandle, LWSPARSE_OPERATION_NON_TRANSPOSE,
+                               &alpha, matA, vecp, &beta, vecAx, LWDA_R_32F,
+                               LWSPARSE_SPMV_ALG_DEFAULT, buffer));
+
+  checkLwdaErrors(lwblasSdot(lwblasHandle, N, d_p, 1, d_Ax, 1, d_dot));
+
+  r1_div_x<<<1, 1, 0, stream1>>>(d_r1, d_dot, d_a);
+
+  checkLwdaErrors(lwblasSaxpy(lwblasHandle, N, d_a, d_p, 1, d_x, 1));
+
+  a_minus<<<1, 1, 0, stream1>>>(d_a, d_na);
+
+  checkLwdaErrors(lwblasSaxpy(lwblasHandle, N, d_na, d_Ax, 1, d_r, 1));
+
+  checkLwdaErrors(lwdaMemcpyAsync(d_r0, d_r1, sizeof(float),
+                                  lwdaMemcpyDeviceToDevice, stream1));
+
+  checkLwdaErrors(lwblasSdot(lwblasHandle, N, d_r, 1, d_r, 1, d_r1));
+
+  checkLwdaErrors(lwdaMemcpyAsync(&r1, d_r1, sizeof(float),
+                                  lwdaMemcpyDeviceToHost, stream1));
+  checkLwdaErrors(lwdaStreamSynchronize(stream1));
+  printf("iteration = %3d, residual = %e\n", k, sqrt(r1));
+  // First Iteration when k=1 ends
+  k++;
+
+#if WITH_GRAPH
+  lwdaGraph_t initGraph;
+  checkLwdaErrors(lwdaStreamCreate(&streamForGraph));
+  checkLwdaErrors(lwblasSetStream(lwblasHandle, stream1));
+  checkLwdaErrors(lwsparseSetStream(lwsparseHandle, stream1));
+  checkLwdaErrors(lwdaStreamBeginCapture(stream1, lwdaStreamCaptureModeGlobal));
+
+  r1_div_x<<<1, 1, 0, stream1>>>(d_r1, d_r0, d_b);
+  lwblasSetPointerMode(lwblasHandle, LWBLAS_POINTER_MODE_DEVICE);
+  checkLwdaErrors(lwblasSscal(lwblasHandle, N, d_b, d_p, 1));
+  lwblasSetPointerMode(lwblasHandle, LWBLAS_POINTER_MODE_HOST);
+  checkLwdaErrors(lwblasSaxpy(lwblasHandle, N, &alpha, d_r, 1, d_p, 1));
+  lwblasSetPointerMode(lwblasHandle, LWBLAS_POINTER_MODE_DEVICE);
+
+  checkLwdaErrors(
+      lwsparseSetPointerMode(lwsparseHandle, LWSPARSE_POINTER_MODE_HOST));
+  checkLwdaErrors(lwsparseSpMV(lwsparseHandle, LWSPARSE_OPERATION_NON_TRANSPOSE,
+                               &alpha, matA, vecp, &beta, vecAx, LWDA_R_32F,
+                               LWSPARSE_SPMV_ALG_DEFAULT, buffer));
+
+  checkLwdaErrors(lwdaMemsetAsync(d_dot, 0, sizeof(float), stream1));
+  checkLwdaErrors(lwblasSdot(lwblasHandle, N, d_p, 1, d_Ax, 1, d_dot));
+
+  r1_div_x<<<1, 1, 0, stream1>>>(d_r1, d_dot, d_a);
+
+  checkLwdaErrors(lwblasSaxpy(lwblasHandle, N, d_a, d_p, 1, d_x, 1));
+
+  a_minus<<<1, 1, 0, stream1>>>(d_a, d_na);
+
+  checkLwdaErrors(lwblasSaxpy(lwblasHandle, N, d_na, d_Ax, 1, d_r, 1));
+
+  checkLwdaErrors(lwdaMemcpyAsync(d_r0, d_r1, sizeof(float),
+                                  lwdaMemcpyDeviceToDevice, stream1));
+  checkLwdaErrors(lwdaMemsetAsync(d_r1, 0, sizeof(float), stream1));
+
+  checkLwdaErrors(lwblasSdot(lwblasHandle, N, d_r, 1, d_r, 1, d_r1));
+
+  checkLwdaErrors(lwdaMemcpyAsync((float *)&r1, d_r1, sizeof(float),
+                                  lwdaMemcpyDeviceToHost, stream1));
+
+  checkLwdaErrors(lwdaStreamEndCapture(stream1, &initGraph));
+  lwdaGraphExec_t graphExec;
+  checkLwdaErrors(lwdaGraphInstantiate(&graphExec, initGraph, NULL, NULL, 0));
+#endif
+
+  checkLwdaErrors(lwblasSetStream(lwblasHandle, stream1));
+  checkLwdaErrors(lwsparseSetStream(lwsparseHandle, stream1));
+
+  while (r1 > tol * tol && k <= max_iter) {
+#if WITH_GRAPH
+    checkLwdaErrors(lwdaGraphLaunch(graphExec, streamForGraph));
+    checkLwdaErrors(lwdaStreamSynchronize(streamForGraph));
+#else
+    r1_div_x<<<1, 1, 0, stream1>>>(d_r1, d_r0, d_b);
+    lwblasSetPointerMode(lwblasHandle, LWBLAS_POINTER_MODE_DEVICE);
+    checkLwdaErrors(lwblasSscal(lwblasHandle, N, d_b, d_p, 1));
+
+    lwblasSetPointerMode(lwblasHandle, LWBLAS_POINTER_MODE_HOST);
+    checkLwdaErrors(lwblasSaxpy(lwblasHandle, N, &alpha, d_r, 1, d_p, 1));
+
+    checkLwdaErrors(lwsparseSpMV(
+        lwsparseHandle, LWSPARSE_OPERATION_NON_TRANSPOSE, &alpha, matA, vecp,
+        &beta, vecAx, LWDA_R_32F, LWSPARSE_SPMV_ALG_DEFAULT, buffer));
+
+    lwblasSetPointerMode(lwblasHandle, LWBLAS_POINTER_MODE_DEVICE);
+    checkLwdaErrors(lwblasSdot(lwblasHandle, N, d_p, 1, d_Ax, 1, d_dot));
+
+    r1_div_x<<<1, 1, 0, stream1>>>(d_r1, d_dot, d_a);
+
+    checkLwdaErrors(lwblasSaxpy(lwblasHandle, N, d_a, d_p, 1, d_x, 1));
+
+    a_minus<<<1, 1, 0, stream1>>>(d_a, d_na);
+    checkLwdaErrors(lwblasSaxpy(lwblasHandle, N, d_na, d_Ax, 1, d_r, 1));
+
+    checkLwdaErrors(lwdaMemcpyAsync(d_r0, d_r1, sizeof(float),
+                                    lwdaMemcpyDeviceToDevice, stream1));
+
+    checkLwdaErrors(lwblasSdot(lwblasHandle, N, d_r, 1, d_r, 1, d_r1));
+    checkLwdaErrors(lwdaMemcpyAsync((float *)&r1, d_r1, sizeof(float),
+                                    lwdaMemcpyDeviceToHost, stream1));
+    checkLwdaErrors(lwdaStreamSynchronize(stream1));
+#endif
+    printf("iteration = %3d, residual = %e\n", k, sqrt(r1));
+    k++;
+  }
+
+#if WITH_GRAPH
+  checkLwdaErrors(lwdaMemcpyAsync(x, d_x, N * sizeof(float),
+                                  lwdaMemcpyDeviceToHost, streamForGraph));
+  checkLwdaErrors(lwdaStreamSynchronize(streamForGraph));
+#else
+  checkLwdaErrors(lwdaMemcpyAsync(x, d_x, N * sizeof(float),
+                                  lwdaMemcpyDeviceToHost, stream1));
+  checkLwdaErrors(lwdaStreamSynchronize(stream1));
+#endif
+
+  float rsum, diff, err = 0.0;
+
+  for (int i = 0; i < N; i++) {
+    rsum = 0.0;
+
+    for (int j = I[i]; j < I[i + 1]; j++) {
+      rsum += val[j] * x[J[j]];
+    }
+
+    diff = fabs(rsum - rhs[i]);
+
+    if (diff > err) {
+      err = diff;
+    }
+  }
+
+#if WITH_GRAPH
+  checkLwdaErrors(lwdaGraphExecDestroy(graphExec));
+  checkLwdaErrors(lwdaGraphDestroy(initGraph));
+  checkLwdaErrors(lwdaStreamDestroy(streamForGraph));
+#endif
+  checkLwdaErrors(lwdaStreamDestroy(stream1));
+  lwsparseDestroy(lwsparseHandle);
+  lwblasDestroy(lwblasHandle);
+
+  if (matA) {
+    checkLwdaErrors(lwsparseDestroySpMat(matA));
+  }
+  if (vecx) {
+    checkLwdaErrors(lwsparseDestroyDlwec(vecx));
+  }
+  if (vecAx) {
+    checkLwdaErrors(lwsparseDestroyDlwec(vecAx));
+  }
+  if (vecp) {
+    checkLwdaErrors(lwsparseDestroyDlwec(vecp));
+  }
+
+  checkLwdaErrors(lwdaFreeHost(I));
+  checkLwdaErrors(lwdaFreeHost(J));
+  checkLwdaErrors(lwdaFreeHost(val));
+  checkLwdaErrors(lwdaFreeHost(x));
+  free(rhs);
+  checkLwdaErrors(lwdaFree(d_col));
+  checkLwdaErrors(lwdaFree(d_row));
+  checkLwdaErrors(lwdaFree(d_val));
+  checkLwdaErrors(lwdaFree(d_x));
+  checkLwdaErrors(lwdaFree(d_r));
+  checkLwdaErrors(lwdaFree(d_p));
+  checkLwdaErrors(lwdaFree(d_Ax));
+
+  printf("Test Summary:  Error amount = %f\n", err);
+  exit((k <= max_iter) ? 0 : 1);
+}

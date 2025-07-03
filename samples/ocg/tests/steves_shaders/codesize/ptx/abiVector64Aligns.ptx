@@ -1,0 +1,59 @@
+.version 3.1
+.target sm_20
+
+/*
+ * This function does not need to have its stack alignment modified.
+ */
+
+.func (.reg .v2 .b64 out) myadd (.param .b8 junk[48], .reg .v2 .b64 a, .reg .v2 .s64 b,
+                                 .reg .v2 .u64 c)
+{
+    .reg .u64 resx, resy, tempx, tempy;
+
+    mov.v2.b64   {resx, resy}, a;
+    mov.v2.b64   {tempx, tempy}, b;
+    add.u64      resx, resx, tempx;
+    add.u64      resy, resy, tempy;
+    mov.v2.b64   {tempx, tempy}, c;
+    add.u64      resx, resx, tempx;
+    add.u64      resy, resy, tempy;
+
+    mov.v2.b64   out, {resx, resy};
+    ret;
+}
+
+/*
+ * This function should dynamically set its stack alignment to 16 bytes because its call to
+ * myadd contains vector data types that require 16 byte alignment that need to be passed on
+ * the stack.
+ */
+
+.func (.reg .v2 .b64 out) dummy(.reg .u64 a, .reg .u64 b, .reg .u64 c, .reg .u64 d,
+                                .reg .u64 e, .reg .u64 f)
+{
+    .reg .v2 .b64 inb, o;
+    .reg .v2 .u64 inu;
+    .reg .v2 .s64 ins;
+    .param .b8 junk[48];
+
+    mov.v2.b64   inb, {a, b};
+    mov.v2.b64   inu, {c, d};
+    mov.v2.b64   ins, {e, f};
+
+    st.param.u8  [junk], 1;
+    call (o), myadd, (junk, inb, ins, inu);
+
+    mov.v2.b64   out, o;
+}
+
+.entry main(.param .u32 output)
+{
+    .reg .u32 o;
+    .reg .v2 .b64 out;
+
+    call (out), dummy, (1, 2, 11, 12, 111, 112);
+    ld.param.u32 o, [output];
+    st.v2.b64    [o], out;
+
+    exit;
+}

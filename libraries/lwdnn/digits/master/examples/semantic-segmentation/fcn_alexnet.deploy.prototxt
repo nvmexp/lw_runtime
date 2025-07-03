@@ -1,0 +1,273 @@
+# data layers
+input: "data"
+input_shape {
+  dim: 1
+  dim: 3
+  dim: 500
+  dim: 356
+}
+# data preprocessing
+layer {
+  # Use Power layer in deploy phase for input scaling
+  name: "shift"
+  bottom: "data"
+  top: "data_preprocessed"
+  type: "Power"
+  power_param {
+    shift: -116.0
+  }
+}
+# main network description
+layer {
+  name: "colw1"
+  type: "Colwolution"
+  bottom: "data_preprocessed"
+  top: "colw1"
+  colwolution_param {
+    num_output: 96
+    pad: 100
+    kernel_size: 11
+    group: 1
+    stride: 4
+  }
+}
+layer {
+  name: "relu1"
+  type: "ReLU"
+  bottom: "colw1"
+  top: "colw1"
+}
+layer {
+  name: "pool1"
+  type: "Pooling"
+  bottom: "colw1"
+  top: "pool1"
+  pooling_param {
+    pool: MAX
+    kernel_size: 3
+    stride: 2
+  }
+}
+layer {
+  name: "norm1"
+  type: "LRN"
+  bottom: "pool1"
+  top: "norm1"
+  lrn_param {
+    local_size: 5
+    alpha: 0.0001
+    beta: 0.75
+  }
+}
+layer {
+  name: "colw2"
+  type: "Colwolution"
+  bottom: "norm1"
+  top: "colw2"
+  colwolution_param {
+    num_output: 256
+    pad: 2
+    kernel_size: 5
+    group: 2
+    stride: 1
+  }
+}
+layer {
+  name: "relu2"
+  type: "ReLU"
+  bottom: "colw2"
+  top: "colw2"
+}
+layer {
+  name: "pool2"
+  type: "Pooling"
+  bottom: "colw2"
+  top: "pool2"
+  pooling_param {
+    pool: MAX
+    kernel_size: 3
+    stride: 2
+  }
+}
+layer {
+  name: "norm2"
+  type: "LRN"
+  bottom: "pool2"
+  top: "norm2"
+  lrn_param {
+    local_size: 5
+    alpha: 0.0001
+    beta: 0.75
+  }
+}
+layer {
+  name: "colw3"
+  type: "Colwolution"
+  bottom: "norm2"
+  top: "colw3"
+  colwolution_param {
+    num_output: 384
+    pad: 1
+    kernel_size: 3
+    group: 1
+    stride: 1
+  }
+}
+layer {
+  name: "relu3"
+  type: "ReLU"
+  bottom: "colw3"
+  top: "colw3"
+}
+layer {
+  name: "colw4"
+  type: "Colwolution"
+  bottom: "colw3"
+  top: "colw4"
+  colwolution_param {
+    num_output: 384
+    pad: 1
+    kernel_size: 3
+    group: 2
+    stride: 1
+  }
+}
+layer {
+  name: "relu4"
+  type: "ReLU"
+  bottom: "colw4"
+  top: "colw4"
+}
+layer {
+  name: "colw5"
+  type: "Colwolution"
+  bottom: "colw4"
+  top: "colw5"
+  colwolution_param {
+    num_output: 256
+    pad: 1
+    kernel_size: 3
+    group: 2
+    stride: 1
+  }
+}
+layer {
+  name: "relu5"
+  type: "ReLU"
+  bottom: "colw5"
+  top: "colw5"
+}
+layer {
+  name: "pool5"
+  type: "Pooling"
+  bottom: "colw5"
+  top: "pool5"
+  pooling_param {
+    pool: MAX
+    kernel_size: 3
+    stride: 2
+  }
+}
+layer {
+  name: "fc6"
+  type: "Colwolution"
+  bottom: "pool5"
+  top: "fc6"
+  colwolution_param {
+    num_output: 4096
+    pad: 0
+    kernel_size: 6
+    group: 1
+    stride: 1
+  }
+}
+layer {
+  name: "relu6"
+  type: "ReLU"
+  bottom: "fc6"
+  top: "fc6"
+}
+layer {
+  name: "drop6"
+  type: "Dropout"
+  bottom: "fc6"
+  top: "fc6"
+  dropout_param {
+    dropout_ratio: 0.5
+  }
+}
+layer {
+  name: "fc7"
+  type: "Colwolution"
+  bottom: "fc6"
+  top: "fc7"
+  colwolution_param {
+    num_output: 4096
+    pad: 0
+    kernel_size: 1
+    group: 1
+    stride: 1
+  }
+}
+layer {
+  name: "relu7"
+  type: "ReLU"
+  bottom: "fc7"
+  top: "fc7"
+}
+layer {
+  name: "drop7"
+  type: "Dropout"
+  bottom: "fc7"
+  top: "fc7"
+  dropout_param {
+    dropout_ratio: 0.5
+  }
+}
+layer {
+  name: "score_fr_21classes"
+  type: "Colwolution"
+  bottom: "fc7"
+  top: "score_fr_21classes"
+  param {
+    lr_mult: 1
+    decay_mult: 1
+  }
+  param {
+    lr_mult: 2
+    decay_mult: 0
+  }
+  colwolution_param {
+    num_output: 21
+    pad: 0
+    kernel_size: 1
+  }
+}
+layer {
+  name: "upscore_21classes"
+  type: "Decolwolution"
+  bottom: "score_fr_21classes"
+  top: "upscore_21classes"
+  param {
+    lr_mult: 0
+  }
+  colwolution_param {
+    num_output: 21
+    group: 21
+    bias_term: false
+    kernel_size: 63
+    stride: 32
+    weight_filler: { type: "bilinear" }
+  }
+}
+layer {
+  name: "score"
+  type: "Crop"
+  bottom: "upscore_21classes"
+  bottom: "data"
+  top: "score"
+  crop_param {
+    axis: 2
+    offset: 18
+  }
+}

@@ -1,0 +1,101 @@
+################################## tell Emacs this is a -*- makefile-gmake -*-
+#
+# Copyright (c) 2015-2021 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+# tmake for SW Mobile component makefile
+#
+###############################################################################
+
+ifdef LW_COMPONENT_FLAG_DYNAMIC_EXELWTABLE_SECTION
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME := microbench
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_HOS),1)
+  MICROBENCH_PLATFORM := hos
+else ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_LINUX),1)
+  MICROBENCH_PLATFORM := linux
+else
+  $(error unsupported platform for microbench)
+endif
+
+include $(LW_COMPONENT_DIR)/SrcList.inc
+
+LW_COMPONENT_SOURCES := $(MICROBENCH_CPPFILES)
+
+LW_COMPONENT_HAS_BROKEN_CODE := \
+	unused-variable \
+	unused-but-set-variable \
+	redundant-decls
+
+LW_COMPONENT_INCLUDES := \
+	../include \
+	../samples/common \
+	../common
+
+LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+	$(LW_INTERFACE_GPU_GRAPHICS_EGL) \
+	$(LW_INTERFACE_GPU_GRAPHICS_LWN) \
+	$(LW_INTERFACE_GPU_GRAPHICS_LWWINSYS_PRIVATE) \
+	$(LW_SOURCE)/gpu/drv/drivers/lwn/glslc
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_HOS),1)
+
+  LW_COMPONENT_CFLAGS += \
+	-DLW_HOS
+
+  LW_COMPONENT_INCLUDES += \
+	$(LW_SOURCE)/hos/drivers/Raptor/Include
+
+  LW_COMPONENT_NEEDED_INTERFACE_DIRS += \
+	$(LW_INTERFACE_GPU_GRAPHICS_OPENGLES2) \
+	$(LW_SOURCE)/core/utils/lwos
+
+  ifneq ($(LW_LWSTOMER_HOS_DDK_ROOT),)
+    _toolchain_ddk_root := $(LW_LWSTOMER_HOS_DDK_ROOT)
+  else
+    _toolchain_ddk_root := $(LW_SOURCE)/3rdparty/hos-ddk-minimal/ddk
+  endif
+
+  LW_COMPONENT_POST_PROCESS_INPUT += \
+	microbench_dyn.desc.partial.xml \
+	$(_toolchain_ddk_root)/Common/Build/SpecFiles/SvcBase.desc.partial.xml \
+	$(_toolchain_ddk_root)/Common/Build/SpecFiles/SvcDd.desc.partial.xml
+
+  ifeq ($(LW_TARGET_ARCH),hos_64)
+    LW_COMPONENT_POST_PROCESS_INPUT += \
+	  microbench.aarch64.nmeta
+  else
+    LW_COMPONENT_POST_PROCESS_INPUT += \
+	  microbench.arm.nmeta
+  endif
+else ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_LINUX),1)
+  LW_COMPONENT_CFLAGS += \
+	-DLW_LINUX
+
+  LW_COMPONENT_NEEDED_INTERFACE_DIRS += \
+    $(LW_SOURCE)/gpu/drv/drivers/unix/dso-stubs/wayland/libwayland-dso-stubs/wayland-client \
+    $(LW_SOURCE)/gpu/drv/drivers/unix/dso-stubs/wayland/libwayland-dso-stubs/wayland-egl
+
+  LW_COMPONENT_INCLUDES += \
+    $(LW_TOOLS)/embedded/external-prebuilt/wayland-1.14.0/Linux-aarch64/include \
+    $(LW_TOOLS)/embedded/external-prebuilt/wayland-protocols-1.17/include \
+    $(LW_TOOLS)/embedded/external-prebuilt/wayland-protocols-1.17/src
+
+  LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += stdc++
+endif # END OF OS_IS_HOS
+
+include $(LW_BUILD_DYNAMIC_EXELWTABLE)
+endif
+
+# Local Variables:
+# indent-tabs-mode: t
+# tab-width: 8
+# End:
+# vi: set tabstop=8 noexpandtab:

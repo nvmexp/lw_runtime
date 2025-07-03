@@ -1,0 +1,1084 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#if !defined(LDPC2_C2V_X2_LWH_INCLUDED_)
+#define LDPC2_C2V_X2_LWH_INCLUDED_
+
+// Classes/structs for LDPC min-sum decode kernels that work with a pair
+// of codewords per CTA.
+
+#include "ldpc2.lwh"
+
+namespace ldpc2
+{
+
+////////////////////////////////////////////////////////////////////////
+// sign_mgr_pair_base
+// Sign bit manager for a pair of individual codewords, with the lo
+// half-word of an fp16x2 pair represents a value from one codeword, and
+// the hi half-word represents a value from the other codeword.
+// Internal representation:
+//
+// For BG1, we need to be able to store up to 19 bits for each codeword.
+// However, the maximum row degree for all nodes in BG2 and all nodes
+// after the first 4 in BG1, the maximum row degree is 10. As such, we
+// will split the sign storage so that we can also store the row index
+// with up to 10 sign bits from each codeword, so that the compiler can
+// (hopefully) avoid allocating registers when the node loop is unrolled.
+//
+//  Bit
+//  31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+//
+// The first 10 bits of the stored signs will be in the first signs word,
+// ordered as follows:
+//
+//  Word 1 Sign Bits                                  Word 0 Sign Bits
+//  ------------------------------------------------|------------------------------------------------
+//   9  8  7  6  5  4  3  2  1  0  .  .  .  .  .  . |  9  8  7  6  5  4  3  2  1  0  .  .  .  .  .  .
+//                              ^                                                 ^
+//                   Row Index  |                                      Row Index  |
+//
+// Index of min0 will be 5 bits or less (max row degree is 19). The min0_index value for each word will
+// be stored in the low bits of each half word.
+//
+//  Word 1 Min0 Index                                 Word 0 Min0 Index
+//  ------------------------------------------------|------------------------------------------------
+//   .  .  .  .  .  .  .  .  .  .  .  x  x  x  x  x |  .  .  .  .  .  .  .  .  .  .  .  x  x  x  x  x
+//
+// The remainder of the stored signs will be in the second signs word, ordered as follows:
+//
+//  Word 1 Sign Bits                                  Word 0 Sign Bits
+//  ------------------------------------------------|------------------------------------------------
+//  18 17 16 15 14 13 12 11 10  .  .  .  .  .  .  . | 18 17 16 15 14 13 12 11 10  .  .  .  .  .  .  .
+//        ^                                                  ^
+//        | Row Index                                        |  Row Index
+//
+template <typename T> struct sign_mgr_pair_base;
+
+template <> struct sign_mgr_pair_base<__half2>
+{
+    //------------------------------------------------------------------
+    // init()
+    // Initialize the first signs word from the first two input values.
+    __device__
+    static void init(uint32_t& signs0, word_t v0, word_t v1)
+    {
+        word_t s0 = fp16x2_sign_mask(v0);
+        word_t s1 = fp16x2_sign_mask(v1);
+        signs0    = (s0.u32 >> 9) | (s1.u32 >> 8);
+    }
+    //------------------------------------------------------------------
+    // update()
+    // Update one of the pair of signs words using the given input value
+    __device__
+    static void update(uint32_t& signs0, uint32_t& signs1, word_t v, int idx)
+    {
+        word_t sv = fp16x2_sign_mask(v);
+        if(idx < 10) // compile time branch with unrolled loops...
+        {
+            signs0 |= (sv.u32 >> (9-idx));
+        }
+        else
+        {
+            signs1 |= (sv.u32 >> (18-idx));
+        }
+    }
+    //------------------------------------------------------------------
+    // sign_product_mask()
+    // Returns a value with bits 15 and 31 set or cleared, based on the
+    // product of the signs of the given sign bits for each of the two
+    // codewords represented. All other bits will be zero.
+    // This version uses only a single signs value, and is this only
+    // applicable when the row degree is 10 or less.
+    __device__
+    static uint32_t sign_product_mask(const uint32_t& s)
+    {
+        const uint32_t CW0_sign_prod = (unsigned int)__popc(s & 0x0000FFC0) & 0x1;
+        const uint32_t CW1_sign_prod = (unsigned int)__popc(s & 0xFFC00000) & 0x1;
+        return (CW0_sign_prod << 15) | (CW1_sign_prod << 31);
+    }
+    //------------------------------------------------------------------
+    // sign_product_mask()
+    // Returns a value with bits 15 and 31 set or cleared, based on the
+    // product of the signs of the given sign bits for each of the two
+    // codewords represented. All other bits will be zero.
+    // This version uses only a single signs value, and is this only
+    // applicable when the row degree is 10 or less.
+    __device__
+    static uint32_t sign_product_mask(const uint32_t& s0_9, const uint32_t& s10_)
+    {
+        const uint32_t CW0_signs = (s0_9 & 0x0000FFC0) | (s10_ << 16);
+        const uint32_t CW1_signs = (s0_9 >> 16)        | (s10_ & 0xFFC00000);
+        const uint32_t CW0_sign_prod = (unsigned int)__popc(CW0_signs) & 0x1;
+        const uint32_t CW1_sign_prod = (unsigned int)__popc(CW1_signs) & 0x1;
+        
+        return (CW0_sign_prod << 15) | (CW1_sign_prod << 31);
+    }
+    //------------------------------------------------------------------
+    // sign_mask()
+    // Returns a mask with the appropriate sign bits set at bits 15 and
+    // 31, based on the stored sign bits for the given index pair.
+    __device__
+    static uint32_t sign_mask(const uint32_t& signs0_9, const uint32_t& signs10_, int idx)
+    {
+        const uint32_t smask = (idx < 10) ? (signs0_9 << (9-idx)) : (signs10_ << (18-idx)); 
+        return (smask & 0x80008000);
+    }
+    //------------------------------------------------------------------
+    // debug_get_codeword_signs()
+    __device__
+    static uint32_t debug_get_codeword_signs(uint32_t signs0_9,
+                                             uint32_t signs10_,
+                                             int      cw_index)
+    {
+        if(0 == cw_index)
+        {
+            return (((signs0_9 & 0x0000FFC0) >> 6) | ((signs10_ & 0x0000FF80) << 3));
+        }
+        else
+        {
+            return ((signs0_9 >> 22) | ((signs10_ & 0xFF800000) >> 8 ));
+        }
+    }
+#if 0
+    //------------------------------------------------------------------
+    // signs_xor()
+    // xor() sign bits in s with the product of the signs.
+    // `pair_count` indicates how many value pairs have sign bits set in
+    // `s`.
+    // This can be used to store the "destination" sign bits: what the
+    // output will be when the compressed C2V is extracted.
+    __device__
+    static void signs_xor(uint32_t& signs_0_9,
+                          uint32_t& signs_10_,
+                          int       row_degree)
+    {
+        if(row_degree > 10)
+        {
+            uint32_t s0_9 = signs_0_9 >> 6;
+            uint32_t s10_ = signs_10_ >> 7;
+            uint32_t cw0_signs = uint32_permute<0x5410>(s_0_9, s10_);
+            uint32_t cw1_signs = uint32_permute<0x7632>(s_0_9, s10_);
+        }
+        else
+        {
+        }
+        //uint32_t even_odd_mask = 0;
+        //if(0 != ((unsigned int)pop_count(s) & 0x1))
+        //{
+        //    // This way maintains zeros in the gap between the valid
+        //    // sign regions. We may not need to do so, but popc()
+        //    // will be wrong with 1s in those positions, so we make
+        //    // sure they are 0 here.
+        //    even_odd_mask = (1 << pair_count) - 1;
+        //    even_odd_mask |= (even_odd_mask << 16);
+        //}
+        //s ^= even_odd_mask;
+    }
+#endif
+};
+
+#if 0
+////////////////////////////////////////////////////////////////////////
+// sign_mgr_pair_dst
+// This class assumes that the signs words will, after the finalize()
+// function is called, store the "destination" signs (e.g. the sign of
+// the output value from the extract() function). In general,
+// this requires that the source signs be optionally modified using
+// the product of the signs, and the min0/min1 values are stored in
+// absolute value form (e.g. the positive values are stored).
+template <typename T> struct sign_mgr_pair_dst : public sign_mgr_pair_base<T>
+{
+    //------------------------------------------------------------------
+    // finalize()
+    __device__
+    static void finalize(word_t&   min0,
+                         word_t&   min1,
+                         uint32_t& signs_0_9,
+                         uint32_t& signs_10_,
+                         int       row_degree)
+    {
+        // Before this function is called, the signs value has the
+        // current signs of each input in the row. When we expand,
+        // we want the product of signs, but without the sign
+        // contribution of a specific index. We colwert here
+        // to what the actual output sign will be, to simplify that
+        // operation, by taking the XOR with a bitmask that has
+        // each bit set to the overall parity (1s if odd, 0s if even).
+        signs_xor(signs_0_9, signs_10_, row_degree);
+
+        // Store the absolute value of min0 and min1
+        min0 = fp16x2_abs(min0);
+        min1 = fp16x2_abs(min1);
+        
+        // Clamp to +FP16_max to avoid subtracting Inf during the next
+        // iteration. (Inf - Inf = NaN.)
+        // In this case, min1 and min0 are stored as positive values,
+        // so we only need to clamp to +FP16_max.
+        min0 = clamp_pos_to_half_max(min0);
+        min1 = clamp_pos_to_half_max(min1);
+    }
+};
+#endif
+
+////////////////////////////////////////////////////////////////////////
+// sign_mgr_pair_src
+// This class assumes that the signs word will, after the finalize()
+// function is called, store the "source" signs (e.g. the sign of the
+// input value to the compressed C2V update function). In general,
+// this requires that the product of the signs be stored in the min0
+// and min1 values, and the output sign can be obtained via the xor
+// of the "src" sign and the sign product.
+template <typename T> struct sign_mgr_pair_src : public sign_mgr_pair_base<T>
+{
+    typedef sign_mgr_pair_base<T> inherited;
+    //------------------------------------------------------------------
+    // finalize()
+    __device__
+    static void finalize(word_t&   min0,
+                         word_t&   min1,
+                         uint32_t& signs_0_9,
+                         uint32_t& signs_10_,
+                         int       row_degree)
+    {
+        // row_degree should be constant at compile time with unrolling...
+        const uint32_t sign_prod_mask = (row_degree > 10)                                  ?
+                                        inherited::sign_product_mask(signs_0_9, signs_10_) :
+                                        inherited::sign_product_mask(signs_0_9);
+        
+        // We will store the product of all signs in the sign bits of
+        // min0 and min1. When retrieving the value, we can then take
+        // the xor of the desired input sign bit (retrieved from the
+        // signs field) with the min0 sign to get the desired output sign.
+        min0.u32 = (min0.u32 & 0x7FFF7FFF) | sign_prod_mask;
+        min1.u32 = (min1.u32 & 0x7FFF7FFF) | sign_prod_mask;
+        
+        // Clamp to +/- FP16_max to avoid subtracting +/-Inf during
+        // the next iteration. (-Inf - (-Inf) = NaN, Inf - Inf = NaN.)
+        // In this case, min1 and min0 are signed values, so we must
+        // clamp to +/- FP16_max.
+        min0 = clamp_to_half_max(min0);
+        min1 = clamp_to_half_max(min1);
+    }
+    //------------------------------------------------------------------
+    // apply_sign()
+    __device__
+    static word_t apply_sign(word_t v, uint32_t signs0_9, uint32_t signs10_, int index)
+    {
+        word_t out;
+        out.u32 = inherited::sign_mask(signs0_9, signs10_, index) ^ v.u32;
+        return out;
+    }
+};
+
+////////////////////////////////////////////////////////////////////////
+// Storage representation of compressed C2V data, used for placing
+// in registers, shared, or global memory in between uses.
+//
+// Note that the row degree is 19 for the first 4 nodes of BG1, but the
+// max row degree is 10 for all other BG1 nodes. And the max row degree
+// of BG2 is 10. In light of this, we will store the first 10 sign bits
+// with the min0_index, in the hopes that the compiler can avoid
+// allocating a register for storing signs for row indices 10 and higher
+// for nodes with 10 or fewer row elements when the graph is fully
+// unrolled.
+// 
+//  Bit
+//  31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 | 15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+//
+// The first 10 bits of the stored signs will be in the signs_0_9_min0_index
+// field, ordered as follows:
+//
+//  Word 1 Sign Bits                                  Word 0 Sign Bits
+//  ------------------------------------------------|------------------------------------------------
+//   9  8  7  6  5  4  3  2  1  0  .  .  .  .  .  . |  9  8  7  6  5  4  3  2  1  0  .  .  .  .  .  .
+//                              ^                                                 ^
+//                   Row Index  |                                      Row Index  |
+//
+// Index of min0 will be 5 bits or less (max row degree is 19). The min0_index value for each word will
+// be stored in the low bits of each half word.
+//
+//  Word 1 Min0 Index                                 Word 0 Min0 Index
+//  ------------------------------------------------|------------------------------------------------
+//   .  .  .  .  .  .  .  .  .  .  .  x  x  x  x  x |  .  .  .  .  .  .  .  .  .  .  .  x  x  x  x  x
+//
+// The remainder of the stored signs will be in the signs_10_ field, ordered as follows:
+//
+//  Word 1 Sign Bits                                  Word 0 Sign Bits
+//  ------------------------------------------------|------------------------------------------------
+//  18 17 16 15 14 13 12 11 10  .  .  .  .  .  .  . | 18 17 16 15 14 13 12 11 10  .  .  .  .  .  .  .
+//        ^                                                  ^
+//        | Row Index                                        |  Row Index
+//
+template <> struct cC2V_storage_t<__half2>
+{
+    static constexpr int NUM_WORDS       = 4;
+    static constexpr int NUM_WORDS_SMALL = 3;
+    struct c2v_large_t
+    {
+        word_t    min0;
+        word_t    min1;
+        uint32_t  signs_0_9_min0_index;
+        uint32_t  signs_10_;
+    };
+    struct c2v_small_t
+    {
+        word_t    min0;
+        word_t    min1;
+        uint32_t  signs_0_9_min0_index;
+    };
+    union value
+    {
+        int4         i4;
+        c2v_large_t  c2v;
+        c2v_small_t  c2v_sm;
+        word_t words[4];
+    };
+    cC2V_storage_t() = default;
+
+    __device__
+    cC2V_storage_t(word_t m0, word_t m1, uint32_t signs_0_9, uint32_t signs_10_, word_t m0_index)
+    {
+        v.c2v.min0 = m0;
+        v.c2v.min1 = m1;
+        v.c2v.signs_0_9_min0_index = signs_0_9 | m0_index.u32;
+        v.c2v.signs_10_ = signs_10_;
+    }
+    __device__
+    void set(word_t m0, word_t m1, uint32_t signs_0_9, uint32_t signs_10_, word_t m0_index)
+    {
+        v.c2v.min0 = m0;
+        v.c2v.min1 = m1;
+        v.c2v.signs_0_9_min0_index = signs_0_9 | m0_index.u32;
+        v.c2v.signs_10_ = signs_10_;
+    }
+    //------------------------------------------------------------------
+    // store()
+    __device__
+    void store(char* addr)
+    {
+        *(reinterpret_cast<int4*>(addr)) = v.i4;
+    }
+    //------------------------------------------------------------------
+    // load()
+    __device__
+    void load(const char* addr)
+    {
+        v.i4 = *(reinterpret_cast<const int4*>(addr));
+    }
+    //------------------------------------------------------------------
+    // store_shared()
+    __device__
+    void store_shared(int sh_offset)
+    {
+
+        write_shared_int4(v.i4, sh_offset);
+    }
+    //------------------------------------------------------------------
+    // load_shared()
+    __device__
+    void load_shared(int sh_offset)
+    {
+
+        v.i4 = smem_address_as<int4>(sh_offset);
+    }
+    //------------------------------------------------------------------
+    // get_signs_0_9()
+    __device__
+    uint32_t get_signs_0_9() const { return (v.c2v.signs_0_9_min0_index & 0xFFC0FFC0); }
+    //------------------------------------------------------------------
+    // get_min0_index()
+    __device__
+    word_t get_min0_index() const
+    {
+        word_t w;
+        w.u32 = (v.c2v.signs_0_9_min0_index & 0x001F001F);
+        return w;
+    }
+    //------------------------------------------------------------------
+    // Data
+    value v;
+};
+
+
+////////////////////////////////////////////////////////////////////////
+// Structure with expanded, in-register C2V representation (as opposed
+// to one compressed for storage to global/shared memory), for temporary
+// use in processing a single parity node.
+template <template<typename> class TSignMgr>
+struct row_context<__half2, TSignMgr>
+{
+    //------------------------------------------------------------------
+    // No "extra" data required for extracting values at the moment...
+    struct extract_context
+    {
+    };
+    //------------------------------------------------------------------
+    typedef TSignMgr<__half2>       sign_mgr_t;
+    typedef cC2V_storage_t<__half2> storage_t;
+    //------------------------------------------------------------------
+    __device__
+    row_context() {}
+    //------------------------------------------------------------------
+    // Constructor
+    // Initialize a row context from the storage structure (which is
+    // typically as small as possible to conserve space and bandwidth)
+    __device__
+    row_context(const storage_t& s) :
+        min0(s.v.c2v.min0),
+        min1(s.v.c2v.min1),
+        signs_0_9(s.get_signs_0_9()),
+        min0_index(s.get_min0_index()),
+        signs_10_(s.v.c2v.signs_10_)
+    {
+    }
+    //------------------------------------------------------------------
+    // init()
+    // Initialize row context min-sum fields with the first pair of
+    // sequence values
+    __device__
+    void init(word_t v0, word_t v1)
+    {
+        word_t cZeros, cOnes;
+        cZeros.u16x2 = ushort2{0, 0};
+        cOnes.u16x2 = ushort2{1, 1};
+        
+        word_t absv0_lt_absv1 = hltu_bm(fp16x2_abs(v0), fp16x2_abs(v1));
+        min0                  = select_from_mask(absv0_lt_absv1, v0, v1);
+        min1                  = select_from_mask(absv0_lt_absv1, v1, v0);
+        min0_index            = select_from_mask(absv0_lt_absv1, cZeros, cOnes);
+        sign_mgr_t::init(signs_0_9, v0, v1);
+        signs_10_ = 0;
+    }
+    //------------------------------------------------------------------
+    // update()
+    // Update the internal representation with a word containing a new
+    // value for each codeword.
+    __device__
+    void update(word_t v, int idx)
+    {
+        word_t maybe_min1, idx_pair;
+
+        idx_pair.u16x2           = ushort2{static_cast<unsigned short>(idx),
+                                           static_cast<unsigned short>(idx)};
+        word_t absv_lt_absmin0   = hltu_bm(fp16x2_abs(v), fp16x2_abs(min0));                // v < min0?
+        min0_index               = select_from_mask(absv_lt_absmin0, idx_pair, min0_index); // min0_index   = (v < min0) ? idx ? min0_index
+        maybe_min1               = select_from_mask(absv_lt_absmin0, min0, v);              // maybe_min1 = (v < min0) ? min0 : v
+        min0                     = select_from_mask(absv_lt_absmin0, v, min0);              // min0       = (v < min0) ? v : min0
+        word_t abstmp_lt_absmin1 = hltu_bm(fp16x2_abs(maybe_min1), fp16x2_abs(min1));       // maybe_min1 < min1?
+        min1                     = select_from_mask(abstmp_lt_absmin1, maybe_min1, min1);   // min1       = (maybe_min1 < min1) ? maybe_min1 : min1
+
+        sign_mgr_t::update(signs_0_9, signs_10_, v, idx);
+    }
+    //------------------------------------------------------------------
+    // finalize()
+    __device__
+    void finalize(const LDPC_kernel_params& params, int row_degree)
+    {
+        // Apply normalization to both values (min1 and min0)
+        // TODO: fuse with add of update to APP value
+        min0.f16x2 = __hmul2(min0.f16x2, params.norm.f16x2);
+        min1.f16x2 = __hmul2(min1.f16x2, params.norm.f16x2);
+
+        finalize_no_normalize(row_degree);
+#if 0
+        if(0 == threadIdx.x)
+        {
+            printf("finalized: min0 = %f, min1 = %f, min0_index = %u\n",
+                   __low2float(min0.f16x2),
+                   __low2float(min1.f16x2),
+                   min0_index.u32 >> 16);
+        }
+#endif
+    }
+    //------------------------------------------------------------------
+    // finalize_no_normalize()
+    __device__
+    void finalize_no_normalize(int row_degree)
+    {
+        // Adjust signs of min0, min1 values (optionally)
+        sign_mgr_t::finalize(min0, min1, signs_0_9, signs_10_, row_degree);
+    }
+
+    //------------------------------------------------------------------
+    // Constructor
+    // Initialize a row context from a sequence of APP values,
+    // proceeding through the sequence and updating the min-sum
+    // representation.
+    template <int ROW_DEGREE, int MAX_WORDS>
+    __device__
+    explicit row_context(const LDPC_kernel_params&               params,
+                         word_t                                  (&app)[MAX_WORDS],
+                         std::integral_constant<int, ROW_DEGREE>)
+    {
+        // Initialize with first two values
+        init(app[0], app[1]);
+        // Update min-sum with the rest of the values
+        #pragma unroll
+        for(int i = 2; i < ROW_DEGREE; ++i)
+        {
+            update(app[i], i);
+        }
+        // Post-process row context to prepare for extraction
+        finalize(params, ROW_DEGREE);
+    }
+    //------------------------------------------------------------------
+    // get_storage()
+    // Initialize a storage structure from the internal min-sum
+    // representation
+    __device__
+    storage_t get_storage() const
+    {
+        return storage_t(min0, min1, signs_0_9, signs_10_, min0_index);
+    }
+    //------------------------------------------------------------------
+    // extract()
+    // Extract a pair of values using the internal representation. The
+    // returned word will contain two values, with the low word having
+    // the sequence value with the lower index.
+    __device__
+    word_t extract(const extract_context& ec, int idx) const
+    {
+        word_t idx_pair;
+        // Create a fp16x2 word with the index value replicated, and
+        // use denormalized float comparisons to compare the index to
+        // the min0_index for each codeword
+        idx_pair.u16x2       = ushort2{static_cast<unsigned short>(idx),
+                                       static_cast<unsigned short>(idx)};
+        word_t idx_is_min0   = hequ_bm(idx_pair, min0_index);             // idx == min0_index?
+        word_t ex_value      = select_from_mask(idx_is_min0, min1, min0); // ex_value = (idx_is_min0) ? min1 : min0
+        return sign_mgr_t::apply_sign(ex_value, signs_0_9, signs_10_, idx);
+    }
+    //------------------------------------------------------------------
+    // get_extract_context()
+    // Populate a data structure in preparation for extraction of a
+    // sequence of values from the compressed representation.
+    __device__
+    extract_context get_extract_context() const
+    {
+        extract_context ec;
+        return ec;
+    }
+    //------------------------------------------------------------------
+    // Data
+    word_t    min0;        // (fp16x2 for 2 codewords)
+    word_t    min1;        // (fp16x2 for 2 codewords)
+    uint32_t  signs_0_9;   // sign bits (first 10 row elements for each CW)
+    word_t    min0_index;  // index of min 0 for each of 2 codewords
+    uint32_t  signs_10_;   // sign bits (elements after first 10 for each CW)
+};
+
+////////////////////////////////////////////////////////////////////////
+// ldpc_traits specialization for __half2, which decodes two codewords
+// at a time.
+template <> struct ldpc_traits<__half2>
+{
+    typedef  uint2  llr_ldg_t;  // The type to store LLR.
+    typedef  uint4  llr_sts_t;  // The type to store in the APP buffer
+    typedef __half2 app_buf_t;  // The APP element type
+    typedef __half  app_elem_t;
+};
+
+// app_max_words
+// Structure to define the maximum number of APP words for cC2V functions
+// For __half2, two codewords are being processed at a time, using the
+// (independent) high and low halves of a word. Therefore, the maximum
+// number of words in this case is equal to the row degree.
+template <int BG>
+struct app_max_words<__half2, BG>  { static const int value = max_row_degree<BG>::value; };
+
+
+////////////////////////////////////////////////////////////////////////
+// cC2V_index
+// Specialization for two codewords at a time as independent "high" and
+// "low" fp16 values in a __half2 APP data type.
+template <int BG,
+          template <typename> class TUnused,
+          template <typename> class TSignManager>
+struct cC2V_index<__half2, BG, TUnused, TSignManager>
+{
+    typedef TSignManager<__half2>                    sign_mgr_t;
+    typedef row_context<__half2, TSignManager>       row_context_t;
+    typedef cC2V_storage_t<__half2>                  c2v_storage_t;
+    typedef typename row_context_t::extract_context  extract_context_t;
+    typedef __half2                                  app_t;
+    //------------------------------------------------------------------
+    // load_app()
+    // Load shared memory APP values to registers
+    template <int CHECK_IDX, int NUM_SMEM_APP_CHECK_NODES>
+    __device__
+    void load_app(const LDPC_kernel_params& params,
+                  word_t                    (&app)[app_max_words<__half2, BG>::value],
+                  int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        static_assert(CHECK_IDX < NUM_SMEM_APP_CHECK_NODES,
+                      "APP loads from global memory unimplemented");
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Fetch app values and update the min0/min1/address fields
+        #pragma unroll
+        for(int i = 0; i < row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            app[i] = smem_address_as<word_t>(app_addr[i]);
+        }
+    }
+    //------------------------------------------------------------------
+    // store_non_ext_app()
+    // Store register APP array values to shared memory
+    template <int CHECK_IDX>
+    __device__
+    void store_non_ext_app(word_t (&app)[app_max_words<__half2, BG>::value],
+                           int    (&app_addr)[max_row_degree<BG>::value])
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Write output values
+        #pragma unroll
+        for(int i = 0; i < update_row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            write_shared_word(app[i], app_addr[i]);
+        }
+    }
+    //------------------------------------------------------------------
+    // app_sub_prev_iter()
+    template <int CHECK_IDX>
+    __device__
+    void app_sub_prev_iter(word_t               (&app)[app_max_words<__half2, BG>::value],
+                           const row_context_t& rc)
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Update the APP values with the decrement from the previous
+        // iteration. We don't need to update APP values for extension
+        // nodes.
+        extract_context_t ec = rc.get_extract_context();
+        #pragma unroll
+        for(int i = 0; i < update_row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            // Operate on a pair of values at a time
+            word_t dec = rc.extract(ec, i);
+
+            // TODO: Fuse normalization from prev iteration?
+            app[i].f16x2 = __hsub2(app[i].f16x2, dec.f16x2);
+        }
+    }
+    //------------------------------------------------------------------
+    // app_update()
+    template <int CHECK_IDX>
+    __device__
+    void app_update(word_t               (&app)[app_max_words<__half2, BG>::value],
+                    const row_context_t& rc)
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Extract values from the new row context and update the APP
+        // values.
+        extract_context_t ec = rc.get_extract_context();
+        #pragma unroll
+        for(int i = 0; i < update_row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            word_t inc = rc.extract(ec, i);
+            // TODO: Fuse multiply-add of normalization in finalize()
+            // here
+            app[i].f16x2 = __hadd2(app[i].f16x2, inc.f16x2);
+        }
+    }
+    //------------------------------------------------------------------
+    // process_row_init()
+    // CHECK_IDX: Index of check (parity) node
+    // NUM_SMEM_APP_CHECK_NODES: Number of check nodes for which APP
+    //                           data is stored in shared memory. (For
+    //                           check nodes >= this value, the APP data
+    //                           will be fetched from global memory.
+    template <int CHECK_IDX, int NUM_SMEM_APP_CHECK_NODES>
+    __device__
+    void process_row_init(const LDPC_kernel_params& params,
+                          word_t                    (&app)[app_max_words<__half2, BG>::value],
+                          int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Load APP values into registers
+        load_app<CHECK_IDX, NUM_SMEM_APP_CHECK_NODES>(params, app, app_addr);
+        
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Construct a row context using the current APP values for the
+        // first iteration - no previous iteration to load. This will
+        // create a min-sum representation of the input values.
+        row_context_t rc(params,
+                         app,
+                         std::integral_constant<int, row_degree<BG, CHECK_IDX>::value>{});
+
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Store compressed representation in member variable, to be
+        // used during a future iteration. It may (or may not)
+        // separately be saved to global memory.
+        c2v_storage = rc.get_storage();
+
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Extract values from the new row context and update the APP
+        // values.
+        app_update<CHECK_IDX>(app, rc);
+
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Write output values
+        store_non_ext_app<CHECK_IDX>(app, app_addr);
+    }
+    //------------------------------------------------------------------
+    // process_row()
+    template <int CHECK_IDX, int NUM_SMEM_APP_CHECK_NODES>
+    __device__
+    void process_row(const LDPC_kernel_params& params,
+                     word_t                    (&app)[app_max_words<__half2, BG>::value],
+                     int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Load APP values into registers
+        load_app<CHECK_IDX, NUM_SMEM_APP_CHECK_NODES>(params, app, app_addr);
+        {
+            //- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Initialize a row processing context using data from the
+            // previous iteration (which may be stored in registers or
+            // global memory).
+            row_context_t rc(c2v_storage);
+
+            //- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Update the APP values with the decrement from the previous
+            // iteration.
+            app_sub_prev_iter<CHECK_IDX>(app, rc);
+        }
+        {
+            //- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Construct a row context using the updated APP values (with
+            // values from the previous iteration subtracted). This will
+            // create a min-sum representation of the APP values.
+            row_context_t rcNew(params,
+                                app,
+                                std::integral_constant<int, row_degree<BG, CHECK_IDX>::value>{});
+
+            //- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Store compressed representation in member variable. It may
+            // (or may not) separately be saved to global memory.
+            c2v_storage = rcNew.get_storage();
+
+            //- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Extract values from the new row context and update the APP
+            // values.
+            app_update<CHECK_IDX>(app, rcNew);
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Write output values to shared_memory
+        store_non_ext_app<CHECK_IDX>(app, app_addr);
+    }
+    //------------------------------------------------------------------
+    // load_shared_strided()
+    __device__
+    void load_shared_strided(const LDPC_kernel_params& params,
+                             int                       checkIdx,
+                             int                       threadByteOffset,
+                             int                       strideBytes)
+    {
+        if((BG != 1) || checkIdx >= 4)
+        {
+            #pragma unroll
+            for(int i = 0; i < c2v_storage_t::NUM_WORDS_SMALL; ++i)
+            {
+                c2v_storage.v.words[i] = smem_address_as<word_t>(threadByteOffset + (i * strideBytes));
+            }
+        }
+        else
+        {
+            #pragma unroll
+            for(int i = 0; i < c2v_storage_t::NUM_WORDS; ++i)
+            {
+                c2v_storage.v.words[i] = smem_address_as<word_t>(threadByteOffset + (i * strideBytes));
+            }
+        }
+    }
+    //------------------------------------------------------------------
+    // store_shared_strided()
+    __device__
+    void store_shared_strided(const LDPC_kernel_params& params,
+                              int                       checkIdx,
+                              int                       threadByteOffset,
+                              int                       strideBytes)
+    {
+        if((BG != 1) || checkIdx >= 4)
+        {
+            #pragma unroll
+            for(int i = 0; i < c2v_storage_t::NUM_WORDS_SMALL; ++i)
+            {
+                write_shared_word(c2v_storage.v.words[i], threadByteOffset + (i * strideBytes));
+            }
+        }
+        else
+        {
+            #pragma unroll
+            for(int i = 0; i < c2v_storage_t::NUM_WORDS; ++i)
+            {
+                write_shared_word(c2v_storage.v.words[i], threadByteOffset + (i * strideBytes));
+            }
+        }
+    }
+    //------------------------------------------------------------------
+    // Data
+    c2v_storage_t c2v_storage;
+
+};
+
+////////////////////////////////////////////////////////////////////////
+// interleave_llr()
+static inline __device__
+uint4 interleave_llr(uint2 llr0, uint2 llr1)
+{
+    uint4 d;
+    asm volatile("prmt.b32 %0, %1, %2, 0x5410;\n" : "=r"(d.x) : "r"(llr0.x), "r"(llr1.x));
+    asm volatile("prmt.b32 %0, %1, %2, 0x7632;\n" : "=r"(d.y) : "r"(llr0.x), "r"(llr1.x));
+    asm volatile("prmt.b32 %0, %1, %2, 0x5410;\n" : "=r"(d.z) : "r"(llr0.y), "r"(llr1.y));
+    asm volatile("prmt.b32 %0, %1, %2, 0x7632;\n" : "=r"(d.w) : "r"(llr0.y), "r"(llr1.y));
+    return d;
+}
+
+////////////////////////////////////////////////////////////////////////
+// llr_loader_fixed (__half2 specialization)
+// Structure to load data from global to shared memory using a fixed (at
+// compile time) number of variable nodes
+// T:      LLR Type
+// Z:      Lifting factor (LDPC)
+// VNODES: Number of variable/bit nodes to load
+//
+// Example use:
+//
+// typedef llr_loader_fixed<T, Z, V>              llr_loader_t;
+// typedef typename llr_loader_t::app_buffer_type app_buf_t;
+//
+// __shared__ char smem[llr_loader_t::LLR_BUFFER_SIZE];
+// or
+// extern __shared__ char smem[];
+//
+// app_buf_t*   app_smem = reinterpret_cast<app_t*>(smem);
+// llr_loader_t loader;
+// loader.load_sync(params, smem);
+//
+template <int Z, int VNODES>
+struct llr_loader_fixed<__half2, Z, VNODES>
+{
+    typedef __half2 T;
+    // clang-format off
+    typedef typename ldpc_traits<T>::llr_ldg_t   llr_ldg_t;  // The type to load LLR.
+    typedef typename ldpc_traits<T>::llr_sts_t   llr_sts_t;  // The type to store LLR to shared memory.
+    typedef typename ldpc_traits<T>::app_buf_t   app_buf_t;  // The type to store APP in shared memory.
+    typedef typename ldpc_traits<T>::app_elem_t  app_elem_t; // The underlying APP element type
+    enum { THREADS_PER_WARP = 32 };                                                              // Number of threads per warp
+    enum { THREADS_PER_CTA = Z };                                                                // Number of threads per CTA.
+    enum { LLR_ELEMENTS = VNODES * Z };                                                          // Number of LLR elements.
+    enum { LLR_BYTES_PER_THREAD_PER_LDG = sizeof(llr_ldg_t) };                                   // Number of bytes loaded by each thread per LDG
+    enum { LLR_ELEM_PER_THREAD_PER_LDG = LLR_BYTES_PER_THREAD_PER_LDG / sizeof(app_elem_t) };    // Number of elements loaded by each thread per LDG.
+    enum { LLR_BYTES_PER_CTA_PER_LDG = LLR_BYTES_PER_THREAD_PER_LDG * THREADS_PER_CTA };         // Number of bytes loaded by the CTA per LDG.
+    enum { LLR_ELEM_PER_CTA_PER_LDG = LLR_ELEM_PER_THREAD_PER_LDG * THREADS_PER_CTA };           // Number of elements loaded by the CTA per LDG.
+    enum { LLR_LDGS = (LLR_ELEMENTS + LLR_ELEM_PER_CTA_PER_LDG-1) / LLR_ELEM_PER_CTA_PER_LDG };  // Number of LDGs needed to load the LLR array.
+    enum { LLR_REMAINING_ELEM = LLR_ELEMENTS - (LLR_LDGS-1) * LLR_ELEM_PER_CTA_PER_LDG };        // Number of elements for the last load.
+    
+    enum { LLR_BYTES_PER_THREAD_PER_STS = sizeof(llr_sts_t) };                                   // Number of bytes loaded by each thread per STS.
+    enum { LLR_ELEM_PER_THREAD_PER_STS = LLR_BYTES_PER_THREAD_PER_STS / sizeof(app_elem_t) };    // Number of elements loaded by each thread per STS.
+    enum { LLR_BYTES_PER_CTA_PER_STS = LLR_BYTES_PER_THREAD_PER_STS * THREADS_PER_CTA };         // Number of bytes loaded by the CTA per STS.
+    enum { LLR_ELEM_PER_CTA_PER_STS = LLR_ELEM_PER_THREAD_PER_STS * THREADS_PER_CTA };           // Number of elements loaded by the CTA per STS.
+    enum { LLR_BUFFER_SIZE = LLR_ELEMENTS * sizeof(app_buf_t) };
+    // clang-format on
+    //------------------------------------------------------------------
+    __device__
+    void load_sync(const LDPC_kernel_params& params,
+                   char*                     smem)
+    {
+        //if(0 == threadIdx.x) printf("smem = %p, LLR_BUFFER_SIZE = %u\n", smem, LLR_BUFFER_SIZE);
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Load from global memory to registers. We use two sets of
+        // registers because we are loading from two separate codewords.
+        llr_ldg_t llr_ldg[2][LLR_LDGS]; // Register storage (GLOBAL --> REG)
+
+        #pragma unroll
+        for(int iCW = 0; iCW < 2; ++iCW)
+        {
+            if((blockIdx.x * 2 + iCW) < params.num_codewords) // Avoid reads past the end of input for odd number of codewords
+            {
+
+                const int CW_INDEX = blockIdx.x * 2 + iCW;
+                
+                int llr_g_offset_bytes = sizeof(app_elem_t) * ((CW_INDEX * params.input_llr_stride_elements) +
+                                                               (threadIdx.x * LLR_ELEM_PER_THREAD_PER_LDG));
+
+                #pragma unroll
+                for(int jLDG = 0; jLDG < LLR_LDGS-1; ++jLDG)
+                {
+                    llr_ldg[iCW][jLDG] = *reinterpret_cast<const llr_ldg_t*>(params.input_llr + llr_g_offset_bytes + (jLDG * LLR_BYTES_PER_CTA_PER_LDG));
+                }
+                // Deal with the last (possibly) incomplete LDG.
+                if((threadIdx.x * LLR_ELEM_PER_THREAD_PER_LDG) < LLR_REMAINING_ELEM)
+                {
+                    llr_ldg[iCW][LLR_LDGS-1] = *reinterpret_cast<const llr_ldg_t*>(params.input_llr + llr_g_offset_bytes + ((LLR_LDGS-1)*LLR_BYTES_PER_CTA_PER_LDG));
+                }
+            }
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Interleave data from adjacent codewords into the high and low
+        // parts of fp16x2 values.
+        llr_sts_t llr_sts[LLR_LDGS];
+
+        #pragma unroll
+        for(int iLDG = 0; iLDG < LLR_LDGS; ++iLDG)
+        {
+            llr_sts[iLDG] = interleave_llr(llr_ldg[0][iLDG], llr_ldg[1][iLDG]);
+        }
+
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Store register data to shared memory
+        // The offset in shared memory for LLR elements.
+        int llr_s_offset_bytes = threadIdx.x * LLR_BYTES_PER_THREAD_PER_STS;
+
+        // Copy the LLR elements to shared memory.
+        #pragma unroll
+        for(int iSTS = 0; iSTS < (LLR_LDGS-1); ++iSTS)
+        {
+            const int imm                                                  = iSTS * LLR_BYTES_PER_CTA_PER_STS;
+            *reinterpret_cast<llr_sts_t*>(smem + llr_s_offset_bytes + imm) = llr_sts[iSTS];
+        }
+
+        // Deal with the last (possibly) incomplete LDG.
+        if((threadIdx.x * LLR_ELEM_PER_THREAD_PER_LDG) < LLR_REMAINING_ELEM)
+        {
+            const int imm                                                  = (LLR_LDGS-1) * LLR_BYTES_PER_CTA_PER_STS;
+            *reinterpret_cast<llr_sts_t*>(smem + llr_s_offset_bytes + imm) = llr_sts[LLR_LDGS - 1];
+        }
+        // Synchronize shared memory contents
+        __syncthreads();
+
+    }
+    //------------------------------------------------------------------
+    // Data
+
+};
+
+////////////////////////////////////////////////////////////////////////
+// ldpc_output_fixed()
+// Overload of hard decision output function for kernels that process
+// two codewords at a time (using fp16x2 APP values in shared memory).
+// "Fixed" output functions use parameters (NODES, Z) that are known at
+// compile time.
+template <int NODES, int Z>
+static inline __device__ void ldpc_output_fixed(const LDPC_kernel_params& params, const __half2* app_smem, int offset)
+{
+    // The number of threads per warp.
+    enum
+    {
+        THREADS_PER_WARP = 32
+    };
+
+    // Decompose the thread indices into warp/lane.
+    const int WARP_IDX = threadIdx.x / THREADS_PER_WARP;
+    const int LANE     = threadIdx.x % THREADS_PER_WARP;
+
+    // The output per thread.
+    int output[2] = {0, 0};
+
+    // Each warp reads 32*THREADS_PER_WARP elements.
+    int idx = (WARP_IDX * 32 * THREADS_PER_WARP) + LANE;
+    for(int ii = 0; ii < 32; ++ii)
+    {
+        word_t app;
+        app.u32 = 0;
+        if(idx + (ii * THREADS_PER_WARP) < (NODES * Z))
+        {
+            app.f16x2 = app_smem[idx + (ii * THREADS_PER_WARP)];
+        }
+        word_t app_sign_mask = fp16x2_sign_mask(app);
+        
+        unsigned int vote0 = __ballot_sync(0xffffffff, (app_sign_mask.u32 & 0x00008000));
+        unsigned int vote1 = __ballot_sync(0xffffffff, (app_sign_mask.u32 & 0x80000000));
+        if(LANE == ii)
+        {
+            output[0] = vote0;
+            output[1] = vote1;
+        }
+    }
+
+    // Output the result.
+    //int gmem_out_offset = blockIdx.x*params.outputs_per_codeword + offset;
+    if(offset < params.outputs_per_codeword)
+    {
+        int gmem_out_offset = (blockIdx.x * 2 * params.output_stride_words) + offset;
+        //KERNEL_PRINT_BLOCK_ONCE("blockIdx.x = %u, threadIdx.x = %u, offset = %i, gmem_out_offset = %i, output = 0x%X\n",
+        //                        blockIdx.x, threadIdx.x, offset, gmem_out_offset, output);
+        reinterpret_cast<int*>(params.out)[gmem_out_offset]                             = output[0];
+        // Avoid writes past the end of the output when the number of
+        // codewords is odd.
+        if(((blockIdx.x * 2) + 1) < params.num_codewords)
+        {
+            reinterpret_cast<int*>(params.out)[gmem_out_offset + params.output_stride_words] = output[1];
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// ldpc_output_variable()
+// Overload of hard decision output function for kernels that process
+// two codewords at a time (using fp16x2 APP values in shared memory).
+// "Variable" output functions use parameters that are not known at
+// compile time.
+static inline __device__ void ldpc_output_variable(const LDPC_kernel_params& params, const __half2* app_smem, int offset)
+{
+    // The number of threads per warp.
+    enum
+    {
+        THREADS_PER_WARP = 32
+    };
+
+    // Decompose the thread indices into warp/lane.
+    const int WARP_IDX = threadIdx.x / THREADS_PER_WARP;
+    const int LANE     = threadIdx.x % THREADS_PER_WARP;
+
+    // The output per thread.
+    int output[2] = {0, 0};
+
+    // Each warp reads 32*THREADS_PER_WARP elements.
+    int idx = (WARP_IDX * 32 * THREADS_PER_WARP) + LANE;
+    for(int ii = 0; ii < 32; ++ii)
+    {
+        word_t app;
+        app.u32 = 0;
+        if(idx + (ii * THREADS_PER_WARP) < params.KbZ)
+        {
+            app.f16x2 = app_smem[idx + (ii * THREADS_PER_WARP)];
+        }
+        word_t app_sign_mask = fp16x2_sign_mask(app);
+        
+        unsigned int vote0 = __ballot_sync(0xffffffff, (app_sign_mask.u32 & 0x00008000));
+        unsigned int vote1 = __ballot_sync(0xffffffff, (app_sign_mask.u32 & 0x80000000));
+        if(LANE == ii)
+        {
+            output[0] = vote0;
+            output[1] = vote1;
+        }
+    }
+
+    // Output the result.
+    //int gmem_out_offset = blockIdx.x*params.outputs_per_codeword + offset;
+    if(offset < params.outputs_per_codeword)
+    {
+        int gmem_out_offset = (blockIdx.x * 2 * params.output_stride_words) + offset;
+        //KERNEL_PRINT_BLOCK_ONCE("blockIdx.x = %u, threadIdx.x = %u, offset = %i, gmem_out_offset = %i, output = 0x%X\n",
+        //                        blockIdx.x, threadIdx.x, offset, gmem_out_offset, output);
+        reinterpret_cast<int*>(params.out)[gmem_out_offset]                             = output[0];
+        // Avoid writes past the end of the output when the number of
+        // codewords is odd.
+        if(((blockIdx.x * 2) + 1) < params.num_codewords)
+        {
+            reinterpret_cast<int*>(params.out)[gmem_out_offset + params.output_stride_words] = output[1];
+        }
+    }
+}
+
+} // namespace ldpc2
+
+#endif // !defined(LDPC2_C2V_X2_LWH_INCLUDED_)

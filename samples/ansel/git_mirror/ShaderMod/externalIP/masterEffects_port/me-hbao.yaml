@@ -1,0 +1,69 @@
+thesampler:
+    filter: MIN_MAG_MIP_LINEAR
+    addressU: CLAMP
+    addressV: CLAMP
+
+
+pass_template: 
+    samplerstates:
+        samplerDepth: #colorLinearSampler
+            import: [thesampler]
+        samplerOcclusion1:
+            import: [thesampler]
+        samplerOcclusion2:
+            import: [thesampler]
+        samplerLDR1:
+            import: [thesampler]
+    type: BGRA8_uint
+
+main:
+    import: [pass_template]
+    samplerstates:
+        samplerLDR1: #colorLinearSampler
+            import: [thesampler]
+        samplerOcclusion1: #colorLinearSampler
+            import: [thesampler]
+        samplerDepth: #colorLinearSampler
+            import: [thesampler]
+    shader: PS_ME_AOCombine@me-hbao.yfx
+    textures:
+        texBlurred:
+            import: [pass_BlurH]
+        texDepth:
+            channel: PIPE_INPUTS_DEPTH
+        texColor:
+            channel: PIPE_INPUTS_COLOR
+
+pass_BlurH:
+    import: [pass_template]
+    samplerstates:
+        samplerOcclusion2: #colorLinearSampler
+            import: [thesampler]
+    shader: PS_ME_AOBlurH@me-hbao.yfx
+    textures:
+        texColor:
+            import: [pass_BlurV]
+pass_BlurV:
+    import: [pass_template]
+    samplerstates:
+        samplerOcclusion1: #colorLinearSampler
+            import: [thesampler]
+    shader: PS_ME_AOBlurV
+    filename: me-hbao.yfx
+    textures:
+        texColor:
+            import: [pass_HBAO]
+
+pass_HBAO:
+    import: [pass_template]
+    samplerstates:
+        samplerDepth: #colorLinearSampler
+            import: [thesampler]
+    constant-buffers: {globalParams: {screenSize: SCREEN_SIZE}}
+    shader: PS_ME_HBAO@me-hbao.yfx
+    textures:
+        texDepth:
+            channel: PIPE_INPUTS_DEPTH
+       
+
+

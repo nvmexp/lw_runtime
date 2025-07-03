@@ -1,0 +1,95 @@
+// v2fConnector.HPOS is set to be the homogenous space coordinate
+// v2f.diffCol is set to be the texture coordinate
+// v2f.worldEyeDir is set to be the eye direction (from eye) in world space
+// v2f.worldTanMatrixX is set to be the tangentMatrix X-row in world space
+// v2f.worldTanMatrixY is set to be the tangentMatrix Y-row in world space
+// v2f.worldTanMatrixZ is set to be the tangentMatrix Z-row in world space
+// v2f.SkinSilouetteVec is set to be the skin silouette vector
+// IlwerseTransposes not used, as we assume no nonuniform scales.
+
+
+// vecMul(matrix, float3) multiplies like a vector instead of point (no translate)
+float3 vecMul(const float4x4 matrix, const float3 vec){
+    return(float3(dot(vec, matrix._11_12_13),
+                  dot(vec, matrix._21_22_23),
+                  dot(vec, matrix._31_32_33)));
+}
+
+struct a2vConnector : application2vertex {
+    float4 coord;
+    float4 normal;
+    float4 tangent;
+    float4 boneWeight0_3;
+    float4 boneIndex0_3;
+    float4 diffCol;
+};
+
+struct v2fConnector : vertex2fragment {
+  float4 HPOS		:HPOS;
+    float4 diffCol	:TEX0;
+    float3 worldEyeDir	:TEX1;
+    float3 worldTanMatrixX	:TEX5;
+    float3 worldTanMatrixY	:TEX6;
+    float3 worldTanMatrixZ	:TEX7;
+    float4 SkinSilouetteVec	:TEX2;
+};
+
+v2fConnector main(a2vConnector a2v,
+                  const uniform float4x4 model[8],
+                  const uniform float4 globalCamPos,
+                  const uniform float4x4 view,
+                  const uniform float4x4 proj){
+    v2fConnector v2f;
+
+    v2f.diffCol = a2v.diffCol;
+
+    float4 objectCoord = a2v.coord;
+    float4 worldCoord = a2v.boneWeight0_3.x * mul(model[a2v.boneIndex0_3.x], objectCoord);
+    worldCoord = worldCoord + a2v.boneWeight0_3.y * mul(model[a2v.boneIndex0_3.y], objectCoord);
+    worldCoord = worldCoord + a2v.boneWeight0_3.z * mul(model[a2v.boneIndex0_3.z], objectCoord);
+    worldCoord = worldCoord + a2v.boneWeight0_3.w * mul(model[a2v.boneIndex0_3.w], objectCoord);
+    float4 worldEyePos = globalCamPos;
+    float3 worldEyeDir = normalize(worldCoord.xyz - worldEyePos.xyz);
+    v2f.worldEyeDir = worldEyeDir;
+
+    float4 objectNormal = a2v.normal;
+    float3 worldNormal = a2v.boneWeight0_3.x * vecMul(model[a2v.boneIndex0_3.x], objectNormal.xyz);
+    worldNormal = worldNormal + a2v.boneWeight0_3.y * vecMul(model[a2v.boneIndex0_3.y], objectNormal.xyz);
+    worldNormal = worldNormal + a2v.boneWeight0_3.z * vecMul(model[a2v.boneIndex0_3.z], objectNormal.xyz);
+    worldNormal = worldNormal + a2v.boneWeight0_3.w * vecMul(model[a2v.boneIndex0_3.w], objectNormal.xyz);
+    worldNormal = normalize(worldNormal);
+    float4 objectTangent = a2v.tangent;
+    float4 worldTangent;
+    worldTangent.xyz = a2v.boneWeight0_3.x * vecMul(model[a2v.boneIndex0_3.x], objectTangent.xyz);
+    worldTangent.xyz = worldTangent.xyz + a2v.boneWeight0_3.y * vecMul(model[a2v.boneIndex0_3.y], objectTangent.xyz);
+    worldTangent.xyz = worldTangent.xyz + a2v.boneWeight0_3.z * vecMul(model[a2v.boneIndex0_3.z], objectTangent.xyz);
+    worldTangent.xyz = worldTangent.xyz + a2v.boneWeight0_3.w * vecMul(model[a2v.boneIndex0_3.w], objectTangent.xyz);
+    worldTangent.xyz = normalize(worldTangent.xyz);
+    worldTangent.w = objectTangent.w;
+    float3 worldBinormal = worldTangent.w * normalize(cross(worldNormal, worldTangent.xyz));
+    float3 worldTanMatrixX = float3(worldTangent.x, worldBinormal.x, worldNormal.x);
+    v2f.worldTanMatrixX = worldTanMatrixX;
+
+    float3 worldTanMatrixY = float3(worldTangent.y, worldBinormal.y, worldNormal.y);
+    v2f.worldTanMatrixY = worldTanMatrixY;
+
+    float3 worldTanMatrixZ = float3(worldTangent.z, worldBinormal.z, worldNormal.z);
+    v2f.worldTanMatrixZ = worldTanMatrixZ;
+
+    float4 eyeEyePos = {0.0f, 0.0f, 0.0f, 1.0f};
+    float4 eyeCoord = mul(view, worldCoord);
+    float3 eyeEyeVec = normalize(eyeEyePos.xyz - eyeCoord.xyz);
+    float3 eyeNormal = vecMul(view, worldNormal);
+    float VdotN = abs(dot(eyeEyeVec, eyeNormal));
+    float oneMinusVdotN = 1.0-VdotN;
+    float4 skinSilouetteVec;
+    skinSilouetteVec.x = objectNormal.w;
+    skinSilouetteVec.y = oneMinusVdotN*oneMinusVdotN;
+    skinSilouetteVec.z = oneMinusVdotN;
+    v2f.SkinSilouetteVec = skinSilouetteVec;
+
+    float4 hpos = mul(proj, eyeCoord);
+    v2f.HPOS = hpos;
+
+    return v2f;
+}

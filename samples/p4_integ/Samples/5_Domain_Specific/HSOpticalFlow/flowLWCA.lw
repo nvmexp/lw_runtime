@@ -1,0 +1,216 @@
+/* Copyright (c) 2022, LWPU CORPORATION. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *  * Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  * Neither the name of LWPU CORPORATION nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include "common.h"
+
+// include kernels
+#include "downscaleKernel.lwh"
+#include "upscaleKernel.lwh"
+#include "warpingKernel.lwh"
+#include "derivativesKernel.lwh"
+#include "solverKernel.lwh"
+#include "addKernel.lwh"
+
+///////////////////////////////////////////////////////////////////////////////
+/// \brief method logic
+///
+/// handles memory allocations, control flow
+/// \param[in]  I0           source image
+/// \param[in]  I1           tracked image
+/// \param[in]  width        images width
+/// \param[in]  height       images height
+/// \param[in]  stride       images stride
+/// \param[in]  alpha        degree of displacement field smoothness
+/// \param[in]  nLevels      number of levels in a pyramid
+/// \param[in]  nWarpIters   number of warping iterations per pyramid level
+/// \param[in]  nSolverIters number of solver iterations (Jacobi iterations)
+/// \param[out] u            horizontal displacement
+/// \param[out] v            vertical displacement
+///////////////////////////////////////////////////////////////////////////////
+void ComputeFlowLWDA(const float *I0, const float *I1, int width, int height,
+                     int stride, float alpha, int nLevels, int nWarpIters,
+                     int nSolverIters, float *u, float *v) {
+  printf("Computing optical flow on GPU...\n");
+
+  // pI0 and pI1 will hold device pointers
+  const float **pI0 = new const float *[nLevels];
+  const float **pI1 = new const float *[nLevels];
+
+  int *pW = new int[nLevels];
+  int *pH = new int[nLevels];
+  int *pS = new int[nLevels];
+
+  // device memory pointers
+  float *d_tmp;
+  float *d_du0;
+  float *d_dv0;
+  float *d_du1;
+  float *d_dv1;
+
+  float *d_Ix;
+  float *d_Iy;
+  float *d_Iz;
+
+  float *d_u;
+  float *d_v;
+  float *d_nu;
+  float *d_lw;
+
+  const int dataSize = stride * height * sizeof(float);
+
+  checkLwdaErrors(lwdaMalloc(&d_tmp, dataSize));
+  checkLwdaErrors(lwdaMalloc(&d_du0, dataSize));
+  checkLwdaErrors(lwdaMalloc(&d_dv0, dataSize));
+  checkLwdaErrors(lwdaMalloc(&d_du1, dataSize));
+  checkLwdaErrors(lwdaMalloc(&d_dv1, dataSize));
+
+  checkLwdaErrors(lwdaMalloc(&d_Ix, dataSize));
+  checkLwdaErrors(lwdaMalloc(&d_Iy, dataSize));
+  checkLwdaErrors(lwdaMalloc(&d_Iz, dataSize));
+
+  checkLwdaErrors(lwdaMalloc(&d_u, dataSize));
+  checkLwdaErrors(lwdaMalloc(&d_v, dataSize));
+  checkLwdaErrors(lwdaMalloc(&d_nu, dataSize));
+  checkLwdaErrors(lwdaMalloc(&d_lw, dataSize));
+
+  // prepare pyramid
+
+  int lwrrentLevel = nLevels - 1;
+  // allocate GPU memory for input images
+  checkLwdaErrors(lwdaMalloc(pI0 + lwrrentLevel, dataSize));
+  checkLwdaErrors(lwdaMalloc(pI1 + lwrrentLevel, dataSize));
+
+  checkLwdaErrors(lwdaMemcpy((void *)pI0[lwrrentLevel], I0, dataSize,
+                             lwdaMemcpyHostToDevice));
+  checkLwdaErrors(lwdaMemcpy((void *)pI1[lwrrentLevel], I1, dataSize,
+                             lwdaMemcpyHostToDevice));
+
+  pW[lwrrentLevel] = width;
+  pH[lwrrentLevel] = height;
+  pS[lwrrentLevel] = stride;
+
+  for (; lwrrentLevel > 0; --lwrrentLevel) {
+    int nw = pW[lwrrentLevel] / 2;
+    int nh = pH[lwrrentLevel] / 2;
+    int ns = iAlignUp(nw);
+
+    checkLwdaErrors(
+        lwdaMalloc(pI0 + lwrrentLevel - 1, ns * nh * sizeof(float)));
+    checkLwdaErrors(
+        lwdaMalloc(pI1 + lwrrentLevel - 1, ns * nh * sizeof(float)));
+
+    Downscale(pI0[lwrrentLevel], pW[lwrrentLevel], pH[lwrrentLevel],
+              pS[lwrrentLevel], nw, nh, ns, (float *)pI0[lwrrentLevel - 1]);
+
+    Downscale(pI1[lwrrentLevel], pW[lwrrentLevel], pH[lwrrentLevel],
+              pS[lwrrentLevel], nw, nh, ns, (float *)pI1[lwrrentLevel - 1]);
+
+    pW[lwrrentLevel - 1] = nw;
+    pH[lwrrentLevel - 1] = nh;
+    pS[lwrrentLevel - 1] = ns;
+  }
+
+  checkLwdaErrors(lwdaMemset(d_u, 0, stride * height * sizeof(float)));
+  checkLwdaErrors(lwdaMemset(d_v, 0, stride * height * sizeof(float)));
+
+  // compute flow
+  for (; lwrrentLevel < nLevels; ++lwrrentLevel) {
+    for (int warpIter = 0; warpIter < nWarpIters; ++warpIter) {
+      checkLwdaErrors(lwdaMemset(d_du0, 0, dataSize));
+      checkLwdaErrors(lwdaMemset(d_dv0, 0, dataSize));
+
+      checkLwdaErrors(lwdaMemset(d_du1, 0, dataSize));
+      checkLwdaErrors(lwdaMemset(d_dv1, 0, dataSize));
+
+      // on current level we compute optical flow
+      // between frame 0 and warped frame 1
+      WarpImage(pI1[lwrrentLevel], pW[lwrrentLevel], pH[lwrrentLevel],
+                pS[lwrrentLevel], d_u, d_v, d_tmp);
+
+      ComputeDerivatives(pI0[lwrrentLevel], d_tmp, pW[lwrrentLevel],
+                         pH[lwrrentLevel], pS[lwrrentLevel], d_Ix, d_Iy, d_Iz);
+
+      for (int iter = 0; iter < nSolverIters; ++iter) {
+        SolveForUpdate(d_du0, d_dv0, d_Ix, d_Iy, d_Iz, pW[lwrrentLevel],
+                       pH[lwrrentLevel], pS[lwrrentLevel], alpha, d_du1, d_dv1);
+
+        Swap(d_du0, d_du1);
+        Swap(d_dv0, d_dv1);
+      }
+
+      // update u, v
+      Add(d_u, d_du0, pH[lwrrentLevel] * pS[lwrrentLevel], d_u);
+      Add(d_v, d_dv0, pH[lwrrentLevel] * pS[lwrrentLevel], d_v);
+    }
+
+    if (lwrrentLevel != nLevels - 1) {
+      // prolongate solution
+      float scaleX = (float)pW[lwrrentLevel + 1] / (float)pW[lwrrentLevel];
+
+      Upscale(d_u, pW[lwrrentLevel], pH[lwrrentLevel], pS[lwrrentLevel],
+              pW[lwrrentLevel + 1], pH[lwrrentLevel + 1], pS[lwrrentLevel + 1],
+              scaleX, d_nu);
+
+      float scaleY = (float)pH[lwrrentLevel + 1] / (float)pH[lwrrentLevel];
+
+      Upscale(d_v, pW[lwrrentLevel], pH[lwrrentLevel], pS[lwrrentLevel],
+              pW[lwrrentLevel + 1], pH[lwrrentLevel + 1], pS[lwrrentLevel + 1],
+              scaleY, d_lw);
+
+      Swap(d_u, d_nu);
+      Swap(d_v, d_lw);
+    }
+  }
+
+  checkLwdaErrors(lwdaMemcpy(u, d_u, dataSize, lwdaMemcpyDeviceToHost));
+  checkLwdaErrors(lwdaMemcpy(v, d_v, dataSize, lwdaMemcpyDeviceToHost));
+
+  // cleanup
+  for (int i = 0; i < nLevels; ++i) {
+    checkLwdaErrors(lwdaFree((void *)pI0[i]));
+    checkLwdaErrors(lwdaFree((void *)pI1[i]));
+  }
+
+  delete[] pI0;
+  delete[] pI1;
+  delete[] pW;
+  delete[] pH;
+  delete[] pS;
+
+  checkLwdaErrors(lwdaFree(d_tmp));
+  checkLwdaErrors(lwdaFree(d_du0));
+  checkLwdaErrors(lwdaFree(d_dv0));
+  checkLwdaErrors(lwdaFree(d_du1));
+  checkLwdaErrors(lwdaFree(d_dv1));
+  checkLwdaErrors(lwdaFree(d_Ix));
+  checkLwdaErrors(lwdaFree(d_Iy));
+  checkLwdaErrors(lwdaFree(d_Iz));
+  checkLwdaErrors(lwdaFree(d_nu));
+  checkLwdaErrors(lwdaFree(d_lw));
+  checkLwdaErrors(lwdaFree(d_u));
+  checkLwdaErrors(lwdaFree(d_v));
+}

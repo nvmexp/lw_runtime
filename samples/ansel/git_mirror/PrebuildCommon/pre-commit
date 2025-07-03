@@ -1,0 +1,34 @@
+#!/bin/sh
+
+if git rev-parse --verify HEAD >/dev/null 2>&1
+then
+    against=HEAD
+else
+    # Initial commit: diff against an empty tree object
+    against=$(git hash-object -t tree /dev/null)
+fi
+
+# Redirect output to stderr.
+exec 1>&2
+
+# Path to cpplint where cpplint is installed
+cpplint=$(pwd)//PrebuildCommon//package-links//cpplint//cpplint//cpplint.py
+python_cmd=$(pwd)//PrebuildCommon//package-links//python/python.exe
+
+sum=0
+filters='-readability,-build,-legal,-runtime,+whitespace,-whitespace/line_length,-whitespace/braces,-whitespace/newline,-whitespace/comments,-whitespace/parens'
+        
+# for cpp
+for file in $(git diff --cached --name-status $against -- | grep -E '\.[ch](pp)?$' | awk '{print $2}'); do
+    echo "Running cpplint to check for code-style errors..."
+    $python_cmd $cpplint --filter=$filters $file
+    sum=$(expr ${sum} + $?)
+done
+    
+if [ ${sum} -eq 0 ]; then
+    echo "Code looks clean... for now."
+    exit 0
+else
+    echo "Please fix the above errors before committing your changes!"
+    exit 1
+fi

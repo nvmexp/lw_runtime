@@ -1,0 +1,21 @@
+##############################################################################
+# makefile fragment for generating a lwglsi DSO stub that can be
+# used at build time by libraries that depend on lwglsi.
+#
+# includers should declare dependence on $(LWGLSI_DSO_STUB), and
+# then link with "-llwidia-glsi-stub"
+##############################################################################
+
+LWGLSI_DSO_STUB = $(OUTPUTDIR)/liblwidia-glsi-stub.so
+
+LWGLSI_TEGRA_EXPORTS = $(LW_SOURCE)/drivers/OpenGL/win/egl/glsi/liblwglsi.export
+LWGLSI_EXPORTS = $(OUTPUTDIR)/liblwglsi-exports.txt
+
+$(LWGLSI_EXPORTS): $(LWGLSI_TEGRA_EXPORTS)
+	$(SED) -e 's/@[0-9]\+//' \
+	-e 's/^\([^#].\+\)$$/\1 func/' \
+	$(LWGLSI_TEGRA_EXPORTS) > \
+	$(LWGLSI_EXPORTS)
+
+$(eval $(call GEN_DSO_STUB_RULE, \
+  $(LWGLSI_DSO_STUB),$(LWGLSI_EXPORTS),liblwidia-glsi.so,,))

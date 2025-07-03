@@ -1,0 +1,27 @@
+##############################################################################
+# unix.lwmk
+##############################################################################
+LWSWITCH_TEST_DIR ?= $(LW_SOURCE)/drivers/lwswitch/tests
+
+include $(LW_SOURCE)/drivers/lwswitch/user/lwswitchapi.lwmk
+
+LDFLAGS += -pthread -lrt -ldl
+
+INCLUDES += $(addprefix -I,$(LWSWITCHAPI_INCLUDES))
+INCLUDES += -I$(LW_SOURCE)/drivers/unix/common/inc
+
+LOGFILE ?= \"LWSWITCH_TEST_DIR\/$(OUTPUTDIR)\/lwswitch_perf_data.log\"
+
+# Force static linking if supported
+LDFLAGS += $(if $(LW_GCC_HAS_STATIC_LIBSTDCXX_OPTION),-static-libgcc -static-libstdc++)
+
+$(call BUILD_OBJECT_LIST,$(SOURCES)): \
+    CFLAGS += -c -g -O0 $(INCLUDES) -DLOGFILE=$(LOGFILE) \
+		          -Wall -Wno-sign-compare -Werror -Wno-unused-function -Wno-cast-qual
+
+OTHER_FILES_TO_REMOVE += $(wildcard core.*)
+
+build: $(OUTPUTDIR)/lwswitch
+
+$(OUTPUTDIR)/lwswitch: $(OBJECTS)
+	$(call quiet_cmd,CXX) -o $@ $(OBJECTS) $(LDFLAGS) $(BIN_LDFLAGS)

@@ -1,0 +1,127 @@
+##############################################################################
+# define LOCAL_SOURCES
+##############################################################################
+
+
+LW_CXX_EXCEPTIONS := 0
+LW_CXX_RTTI := 0
+
+LWRRENT_DIR := $(LW_SOURCE)/apps/dcgm/modules/lwswitch
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += DcgmModuleLwSwitch.cpp
+LOCAL_SOURCES += DcgmGlobalFabricManager.cpp
+LOCAL_SOURCES += DcgmLocalFabricManager.cpp
+LOCAL_SOURCES += DcgmSwitchInterface.cpp
+LOCAL_SOURCES += DcgmLocalFabricManagerCoOp.cpp
+LOCAL_SOURCES += DcgmFabricParser.cpp
+LOCAL_SOURCES += DcgmFabricConfig.cpp
+LOCAL_SOURCES += DcgmGlobalControlMsgHndl.cpp
+LOCAL_SOURCES += DcgmLocalControlMsgHndl.cpp
+LOCAL_SOURCES += DcgmFMError.cpp
+LOCAL_SOURCES += DcgmFMTimer.cpp
+LOCAL_SOURCES += DcgmFMConnectionBase.cpp
+LOCAL_SOURCES += DcgmFMLwcmClient.cpp
+LOCAL_SOURCES += DcgmFMLwcmServer.cpp
+LOCAL_SOURCES += DcgmLocalStatsReporter.cpp
+LOCAL_SOURCES += DcgmGlobalHeartbeat.cpp
+LOCAL_SOURCES += DcgmFMLWLinkIntf.cpp
+LOCAL_SOURCES += DcgmFMLWLinkReqBase.cpp
+LOCAL_SOURCES += DcgmFMLWLinkReqConn.cpp
+LOCAL_SOURCES += DcgmFMLWLinkDrvIntf.cpp
+LOCAL_SOURCES += DcgmFMLWLinkReqConnTrain.cpp
+LOCAL_SOURCES += DcgmFMLWLinkDeviceRepo.cpp
+LOCAL_SOURCES += DcgmFMLWLinkReqDiscovery.cpp
+LOCAL_SOURCES += DcgmFMLWLinkReqInit.cpp
+LOCAL_SOURCES += DcgmFMLWLinkMsgHndlr.cpp
+LOCAL_SOURCES += DcgmGFMHelper.cpp
+LOCAL_SOURCES += DcgmFMDevInfoMsgHndlr.cpp
+LOCAL_SOURCES += DcgmFMLWLinkError.cpp
+LOCAL_SOURCES += DcgmGlobalStatsMsgHndlr.cpp
+LOCAL_SOURCES += DcgmLocalStatsMsgHndlr.cpp
+LOCAL_SOURCES += DcgmFabricNode.cpp
+LOCAL_SOURCES += DcgmFMReqTracker.cpp
+LOCAL_SOURCES += DcgmFMLWLinkState.cpp
+LOCAL_SOURCES += DcgmFMLWLinkConnRepo.cpp
+LOCAL_SOURCES += DcgmFMTopologyValidator.cpp
+LOCAL_SOURCES += DcgmCommandServer.cpp
+LOCAL_SOURCES += DcgmGlobalCommandServer.cpp
+LOCAL_SOURCES += DcgmLocalCommandServer.cpp
+LOCAL_SOURCES += DcgmGlobalFMErrorHndlr.cpp
+LOCAL_SOURCES += DcgmGFMFabricPartitionMgr.cpp
+LOCAL_SOURCES += DcgmLocalMemMgr.cpp
+LOCAL_SOURCES += DcgmGlobalFabricManagerHaMgr.cpp
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi.c
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi-numa.c
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi-mmap.c
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi-control-device.c
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi-control-device-unix.c
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/utils/mem-sysfs.c
+
+ifdef DCGM_BUILD_LWSWITCH_MODULE
+    include $(LW_SOURCE)/drivers/lwswitch/user/lwswitchapi.lwmk
+    LOCAL_SOURCES += $(LWSWITCHAPI_SOURCES)
+endif
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/common/protobuf
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/protobuf-2.6.0/include/
+LOCAL_INCLUDES += $(DCGM_DIR)/common
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/src/
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/
+LOCAL_INCLUDES += $(DCGM_DIR)/common/transport
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/lwswitch
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/lwlink/interface/
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(LWSWITCHAPI_INCLUDES)
+#We should probably get rid of the below eventually
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/libevent-2.0.22-stable/include/
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/libevent-2.0.22-stable/include/event2/
+LOCAL_INCLUDES += $(LWVS_DIR)/libs/jsoncpp-0.10.6/include
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(LWML_DIR)
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_CFLAGS += -fPIC
+endif
+
+DCGMLWSWITCH_SHARED_LIBRARY_NAME:=libdcgmmodulelwswitch.so
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+    
+LOCAL_LDFLAGS += -rdynamic
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS) -lstdc++ -ldcgm -lgcc_s -llwcmproto -lrt
+
+dcgmmodulelwswitch_TARGET  := $(OUTPUTDIR)/$(DCGMLWSWITCH_SHARED_LIBRARY_NAME)
+dcgmmodulelwswitch_OBJECTS := $(LOCAL_OBJECTS)
+dcgmmodulelwswitch_CFLAGS  := $(LOCAL_CFLAGS)
+dcgmmodulelwswitch_LDFLAGS := $(LOCAL_LDFLAGS)
+dcgmmodulelwswitch_DEPENDS ?= $(dcgm_TARGET)
+
+
+DCGMMODULELWSWITCH_DECODE_DB := $(OUTPUTDIR)/dcgmmodulelwswitch_decode_db.txt
+$(DCGMMODULELWSWITCH_DECODE_DB) : $(LOCAL_SOURCES)
+	$(GREP) -n -B 1 -A 4 -e '^\s*PRINT_' -e 'DEBUG_' $^ > $@
+
+build: $(dcgmmodulelwswitch_TARGET)
+dcgmbuildsyncpoint:: $(dcgmmodulelwswitch_TARGET)
+$(eval $(call MAKE_SHARED_LIBRARY,dcgmmodulelwswitch))
+build: $(dcgmmodulelwswitch_TARGET).guardwords
+
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

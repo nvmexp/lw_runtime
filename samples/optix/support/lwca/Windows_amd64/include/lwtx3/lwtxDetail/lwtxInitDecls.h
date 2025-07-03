@@ -1,0 +1,73 @@
+#ifndef LWTX_IMPL_GUARD
+#error Never include this file directly -- it is automatically included by lwToolsExt.h (except when LWTX_NO_IMPL is defined).
+#endif
+
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxMarkEx_impl_init)(const lwtxEventAttributes_t* eventAttrib);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxMarkA_impl_init)(const char* message);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxMarkW_impl_init)(const wchar_t* message);
+LWTX_LINKONCE_FWDDECL_FUNCTION lwtxRangeId_t LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxRangeStartEx_impl_init)(const lwtxEventAttributes_t* eventAttrib);
+LWTX_LINKONCE_FWDDECL_FUNCTION lwtxRangeId_t LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxRangeStartA_impl_init)(const char* message);
+LWTX_LINKONCE_FWDDECL_FUNCTION lwtxRangeId_t LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxRangeStartW_impl_init)(const wchar_t* message);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxRangeEnd_impl_init)(lwtxRangeId_t id);
+LWTX_LINKONCE_FWDDECL_FUNCTION int LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxRangePushEx_impl_init)(const lwtxEventAttributes_t* eventAttrib);
+LWTX_LINKONCE_FWDDECL_FUNCTION int LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxRangePushA_impl_init)(const char* message);
+LWTX_LINKONCE_FWDDECL_FUNCTION int LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxRangePushW_impl_init)(const wchar_t* message);
+LWTX_LINKONCE_FWDDECL_FUNCTION int LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxRangePop_impl_init)(void);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameCategoryA_impl_init)(uint32_t category, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameCategoryW_impl_init)(uint32_t category, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameOsThreadA_impl_init)(uint32_t threadId, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameOsThreadW_impl_init)(uint32_t threadId, const wchar_t* name);
+
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwDeviceA_impl_init)(lwtx_LWdevice device, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwDeviceW_impl_init)(lwtx_LWdevice device, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwContextA_impl_init)(lwtx_LWcontext context, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwContextW_impl_init)(lwtx_LWcontext context, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwStreamA_impl_init)(lwtx_LWstream stream, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwStreamW_impl_init)(lwtx_LWstream stream, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwEventA_impl_init)(lwtx_LWevent event, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwEventW_impl_init)(lwtx_LWevent event, const wchar_t* name);
+
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClDeviceA_impl_init)(lwtx_cl_device_id device, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClDeviceW_impl_init)(lwtx_cl_device_id device, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClContextA_impl_init)(lwtx_cl_context context, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClContextW_impl_init)(lwtx_cl_context context, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClCommandQueueA_impl_init)(lwtx_cl_command_queue command_queue, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClCommandQueueW_impl_init)(lwtx_cl_command_queue command_queue, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClMemObjectA_impl_init)(lwtx_cl_mem memobj, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClMemObjectW_impl_init)(lwtx_cl_mem memobj, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClSamplerA_impl_init)(lwtx_cl_sampler sampler, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClSamplerW_impl_init)(lwtx_cl_sampler sampler, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClProgramA_impl_init)(lwtx_cl_program program, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClProgramW_impl_init)(lwtx_cl_program program, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClEventA_impl_init)(lwtx_cl_event evnt, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameClEventW_impl_init)(lwtx_cl_event evnt, const wchar_t* name);
+
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwdaDeviceA_impl_init)(int device, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwdaDeviceW_impl_init)(int device, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwdaStreamA_impl_init)(lwtx_lwdaStream_t stream, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwdaStreamW_impl_init)(lwtx_lwdaStream_t stream, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwdaEventA_impl_init)(lwtx_lwdaEvent_t event, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxNameLwdaEventW_impl_init)(lwtx_lwdaEvent_t event, const wchar_t* name);
+
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainMarkEx_impl_init)(lwtxDomainHandle_t domain, const lwtxEventAttributes_t* eventAttrib);
+LWTX_LINKONCE_FWDDECL_FUNCTION lwtxRangeId_t LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainRangeStartEx_impl_init)(lwtxDomainHandle_t domain, const lwtxEventAttributes_t* eventAttrib);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainRangeEnd_impl_init)(lwtxDomainHandle_t domain, lwtxRangeId_t id);
+LWTX_LINKONCE_FWDDECL_FUNCTION int LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainRangePushEx_impl_init)(lwtxDomainHandle_t domain, const lwtxEventAttributes_t* eventAttrib);
+LWTX_LINKONCE_FWDDECL_FUNCTION int LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainRangePop_impl_init)(lwtxDomainHandle_t domain);
+LWTX_LINKONCE_FWDDECL_FUNCTION lwtxResourceHandle_t LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainResourceCreate_impl_init)(lwtxDomainHandle_t domain, lwtxResourceAttributes_t* attribs);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainResourceDestroy_impl_init)(lwtxResourceHandle_t resource);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainNameCategoryA_impl_init)(lwtxDomainHandle_t domain, uint32_t category, const char* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainNameCategoryW_impl_init)(lwtxDomainHandle_t domain, uint32_t category, const wchar_t* name);
+LWTX_LINKONCE_FWDDECL_FUNCTION lwtxStringHandle_t LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainRegisterStringA_impl_init)(lwtxDomainHandle_t domain, const char* string);
+LWTX_LINKONCE_FWDDECL_FUNCTION lwtxStringHandle_t LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainRegisterStringW_impl_init)(lwtxDomainHandle_t domain, const wchar_t* string);
+LWTX_LINKONCE_FWDDECL_FUNCTION lwtxDomainHandle_t LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainCreateA_impl_init)(const char* message);
+LWTX_LINKONCE_FWDDECL_FUNCTION lwtxDomainHandle_t LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainCreateW_impl_init)(const wchar_t* message);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainDestroy_impl_init)(lwtxDomainHandle_t domain);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxInitialize_impl_init)(const void* reserved);
+
+LWTX_LINKONCE_FWDDECL_FUNCTION lwtxSynlwser_t LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainSynlwserCreate_impl_init)(lwtxDomainHandle_t domain, const lwtxSynlwserAttributes_t* attribs);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainSynlwserDestroy_impl_init)(lwtxSynlwser_t handle);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainSynlwserAcquireStart_impl_init)(lwtxSynlwser_t handle);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainSynlwserAcquireFailed_impl_init)(lwtxSynlwser_t handle);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainSynlwserAcquireSuccess_impl_init)(lwtxSynlwser_t handle);
+LWTX_LINKONCE_FWDDECL_FUNCTION void LWTX_API LWTX_VERSIONED_IDENTIFIER(lwtxDomainSynlwserReleasing_impl_init)(lwtxSynlwser_t handle);

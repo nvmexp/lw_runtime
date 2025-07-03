@@ -1,0 +1,129 @@
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+	float4 tileUV;
+}
+
+cbuffer controlBuf
+{
+	float g_maskID;
+	float g_sldTRANSP;
+	float g_sldDIST;
+	bool g_sldILW;
+	float g_sldPosX;
+	float g_sldPosY;
+	float g_sldSIZE;
+	float g_sldROTATE;
+}
+
+Texture2D texColor;
+Texture2D texDepth;
+Texture2D texOv01;
+Texture2D texOv02;
+Texture2D texOv03;
+Texture2D texOv04;
+Texture2D texOv05;
+Texture2D texOv06;
+Texture2D texOv07;
+Texture2D texOv08;
+SamplerState samLinear;
+SamplerState samLinearWrap;
+
+float GetLinearDepth(float2 uv, bool ilw)
+{
+	#define DepthParameters         float4(1.0,1000.0,-999.0f,0.0) //whatever works best
+	float depth = texDepth.SampleLevel(samLinear, uv, 0).x;
+	depth = ilw ? depth : 1.0 - depth; //most games use ilwerted depth, keep that as default
+	depth *= rcp(DepthParameters.y + depth * DepthParameters.z);
+	return saturate(depth);
+}
+
+#ifndef LW_COMMON
+#define LW_COMMON
+
+#define CAPTURE_STATE_NOT_STARTED		0
+#define CAPTURE_STATE_REGULAR			1
+#define CAPTURE_STATE_REGULARSTEREO		2
+#define CAPTURE_STATE_HIGHRES			3
+#define CAPTURE_STATE_360				4
+#define CAPTURE_STATE_360STEREO			5
+
+#endif 
+
+void PSMain(in float4 vpos : SV_Position, in float2 uv : TexCoord, out float4 color : SV_Target)
+{	
+	color = texColor.Sample(samLinear, uv);
+	float maskID = floor(g_maskID);
+
+	if(captureState == CAPTURE_STATE_NOT_STARTED || captureState == CAPTURE_STATE_REGULAR || captureState == CAPTURE_STATE_HIGHRES || captureState == CAPTURE_STATE_REGULARSTEREO)
+	{
+
+	float2 rotatevec;
+	sincos(g_sldROTATE / 180.0 * 3.1415927, rotatevec.y, rotatevec.x);
+	float2x2 rotate2Dmat = float2x2(rotatevec.x, -rotatevec.y, rotatevec.y, rotatevec.x);
+
+	float2 maskuv = (tileUV.zw - tileUV.xy) * uv + tileUV.xy;
+	maskuv -= float2(g_sldPosX, 1.0 - g_sldPosY) * 2.0 - 1.0; 		
+	maskuv -= 0.5;	
+	maskuv *= float2( screenSize.x / screenSize.y, 1);
+	maskuv = mul(maskuv, rotate2Dmat);
+	maskuv *= float2( screenSize.y / screenSize.x, 1);
+	maskuv /= g_sldSIZE+ 1e-6;
+
+	float4 mask = 0;
+	float2 mask_size = 1;
+	switch(maskID)
+	{
+		case 1:
+			texOv01.GetDimensions(mask_size.x, mask_size.y);
+			maskuv =  maskuv * float2(mask_size.x / mask_size.y, 1) + 0.5;
+			mask = texOv01.Sample(samLinear, maskuv);
+			break;
+		case 2:
+			texOv02.GetDimensions(mask_size.x, mask_size.y);
+			maskuv =  maskuv * float2(mask_size.x / mask_size.y, 1) + 0.5;
+			mask = texOv02.Sample(samLinear, maskuv);
+			break;	
+		case 3:
+			texOv03.GetDimensions(mask_size.x, mask_size.y);
+			maskuv =  maskuv * float2(mask_size.x / mask_size.y, 1) + 0.5;
+			mask = texOv03.Sample(samLinear, maskuv);
+			break;
+		case 4:
+			texOv04.GetDimensions(mask_size.x, mask_size.y);
+			maskuv =  maskuv * float2(mask_size.x / mask_size.y, 1) + 0.5;
+			mask = texOv04.Sample(samLinear, maskuv);
+			break;
+		case 5:
+			texOv05.GetDimensions(mask_size.x, mask_size.y);
+			maskuv =  maskuv * float2(mask_size.x / mask_size.y, 1) + 0.5;
+			mask = texOv05.Sample(samLinear, maskuv);
+			break;
+		case 6:
+			texOv06.GetDimensions(mask_size.x, mask_size.y);
+			maskuv =  maskuv * float2(mask_size.x / mask_size.y, 1) + 0.5;
+			mask = texOv06.Sample(samLinear, maskuv);
+			break;
+		case 7:
+			texOv07.GetDimensions(mask_size.x, mask_size.y);
+			maskuv =  maskuv * float2(mask_size.x / mask_size.y, 1) + 0.5;
+			mask = texOv07.Sample(samLinear, maskuv);
+			break;
+		case 8:
+			texOv08.GetDimensions(mask_size.x, mask_size.y);
+			maskuv =  maskuv * float2(mask_size.x / mask_size.y, 1) + 0.5;
+			mask = texOv08.Sample(samLinear, maskuv);
+			break;																														
+	}
+
+	//make sure no border pixels cause problems for bad mask textures
+	mask.a *= all(saturate(maskuv - maskuv * maskuv));
+
+	float linear_depth = GetLinearDepth(uv, g_sldILW);
+	float depth_mask = linear_depth > g_sldDIST * g_sldDIST * g_sldDIST;
+	color.rgb = lerp(color.rgb, mask.rgb, mask.a * depth_mask * g_sldTRANSP);
+	
+	}
+}

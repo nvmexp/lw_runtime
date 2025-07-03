@@ -1,0 +1,136 @@
+//
+// Copyright 2020 LWPU Corporation. All rights reserved.
+//
+
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+#include "layerdata_load.h"
+#include "layers.h"
+#include "layers_inline.h"
+
+namespace optix_exp {
+
+template <typename buffer_type>
+static __global__ void k_copyOutput( floatWrAccess result,
+                                     floatRdAccess input,
+                                     buffer_type*  colwout,
+                                     int           ic,
+                                     int           N,
+                                     bool          copyAlpha,
+                                     int           srcChannel,
+                                     int           ndim,
+                                     int           w,
+                                     int           h,
+                                     unsigned int  inputOffsetX,
+                                     unsigned int  inputOffsetY,
+                                     int           op,
+                                     float         c_expmul,
+                                     float*        intensity,
+                                     bool          upscale2X,
+                                     float         bf )
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int iOx = upscale2X ? inputOffsetX * 2 : inputOffsetX;
+    int iOy = upscale2X ? inputOffsetY * 2 : inputOffsetY;
+
+    if( x < result.image.width && y < result.image.height )
+    {
+        if( op == IMPORT_A_LOG || op == IMPORT_A_LOG_SQRT )
+        {
+             float f = colwout[( ( y + iOy ) * w + x + iOx ) * ic + srcChannel * N];
+             f = __clamp01( __expf( f * c_expmul ) - 1.f );
+             result.write( x, y, 3, op == IMPORT_A_LOG_SQRT ? f * f : f );
+        }
+        else if( op == IMPORT_A )
+        {
+             result.write( x, y, 3, __clamp01( colwout[( ( y + iOy ) * w + x + iOx ) * ic + srcChannel * N] ) );
+        }
+        else
+        {
+            int ix = upscale2X ? x / 2 : x;
+            int iy = upscale2X ? y / 2 : y;
+
+            for( int c=0; c < ndim; c++ )
+            {
+                float R = colwout[( ( y + iOy ) * w + x + iOx ) * ic + ( srcChannel + c ) * N];
+
+                if( op != IMPORT_XYZ )
+                    R = __clamp0( R );
+
+                if( op == IMPORT_LOG || op == IMPORT_LOG_SQRT )
+                {
+                    const float r_intensity = __frcp_rn( *intensity );
+                    R = __expf( R * c_expmul ) - 1.f;
+
+                    if( op == IMPORT_LOG_SQRT )
+                        R *= R;
+                    R *= r_intensity;
+                }
+                else if( op == IMPORT_PQ )
+                {
+                    const float r_intensity = __frcp_rn( *intensity );
+                    R = pq_decode( R ) * r_intensity;
+                }
+                else if( op == IMPORT_RGB )
+                {
+                    if( R > 1.f )
+                        R = 1.f;
+                }
+                if( bf == 0.f )
+                    result.write( x, y, c, R );
+                else
+                    result.write( x, y, c, R * ( 1.f - bf ) + __clamp0( input( ix + inputOffsetX, iy + inputOffsetY, c ) ) * bf );
+            }
+            if( copyAlpha )
+                result.write( x, y, 3, __clamp01( input( ix + inputOffsetX, iy + inputOffsetY, 3 ) ) );
+        }
+    }
+}
+
+void AELayer::copyOutput( const OptixImage2D* result,
+                          const OptixImage2D* input,
+                          unsigned int        inputOffsetX,
+                          unsigned int        inputOffsetY,
+                          int                 srcChannel,
+                          int                 numChannels,
+                          int                 op,
+                          void*               smem,
+                          lwdaStream_t        stream,
+                          bool                upscale2X,
+                          float               bf )
+{
+    beginTiming();
+
+    dim3 dimBlock( 64, 2 );
+    dim3 blockGrid = dim3( roundUp( result->width, dimBlock.x ), roundUp( result->height, dimBlock.y ), 1 );
+
+    int ic = m_tensorFormat == TENSOR_NHWC ? m_outChannels : 1;
+    int N  = m_tensorFormat == TENSOR_NHWC ? 1 : m_outWidth * m_outHeight;
+
+    // copy alpha from noisy input ? when alpha is denoised copy is not needed here, simplifies the interface
+    bool copyAlpha = getNumChannels( *result ) == 4;
+
+    if( m_dtype == DATA_HALF )
+    {
+        k_copyOutput<__half><<<blockGrid, dimBlock, 0, stream>>>(
+            floatWrAccess( *result ),
+            input ? floatRdAccess( *input ) : floatRdAccess(),
+            (__half*)( (char*)smem + m_outDataIndex ),
+            ic, N, copyAlpha, srcChannel, numChannels, m_outWidth, m_outHeight, inputOffsetX, inputOffsetY, op, m_expmul, (float*)( (char*)smem + m_intensityIndex ), upscale2X, bf );
+    }
+    else
+    {
+        k_copyOutput<float><<<blockGrid, dimBlock, 0, stream>>>(
+            floatWrAccess( *result ),
+            input ? floatRdAccess( *input ) : floatRdAccess(),
+            (float*)( (char*)smem + m_outDataIndex ),
+            ic, N, copyAlpha, srcChannel, numChannels, m_outWidth, m_outHeight, inputOffsetX, inputOffsetY, op, m_expmul, (float*)( (char*)smem + m_intensityIndex ), upscale2X, bf );
+    }
+
+    endTiming();
+}
+
+};  // namespace optix_exp

@@ -1,0 +1,335 @@
+/*
+ff
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include <math.h>
+#include <stdio.h>
+#include <fstream>
+#include <iostream>
+#include <vector>
+#include "lwphy.h"
+#include "lwphy_internal.h"
+
+#include "GOLD_2_COALESCED_P_LUT.h"
+#include "GOLD_1_SEQ_LUT.h"
+#include "descrambling.lwh"
+#include "crc.hpp"
+#include "descrambling.hpp"
+
+using namespace lwphy_i;
+using namespace descrambling;
+using namespace crc;
+
+__device__ inline int isnan_(float f)  { return isnan(f);               }
+__device__ inline int isnan_(__half h) { return isnan(__half2float(h)); }
+
+__device__ inline uint32_t gold32(uint32_t seed2, uint32_t n)
+{
+    uint32_t prod2;
+
+    //    uint32_t state1 = 0x40000000;         // reverse of 0x1
+    uint32_t state2 = __brev(seed2) >> 1; // reverse 31 bits
+
+    state2 = polyMulHigh31(state2, POLY_2);
+
+    prod2 = mulModPoly31_Coalesced(state2,
+                                   &GOLD_2_COALESCED_P_LUT[(n) / WORD_SIZE],
+                                   GOLD_2_COALESCED_P_LUT_OFFSET,
+                                   POLY_2);
+
+    uint32_t fstate2 = galois31LFSRWord(prod2, POLY_2_GMASK, 31);
+
+    uint32_t output2 = fibonacciLFSR2_1bit(fstate2);
+
+    //    return output1 ^ output2;
+    return GOLD_1_SEQ_LUT[n / WORD_SIZE] ^ output2;
+}
+
+__device__ inline
+float rate_match_xor_sign(uint32_t seq, int bit_index, float llr_input)
+{
+    union u
+    {
+        float    f32;
+        uint32_t u32;
+    };
+    u input, output;
+    input.f32 = llr_input;
+    // Extract the desired bit from the sequence and XOR with the input
+    // float to (possibly) modify the sign bit of the input.
+    output.u32 = (((seq << (31 - bit_index)) & 0x80000000) ^ input.u32);
+    return output.f32;
+}
+
+__device__ inline
+__half rate_match_xor_sign(uint32_t seq, int bit_index, __half llr_input)
+{
+    // Shift the desired bit from the sequence to the sign position for
+    // a half precision value (bit 15).
+    uint32_t   half_sign_mask = (seq >> bit_index) << 15;
+    __half_raw hraw           = llr_input;
+    uint32_t   hraw32         = hraw.x;
+    // XOR the sign mask with the original value to (possibly) modify
+    // the sign bit of the input
+    uint32_t   out32          = (half_sign_mask & 0x00008000) ^ hraw32;
+    hraw.x = (unsigned short)out32;
+    return __half(hraw);
+}
+
+template <typename T>
+__global__ void __launch_bounds__(128, 1) de_rate_matching_global(const float* llr_vec_in,
+                                                                  T*           out,
+
+                                                                  const PerTbParams* tbPrmsArray,
+                                                                  uint32_t           nTb,
+                                                                  uint32_t           nBBULayers,
+                                                                  int                descramblingOn)
+{
+    extern __shared__ uint32_t sharedSeq[];
+    // code block index
+    uint32_t r = blockIdx.x + tbPrmsArray[blockIdx.y].firstCodeBlockIndex;
+    // Assuming no limit soft buffer size
+    uint32_t Ncb = tbPrmsArray[blockIdx.y].Ncb;
+    // number of code blocks in transport block
+    uint32_t C = tbPrmsArray[blockIdx.y].num_CBs;
+    // base graph index
+    uint32_t bg = tbPrmsArray[blockIdx.y].bg;
+    // redundancy version
+    uint32_t rv = tbPrmsArray[blockIdx.y].rv;
+    // lifting factor
+    uint32_t Zc = tbPrmsArray[blockIdx.y].Zc;
+
+    if(r < C)
+    { // Only exlwtes code if thread is allocated a valid
+        //  codeblock
+        // (some threads will be idle)
+
+        uint32_t Qm = tbPrmsArray[blockIdx.y].Qm;
+        uint32_t Nl = tbPrmsArray[blockIdx.y].Nl;
+        // Determine rate matched block size E and start index codeBlockQAMStartIndex
+
+        uint32_t codeBlockQAMStartIndex;
+        uint32_t E;
+
+        uint32_t d1 = Nl * Qm;
+        uint32_t d  = d1 * C;
+        uint32_t q1 = tbPrmsArray[blockIdx.y].encodedSize / (d1); // exact division
+        uint32_t q  = q1 / C;
+        uint32_t El = Nl * Qm * q;
+        //uint32_t Eh = Nl * Qm * ((Ncb + d - 1) / d);
+        uint32_t Eh = El + d1 * (q * d < tbPrmsArray[blockIdx.y].encodedSize);
+        uint32_t rr = C - (q1 - q * C) - 1;
+
+        if(r <= rr)
+        {
+            E                      = El;
+            codeBlockQAMStartIndex = r * El;
+        }
+        else
+        {
+            E                      = Eh;
+            codeBlockQAMStartIndex = (rr + 1) * El + (r - rr - 1) * Eh;
+        }
+
+        // Determine k0 based on rv and bg
+
+        uint32_t k0;
+        if(bg == 1)
+        {
+            if(rv == 0)
+            {
+                k0 = 0;
+            }
+            else if(rv == 1)
+            {
+                k0 = (17 * Ncb / (66 * Zc)) * Zc;
+            }
+            else if(rv == 2)
+            {
+                k0 = (33 * Ncb / (66 * Zc)) * Zc;
+            }
+            else if(rv == 3)
+            {
+                k0 = (56 * Ncb / (66 * Zc)) * Zc;
+            }
+        }
+        else if(bg == 2)
+        {
+            if(rv == 0)
+            {
+                k0 = 0;
+            }
+            else if(rv == 1)
+            {
+                k0 = (13 * Ncb / (50 * Zc)) * Zc;
+            }
+            else if(rv == 2)
+            {
+                k0 = (25 * Ncb / (50 * Zc)) * Zc;
+            }
+            else if(rv == 3)
+            {
+                k0 = (43 * Ncb / (50 * Zc)) * Zc;
+            }
+        }
+        // rv 0 (detected if k0=0): no LLR combining, just write to memory; write
+        // filler bits
+
+        uint32_t tid = (blockDim.x * blockIdx.z + threadIdx.x);
+        // Position of LLR withing transport block, used for descrambling
+        uint32_t t = codeBlockQAMStartIndex + (tid);
+
+        codeBlockQAMStartIndex = (codeBlockQAMStartIndex / Qm) * QAM_STRIDE;
+        uint32_t F             = tbPrmsArray[blockIdx.y].F;
+        uint32_t K             = tbPrmsArray[blockIdx.y].K - 2 * Zc;
+        uint32_t Kd            = K - F;
+
+        // Deinterleave and fill output vector except filler bits
+        T        llr;
+        uint32_t j      = tid / Qm;
+        uint32_t jl     = j / Nl;
+        uint32_t k      = tid - j * Qm;
+        uint32_t tbBase = 0;
+        // compute start position of transport block in the output
+        for(int i = 1; i <= blockIdx.y; i++)
+        {
+            tbBase += tbPrmsArray[i - 1].num_CBs * tbPrmsArray[i - 1].Ncb;
+        }
+
+        if(j < E / Qm)
+        {
+            uint32_t cbStep = nBBULayers / Nl;
+            // if(threadIdx.x == 0) printf("%d %d %d\n", codeBlockQAMStartIndex, blockIdx.y, userLayerMapArray[blockIdx.y * nBBULayers + (j % Nl)] );
+            llr = static_cast<T>(llr_vec_in[codeBlockQAMStartIndex * cbStep +
+                                            (k + (jl * nBBULayers + tbPrmsArray[blockIdx.y].layer_map_array[(j - jl * Nl)]) * QAM_STRIDE)]);
+        }
+        if(threadIdx.x < (blockDim.x / WORD_SIZE + 1))
+        {
+            sharedSeq[threadIdx.x] =
+                gold32(tbPrmsArray[blockIdx.y].cinit,
+                       t - (threadIdx.x) + (threadIdx.x * WORD_SIZE));
+        }
+        __syncthreads();
+
+        if(j < E / Qm)
+        {
+            uint32_t offset = (WORD_SIZE - (t % WORD_SIZE)) * (((t - threadIdx.x) % 32) != 0);
+            uint32_t seq    = sharedSeq[((threadIdx.x + offset) / WORD_SIZE)];
+
+            // change sign based on scrambling sequence bit
+            if(descramblingOn)
+            {
+                // Previous method generates NaNs when the llr value is inf,
+                // due to multiplicaion with 0. (This is likely to occur at
+                // high SNR conditions with the fp16 data type.)
+                //uint32_t s = (seq >> (t % WORD_SIZE)) & 1;
+                //uint32_t sn = (s + 1) & 0x1;
+                //T llr_old = -llr * static_cast<T>(s) + llr * static_cast<T>(sn);
+
+                llr = rate_match_xor_sign(seq, (t % WORD_SIZE), llr);
+                //if(static_cast<float>(llr) != static_cast<float>(llr_old)) { printf("Error: llr = %f, llr_check = %f\n", static_cast<float>(llr), static_cast<float>(llr_check));  }
+                //if(isnan_(static_cast<float>(llr_old))) { printf("llr_old = NaN: threadIdx.x = %u, s = %u, sn = %u, llr = %f, llr_old = %f\n", threadIdx.x, s, sn, static_cast<float>(llr), static_cast<float>(llr_check));
+            }
+            if(k0 > 0) // soft-combining
+            {
+                if(k * E / Qm + j + k0 < Kd || k0 > K)
+                    out[tbBase + r * Ncb +
+                        (k * E / Qm + j + k0 + 2 * Zc) % Ncb] += llr;
+                else
+                    out[tbBase + r * Ncb +
+                        (k * E / Qm + j + k0 + F + 2 * Zc) % Ncb] += llr;
+            }
+            else
+            {
+                if(k * E / Qm + j < Kd)
+                    out[2 * Zc + tbBase + r * Ncb + k * E / Qm + j] = llr;
+                else
+                    out[2 * Zc + tbBase + r * Ncb + k * E / Qm + j + F] = llr;
+            }
+        }
+        // Write filler bits
+        for(uint32_t n = Kd + threadIdx.x; n < K; n += blockDim.x)
+        {
+            out[2 * Zc + tbBase + r * Ncb + n] = 10000.0;
+        }
+    }
+}
+template <typename T>
+void rate_matching_kernel_launch(
+    const PerTbParams* tbPrmsArray,
+    uint32_t           CMax,
+    uint32_t           EMax,
+    uint32_t           nTb,
+    uint32_t           nBBULayers,
+    const float*       in,
+    T*                 out,
+    int                descramblingOn,
+    lwdaStream_t       strm)
+{
+    uint32_t threadBlkDim = 128;
+    dim3     numThreadBlocks(CMax, nTb, (EMax + threadBlkDim - 1) / threadBlkDim);
+    de_rate_matching_global<T><<<numThreadBlocks,
+                                 threadBlkDim,
+                                 sizeof(uint32_t) * ((threadBlkDim / WORD_SIZE) + 1),
+                                 strm>>>(in,
+                                         out,
+                                         tbPrmsArray,
+                                         nTb,
+                                         nBBULayers,
+                                         descramblingOn);
+}
+
+extern "C" {
+
+void rate_matchingFP16(
+    uint32_t           CMax,
+    uint32_t           EMax,
+    uint32_t           nTb,
+    uint32_t           nBBULayers,
+    const PerTbParams* tbPrmsArray,
+    float*             in,
+    __half*            out,
+    int                descramblingOn,
+    lwdaStream_t       strm)
+{
+    rate_matching_kernel_launch<__half>(
+        tbPrmsArray,
+        CMax,
+        EMax,
+        nTb,
+        nBBULayers,
+        in,
+        out,
+        descramblingOn,
+        strm);
+}
+void rate_matchingFP32(
+    uint32_t           CMax,
+    uint32_t           EMax,
+    uint32_t           nTb,
+    uint32_t           nBBULayers,
+    const PerTbParams* tbPrmsArray,
+    float*             in,
+    float*             out,
+    int                descramblingOn,
+    lwdaStream_t       strm)
+{
+    rate_matching_kernel_launch<float>(
+        tbPrmsArray,
+        CMax,
+        EMax,
+        nTb,
+        nBBULayers,
+        in,
+        out,
+        descramblingOn,
+        strm);
+}
+}

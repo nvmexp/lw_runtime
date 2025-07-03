@@ -1,0 +1,131 @@
+//
+// Copyright 2020 LWPU Corporation. All rights reserved.
+//
+
+// Autoexposure
+
+#include <lwda_fp16.h>
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+#ifndef IRAY_BUILD
+#include <corelib/system/LwdaDriver.h>
+#include <exp/context/DeviceContext.h>
+#endif
+
+#include "layers_inline.h"
+#include "rgbaverage.h"
+
+namespace optix_exp {
+
+#define BLOCK_SIZE 1024
+#define GRID_SIZE  24
+
+static inline __device__ bool dLogChannel( const floatRdAccess& input, int index, int channel, float & result )
+{
+    float f = input( index % input.image.width, index / input.image.width, channel );
+
+    if( isfinite(f) && f > 5.96e-8f )
+    {
+        result = __logf(f);
+        return true;
+    }
+
+    return false;
+}
+
+static __global__ void k_averageInput( const floatRdAccess input, float* _sumOut, int* countOut )
+{
+    const int idx = threadIdx.x;
+    const int index = blockIdx.x * blockDim.x + idx;
+    const int gSize = blockDim.x * gridDim.x;
+    const int channel = blockIdx.y;
+
+    __shared__ float result[BLOCK_SIZE];
+
+    float* sumOut = &_sumOut[channel * gridDim.x];
+
+    float sum = 0;
+    int count = 0;
+    for( int i = index; i < input.image.width * input.image.height; i += gSize )
+    {
+        float logval;
+        if( dLogChannel( input, i, channel, logval ) )
+            sum += logval;
+        else
+            count++;
+    }
+    result[idx] = sum;
+    if( count )
+        atomicAdd( &countOut[channel], count );
+    __syncthreads();
+
+    for( int size = blockDim.x/2; size > 0; size /= 2 )
+    {
+        if( idx < size )
+            result[idx] += result[idx + size];
+        __syncthreads();
+    }
+
+    if( idx == 0 )
+        sumOut[blockIdx.x] = result[0];
+}
+
+static __global__ void k_reduceBlocks( float* res, float * _sumOut, int inputSize, int totalInputSize )
+{
+    const int idx = threadIdx.x;
+    const int channel = blockIdx.y;
+
+    __shared__ float result[BLOCK_SIZE];
+    float* sumOut = &_sumOut[channel * inputSize];
+
+    result[idx] = idx < inputSize ? sumOut[idx] : 0;
+
+    __syncthreads();
+
+    for (int size = blockDim.x/2; size > 0; size /= 2)
+    {
+        if( idx < size )
+            result[idx] += result[idx + size];
+        __syncthreads();
+    }
+
+    if( idx == 0 )
+    {
+        int counter = totalInputSize - ((int*)res)[channel];      // res holds the number of nonzero pixels from autoexposure
+        res[channel] = counter == 0 ? 0.f : result[0] / float(counter);
+    }
+}
+
+OptixResult denoiseRGBAverage( const OptixImage2D* input, float average[3], void* scratch, size_t scratchSize, lwdaStream_t streamId, ErrorDetails& errDetails )
+{
+    const unsigned int dim = input->width * input->height;
+    if( dim == 0 )
+        return OPTIX_SUCCESS;
+
+    size_t minScratchSize = 3 * sizeof( float );
+    if( scratchSize < minScratchSize )
+        return errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE, corelib::stringf( "not enough scratch memory, need "
+                                                                                   "at least %llu bytes",
+                                                                                   static_cast<unsigned long long>( minScratchSize ) ) );
+    int gridSize = GRID_SIZE;
+    size_t memReq = 3 * gridSize * sizeof( float );
+
+    if( scratchSize < memReq )
+        gridSize = scratchSize / ( 3 * sizeof(float) );
+
+    if( const LWresult lwret = corelib::lwdaDriver().LwMemsetD8Async( (LWdeviceptr)average, 0, 3 * sizeof(int), streamId ) )
+            return errDetails.logDetails( lwret, "initialization of scratch buffer for autoexposure failed" );
+    k_averageInput<<<dim3(gridSize, 3), BLOCK_SIZE, 0, streamId>>>( floatRdAccess( *input ), (float*)scratch, (int*)&average[0] );
+    k_reduceBlocks<<<dim3(1, 3), BLOCK_SIZE, 0, streamId>>>( average, (float*)scratch, gridSize, dim );
+
+    return OPTIX_SUCCESS;
+}
+
+OptixResult denoiseRGBAverageComputeMemoryResources( size_t& sizeInBytes, ErrorDetails& errDetails )
+{
+    sizeInBytes = 3 * GRID_SIZE * sizeof( float );
+    return OPTIX_SUCCESS;
+}
+
+};  // namespace optix_exp

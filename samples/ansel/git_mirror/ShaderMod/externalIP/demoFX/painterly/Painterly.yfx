@@ -1,0 +1,207 @@
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	float4 tileUV;
+	int captureState;
+}
+
+cbuffer controlBuf
+{
+	float g_sldPasses;
+	float g_sldPaintDirs;
+	float g_sldPaintLen;
+	float g_sldSharpen;
+}
+
+Texture2D texColor;
+SamplerState samLinear;
+
+#define NUM_DIRS 				g_sldPaintDirs
+#define NUM_STEPS_PER_PASS 		g_sldPaintLen
+#define SHARPEN_INTENSITY		g_sldSharpen
+#define NUM_PASSES				g_sldPasses
+
+float2 sobel(in float2 uv, 
+	         in float2 pixel_size)
+{
+	float2 grad = 0;
+	float3x3 sobel_m = float3x3(-1, -2, -1, 0,  0,  0, 1,  2,  1);
+	[unroll]for(int x = -1; x <= 1; x++)
+	[unroll]for(int y = -1; y <= 1; y++)
+	{
+		float v = dot(texColor.SampleLevel(samLinear, uv + pixel_size * float2(x, y), 0).rgb, 0.333);
+		grad += v * float2(sobel_m[x+1][y+1], sobel_m[y+1][x+1]);	
+	}
+	return grad * float2(1,-1);
+}
+
+float3 faux_kuwahara(	in float2 uv, 
+	                	in float2 pixel_size, 
+	                	in float pass_id)
+{
+	static const float STEP_SIZE = 1.414;
+	float2 grad = sobel(uv, pixel_size);
+
+	float2 orthogonal = float2(grad.y, -grad.x);
+	float steepness = dot(grad, grad) * 4;
+
+	float edge_angle = atan(orthogonal.y / orthogonal.x);
+	float2x2 rot_to_edge = float2x2(cos(edge_angle), -sin(edge_angle), 
+		                            sin(edge_angle),  cos(edge_angle));
+
+	float4 weighted_sum = 0;
+	float3 center = texColor.Sample(samLinear, uv).rgb;
+
+	[loop]
+	for(float j = 0; j < NUM_DIRS; j++)
+	{
+		float2 dir;
+		sincos(radians(360.0 / NUM_DIRS * (j + pass_id / NUM_PASSES)), dir.y, dir.x);
+		//sincos(radians(360.0 / NUM_DIRS * j), dir.y, dir.x);
+
+		//deform circle to ellipse
+		dir.x *= 1 + steepness;
+		dir.y /= 1 + steepness;		
+
+		//align ellipse with edge orientation
+		dir = mul(dir, rot_to_edge);
+
+		//precompute scale
+		dir *= pixel_size * STEP_SIZE; 
+
+		float4 mean 	= float4(center, 		  1); 
+		float4 variance = float4(center * center, 1);
+
+		[loop]
+		for(int k = 1; k <= NUM_STEPS_PER_PASS; k++)
+		{
+
+			float3 color = texColor.SampleLevel(samLinear, uv + dir * k, 0).rgb;
+			mean += float4(color, 1);
+			variance += float4(color * color, 1);
+		}
+
+		mean.rgb 		/= mean.a; 
+		variance.rgb 	/= variance.a;
+
+		variance.rgb -= mean.rgb*mean.rgb;
+		variance.a = max(max(variance.x, variance.y), variance.z) + 0.001;
+
+		weighted_sum += float4(mean.rgb, 1) * pow(variance.a, -SHARPEN_INTENSITY * 8);
+	}
+
+	return weighted_sum.rgb / weighted_sum.a;
+}
+
+void PS_Paint_1(in float4 position : SV_Position, 
+				in float2 uv: TexCoord, 
+				out float4 color : SV_Target)
+{
+	static const float2 pixel_size = rcp(screenSize.xy * (tileUV.zw - tileUV.xy));
+
+	if(NUM_PASSES >= 1)
+		color.rgb = faux_kuwahara(uv, pixel_size, 1);
+	else
+		color.rgb = texColor.Sample(samLinear, uv).rgb;
+
+	color.a = 1.0;
+}
+
+void PS_Paint_2(in float4 position : SV_Position, 
+				in float2 uv: TexCoord, 
+				out float4 color : SV_Target)
+{
+	static const float2 pixel_size = rcp(screenSize.xy * (tileUV.zw - tileUV.xy));
+
+	if(NUM_PASSES >= 2)
+		color.rgb = faux_kuwahara(uv, pixel_size, 2);
+	else
+		color.rgb = texColor.Sample(samLinear, uv).rgb;
+
+	color.a = 1.0;
+}
+
+void PS_Paint_3(in float4 position : SV_Position, 
+				in float2 uv: TexCoord, 
+				out float4 color : SV_Target)
+{
+	static const float2 pixel_size = rcp(screenSize.xy * (tileUV.zw - tileUV.xy));
+
+	if(NUM_PASSES >= 3)
+		color.rgb = faux_kuwahara(uv, pixel_size, 3);
+	else
+		color.rgb = texColor.Sample(samLinear, uv).rgb;
+
+	color.a = 1.0;
+}
+
+void PS_Paint_4(in float4 position : SV_Position, 
+				in float2 uv: TexCoord, 
+				out float4 color : SV_Target)
+{
+	static const float2 pixel_size = rcp(screenSize.xy * (tileUV.zw - tileUV.xy));
+
+	if(NUM_PASSES >= 4)
+		color.rgb = faux_kuwahara(uv, pixel_size, 4);
+	else
+		color.rgb = texColor.Sample(samLinear, uv).rgb;
+
+	color.a = 1.0;
+}
+
+void PS_Paint_5(in float4 position : SV_Position, 
+				in float2 uv: TexCoord, 
+				out float4 color : SV_Target)
+{
+	static const float2 pixel_size = rcp(screenSize.xy * (tileUV.zw - tileUV.xy));
+
+	if(NUM_PASSES >= 5)
+		color.rgb = faux_kuwahara(uv, pixel_size, 5);
+	else
+		color.rgb = texColor.Sample(samLinear, uv).rgb;
+
+	color.a = 1.0;
+}
+
+void PS_Paint_6(in float4 position : SV_Position, 
+				in float2 uv: TexCoord, 
+				out float4 color : SV_Target)
+{
+	static const float2 pixel_size = rcp(screenSize.xy * (tileUV.zw - tileUV.xy));
+
+	if(NUM_PASSES >= 6)
+		color.rgb = faux_kuwahara(uv, pixel_size, 6);
+	else
+		color.rgb = texColor.Sample(samLinear, uv).rgb;
+
+	color.a = 1.0;
+}
+
+void PS_Paint_7(in float4 position : SV_Position, 
+				in float2 uv: TexCoord, 
+				out float4 color : SV_Target)
+{
+	static const float2 pixel_size = rcp(screenSize.xy * (tileUV.zw - tileUV.xy));
+
+	if(NUM_PASSES >= 7)
+		color.rgb = faux_kuwahara(uv, pixel_size, 7);
+	else
+		color.rgb = texColor.Sample(samLinear, uv).rgb;
+
+	color.a = 1.0;
+}
+
+void PS_Paint_8(in float4 position : SV_Position, 
+				in float2 uv: TexCoord, 
+				out float4 color : SV_Target)
+{
+	static const float2 pixel_size = rcp(screenSize.xy * (tileUV.zw - tileUV.xy));
+
+	if(NUM_PASSES >= 8)
+		color.rgb = faux_kuwahara(uv, pixel_size, 8);
+	else
+		color.rgb = texColor.Sample(samLinear, uv).rgb;
+
+	color.a = 1.0;
+}

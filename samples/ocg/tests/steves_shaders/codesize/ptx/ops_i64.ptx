@@ -1,0 +1,82 @@
+	.version 3.1
+	.target sm_20
+
+        .global .u64 mem0;
+        .global .u64 mem1;
+        .global .u32 mem2;
+        .global .u16 mem3;
+
+	.entry main 
+	{
+           .reg .u64 a, b, c;
+           .reg .u32 i;
+           .reg .s32 r;
+           .reg .s16 shrt;
+           .reg .pred p, q;
+           
+
+           ld.global.u64  a, [mem0];
+           ld.global.u64  b, [mem1];
+           add.u64        a, a, b;
+           neg.s64        a, a;
+           sub.s64        a, a, b;
+           not.b64        a, a;
+           and.b64        a, a, b;
+           or.b64         a, a, b;
+           xor.b64        a, a, b;
+           mul.lo.u64     a, a, b;
+           mul.hi.u64     a, a, b;
+           mul.lo.s64     a, a, b;
+           mul.hi.s64     a, a, b;
+           min.s64        a, a, b;
+           max.s64        a, a, b;
+           ld.global.u32  i, [mem2];
+           shl.b64        a, a, i;
+           shr.u64        a, a, i;
+           shr.s64        a, a, i;
+           ld.global.s32  r, [mem2];
+           cvt.s64.s32    b, r;
+           and.b64        a, a, b;
+           ld.global.s16  shrt, [mem3];
+           cvt.s64.s16    b, shrt;
+           or.b64         a, a, b;
+           setp.lt.u64    p, a, b;
+           set.u32.u64.eq i, a, b;
+           setp.eq.u32    q, i, 3;
+           and.pred       p, p, q;
+        @p st.global.u64  [mem0], a;
+           cvt.s32.s64    r, a;
+           cvt.u32.u64    i, a;
+           and.b32        r, r, i;
+           st.global.u32  [mem2], r;
+           cvt.s16.s64    shrt, a;
+           st.global.s16  [mem3], shrt;
+
+           bar.sync       0;
+
+           ld.global.u64  a, [mem0];
+           set.le.u32.u64 i, a, b;
+           neg.s32        i, i;
+           cvt.u64.u32    a, i;
+           st.global.u64  [mem0], a;
+
+           ld.global.u64  a, [mem0];
+           cvt.u64.u64    a, a;
+           st.global.u64  [mem0], a;
+
+           bar.sync       0;
+
+           ld.global.u64  a, [mem0];
+           ld.global.u64  b, [mem1];
+           ld.global.u64  c, [mem1 + 8];
+           mad.lo.u64     a, a, b, c;
+           mad.hi.u64     b, a, b, c;
+           st.global.u64  [mem0], a;
+           st.global.u64  [mem1], b;
+
+           bar.sync       0;
+           sad.u64        a, a, b, c;
+           st.global.u64  [mem0], a;
+           exit;
+        }
+

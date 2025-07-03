@@ -1,0 +1,45 @@
+cbuffer globalParams
+{
+	float2 screenSize;
+	int captureState;
+	float4 tileUV;
+}
+
+cbuffer controlBuf
+{
+	float g_sldProtanopia;
+	float g_sldDeuteranopia;
+	float g_sldTritanopia;
+}
+
+Texture2D texColor;
+SamplerState samLinear;
+
+void PS_Daltonize(in float4 position : SV_Position, in float2 uv: TexCoord, out float4 color : SV_Target)
+{
+	color = texColor.Sample(samLinear, uv);
+
+	float3 RGB = color.rgb;
+
+	float3 LMS = float3(	dot(RGB,float3(17.8824,		43.5161,	4.11935)),
+							dot(RGB,float3(3.45565,		27.1554,	3.86714)),
+							dot(RGB,float3(0.0299566,	0.184309,	1.46709)));
+
+	float3 LMS_daltonized = LMS;
+	//Protanopia - modify L only
+	LMS_daltonized.x = lerp(LMS_daltonized.x, dot(LMS,float3(0.0,	2.02344, -2.52581)), g_sldProtanopia);
+	//Deuteranopia - modify M only
+	LMS_daltonized.y = lerp(LMS_daltonized.y, dot(LMS,float3(0.494207, 0.0, 1.24827)), g_sldDeuteranopia);
+	 //Tritanopia - modify S only
+	LMS_daltonized.z = lerp(LMS_daltonized.z, dot(LMS,float3(-0.395913, 0.801109, 0.0)), g_sldTritanopia);
+
+	float3 RGB_daltonized = float3(	dot(LMS_daltonized,float3(0.0809444479,		-0.130504409,	0.116721066)),
+									dot(LMS_daltonized,float3(-0.0102485335,	0.0540193266,	-0.113614708)),
+									dot(LMS_daltonized,float3(-0.000365296938,	-0.00412161469,	0.693511405)));
+
+	float3 RGB_corrected = RGB;
+	RGB_corrected.y += dot(RGB.xy - RGB_daltonized.xy, float2(0.7,1.0));
+	RGB_corrected.z += dot(RGB.xz - RGB_daltonized.xz, float2(0.7,1.0));
+
+	color = float4(RGB_corrected, 1.0);
+}

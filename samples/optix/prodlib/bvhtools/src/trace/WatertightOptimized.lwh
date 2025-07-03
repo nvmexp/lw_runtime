@@ -1,0 +1,215 @@
+// Original author: Tero Karras
+// https://wiki.lwpu.com/lwresearch/index.php/Ray_Tracing_100x/Watertight_Ray_Triangle_Intersection
+// https://wiki.lwpu.com/lwresearch/index.php/Ray_Tracing_100x/Watertight_Ray_Triangle_Intersection/WatertightImproved
+//
+// Retweaked to improve precision for the t value/hit distance: iray code/Carsten Waechter
+// 
+// This is an improved LWCA implementation based on the ideas presented in the following paper:
+// 
+//     Watertight Ray/Triangle Intersection 
+//     Sven Woop, Carsten Benthin, Ingo Wald 
+//     2013 Journal of Computer Graphics Techniques
+// 
+// Changes for OptiX: moved intrinsics to this file.  Removed some debug code.
+
+#include <prodlib/bvhtools/src/common/Intrinsics.hpp>
+
+
+namespace WatertightOptimized // hand-optimized version of TriWatertightOriginal
+{
+
+//------------------------------------------------------------------------
+// Standard floating point arithmetic.
+__device__ __forceinline__ float    ffma_rn     (float a, float b, float c) { float d; asm("fma.rn.f32 %0, %1, %2, %3;" : "=f"(d) : "f"(a), "f"(b), "f"(c)); return d; }
+__device__ __forceinline__ float    ffma_rn_sat (float a, float b, float c) { float d; asm("fma.rn.sat.f32 %0, %1, %2, %3;" : "=f"(d) : "f"(a), "f"(b), "f"(c)); return d; }
+__device__ __forceinline__ float    fmul_rn_ftz_sat(float a, float b)       { float d; asm("mul.rn.ftz.sat.f32 %0, %1, %2;" : "=f"(d) : "f"(a), "f"(b) ); return d; }
+__device__ __forceinline__ float    frcp        (float a)                   { float d; asm("rcp.approx.ftz.f32 %0, %1;" : "=f"(d) : "f"(a)); return d; }
+__device__ __forceinline__ float    fadd_rn_ftz (float a, float b)          { float d; asm("add.rn.ftz.f32 %0, %1, %2;" : "=f"(d) : "f"(a), "f"(b) ); return d; }
+__device__ __forceinline__ float    fneg        (float a)                   { float d; asm("neg.f32 %0, %1;" : "=f"(d) : "f"(a) ); return d; }
+__device__ __forceinline__ float    fmul_rn     (float a, float b)          { float d; asm("mul.rn.f32 %0, %1, %2;" : "=f"(d) : "f"(a), "f"(b)); return d; }
+__device__ __forceinline__ float    fmul_rn_sat (float a, float b)          { float d; asm("mul.rn.sat.f32 %0, %1, %2;" : "=f"(d) : "f"(a), "f"(b)); return d; }
+__device__ __forceinline__ float    fadd_rn     (float a, float b)          { float d; asm("add.rn.f32 %0, %1, %2;" : "=f"(d) : "f"(a), "f"(b)); return d; }
+__device__ __forceinline__ float    fsub_rn     (float a, float b)          { float d; asm("sub.rn.f32 %0, %1, %2;" : "=f"(d) : "f"(a), "f"(b)); return d; }
+
+//------------------------------------------------------------------------
+
+__device__ __forceinline__ 
+void setupRay(const float3& dir,
+  bool& axisx, bool& axisy, bool& axisz, float3& shear)
+{
+    // Choose main axis.
+
+    const float ax = fabsf(dir.x);
+    const float ay = fabsf(dir.y);
+    const float az = fabsf(dir.z);
+
+    axisx = (ax >= ay && ax >= az);
+    axisy = (!(ax >= ay) && ay >= az);
+    axisz = (!(ax >= az) && !(ay >= az));
+
+    // Swizzle & Precompute.
+
+    shear.z = frcp(axisz ? dir.z : (axisx ? dir.x  : dir.y)); // precision good enough in LWCA (does not handle denormals though)
+    shear.x = fmul_rn(axisx ? dir.z : dir.x, fneg(shear.z));
+    shear.y = fmul_rn(axisy ? dir.z : dir.y, fneg(shear.z));
+}
+
+__device__ __forceinline__ 
+void setupRay(const float3& dir,
+  bool& axisx, bool& axisy, bool& axisz, float3& shear, float3& ilwDir)
+{
+    setupRay(dir, axisx, axisy, axisz, shear);
+    ilwDir.x = frcp(dir.x); // precision good enough in LWCA (does not handle denormals though)
+    ilwDir.y = frcp(dir.y);
+    ilwDir.z = frcp(dir.z);
+}
+
+
+//------------------------------------------------------------------------
+
+template <bool USE_WATERTIGHT>
+__device__ __forceinline__ 
+bool intersectTriangle(const float3& origin, const bool axisx, const bool axisy, const bool axisz, const float3& shear,
+    const float3& v0, const float3& v1, const float3& v2, const float tmin, const float tmax,
+    float& out_t, float2& out_uv/*, float& out_w*/)
+{
+    // Offset the vertices by the ray origin.
+
+    const float3 v0o = make_float3(fsub_rn(v0.x,origin.x), fsub_rn(v0.y,origin.y), fsub_rn(v0.z,origin.z));
+    const float3 v1o = make_float3(fsub_rn(v1.x,origin.x), fsub_rn(v1.y,origin.y), fsub_rn(v1.z,origin.z));
+    const float3 v2o = make_float3(fsub_rn(v2.x,origin.x), fsub_rn(v2.y,origin.y), fsub_rn(v2.z,origin.z));
+
+    // Swizzle z-components of vertices.
+
+    const float az = axisz ? v0o.z : (axisx ? v0o.x : v0o.y);
+    const float bz = axisz ? v1o.z : (axisx ? v1o.x : v1o.y);
+    const float cz = axisz ? v2o.z : (axisx ? v2o.x : v2o.y);
+
+    // Swizzle x/y & Translate/shear vertices.
+
+    float ax = ffma_rn(az, shear.x, axisx ? v0o.z : v0o.x);
+    float ay = ffma_rn(az, shear.y, axisy ? v0o.z : v0o.y);
+    float bx = ffma_rn(bz, shear.x, axisx ? v1o.z : v1o.x);
+    float by = ffma_rn(bz, shear.y, axisy ? v1o.z : v1o.y);
+    float cx = ffma_rn(cz, shear.x, axisx ? v2o.z : v2o.x);
+    float cy = ffma_rn(cz, shear.y, axisy ? v2o.z : v2o.y);
+
+    // Quantize vertex coordinates to 2^-74 granularity by shifting bits worth 2^-75 or less outside the range that can be represented by 32-bit floats.
+    // This ensures products of such coordinates have a granularity no less than 2^-148, which can still be represented by 32-bit floats.
+    // The DP2 instruction sequence following must not underflow, which is why we need this seemingly arbitrary cutoff.
+
+    if(USE_WATERTIGHT)
+    {
+        const int exponentShift = 149 - 74; // Lowest representable denorm exponent
+        const float exp2exponentShift  = exp2f( exponentShift);
+        const float exp2mexponentShift = exp2f(-exponentShift);
+        ax = fmul_rn( fmul_rn(ax, exp2mexponentShift ), exp2exponentShift );
+        ay = fmul_rn( fmul_rn(ay, exp2mexponentShift ), exp2exponentShift );
+        bx = fmul_rn( fmul_rn(bx, exp2mexponentShift ), exp2exponentShift );
+        by = fmul_rn( fmul_rn(by, exp2mexponentShift ), exp2exponentShift );
+        cx = fmul_rn( fmul_rn(cx, exp2mexponentShift ), exp2exponentShift );
+        cy = fmul_rn( fmul_rn(cy, exp2mexponentShift ), exp2exponentShift );
+    }
+
+    // Callwlate high-precision barycentrics (DP2)
+    // This sequence must be exact (no rounding allowed), or the inside test result will differ between adjacent triangles.
+
+    const float ut = fmul_rn(cy, bx);
+    float u = fsub_rn(ffma_rn(cx, by, fneg(ut)), ffma_rn(cy, bx, fneg(ut)));
+    const float vt = fmul_rn(ay, cx);
+    float v = fsub_rn(ffma_rn(ax, cy, fneg(vt)), ffma_rn(ay, cx, fneg(vt)));
+    const float wt = fmul_rn(by, ax);
+    float w = fsub_rn(ffma_rn(bx, ay, fneg(wt)), ffma_rn(by, ax, fneg(wt)));
+
+    // Compute intersection z-coordinate,
+    // and translate/scale to get the t-value.
+
+    // .sat colwerts a NaN output to +0.0f.
+    // .ftz colwerts denorm inputs to 0.
+    // If rdet == inf, the resulting normalized barycentrics will be 0.
+
+    float det = fadd_rn(fadd_rn(u, v), w);
+    float rdet = frcp(det); // precision good enough in LWCA (does not handle denormals though)
+    float unorm = fmul_rn_sat(u, rdet);
+    float vnorm = fmul_rn_sat(v, rdet);
+    //float wnorm = fmul_rn_sat(w, rdet);
+
+    const float z = ffma_rn( fsub_rn(az, cz), unorm, ffma_rn( fsub_rn(bz, cz), vnorm, cz ) );
+    float t = fmul_rn(z, shear.z);
+
+    // Uncertain result => slow fallback/rasterization rules
+    bool missTri;
+    if(USE_WATERTIGHT)
+    {
+    const float eps = exp2f(-126.0f);
+    if(fabsf(u) < eps | fabsf(v) < eps | fabsf(w) < eps)
+    {
+        // This path is very rare and should be skipped with a branch instruction most of the time.
+        // Apply rasterization rules for uncertain edges.
+
+        if (fabsf(det) < eps)
+        {
+            // rdet will be inf (or a very big value)
+            // Redo rdet, vnorm, unorm and recompute z and t
+
+            const float eps2 = exp2f(24.0f);
+            det   = fmul_rn(det, eps2);
+            vnorm = fmul_rn(v,   eps2);
+            unorm = fmul_rn(u,   eps2);
+        
+            rdet  = frcp(det);
+            vnorm = fmul_rn_sat(vnorm, rdet);
+            unorm = fmul_rn_sat(unorm, rdet);
+
+            const float z2 = ffma_rn( fsub_rn(az, cz), unorm, ffma_rn( fsub_rn(bz, cz), vnorm, cz ) );
+            t = fmul_rn(z2, shear.z);
+        }
+
+        if( u == 0.0f )
+            u = fsub_rn(cx, bx);
+        if( u == 0.0f )
+            u = fsub_rn(cy, by);
+        if( v == 0.0f )
+            v = fsub_rn(ax, cx);
+        if( v == 0.0f )
+            v = fsub_rn(ay, cy);
+        if( w == 0.0f )
+            w = fsub_rn(bx, ax);
+        if( w == 0.0f )
+            w = fsub_rn(by, ay);
+
+        // Signs disagree, or all vertices are identical => miss.
+        missTri = ( u < 0.0f | v < 0.0f | w < 0.0f ) == ( u > 0.0f | v > 0.0f | w > 0.0f );
+    }
+    else
+    {
+        // Report miss if sign bits of u, v, w aren't identical.
+        // Doesn't handle +-0.0 correctly, zeros need to have been tested separately earlier.
+        const unsigned int equalBits = bitTest3(__float_as_uint(u), __float_as_uint(v), __float_as_uint(w));
+        missTri = (int)equalBits >= 0;
+    }
+    }
+    else
+        // Signs disagree, or all vertices are identical => miss.
+        missTri = ( u < 0.0f | v < 0.0f | w < 0.0f ) == ( u > 0.0f | v > 0.0f | w > 0.0f );
+
+
+    const bool miss = (t <= tmin || t >= tmax || missTri);
+
+    // Flip back winding order if ray was multiplied by negative value
+    //rdet = __uint_as_float( __float_as_uint( rdet ) ^ ( __float_as_uint( sd.z ) & 0x80000000u ) );
+
+    // Return result.
+    // Note: careful not to modify out_t on a miss
+    if (miss) {
+      return false;
+    } else {
+      out_t = t;
+      out_uv.x = unorm;
+      out_uv.y = vnorm;
+      //out_w = wnorm;
+      return true;
+    }
+}
+
+} // namespace

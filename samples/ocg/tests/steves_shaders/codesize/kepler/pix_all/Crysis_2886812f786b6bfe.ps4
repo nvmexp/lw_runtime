@@ -1,0 +1,53 @@
+ps_4_0
+dcl_input v1.xy, linear centroid
+dcl_input v1.z, linear centroid
+dcl_input v2.xyz, linear
+dcl_input v4.xyzw, linear
+dcl_output o0.xyzw
+dcl_constantbuffer cb0[10].xyzw, immediateindexed
+dcl_constantbuffer cb3[5].xyzw, immediateindexed
+dcl_sampler s0, mode_default
+dcl_resource t0, texture2d, (float, float, float, float)
+dcl_temps 3 
+add r0.xyz, v2.xyzx, -cb0[1].xyzx
+mul r0.w, r0.z, cb0[2].x
+mul r1.x, r0.w, l(-1.44269502)
+exp r1.x, r1.x
+add r1.x, -r1.x, l(1.00000000)
+div r0.w, r1.x, r0.w
+lt r1.x, l(0.01000000), |r0.z|
+movc r0.w, r1.x, r0.w, l(0x3f800000)
+dp3 r1.x, r0.xyzx, r0.xyzx
+sqrt r1.y, r1.x
+rsq r1.x, r1.x
+mul r1.y, r1.y, cb0[2].y
+mad r0.w, r0.w, r1.y, -cb0[2].w
+exp_sat r0.w, -r0.w
+dp3 r1.y, r0.xyzx, -cb0[8].xyzx
+mul r0.xyz, r0.xyzx, r1.xxxx
+mad r1.x, r1.y, cb0[0].w, l(-1.00000000)
+mul_sat r1.x, r0.w, r1.x
+dp3 r0.x, cb0[6].xyzx, r0.xyzx
+mad r0.y, cb0[7].x, -r0.x, cb0[7].y
+mad r0.x, r0.x, r0.x, l(1.00000000)
+log r0.y, r0.y
+mul r0.y, r0.y, l(-1.50000000)
+exp r0.y, r0.y
+mul r0.y, r0.x, r0.y
+mul r0.x, r0.x, l(0.75000000)
+mul r1.yzw, r0.yyyy, cb0[5].xxyz
+mul r0.xyz, r0.xxxx, cb0[4].xyzx
+mad r0.xyz, r1.yzwy, r1.xxxx, r0.xyzx
+add r0.xyz, r0.xyzx, cb0[3].xyzx
+min r0.xyz, r0.xyzx, l(16384.00000000, 16384.00000000, 16384.00000000, 0.00000000)
+sample r1.xyzw, v1.xyxx, t0.xyzw, s0
+mov_sat r2.x, v1.z
+mul r1.xyzw, r1.xyzw, r2.xxxx
+mul r1.xyzw, r1.xyzw, v4.xyzw
+mul r0.xyz, r0.xyzx, r1.wwww
+mov o0.w, r1.w
+mul r1.xyz, r1.xyzx, v4.wwww
+mul r1.xyz, r1.xyzx, cb0[9].xxxx
+mad r1.xyz, r1.xyzx, cb3[3].xxxx, -r0.xyzx
+mad o0.xyz, r0.wwww, r1.xyzx, r0.xyzx
+ret 

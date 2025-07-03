@@ -1,0 +1,92 @@
+!!ARBfp1.0 
+OPTION ARB_precision_hint_fastest;
+
+# texture 0 is the lwbe map
+# texture 1 is the per-surface bump map
+# texture 2 is the light falloff texture
+# texture 3 is the light projection texture
+# texture 4 is the per-surface diffuse map
+# texture 5 is the per-surface spelwlar map
+# texture 6 is the spelwlar lookup table
+
+# elw[0] is the diffuse modifier
+# elw[1] is the spelwlar modifier
+
+TEMP	light, color, R1, R2, localNormal, spelwlar;
+
+PARAM	subOne = { -1, -1, -1, -1 };
+PARAM	scaleTwo = { 2, 2, 2, 2 };
+
+# load the spelwlar half angle first, because
+# the ATI shader gives a "too many indirections" error
+# if this is done right before the texture indirection
+
+
+# instead of using the normalization lwbe map, normalize with math
+DP3		spelwlar, fragment.texcoord[6],fragment.texcoord[6];
+RSQ		spelwlar, spelwlar.x;
+MUL		spelwlar, spelwlar.x, fragment.texcoord[6];
+#-----------------
+
+
+#
+# the amount of light contacting the fragment is the
+# product of the two light projections and the surface
+# bump mapping
+#
+
+# perform the diffuse bump mapping
+
+# instead of using the normalization lwbe map, normalize with math
+DP3		light, fragment.texcoord[0],fragment.texcoord[0];
+RSQ		light, light.x;
+MUL		light, light.x, fragment.texcoord[0];
+#-----------------
+
+TEX	localNormal, fragment.texcoord[1], texture[1], 2D;
+MOV localNormal.x, localNormal.a;
+MAD	localNormal, localNormal, scaleTwo, subOne;
+DP3	light, light, localNormal;
+
+# modulate by the light projection
+TXP	R1, fragment.texcoord[3], texture[3], 2D;
+MUL	light, light, R1;
+
+# modulate by the light falloff
+TXP	R1, fragment.texcoord[2], texture[2], 2D;
+MUL	light, light, R1;
+
+#
+# the light will be modulated by the diffuse and
+# spelwlar surface characteristics
+#
+
+# modulate by the diffuse map and constant diffuse factor
+TEX	R1, fragment.texcoord[4], texture[4], 2D;
+MUL	color, R1, program.elw[0];
+
+# perform the spelwlar bump mapping
+DP3	spelwlar, spelwlar, localNormal;
+
+# perform a dependent table read for the spelwlar falloff
+TEX	R1, spelwlar, texture[6], 2D;
+
+# modulate by the constant spelwlar factor
+MUL	R1, R1, program.elw[1];
+
+# modulate by the spelwlar map * 2
+TEX	R2, fragment.texcoord[5], texture[5], 2D;
+ADD	R2, R2, R2;
+MAD	color, R1, R2, color;
+
+
+MUL	color, light, color;
+
+# modify by the vertex color
+
+# this should be better on future hardware, but current drivers make it slower
+MUL result.color.xyz, color, fragment.color;
+
+
+END
+

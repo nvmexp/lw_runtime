@@ -1,0 +1,60 @@
+.version 3.1
+.target sm_20
+
+.global .u32 x;
+
+.func (.param .u32 out) myadd (.reg .u32 a, .reg .u32 b, .reg .u32 c, .reg .u32 d,
+                               .reg .u32 e, .reg .u32 f, .reg .u32 g, .reg .u32 h,
+                               .reg .u32 i, .reg .u32 j, .reg .u32 k, .reg .u32 l)
+{
+    .reg .u32 cc, r;
+
+    add.u32       r, a, b;
+    add.u32       r, r, c;
+    add.u32       r, r, d;
+    add.u32       r, r, e;
+    add.u32       r, r, f;
+    add.u32       r, r, g;
+    add.u32       r, r, h;
+    add.u32       r, r, i;
+    add.u32       r, r, j;
+    add.u32       r, r, k;
+    add.u32       r, r, l;
+    st.param.u32  [out], r;
+    ret;
+}
+
+.entry main(.param .u32 output, .param .u32 output1, .param .u32 output2)
+{
+    .reg .u32 t, o;
+    .reg .pred p<7>;
+
+    call (t), myadd, (4, 6, 8, 12, 14, 16, 18, 20, 22, 24, 26, 28);
+    ld.param.u32  o, [output];
+    st.b32        [o], t;
+
+    setp.eq.u32 p0, t, 5;
+    setp.ne.u32 p1, t, 6;
+    setp.lt.u32 p2, t, 7;
+    setp.gt.u32 p3, t, 8;
+    setp.ge.u32 p4, t, 9;
+    setp.eq.u32 p5, t, 10;
+    setp.ne.u32 p6, t, 11;
+    call (t), myadd, (t, t, t, 12, 14, 16, 18, 20, 22, 24, 26, 28);
+    ld.param.u32  o, [output1];
+    st.b32        [o], t;
+
+    @p0 add.u32 t, t, 1;
+    @p1 add.u32 t, t, 1;
+    @p2 add.u32 t, t, 1;
+    @p3 add.u32 t, t, 1;
+    @p4 add.u32 t, t, 1;
+    @p5 add.u32 t, t, 1;
+    @p6 add.u32 t, t, 1;
+    call (t), myadd, (t, t, t, 12, 14, 16, 18, 20, 22, 24, 26, 28);
+    ld.param.u32  o, [output2];
+    st.b32        [o], t;
+
+    exit;
+}
+ 

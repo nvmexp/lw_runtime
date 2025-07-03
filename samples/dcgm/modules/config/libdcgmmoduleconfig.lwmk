@@ -1,0 +1,73 @@
+##############################################################################
+# define LOCAL_SOURCES
+##############################################################################
+
+
+LW_CXX_EXCEPTIONS := 0
+LW_CXX_RTTI := 0
+
+LWRRENT_DIR := $(LW_SOURCE)/apps/dcgm/modules/config
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += DcgmModuleConfig.cpp
+LOCAL_SOURCES += DcgmConfigManager.cpp
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/common/protobuf
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/protobuf-2.6.0/include/
+LOCAL_INCLUDES += $(DCGM_DIR)/common
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/src/
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/
+LOCAL_INCLUDES += $(DCGM_DIR)/common/transport
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/config
+#We should probably get rid of the below eventually
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/libevent-2.0.22-stable/include/
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/libevent-2.0.22-stable/include/event2/
+LOCAL_INCLUDES += $(LWVS_DIR)/libs/jsoncpp-0.10.6/include
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(LWML_DIR)
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_CFLAGS += -fPIC
+endif
+
+DCGMCONFIG_SHARED_LIBRARY_NAME:=libdcgmmoduleconfig.so
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+    
+LOCAL_LDFLAGS += -rdynamic
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS) -lstdc++ -ldcgm -lgcc_s
+#backup flags -levent -lc -lz -ljsonc -lprotobuf -llwcmproto -lm -lrt
+
+dcgmmoduleconfig_TARGET  := $(OUTPUTDIR)/$(DCGMCONFIG_SHARED_LIBRARY_NAME)
+dcgmmoduleconfig_SONAME  := $(DCGMCONFIG_SHARED_LIBRARY_NAME)
+dcgmmoduleconfig_OBJECTS := $(LOCAL_OBJECTS)
+dcgmmoduleconfig_CFLAGS  := $(LOCAL_CFLAGS)
+dcgmmoduleconfig_LDFLAGS := $(LOCAL_LDFLAGS)
+dcgmmoduleconfig_DEPENDS ?= $(dcgm_TARGET)
+
+
+DCGMMODULECONFIG_DECODE_DB := $(OUTPUTDIR)/dcgmmoduleconfig_decode_db.txt
+$(DCGMMODULECONFIG_DECODE_DB) : $(LOCAL_SOURCES)
+	$(GREP) -n -B 1 -A 4 -e '^\s*PRINT_' -e 'DEBUG_' $^ > $@
+
+build: $(dcgmmoduleconfig_TARGET)
+dcgmbuildsyncpoint:: $(dcgmmoduleconfig_TARGET)
+$(eval $(call MAKE_SHARED_LIBRARY,dcgmmoduleconfig))
+build: $(dcgmmoduleconfig_TARGET).guardwords
+
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

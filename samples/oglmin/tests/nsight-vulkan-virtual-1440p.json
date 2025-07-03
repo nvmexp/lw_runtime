@@ -1,0 +1,272 @@
+[
+  {
+    "Type": "Control",
+    "Description": "Set regkeys, VulkanSDK, 2560x1440, lock clocks",
+    "OutputDirectory": "Initialization",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryList": [ "vcrt2015-9", "Vulkan-SDK-1.2.135.0" ],
+    "TestDefinitions": [
+      {
+        "Command": "[Netapp]\\vcrt2015-9\\VC_redist.x64.exe",
+        "Arguments": "/install /quiet /norestart /log [OutputDirectory]\\VC_redist.x64.log"
+      },
+      {
+        "Command": "[Netapp]\\vcrt2015-9\\VC_redist.x86.exe",
+        "Arguments": "/install /quiet /norestart /log [OutputDirectory]\\VC_redist.x86.log"
+      },
+      {
+        "Command": "SetVulkanExplicitLayers",
+        "Arguments": "[Netapp]\\Vulkan-SDK-1.2.135.0"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "OGL_DEFAULT_SWAP_INTERVAL=DISABLE"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VSYNCMODE=FORCEOFF"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VK_ABORT_ON_DEVICE_LOST=ENABLED"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VK_HIDE_UNUSED_MEMORY_TYPES=DISABLE"
+      },
+      {
+        "Command": "[bin]\\SetEDID.exe",
+        "Arguments": "[bin]\\acerB286HK-DP.hex"
+      },
+      {
+        "Command": "SetColossusDisplay",
+        "Arguments": "2560 1440 32"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:head;q -o:[OutputDirectory]\\swak-display.txt"
+      },
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-l"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:gpuclk;pstate;q -o:[OutputDirectory]\\swak-clocks.txt"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:nodeinfo;q -o:[OutputDirectory]\\swak-nodeinfo.txt"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "OGL_LOAD_MONITOR_OUTPUT_LOGGING_FLAGS=GPU_TIME"
+      },
+      {
+        "Comment": "Place load monitor file in output directory of Nsight runs",
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "PS_FILE_PATH=[RootOutputDirectory]\\Nsight"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:all;q -o:[OutputDirectory]\\swak-all.txt"
+      },
+      {
+        "Command": "C:\\Windows\\System32\\cmd.exe",
+        "Arguments": "/C C:\\Windows\\System32\\vulkaninfo.exe > [OutputDirectory]\\VulkanInfo.txt 2> [OutputDirectory]\\VulkanInfo-stderr.txt",
+        "ElwironmentVariable": "VK_LOADER_DEBUG=all"
+      }
+    ]
+  },
+  {
+    "Type": "Nsight",
+    "Description": "Run 2560x1440 nsight traces",
+    "SessionName": "Nsight",
+    "TestCase": "Nsight",
+    "OutputDirectory": "Nsight",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryLookup": {
+      "ImageMagick": "[Netapp]\\ImageMagick",
+      "PerfDebug": "[Netapp]\\perfdebug_3.21"
+    },
+    "Server": "hqlwoglsql01:8211",
+    "ElwironmentVariables": {
+      "VK_INSTANCE_LAYERS": "VK_LAYER_LUNARG_screenshot",
+      "VK_SCREENSHOT_FRAMES": "0,999"
+    },
+    "PerfDebug": "--poll 500 --graphEff --tj --csv --pollend",
+    "LoadMonitor": "Enabled",
+    "TestDefinitions": [
+      {
+        "Title": "3DMark Attan",
+        "Name": "3DMark_Attan01301rc0_NsightTrace_2080S_1440p",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\3DMark_Attan01301rc0_NsightTrace_2080S_1440p",
+        "CompressedFile": "3DMark_Attan01301rc0_NsightTrace_2080S_1440p.zip",
+        "FileName": "dev_player.exe",
+        "GRT": "8D220B2A-8F6E-4FC4-B0BD-BAFAB8C06F54",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "BaldursGate3",
+        "Name": "BaldursGate3_2021_09_24_Shipping_Cave_Ultra_1440p_FSRUltraQuality",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\BaldursGate3\\BaldursGate3_2021_09_24_Shipping_Cave_Ultra_1440p_FSRUltraQuality",
+        "CompressedFile": "BaldursGate3_2021_09_24_Shipping_Cave_Ultra_1440p_FSRUltraQuality.zip",
+        "FileName": "bg3_Shipping.exe",
+        "Source": "http://lwgtl/fileinfo/BD0B49E5-FE2C-41C0-B910-435B022D9562",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "DetroitBecomeHuman",
+        "Name": "DetroitBecomeHuman_2021_09_24_Chapter1Hostage_1440p_Ultra_CAS",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\DetroitBecomeHuman\\DetroitBecomeHuman_2021_09_24_Chapter1Hostage_1440p_Ultra_CAS",
+        "CompressedFile": "DetroitBecomeHuman_2021_09_24_Chapter1Hostage_1440p_Ultra_CAS.zip",
+        "FileName": "DetroitBecomeHuman.exe",
+        "Source": "http://lwgtl/fileinfo/74C00A2B-8E82-4FDA-ACDE-3D1C42FA08A5",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh -no-multithreaded-record",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Dxgperf": "GpuTime"
+      },
+      {
+        "Title": "DoomEternal",
+        "Name": "DOOMEternalx64vk_20200107_UltraNightmare_1440p_SuperGoreNest",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\DoomEternal\\DOOMEternalx64vk_20200107_UltraNightmare_1440p_SuperGoreNest",
+        "FileName": "DOOMEternalx64vk.exe",
+        "GTL": "466A590D-9A1A-46AC-9A36-086175FDF225",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated"
+      },
+      {
+        "Title": "DoomEternal_AncientGods2",
+        "Name": "AncientGods2_2021_03_25_E5M1Spear_1440p",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\DoomEternal_AncientGods2\\DoomEternal_AncientGods2_2021_03_25_E5M1Spear_1440p",
+        "CompressedFile": "DLC2_2021_03_25_E5M1Spear_1440p.zip",
+        "FileName": "DOOMEternalx64vk.exe",
+        "Source": "http://lwgtl/fileinfo/7105D19A-E922-45E0-887C-07D0AC64001D",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "ScreenshotComment": "Requires screenshot after frame 0 to avoid compeltely black image.",
+        "ScreenshotComment2": "Do not capture last frame as varies by 2% run to run.",
+        "ScreenshotFrames": "2"
+      },
+      {
+        "Title": "DoomEternal_RT",
+        "Name": "DOOMEternal_2021_07_01_E4M1UACRig_RT_1440p_UltraNightmare",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\DoomEternal_RT\\DOOMEternal_2021_07_01_E4M1UACRig_RT_1440p_UltraNightmare",
+        "CompressedFile": "DOOMEternal_2021_07_01_E4M1UACRig_RT_1440p_UltraNightmare.zip",
+        "FileName": "DOOMEternalx64vk.exe",
+        "Source": "http://lwgtl/fileinfo/DBEC4BE5-09A3-48FC-9565-566BAD204266",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "ga*"
+      },
+      {
+        "Title": "Rage2",
+        "Name": "Rage2_Build_042419_Vineland_1440p_TU10x",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\Rage2\\Rage2_Build_042419_Vineland_1440p_TU10x",
+        "FileName": "Rage2__2019_04_26__14_10_07.exe",
+        "ProfileName": "Rage2.exe",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated"
+      },
+      {
+        "Title": "RedDeadRedemption2",
+        "Name": "[RDR2][Vulkan][2560x1440][2080Ti][BenchmarkPass8]",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\RedDeadRedemption2\\[RDR2][Vulkan][2560x1440][2080Ti][BenchmarkPass8]",
+        "FileName": "RDR2.exe",
+        "ProfileName": "RDR2.exe",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated"
+      },
+      {
+        "Title": "TCGR-Breakpoint",
+        "Name": "TCGR_Breakpoint_1440p_SCG_TU10x_Benchmark",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\TCGR-Breakpoint\\TC_GR_Breakpoint_1440p_SCG_TU10x_Benchmark",
+        "FileName": "scimitar_engine_win64_p_vulkan.exe",
+        "GTL": "A1D63E1C-F035-420C-A3AD-A225562F1379",
+        "AllowGPU": "gp*, gv*, tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated"
+      },
+      {
+        "Title": "TransportFever2",
+        "Name": "TransportFever2_2021_10_20_VeryHigh_1440p",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\TransportFever2\\TransportFever2_2021_10_20_VeryHigh_1440p",
+        "CompressedFile": "TransportFever2_2021_10_20_VeryHigh_1440p.zip",
+        "FileName": "TransportFever2.exe",
+        "Source": "https://gtl-ui.lwpu.com/file/D29AA3FE-2DC6-4632-A9C4-C349FFA5C231",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "ga*"
+      },
+      {
+        "Title": "WorldWarZ",
+        "Name": "WWZ_2021_07_16_VK_1440p_Ultra",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\WorldWarZ\\WWZ_2021_07_16_VK_1440p_Ultra",
+        "CompressedFile": "WWZ_2021_07_16_VK_1440p_Ultra.zip",
+        "FileName": "wwzRetail.exe",
+        "Source": "http://lwgtl/fileinfo/F916708A-A85E-48F3-B777-86CA53BBE42",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "X4-Foundations",
+        "Name": "X4-Foundations_2021_03_17_1440p_Ultra",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\X4-Foundations\\X4-Foundations_2021_03_17_1440p_Ultra",
+        "CompressedFile": "X4-Foundations_2021_03_17_1440p_Ultra.zip",
+        "FileName": "X4.exe",
+        "Source": "http://lwgtl/fileinfo/7D550DB1-C0FD-4B07-9FC1-15F2080EB16E",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "ZombieArmy4",
+        "Name": "za4_vulkan_2019_11_14_Ultra_1440p_SCGon_Benchmark",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\ZombieArmy4\\za4_vulkan_2019_11_14_Ultra_1440p_SCGon_Benchmark",
+        "FileName": "za4_vulkan.exe",
+        "Arguments": "-dumpframetimes -log -wb -automated"
+      }
+    ],
+    "SkipList": {
+    },
+    "Arguments": "-noreset -repeat 1000",
+    "AllowedRMSE": 0.02
+  },
+  {
+    "Type": "Control",
+    "Description": "Clear regkeys, unlock clocks",
+    "OutputDirectory": "Restore",
+    "TestDefinitions": [
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dOGL_DEFAULT_SWAP_INTERVAL"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVSYNCMODE"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVK_ABORT_ON_DEVICE_LOST"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVK_HIDE_UNUSED_MEMORY_TYPES"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVK_HOST_VISIBLE_VIDMEM"
+      },
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-u"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dOGL_LOAD_MONITOR_OUTPUT_LOGGING_FLAGS"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dPS_FILE_PATH"
+      }
+    ]
+  }
+]

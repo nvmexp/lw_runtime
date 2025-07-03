@@ -1,0 +1,93 @@
+
+# include ./build/Common.lwmk
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+include $(LW_SOURCE)/drivers/common/build/LddmCommon.lwmk
+include $(LW_SOURCE)/drivers/common/build/msvc120ctp_tools_amd64.lwmk
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+include $(OUTPUTDIR)/g_lwconfig.mk
+# source files
+
+LW_DEFINES += MCM_TEST_MODE
+
+# LW_TARGET_DEFINES += AMD64 _AMD64_ _M_AMD64 _WIN64
+SOURCES += $(LW_SOURCE)/drivers/display/lddm/lwlddmkm/memoryCfgMgrIf.cpp
+SOURCES += $(LW_SOURCE)/drivers/display/lddm/lwlddmkm/memoryCfgMgr.cpp
+ifneq ($(LWCFG_GLOBAL_ARCH_TEGRA),1)
+SOURCES += $(LW_SOURCE)/drivers/display/lddm/lwlddmkm/memoryCfgMgrWoI.cpp
+endif
+ifeq ($(LWCFG_GLOBAL_ARCH_TEGRA),1)
+SOURCES += $(LW_SOURCE)/drivers/display/lddm/lwlddmkm/WoT/memoryCfgMgrWoA.cpp
+endif
+# SOURCES += baseObject.cpp
+SOURCES += main.cpp
+# SOURCES += mcmDependance.cpp
+# SOURCES += windowstypes.cpp
+# SOURCES += lwlAdapter.cpp
+# SOURCES += winServicesIf.cpp
+# SOURCES += winServices.cpp
+# SOURCES += memoryCfgMgrTest.cpp
+  
+ LW_TARGET_OS   = wddm
+ LW_TARGET_ARCH = amd64
+
+include $(LW_SOURCE)/drivers/common/build/$(LW_TARGET_OS)_$(LW_TARGET_ARCH).lwmk
+# include search path
+LW_INCLUDES += $(LW_SOURCE)/tests/memoryCfgMgr
+LW_INCLUDES += $(LW_SOURCE)/drivers/display/lddm/lwlddmkm/
+LW_INCLUDES += $(LW_SOURCE)/drivers/display/lddm/lwlddmkm/WoT
+LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc/ctrl
+LW_INCLUDES += $(LW_TOOLS)/ddk/nt8/9600/Include
+LW_INCLUDES += $(LW_TOOLS)/ddk/nt8/9600/Include/shared
+LW_INCLUDES += $(LW_TOOLS)/ddk/nt8/9600/Include/um
+LW_INCLUDES += $(LW_TOOLS)/ddk/nt8/9600/Include/wdf/umdf/2.0
+# LW_INCLUDES += $(LW_TOOLS)/ddk/nt8/9600/Include/km
+LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc
+#See if this works to get lwconfig working...
+LW_INCLUDES += $(OUTPUTDIR)
+LW_INCLUDES += $(LW_TOOLS)/win32/msvc120ctp/VC/include
+
+# library search path
+ L_INCLUDES += $(LW_TOOLS)/win32/msvc120ctp/VC/atlmfc/lib
+ L_INCLUDES += $(LW_TOOLS)/win32/msvc120ctp/VC/lib/amd64
+ L_INCLUDES += $(LW_SOURCE)/sdk/lwpu/lib/amd64
+ L_INCLUDES += $(LW_TOOLS)/win32/msvc120ctp/VC/atlmfc
+ L_INCLUDES += $(LW_TOOLS)/ddk/nt8/9600/lib/wilw6.3/um/x64
+ # LFLAGS += -machine:amd64
+ # LFLAGS += lwapi.lib
+
+# linker options
+LFLAGS += -OUT:./$(OUTPUTDIR)/test.exe
+LFLAGS += -NODEFAULTLIB:libc
+LFLAGS += -INCREMENTAL:NO
+LFLAGS += -SUBSYSTEM:CONSOLE 
+LFLAGS += -LARGEADDRESSAWARE
+
+# append L_INCLUDE to LFLAGS with -LIBPATH for each entry
+LFLAGS += $(addprefix -LIBPATH:,$(L_INCLUDES))
+#LFLAGS += $(LW_REQUIRED_DIRS)
+
+
+# libraries to link against
+LFLAGS += winspool.lib comdlg32.lib odbc32.lib odbccp32.lib 
+LFLAGS += advapi32.lib  kernel32.lib user32.lib gdi32.lib uuid.lib ole32.lib oleaut32.lib shlwapi.lib shell32.lib setupapi.lib PowrProf.lib
+LFLAGS += atls.lib 
+LFLAGS += lwrmapi.lib 
+
+# adding list of obj files
+LFLAGS += $(OBJECTS)
+
+# adding to intermediate files list
+# OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/test.pdb $(OUTPUTDIR)/*.txt
+
+
+# finally... building test application
+$(OUTPUTDIR)/test.exe: $(OBJECTS)
+	@echo   Building test
+	$(LINK) $(strip $(LFLAGS))
+
+build: startTimer      $(OUTPUTDIR)/test.exe     stopTimer
+
+
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

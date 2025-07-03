@@ -1,0 +1,249 @@
+##############################################################################
+#
+# lwmake-compatible makefile for lwntest
+#
+# Please see this Wiki page for more information:
+#   http://swwiki/index.php/Building_lwntest
+#
+# Copyright 2004-2006 by LWPU All Rights Reserved
+#
+##############################################################################
+
+# [KThompson Oct/2004]
+# 
+# Make system for lwntest
+# 
+# USAGE
+#
+# '.\build.cfg' determines which parameters lwmake accepts and passes
+# on to this makefile.
+# 
+# Ilwoke using 'lwmake'. Supported paramters:
+# 
+#   debug    - default/hardwired/ignored (see LW_BUILD_TYPE)
+#   winxp    - default/hardwired/ignored (see LW_TARGET_OS)
+#   x86      - Win32 compile
+#   amd64    - AMD64 compile
+#   clean    - delete intermediate and result files (except .bsc)
+#   clobber  - 'clean', plus directory deletion
+#   pdb      - default/hardwired/ignored
+#   bsc      - build sbr and bsc files; default off (Win32 only)
+#   nodep    - don't generate dependency files
+#   proj     - recreate g_lwntest.vcproj and g_lwntest8.vcproj
+#   generate - create generated files (lwrrently this is only !.nact)
+# 
+# Unsupported paramters:
+# 
+#   release,devel - rejected by lwmake
+#   install       - rejected by lwmake
+#   win9x,winnt4  - rejected by lwmake
+#   ia64          - rejected by lwmake
+#   sweep         - not supported; ignored
+#   ckstack       - not supported; ignored
+#   wae           - not supported; ignored
+#   cod           - not supported; ignored
+#   ltcg          - not supported; ignored
+#   opt           - not supported; ignored
+
+# Override some lwmake flags. Some of these aren't even possible if
+# lwmake uses our local 'build.cfg'. HOWEVER we still might get some
+# of these settings if the user runs "lwmake lwntest" from outside
+# our local directory.
+override LW_BUILD_TYPE  := debug
+override LW_DO_INSTALL  := 0
+override LW_INSTALL_DIR :=
+override LW_SYMBOL_DIR  :=
+# override the default target OS to support 
+# making w/o specifying one. For instance @generate
+# target needs to work also w/o target OS but we
+# have no makefile for winxp default target OS.
+# We only support WDDM anyhow.
+override LW_TARGET_OS := wddm
+
+LWNTEST_BASEDIR := $(LWRDIR)
+TARGET := lwntest
+
+# set up arch-independent defines
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+LW_TARGET_OS_ARCH = $(LW_TARGET_OS)_$(LW_TARGET_ARCH)
+
+ifneq ($(LW_TARGET_OS_FAMILY),Windows)
+# Just to be sure. This should actually never happen
+# since we override LW_TARGET_OS with wddm.
+$(error LW_TARGET_OS_FAMILY is not supported.)
+endif
+
+# AMD64 overrides
+ifeq ($(LW_TARGET_ARCH),amd64)
+  override LW_GEN_BSC := 0
+endif
+
+# arch-independent header directories
+GENINCDIRS += $(LWRDIR)/include
+GENINCDIRS += $(LWRDIR)/elw
+GENINCDIRS += $(LW_SOURCE)/drivers/lwn/public
+GENINCDIRS += $(LW_SOURCE)/drivers/lwn/devtools
+GENINCDIRS += $(LW_SOURCE)/drivers/lwn/liblwn-etc1
+GENINCDIRS += $(LW_SOURCE)/drivers/lwn/interface
+GENINCDIRS += $(LW_SOURCE)/common/include
+GENINCDIRS += $(LWRDIR)/../common
+GENINCDIRS += $(LWRDIR)/../samples/common
+GENINCDIRS += $(LW_TOOLS)/lpng124
+GENINCDIRS += $(LW_TOOLS)/zlib113
+
+LWNTEST_PLATFORM = win
+
+# LWCA is not supported by lwntest on Windows
+LWNTEST_LWDA_ENABLED = 0
+
+# Get a list of source files (relative to the base lwntest directory) and
+# other variables which indicate what external libraries are required
+include SrcList.inc
+
+# set up arch-dependent defines & rules
+include $(LWRDIR)/build/$(LW_TARGET_OS)_$(LW_TARGET_ARCH).lwmk
+
+SOURCES += $(LWNTEST_CFILES) $(LWNTEST_CCFILES) $(LWNTEST_CPPFILES)
+
+# Use generated NatVis file for LWN objects.
+LWN_NATVIS = $(LW_SOURCE)/drivers/lwn/public/lwn/lwn.natvis
+LFLAGS += /natvis:$(LWN_NATVIS)
+
+# Precompiled headers for various types of files.
+#
+# We are lwrrently disabling these because we're getting intermittent failures
+# of the form:
+#
+#     c:\dvs\p4\build\sw\...\cppsharedobject.h(53) : 
+#       fatal error C1060: compiler is out of heap space 
+#
+# This seems like it might be related to the "/Zm" compiler flag in Visual
+# Studio, see:
+#
+#   https://msdn.microsoft.com/en-us/library/bdscwf1c.aspx
+#
+#$(eval $(call REGISTER_PCH,$(call BUILD_OBJECT_LIST,$(LWNTEST_CFILES_PCH)),include/ogtest.c))
+#$(eval $(call REGISTER_PCH,$(call BUILD_OBJECT_LIST,$(LWNTEST_C_INTERFACE_TESTS)),include/lwntest_c.cpp))
+#$(eval $(call REGISTER_PCH,$(call BUILD_OBJECT_LIST,$(LWNTEST_CPP_INTERFACE_TESTS)),include/lwntest_cpp.cpp))
+#$(eval $(call REGISTER_PCH,$(call BUILD_OBJECT_LIST,$(LWNTEST_CPPWRAP_INTERFACE_TESTS)),include/lwntest_cppwrap.cpp))
+
+
+# When building lwntest, descend into the "generate" subdirectory to build
+# generated source code, and make sure they match the versions checked into
+# the source tree.
+#GENERATE_DIRS += generate
+#LW_CHECK_AUTOGEN_SOURCE = 1
+
+include $(LWRDIR)/generate/lwntestgenerate-source.lwmk
+
+include $(LW_SOURCE)/drivers/common/build/lwGenerate.lwmk
+
+# Main build, including pseudo-targets to start and stop build timers.
+build: startTimer exelwtable stopTimer
+
+#.PHONY:				checkgen
+#checkgen:			genalldirs.verify
+
+.PHONY:				exelwtable
+exelwtable:			$(OUTPUTDIR)/$(TARGET)$(EXESUFFIX)
+
+# Include order-only dependencies to ensure that the timer starts and the
+# configuration is displayed before building generated sources, objects, and
+# the final exelwtable.
+#$(addsuffix .build, $(GENERATE_DIRS)): 	| startTimer show_config
+$(OBJECTS) $(PCH_OBJECTS): 		| startTimer show_config
+$(OUTPUTDIR)/$(TARGET)$(EXESUFFIX):	| startTimer show_config
+
+# Include order-only dependencies so the stopTimer rule isn't run until the
+# build is done.
+stopTimer: 				| exelwtable
+
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+
+#
+# Final link of lwntest.exe for Windows build.
+#
+# Because Windows has a command line limit of 32KB, we can't just ilwoke the
+# linker with a list of object files, because that list is way longer than
+# 32KB.  Instead, we use the GNU make 4.0+ "file" function to write the object
+# list to a file and use the linker's "@file" feature to import them as though
+# they were specified on the command line.
+#
+$(OUTPUTDIR)/$(TARGET).exe : 	$(OBJECTS) $(LWN_NATVIS)
+ifdef LINKWARN
+	@$(ECHO) $(LINKWARN)
+else
+	@$(ECHO) "  --===* Linking $@ *===--"
+endif
+	$(file >$(OUTPUTDIR)/exeParameters.txt, $(OBJECTS) $(PCH_OBJECTS))
+	$(LINK) /OUT:"$@" $(strip $(LFLAGS)) @$(OUTPUTDIR)/exeParameters.txt
+
+
+.PHONY: dll builddll dllexec
+dll: builddll dllexec
+
+builddll: $(OUTPUTDIR)/$(TARGET).dll
+$(OUTPUTDIR)/$(TARGET).dll : 	$(OBJECTS) $(LWN_NATVIS)
+ifdef LINKWARN
+	@$(ECHO) $(LINKWARN)
+else
+	@$(ECHO) "  --===* Linking $@ *===--"
+endif
+	$(file >$(OUTPUTDIR)/exeParameters.txt, $(OBJECTS) $(PCH_OBJECTS))
+	$(LINK) /OUT:"$@" $(strip $(LFLAGS)) -DLL -PDB:$(OUTPUTDIR)/$(TARGET)_dll.pdb @$(OUTPUTDIR)/exeParameters.txt
+
+dllexec: $(OUTPUTDIR)/$(TARGET)-mt.exe $(LWN_NATVIS)
+$(OUTPUTDIR)/$(TARGET)-mt.exe : $(OUTPUTDIR)/$(TARGET)-mt.obj
+	@$(ECHO) "  --===* Linking $@ *===--"
+	$(LINK) /OUT:"$@" $(strip $(LFLAGS)) -PDB:$(OUTPUTDIR)/$(TARGET)-mt.pdb $<
+
+$(OUTPUTDIR)/$(TARGET)-mt.obj : dll/$(TARGET)-mt.cpp elw/dllmain.h
+	$(CC) -c $(CFLAGS) $<
+
+endif # ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+
+ifeq ($(LW_TARGET_OS_FAMILY),MacOSX)
+
+#
+# Final link of lwntest for MacOSX builds.
+#
+$(OUTPUTDIR)/$(TARGET) : $(OBJECTS)
+	@echo "[01;32mLinking target $@:[00m"
+	$(LD) $(LFLAGS) -o $@ $^
+	@echo "Done!"
+
+endif
+
+ifeq ($(LW_TARGET_OS_FAMILY),Unix)
+  include build/$(LW_TARGET_OS_FAMILY).lwmk
+endif
+
+# make a browser database
+ifeq ($(LW_GEN_BSC),1)
+  build: $(LW_BSC_FILE)
+endif
+
+# In addition to generated source code, we have checked in several generated
+# MS Visual Studio project files (g_lwntest*.vcproj) that can be rebuilt
+# using "lwmake @vcproj".  We do this separately from generating source code
+# because the content of these project files could be adversely affected by
+# random source code in the user's tree.
+.PHONY:		vcproj
+vcproj:
+	@$(MAKE) -C generate\vcproj -f makefile.lwmk codegen
+
+#include $(LW_SOURCE)/drivers/common/build/lwGenerateRules.lwmk
+
+# standard 'lwmake' rules - modified from the original in 'drivers/common/build'
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk
+
+ifeq ($(LW_VERBOSE),0)
+.SILENT:
+endif
+
+# Dummy target to print out various make variables.
+info:
+	@$(ECHO) LW_DEFINES: $(LW_DEFINES)
+	@$(ECHO) LW_TARGET_DEFINES: $(LW_TARGET_DEFINES)
+	@$(ECHO) CFLAGS: $(CFLAGS)
+	@$(ECHO) LW_INCLUDES: $(LW_INCLUDES)

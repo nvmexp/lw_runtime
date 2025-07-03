@@ -1,0 +1,136 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+# Tool.lwmk - Functions to generate rules and targets to compile a standalone tool exelwtable for OptiX.
+
+include $(LW_OPTIX)/make/Tool$(LW_HOST_OS_FAMILY).lwmk
+
+# Global "tools" target that builds every tool built with this template.
+.PHONY: tools
+
+# BUILD_OPTIX_TOOL_OBJECT_LIST
+#
+# Helper to build in subdirs. From lwvm/Justin Holewinski
+#
+# $(1): Component Name
+# $(2): Source List
+#
+# Object files are in $(OUTPUTDIR)/_$(1)
+BUILD_OPTIX_TOOL_OBJECT_LIST = $(patsubst $(OUTPUTDIR)/%,$(OUTPUTDIR)/_$(1)/%,$(call BUILD_OBJECT_LIST,$(2)))
+
+# This will hold all the test case exelwtables after every test makefile snippet has been included.
+optix_tool_exelwtables =
+
+# optix_tool
+#
+# Return text that generates rules and targets for compiling a standalone exelwtable for tools.
+#
+# Input variables:
+# $(1)
+#   The name of the tool exelwtable, without any platform specific suffix.
+#
+# $(1)_SOURCES
+#   A list of absolute paths to C++ source files to be compiled and linked into the exelwtable.
+#
+# $(1)_CFLAGS
+#   A list of compiler flags specific to this exelwtable.
+#
+# $(1)_DEFINES
+#   A list of defines specific to this exelwtable.
+# 
+# $(1)_INCLUDES
+#   A list of include directories specific to this exelwtable.
+#
+# $(1)_LFLAGS
+#   A list of linker flags specific to this exelwtable.
+#
+# $(1)_NEEDS_LWVM
+#   If set to 1, then the source files for this tool depend on LWVM#
+#
+# $(1)_NEEDS_OPTIX_LIBS
+#   (Default: 1 ) If set to 1, then the tool needs to be linked against OptiX.
+#
+# Targets:
+#
+# $(1)
+#   Builds only this tool
+#
+# Usage:
+#   sometool_SOURCES := foo.cpp bar.cpp
+#   $(eval $(call optix_tool,sometool))
+#
+define optix_tool
+  # Provide defaults for some target specific variables:
+  # Target specific compiler flags
+  $(1)_CFLAGS ?=
+  # Target specific defines
+  $(1)_DEFINES ?=
+  # Target specific includes
+  $(1)_INCLUDES ?=
+  # Target specific link flags
+  $(1)_LFLAGS ?=
+  # Tool depends on LWVM
+  $(1)_NEEDS_LWVM ?= 0
+  # Tool needs to be linked with OptiX
+  $(1)_NEEDS_OPTIX_LIBS ?= 1
+
+  # Add this tool to the global "tools" target.
+  tools:: $(1)
+
+  # Name is target that builds this exelwtable only.
+  .PHONY: $(1)
+
+  # List of C++ objects for this exelwtable.
+  $(1)_OBJECTS := $$(call BUILD_OPTIX_TOOL_OBJECT_LIST,$(1),$$($(1)_SOURCES))
+
+  # Apply user-specified includes to this exelwtable.
+  $$($(1)_OBJECTS): LW_INCLUDES += $$($(1)_INCLUDES)
+
+  # $(1)_EXE holds the path of the exelwtable
+  $(1)_EXE := $$(OUTPUTDIR)/$(1)$$(EXESUFFIX)
+
+  # Accumulate tool exelwtables for linking sequentially
+  optix_tool_exelwtables += $$($(1)_EXE)
+
+  # Tool target depends on the exelwtable
+  $(1): $$($(1)_EXE)
+
+  # Object files link statically against optix, so don't allow DLL import
+  # Assume OPTIX_CFLAGS by default and add exelwtable-specific CFLAGS.
+  $$($(1)_OBJECTS): CFLAGS += \
+    $$(OPTIX_CFLAGS) \
+    $$($(1)_CFLAGS)
+
+  # Add global and tool specific defines.
+  $$($(1)_OBJECTS): LW_DEFINES += \
+    RTAPI= \
+    $$($(1)_DEFINES)
+
+  # Tool might depend on generated LWVM headers
+  ifeq ($$($(1)_NEEDS_LWVM),1)
+    $$($(1)_OBJECTS): | lwvm-build
+  endif
+  
+  # Generate rules to build exelwtable object files from source files
+  $$(foreach f,$$(sort $$($(1)_SOURCES)),$$(eval $$(call LW_OBJECT_FROM_SOURCE_RULE,$$(f),$$(call BUILD_OPTIX_TOOL_OBJECT_LIST,$(1),$$(f)))))
+
+  # Create rules to generate the exelwtable
+  $$(eval $$(call link_optix_tool,$(1),$$($(1)_OBJECTS)))
+endef

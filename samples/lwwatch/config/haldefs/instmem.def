@@ -1,0 +1,123 @@
+# -*- mode: perl; -*-
+
+# INSTMEM Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $instmemHal = [
+
+    # per-GPU defaults for INSTMEM engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+       DUMP_FIFO_CTX => [
+
+            DESCRIPTION   => "instmem_DumpFifoCtX",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "ChannelId*",
+
+            _GF100        => [ dMAXWELL_and_later, T234_and_later, ],
+            _T124         => [ ],
+            _STUB         => [ ],
+        ],
+
+       GET_USERD_PARAMS => [
+
+            DESCRIPTION   => "instmemGetUserdParams",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32*, LwU32*",
+
+            _GK104        =>  [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+      GET_CHID_FROM_INST  => [
+
+            DESCRIPTION   => "instmem_GetChidFromInst",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "LwU32 inst, LwU32 target",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_and_later, ],
+        ],
+
+      DUMP_PDE_FOR_CHANNEL  => [
+
+            DESCRIPTION   => "instmem_DumpPdeForChannel",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LwU32 chId, LwU32 begin, LwU32 end",
+
+            _GF100        => [ dMAXWELL_and_later, ],
+        ],
+
+      DUMP_PTE_FOR_CHANNEL  => [
+
+            DESCRIPTION   => "instmem_DumpPteForChannel",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LwU32 chId, LwU32 pde_id, LwU32 begin, LwU32 end",
+
+            _GF100        => [ dMAXWELL_and_later, ],
+        ],
+
+
+        GET_RAMFC_FORMATTED_MEMORY  => [
+
+            DESCRIPTION   => "instmemGetRamfcFormattedMemory",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "formattedMemoryEntry**, LwU32*",
+            STUB_RETURNS  => void,
+
+            _GM107        => [ MAXWELL, -GM200, -GM204, -GM206, ],
+            _GP100        => [ PASCAL, ],
+            _GV100        => [ VOLTA, ],
+            _TU102        => [ TURING, ],
+            _GA100        => [ GA100 ],
+            _GA102        => [ AMPERE_thru_HOPPER, -GA100, -GH20X ],
+            _GH202        => [ GH20X ],
+            _GB100        => [ BLACKWELL_and_later ],
+            _STUB         => [ FERMI_thru_KEPLER, GM200, GM204, GM206, ],
+        ],
+
+        GET_USERD_FORMATTED_MEMORY  => [
+
+            DESCRIPTION   => "instmemGetUserdFormattedMemory",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "formattedMemoryEntry**, LwU32*",
+
+            _GK104        => [ dMAXWELL_thru_dTURING, T234_and_later, GA100, ],
+            _GA102        => [ dAMPERE_thru_dHOPPER, -GA100, -GH20x, ],
+            _GB100        => [ dBLACKWELL_and_later, GH20X ],
+        ],
+
+        SET_START_ADDRESS => [
+
+            DESCRIPTION   => "instmem set start address",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _GF100        => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_SUBCTX_PDB => [
+
+            DESCRIPTION   => "Dump subctx PDB for given channel",
+            INTERFACE_TAG => "instmemGetSubctxPDB",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "ChannelId*, LwU32 veid",
+
+            _GV100        => [ VOLTA_and_later, ],
+            _STUB         => [ dMAXWELL_thru_PASCAL, ],
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $instmemHal;

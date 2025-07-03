@@ -1,0 +1,168 @@
+/*
+ * FIXME: This is lwrrently hard coded in the .cpp and .cg files, but
+ * should really go into a suitable header file
+ */
+#define LW_BLAS_SDOT_BARRIER          (0)
+#define LW_BLAS_SDOT_LOG_THREAD_COUNT (7)
+#define LW_BLAS_SDOT_THREAD_COUNT     (1 << LW_BLAS_SDOT_LOG_THREAD_COUNT)
+#define LW_BLAS_SDOT_GRIDH            (6)
+
+float gmem[1] : global;
+
+struct ctaInfo {
+    unsigned short ctaFlags;
+    unsigned short ctaDO;
+    unsigned short ctaD1;
+    unsigned short ctaD2;
+    unsigned short gridW;
+    unsigned short gridH;
+    unsigned short ctaX;
+    unsigned short ctaY;
+};
+
+/*
+ * float sdot (int n, const float *sx, int incx, const float *sy, int incy);
+ *
+ * IN:  n    number of elements in input vectors
+ *      sx   single precision vector with n elements
+ *      incx storage spacing between elements of sx
+ *      sy   single precision vector with n elements
+ *      incy storage spacing between elements of sy
+ *
+ * OUT: returns single precision dot product (zero if n <= 0)
+ *
+ * BLAS level 1, http://www.netlib.org/blas/sdot.f
+ *
+ * Returns the dot product of single precision vectors sx and sy.
+ * Returns sum for i = 0 to n-1 of  sx[lx+i*incx] * sy[ly+i*incy],
+ * where lx = 0 if incx >= 0, else lx = (1-n)*incx, and ly is
+ * defined in a similar way using incy.
+ */
+
+float partialSum[LW_BLAS_SDOT_GRIDH*LW_BLAS_SDOT_THREAD_COUNT]: shared;        
+
+void main (uniform struct ctaInfo ctx : shared,
+           uniform int nn             : shared,
+           uniform int ssx            : shared,
+           uniform int incx           : shared,
+           uniform int ssy            : shared,
+           uniform int incy           : shared,
+           uniform int result         : shared,
+           uniform int ctaN           : shared,
+           varying int tid            : thread_id) 
+{
+    int i, x, y;
+    int ctaX, ctaY, ctaW, ctaH;
+    int ofs, nxtOfs, n, sx, sy, stride;
+    float sum = 0.0f;
+
+    ctaX = (int)ctx.ctaX;
+    ctaY = (int)ctx.ctaY;
+    ctaW = (int)ctx.gridW;
+    ctaH = (int)ctx.gridH;
+
+    ofs = (ctaX * ctaH + ctaY) * ctaN;
+    nxtOfs = ofs + ctaN;
+    n = (nxtOfs > nn) ? (nn - ofs) : ctaN;
+    sx = ssx + ((incx >= 0) ? (ofs * incx) : ((n - nn + ofs) * incx));
+    sy = ssy + ((incy >= 0) ? (ofs * incy) : ((n - nn + ofs) * incy));
+
+    if ((incx == incy) && (incx > 0)) {
+        /* equal, positive, increments */
+        if (incx == 1) {
+            /* both increments equal to 1 */
+            int ns = n - LW_BLAS_SDOT_THREAD_COUNT + 1;
+            int syTid = sy + tid;
+            int sxTid = sx + tid;
+            for (i = 0; i < ns; i += LW_BLAS_SDOT_THREAD_COUNT) {
+                sum += gmem[syTid + i] * gmem[sxTid + i];
+            }
+            /* handle remaining partial block */
+            if (tid < (n - i)) {
+                sum += gmem[syTid + i] * gmem[sxTid + i];
+            }
+        } else {
+            /* equal, positive, non-unit increments. */
+            int ns = (n - LW_BLAS_SDOT_THREAD_COUNT + 1) * incy;
+            int iy = LW_BLAS_SDOT_THREAD_COUNT * incy;
+            int tidY = tid * incy;
+            int syTidY = sy + tidY;
+            int sxTidX = sx + tidY;
+            for (i = 0; i < ns; i += iy) {
+                sum += gmem[syTidY + i] * gmem[sxTidX + i];
+            }
+            /* handle remaining partial block */
+            if (tidY < (n * incy - i)) {
+                sum += gmem[syTidY + i] * gmem[sxTidX + i];
+            }
+        }
+    } else {
+        /* unequal or nonpositive increments */
+        int ix = (incx < 0) ? ((1 - n) * incx) : 0;
+        int iy = (incy < 0) ? ((1 - n) * incy) : 0;
+        int ns = n - LW_BLAS_SDOT_THREAD_COUNT + 1;
+        int sxTidIncx = sx + tid * incx;
+        int syTidIncy = sy + tid * incy;
+        int tcntIncx = incx * LW_BLAS_SDOT_THREAD_COUNT;
+        int tcntIncy = incy * LW_BLAS_SDOT_THREAD_COUNT;
+        for (i = 0; i < ns; i += LW_BLAS_SDOT_THREAD_COUNT) {
+            sum += gmem[syTidIncy + iy] * gmem[sxTidIncx + ix];
+            ix += tcntIncx;
+            iy += tcntIncy;
+        }
+        /* handle remaining partial block */
+        if (tid < (n - i)) {
+            sum += gmem[syTidIncy + iy] * gmem[sxTidIncx + ix];
+        }
+    }
+    ofs = ctaY * LW_BLAS_SDOT_THREAD_COUNT + tid;
+    partialSum[ofs] = sum;
+
+#if 1
+#if (LW_BLAS_SDOT_THREAD_COUNT & (LW_BLAS_SDOT_THREAD_COUNT - 1))
+#error code requires LW_BLAS_SDOT_THREAD_COUNT to be a power of 2
+#endif
+
+    for (stride = 1; stride < LW_BLAS_SDOT_THREAD_COUNT; stride <<= 1) {
+        barrier_wait (LW_BLAS_SDOT_BARRIER, LW_BLAS_SDOT_THREAD_COUNT);
+        if (!(tid & (2*stride - 1))) {
+            partialSum[ofs] += partialSum[ofs + stride];
+        }
+    }
+    if (tid == 0) {
+        gmem[result + ctaX * ctaH + ctaY] = partialSum[ofs];
+    }
+
+#else
+
+    barrier_wait (LW_BLAS_SDOT_BARRIER, LW_BLAS_SDOT_THREAD_COUNT);
+    if (!(tid & 1)) {
+	partialSum[ofs] += partialSum[ofs + 1];
+    }
+    barrier_wait (LW_BLAS_SDOT_BARRIER, LW_BLAS_SDOT_THREAD_COUNT);
+    if (!(tid & 3)) {
+	partialSum[ofs] += partialSum[ofs + 2];
+    }
+    barrier_wait (LW_BLAS_SDOT_BARRIER, LW_BLAS_SDOT_THREAD_COUNT);
+    if (!(tid & 7)) {
+	partialSum[ofs] += partialSum[ofs + 4];
+    }
+    barrier_wait (LW_BLAS_SDOT_BARRIER, LW_BLAS_SDOT_THREAD_COUNT);
+    if (!(tid & 15)) {
+	partialSum[ofs] += partialSum[ofs + 8];
+    }
+    barrier_wait (LW_BLAS_SDOT_BARRIER, LW_BLAS_SDOT_THREAD_COUNT);
+    if (!(tid & 31)) {
+	partialSum[ofs] += partialSum[ofs + 16];
+    }
+    barrier_wait (LW_BLAS_SDOT_BARRIER, LW_BLAS_SDOT_THREAD_COUNT);
+    if (!(tid & 63)) {
+	partialSum[ofs] += partialSum[ofs + 32];
+    }
+    barrier_wait (LW_BLAS_SDOT_BARRIER, LW_BLAS_SDOT_THREAD_COUNT);
+    if (!(tid & 127)) {
+	gmem[result + ctaX * ctaH + ctaY] = partialSum[ofs] + partialSum[ofs + 64];
+    }    
+
+#endif
+}

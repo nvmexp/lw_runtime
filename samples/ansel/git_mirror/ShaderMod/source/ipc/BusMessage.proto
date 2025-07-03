@@ -1,0 +1,81 @@
+// Copyright (c) 2014, LWPU CORPORATION.  All rights reserved.
+//
+// LWPU CORPORATION and its licensors retain all intellectual property
+// and proprietary rights in and to this software, related documentation
+// and any modifications thereto.  Any use, reproduction, disclosure or
+// distribution of this software and related documentation without an express
+// license agreement from LWPU CORPORATION is strictly prohibited.
+
+// Base class for Messages that go through MessageBus.
+// Modules can derive its own message classes or use the generic one (GenericMessage)
+message BusMessage
+{
+    message Generic
+    {
+        optional uint32 type = 1;
+        optional bytes data = 2;
+    }
+
+    message EncryptedBusMessage
+    {
+        enum EncryptionType
+        {
+            NONE = 1;
+            RSA = 2;
+            AES = 3;
+        }
+        optional EncryptionType type = 1;
+        optional bytes data = 2;
+        // iv must be unpredicatbly random for security, see
+        // http://tools.ietf.org/html/rfc5246#section-6.2.3.2
+        optional bytes iv = 3;
+    }
+    message Status
+    {
+        enum Code
+        {
+            Received = 1;
+            Completed = 2;
+        }
+        optional Code code = 1;
+    }
+    message Peer
+    {
+        required string system = 1;
+        required string module = 2;
+    }
+
+    // to identify replies to BusMessages
+    required string uniqueid = 1;
+
+    // sender system/module ids
+    required string source_system = 2;
+    required string source_module = 3;
+    optional string domain = 4;
+    // indicates to broadcaster that a system/module is joining/leaving
+    // the bus on a particular socket
+    optional bool joined = 5;
+
+    // destination system/module ids
+    optional string target_system = 6;
+    optional string target_module = 7;
+
+    // this BusMessage references a previous BusMessage
+    optional string reference_uniqueid = 10;
+
+    repeated Peer bus_peer = 15;
+
+    // message that corresponds to sender system
+    optional Generic generic = 20;
+    optional Status status = 21;
+    optional EncryptedBusMessage encryptedBusMessage = 22;
+
+    message EncryptionSetup
+    {
+        // Distribute the AES Key to bus client
+        // Must be in an encrypted bus message using RSA
+        optional bytes AESKey = 1;
+    }
+
+    optional EncryptionSetup encryptionsetup = 200;
+}

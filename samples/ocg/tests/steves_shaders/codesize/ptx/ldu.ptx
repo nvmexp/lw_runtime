@@ -1,0 +1,43 @@
+.version 3.1
+.target sm_20
+.shared .u32 s;
+.shared .u64 sl;
+
+.entry main {
+   .reg .u32 a, b, c, d;
+   .reg .u32 a1, b1, c1, d1;
+   .reg .u32 ii, addrb;
+   .reg .u64 addr;
+
+   ld.shared.u32 a, [s];
+   ldu.global.u32   c, [a];
+   st.shared.u32 [s+16], c;
+
+   bar.sync 0;
+
+   ld.shared.u64 addr, [sl];
+   ldu.global.u32  c, [addr];
+   st.shared.u32 [s+4], c;
+
+   bar.sync 0;
+
+   ld.shared.v4.u32 {a,b,c,d}, [sl];
+   add.u32 a, a, 1;
+   st.shared.v4.u32 [s], {a,b,c,d};
+
+   bar.sync 0;
+
+   mov.u32 addrb, a;
+   add.u32 ii, addrb, 4;
+   ld.shared.v4.u32 {a,b,c,d}, [ii];
+   add.u32 ii, addrb, 6;
+   ld.shared.v4.u32 {a1,b1,c1,d1}, [ii];
+   add.u32 a, a, 1;
+   add.u32 a1, a, 1;
+   st.shared.v4.u32 [ii+10], {a,b,c,d};
+   st.shared.v4.u32 [ii+20], {a1,b1,c1,d1};
+
+ 
+ 
+   exit;
+}

@@ -1,0 +1,21 @@
+!!FP2.0
+TEX H0, f[TEX0], TEX0, 2D;
+TEX H1, f[TEX1], TEX0, 2D;
+ADDH H1.w, H0, H1;
+TEX H0, f[TEX2], TEX0, 2D;
+ADDH H1.w, H0, H1;
+TEX H0, f[TEX3], TEX0, 2D;
+ADDH H1.w, H0, H1;
+TEX H0, f[TEX4], TEX0, 2D;
+ADDH H0.w, H0, H1;
+MADH_SAT H0.w, H0, {1.987654, 1.788889, 1.610000, 1.449000}.x, -f[COL0];
+ADDH H0.w, -H0, {1.304100, 1.173690, 1.056321, 0.950689}.x;
+ADDH H0.z, -H0.w, {0.855620, 0.770058, 0.693052, 0.623747}.x;
+MADH H0.x, {0.561372, 0.505235, 0.454712, 0.409240}.x, H0.z, H0.w;
+END
+
+# Passes = 9 
+
+# Registers = 1 
+
+# Textures = 5 

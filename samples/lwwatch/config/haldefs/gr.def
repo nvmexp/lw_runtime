@@ -1,0 +1,1516 @@
+# -*- mode: perl; -*-
+
+# GR Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $grHal = [
+
+    # per-GPU defaults for GR engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+
+        GET_ZLWLL_INFO_LWW => [
+
+            DESCRIPTION     => "gr_GetZlwllInfoLww",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32",
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        GET_INFO  => [
+
+            DESCRIPTION     => "gr_GetGrInfo",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            _GF100          => [ MAXWELL_and_later, ],
+         ],
+
+        # TODO: delete
+        GET_SUB_CH_INFO => [
+
+            DESCRIPTION       => "gr_GetGrSubChInfo",
+            RETURN_TYPE       => void,
+            ARGUMENTS         => "LwU32",
+
+            _STUB             => [ dMAXWELL_and_later, ],
+        ],
+
+        # TODO: delete
+        DUMP_SUB_CH => [
+
+            DESCRIPTION       => "gr_DumpGrSubCh",
+            RETURN_TYPE       => void,
+            ARGUMENTS         => "void",
+
+            LIKE_INTERFACE    => GET_SUB_CH_INFO,
+        ],
+
+        # TODO: delete
+        DUMP_ZLWLL_RAM => [
+
+            DESCRIPTION     => "gr_dump_zlwll_ram",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 addr, LwU32 size, LwU32 select",
+
+            _STUB        => [ dMAXWELL_and_later, ],
+        ],
+
+        # TODO: delete
+        DUMP_FIFO  => [
+
+            DESCRIPTION     => "gr_DumpGrFifo",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "BOOL, LwU32",
+
+            _STUB           => [ dMAXWELL_and_later, ],
+         ],
+
+        # TODO: delete
+        ENABLE_SINGLE_STEP  => [
+
+            DESCRIPTION     => "gr_EnableGrSingleStep",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32, LwU32",
+
+            _STUB           => [ dMAXWELL_and_later, ],
+         ],
+
+        # TODO: delete
+        GET_TILING_INFO_LWW => [
+
+            DESCRIPTION     => "gr_GetTilingInfoLww",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            _STUB           => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_STATUS  => [
+
+            DESCRIPTION     => "grGetStatus: print GPU status and help analyze hangs",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwBool, LwBool, LwU32",
+
+            _GF100          => [ MAXWELL, ],
+            _GP100          => [ PASCAL_and_later,  ],
+        ],
+
+        PRINT_GPU_UNIT_STATUS  => [
+
+            DESCRIPTION     => "grPrintGpuUnitStatus: print GPU status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32, char*",
+
+            _GF100          => [ GM10X, ],
+            _GM200          => [ MAXWELL_and_later, -GM10X, ],
+        ],
+
+        DUMP_BE_ACTIVITY    => [
+
+            DESCRIPTION     => "grDumpBeActivity: print BE activity registers 3 & 4",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 grStatus, LwU32 fbpCount",
+
+            _GA100          => [ GA100, ],
+            _STUB           => [ MAXWELL_and_later, -GA100, ]
+        ],
+
+        DUMP_CONSOLIDATED_REPORT  => [
+
+            DESCRIPTION     => "grDumpConsolidatedReport: print concise GPU status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32",
+
+            _GM107          => [ GM10X, ],
+            _GM200          => [ MAXWELL_thru_PASCAL, -GM10X, ],
+            _GV100          => [ VOLTA, ],
+            _TU102          => [ TURING, ],
+            _GA100          => [ AMPERE_and_later, ],
+        ],
+
+        DUMP_CONSOLIDATED_REPORT_GPC  => [
+
+            DESCRIPTION     => "grDumpConsolidatedReportGpc: print GPU per GPC status summary",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32, LwU32",
+
+            _GM107          => [ GM10X, ],
+            _GM200          => [ MAXWELL_thru_PASCAL, -GM10X, ],
+            _GV100          => [ VOLTA, ],
+            _TU102          => [ TURING, GA100, ],
+            _GA102          => [ AMPERE_and_later, -GA100, ],
+        ],
+
+        DUMP_CONSOLIDATED_REPORT_PMM  => [
+
+            DESCRIPTION     => "grDumpConsolidatedReportPMM: print PMM status summary",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32, LwU32",
+            INTERFACE_TAG   => "grDumpConsolidatedReportPMM",
+
+            _GM107          => [ MAXWELL_thru_PASCAL, ],
+            _STUB           => [ pre_MAXWELL, VOLTA_and_later, ],
+        ],
+
+        DUMP_DETAILED_STATUS  => [
+
+            DESCRIPTION     => "grDumpDetailedStatus: print detailed GPU status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "BOOL, LwU32",
+
+            _GF100          => [ MAXWELL, ],
+            _GP100          => [ PASCAL_thru_TURING, ],
+            _GA100          => [ GA100, ],
+            _GA102          => [ AMPERE_and_later, -GA100, ],
+        ],
+
+        CHECK_CTXSW_STATUS  => [
+
+            DESCRIPTION     => "grCheckCtxswStatus: print context switch status",
+            RETURN_TYPE     => LW_STATUS,
+            ARGUMENTS       => "BOOL, LwU32",
+            STUB_RETURNS    => LW_ERR_NOT_SUPPORTED,
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_FECS_MAILBOX_REGISTERS  => [
+
+            DESCRIPTION     => "grDumpFecsMailboxRegisters: print all FECS mailbox registers",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            _GV100          => [ VOLTA_thru_TURING, ],
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_VOLTA, ]
+        ],
+
+        DUMP_SMCARB_REGISTERS  => [
+
+            DESCRIPTION     => "grDumpSmcarbRegisters: print all SMCARB registers",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ]
+        ],
+
+        DUMP_HSHUB_IDLE_REGISTERS  => [
+
+            DESCRIPTION     => "grDumpHshubIdleRegisters: print HSHUB IDLE registers",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            _GV100          => [ VOLTA_and_later, ],
+            _STUB           => [ pre_VOLTA, ]
+        ],
+
+        CHECK_FE_METHOD_STATUS  => [
+
+            DESCRIPTION     => "grCheckFeMethodStatus: print FE method status",
+            RETURN_TYPE     => LW_STATUS,
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => LW_ERR_NOT_SUPPORTED,
+
+            _GF100          => [ MAXWELL_thru_VOLTA, ],
+            _TU102          => [ TURING_and_later, ],
+        ],
+
+        CHECK_GR_FIFO_STATUS  => [
+
+            DESCRIPTION     => "grCheckGrFifoStatus: print GR FIFO status",
+            RETURN_TYPE     => LW_STATUS,
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => LW_ERR_NOT_SUPPORTED,
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        CHECK_GR_INTERRUPTS  => [
+
+            DESCRIPTION     => "grCheckGrInterrupts: print GR interrupt status",
+            RETURN_TYPE     => LW_STATUS,
+            ARGUMENTS       => "LwU32",
+            STUB_RETURNS    => LW_ERR_NOT_SUPPORTED,
+
+            _GK104          => [ MAXWELL_and_later, ],
+        ],
+
+        TPC_EXCEPTION_MASK  => [
+
+            DESCRIPTION     => "grTpcExceptionMask: Get TPC exception mask",
+            RETURN_TYPE     => LwU32,
+            ARGUMENTS       => "LwU32 tpcIdx",
+            STUB_RETURNS    => ZERO,
+
+            _GK104          => [ MAXWELL_and_later,  -GH100, -GB100, ],
+            _GH100          => [ GH100, GB100, ],
+
+        ],
+
+        CHECK_ILLEGAL_CLASS_INTERRUPTS  => [
+
+            DESCRIPTION     => "grCheckClassInterrupts: print GR's Illegal class Interrupt status given register values",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 grIntr, LwU32 grIntrEn",
+
+            _GK104          => [ pre_HOPPER, ],
+            _STUB           => [ HOPPER_and_later, ],
+        ],
+
+        DUMP_INTR_EN_SEMAPHORE_TIMEOUT  => [
+
+            DESCRIPTION     => "grDumpIntrEnSemaphoreTimeout: print status of LW_PGRAPH_INTR_EN_SEMAPHORE_TIMEOUT",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32",
+
+            _STUB           => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_INTR_SEMAPHORE_TIMEOUT  => [
+
+            DESCRIPTION     => "grDumpIntrSemaphoreTimeout: print status of LW_PGRAPH_INTR_SEMAPHORE_TIMEOUT",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32",
+
+            _STUB           => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_INTR_SINGLE_STEP  => [
+
+            DESCRIPTION     => "grDumpIntrSingleStep: print status of LW_PGRAPH_INTR_SINGLE_STEP",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32",
+
+            _STUB           => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_MME_HWW_ESR  => [
+
+            DESCRIPTION     => "grDumpMmeHwwEsr: print status of LW_PGRAPH_PRI_MME_HWW_ESR_INFO_PC",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32",
+
+            _GF100          => [ MAXWELL, ],
+            _GP100          => [ PASCAL_and_later,],
+        ],
+
+        DUMP_GRFIFO_STATUS_PTR_INFO  => [
+
+            DESCRIPTION     => "grDumpGrfifoStatusPtrInfo: print status of LW_PGRAPH_GRFIFO_STATUS COUNT,READ PTR, WRITE PTR",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32",
+
+            _GM107          => [ dMAXWELL_and_later, ],
+        ],
+
+        CHECK_PRI_FECS_STATUS  => [
+
+            DESCRIPTION     => "grCheckPriFecsStatus: print pri fecs status",
+            RETURN_TYPE     => LW_STATUS,
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => LW_ERR_NOT_SUPPORTED,
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        CHECK_PRI_GPCCS_STATUS  => [
+
+            DESCRIPTION     => "grCheckPriGpccsStatus: print pri gpccs status",
+            RETURN_TYPE     => LW_STATUS,
+            ARGUMENTS       => "LwU32",
+            STUB_RETURNS    => LW_ERR_NOT_SUPPORTED,
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_PRI_FE_SEMAPHORE_STATE  => [
+
+            DESCRIPTION     => "grDumpPriFeSemaphoreState: print pri fe smeaphore status",
+            RETURN_TYPE     => LW_STATUS,
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => LW_ERR_NOT_SUPPORTED,
+
+            _GM107          => [ MAXWELL_and_later, ],
+        ],
+
+        GET_NUM_GPCS  => [
+
+            DESCRIPTION     => "grGetNumGpcs: get number of GPCs",
+            RETURN_TYPE     => LwU32,
+            ARGUMENTS       => "LwU32",
+
+            _GF100          => [ MAXWELL_thru_TURING, ],
+            _GA100          => [ AMPERE_and_later, ],
+
+        ],
+
+        DUMP_FE_SEMAPHORE_ACQUIRE_STATE  => [
+
+            DESCRIPTION     => "grDumpFeSemaphoreAcquireState: print fe smeaphore acquire status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_GR_GPC_TPC_INFO  => [
+
+            DESCRIPTION     => "grDumpGrGpcTpcInfo: print TPC per GPC status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32, LwU32",
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_GPCCS_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpGpccsExceptionState: print TPC exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 gpcCounter, LwU32 tpcCounter",
+
+            _GK104          => [ MAXWELL_thru_VOLTA, ],
+            _TU102          => [ TURING_thru_ADA,  ],
+            _GH100          => [ HOPPER_and_later, ],
+        ],
+
+        DUMP_PGRAPH_EXCEPTIONS_STATE  => [
+
+            DESCRIPTION     => "grDumpPgraphExceptionsState: print pgraph exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32",
+
+            _GK104          => [ MAXWELL_thru_TURING, GA100, USED_BY_GA102, ],
+            _GA102          => [ AMPERE_and_later, -GA100,  ],
+
+        ],
+
+        DUMP_PGRAPH_BE_EXCEPTION_EN_STATE  => [
+
+            DESCRIPTION     => "grDumpPgraphBeExceptionEnState: print LW_PGRAPH_EXCEPTION_EN status for BE",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 regElwal",
+
+            _GK104          => [ MAXWELL_thru_TURING, GA100, ],
+            _STUB           => [ AMPERE_and_later, -GA100, ],
+        ],
+
+        DUMP_PGRAPH_BE_EXCEPTIONS_STATE  => [
+
+            DESCRIPTION     => "grDumpBePgraphExceptionState: print Exception status for BE",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 regExc, LwU32 fbpsCount",
+
+            _GK104          => [ MAXWELL_thru_TURING, GA100, ],
+            _STUB           => [ AMPERE_and_later, -GA100, ],
+        ],
+
+        DUMP_BE_CROP_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpBeCropExceptionState: print be crop exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 beCounter, LwU32 beOffset",
+
+            _STUB           => [ AMPERE_and_later,  -GA100 ],
+            _GK104          => [ MAXWELL_thru_TURING, GA100,  ],
+        ],
+
+
+        DUMP_BE_ZROP_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpBeZropExceptionState: print be zrop exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 beCounter, LwU32 beOffset",
+
+            _GK104          => [ MAXWELL_thru_TURING, GA100,  ],
+            _STUB           => [ AMPERE_and_later, -GA100 ],
+        ],
+
+        DUMP_ROP_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpropExceptionState: print exception status for ROPs in GPC",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 grIdx, LwU32 gpcIdx",
+
+            _GA102          => [ AMPERE_and_later,  -GA100 ],
+            _STUB           => [ MAXWELL_thru_TURING, GA100 ],
+        ],
+
+        DUMP_DS_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpDsExceptionState: print DS exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_GCC_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpGccExceptionState: print GCC exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32",
+
+            _GV100          => [ dMAXWELL_and_later, ],
+        ],
+
+        DUMP_PROP_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpPropExceptionState: print PROP exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 gpcIdx",
+
+            _GK104          => [ MAXWELL_thru_TURING, GA100, USED_BY_GA102, ],
+            _GA102          => [ AMPERE_and_later, -GA100,  ],
+
+        ],
+
+        GET_PTE_KIND_FROM_PROP_HWW_ESR  => [
+            DESCRIPTION     => "grGetPteKindFromPropHwwEsr: return PTE kind field, given ESR register value",
+            RETURN_TYPE     => LwU32,
+            ARGUMENTS       => "LwU32 regVal",
+            STUB_RETURNS    => ZERO,
+
+            _GK104          => [ MAXWELL_thru_VOLTA, ],
+            _TU102          => [ TURING_and_later ],
+
+        ],
+
+        DUMP_SETUP_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpSetupExceptionState: print Setup exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32",
+
+            _GV100          => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_TPC_TPCCS_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpTpcTpccsExceptionState: print TPC TPCCS exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32, LwU32",
+
+            _GH100          => [ HOPPER_and_later, ],
+            _STUB           => [ FERMI_thru_ADA, ],
+        ],
+
+        DUMP_TPC_MPC_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpTpcMpcExceptionState: print TPC MPC exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32, LwU32",
+
+            _TU102          => [ TURING_and_later,  ],
+            _STUB           => [ FERMI_thru_VOLTA,  ],
+        ],
+
+        DUMP_TPC_PE_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpTpcPeExceptionState: print TPC PE exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32, LwU32",
+
+            _GK104          => [ MAXWELL_and_later,  ],
+
+        ],
+
+        DUMP_TPC_TEX_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpTpcTexExceptionState: print TPC TEX exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32, LwU32",
+
+            _GK104          => [ MAXWELL_thru_PASCAL, ],
+            _STUB          => [ VOLTA_and_later, ],
+        ],
+
+        DUMP_ZLWLL_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpZlwllExceptionState: print ZLWLL exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32",
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_TPC_L1C_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpTPCL1CExceptionState: print TPC L1 exception status",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32, LwU32",
+            INTERFACE_TAG   => "grDumpTPCL1CExceptionState",
+
+            _STUB           => [ FERMI, MAXWELL_and_later, ],
+        ],
+
+        DUMP_TEX_M_HWW_ESR_REQ  => [
+
+            DESCRIPTION     => "grDumpTexMHwwEsrReq: print LW_PGRAPH_PRI_GPC0_TPC0_TEX_M_HWW_ESR_REQ_D_SLOT_ID",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32, LwU32",
+
+            _GF100          => [ GM10X, ],
+            _STUB           => [ GM20X_and_later, ],
+        ],
+
+        DUMP_FE_LWRRENT_METHOD_WFI  => [
+
+            DESCRIPTION     => "grDumpFeLwrrentMethodWfi: print LW_PGRAPH_PRI_FE_LWRRENT_METHOD_WFI",
+            RETURN_TYPE     => LW_STATUS,
+            ARGUMENTS       => "LwU32",
+            STUB_RETURNS    =>  LW_OK,
+
+            _GF100          => [ GM10X, ],
+            _STUB           => [ GM20X_and_later, ],
+        ],
+
+        DUMP_TPC_SM_EXCEPTION_STATE  => [
+
+            DESCRIPTION     => "grDumpTPCSMCExceptionState: print TPC SM exception state",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 gpcIndex, LwU32 tpcIndex",
+            INTERFACE_TAG   => "grDumpTPCSMExceptionState",
+
+            _GK104          => [ pre_VOLTA, ],
+            _GV100          => [ VOLTA_and_later ],
+        ],
+
+        GET_SM_HWW_ESR_WARP_ID  => [
+            DESCRIPTION     => "grGetSmHwwEsrWarpId: return SM HWW ESR warp ID given the register value.",
+            RETURN_TYPE     => LwU32,
+            ARGUMENTS       => "LwU32 esrVal",
+            STUB_RETURNS    => ZERO,
+
+            _GK104          => [ GM10X, ],
+            _GM200          => [ GM20X_thru_Pascal, ],
+            _STUB           => [ VOLTA_and_later ],
+        ],
+
+        #TODO Support needs to be added for fields in the later chips.
+        DUMP_SM_LRF_ECC_STATE => [
+            DESCRIPTION     => "grDumpSmLrfEccState: print LW_PTPC_PRI_SM_LRF_ECC_STATUS",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 gpcIdx, LwU32 tpcIdx",
+
+            _STUB           => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_NUM_SM_PER_TPC => [
+
+            DESCRIPTION     => "get number of SM per TPC",
+            RETURN_TYPE     =>  LwU32,
+            ARGUMENTS       => "void",
+            STUB_RETURNS    =>  ZERO,
+
+            _GF100          => [ pre_VOLTA, ],
+            _GV100          => [ VOLTA_and_later, ],
+        ],
+
+        CHECK_PRIV_ACCESS  => [
+
+            DESCRIPTION     => "grCheckPrivAccess",
+            RETURN_TYPE     => LwBool,
+            ARGUMENTS       => "LwBool",
+            STUB_RETURNS    => LW_TRUE,
+
+            _GK20A          => [ MAXWELL_thru_TURING, ],
+            _STUB           => [ AMPERE_and_later, ],
+        ],
+
+        # TODO: delete
+        PROP_STATUS => [
+            DESCRIPTION     => "grPropStatus",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            _STUB           => [ dMAXWELL_and_later, ],
+        ],
+
+        # TODO: delete
+        FE_STATUS => [
+            DESCRIPTION     => "grFeStatus",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            LIKE_INTERFACE  => PROP_STATUS,
+        ],
+
+        # TODO: delete
+        READ_RAMCHAIN_OFFSET => [
+            DESCRIPTION     => "grReadRamchainOffset",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32, LwU32, LwU32, LwU32*",
+
+            _STUB           => [ dMAXWELL_and_later, ],
+        ],
+
+        # TODO: delete
+        ANALYZE_LIMIT_ERROR  => [
+
+            DESCRIPTION     => "gr_AnalyzeGrLimitError",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            _STUB           => [ dMAXWELL_and_later, ]
+         ],
+
+        # TODO: delete
+        PRINT_SURFACE_REGS  => [
+
+            DESCRIPTION     => "gr_PrintGrSurfaceRegs",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            _STUB           => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_CHANNEL_CTX_INFO  => [
+
+            DESCRIPTION     => "gr_GetGrChannelCtXInfo",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32",
+
+            _GF100          => [ MAXWELL_and_later, ],
+         ],
+
+        # TODO: delete
+        LAUCH_CHECK  => [
+
+            DESCRIPTION     => "gr_GrLauchCheck",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            _STUB           => [ dMAXWELL_and_later, ],
+         ],
+
+        # TODO: delete
+        GET_PERF_MONITOR_INFO  => [
+
+            DESCRIPTION     => "gr_GetPerfMonitorInfo",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "void",
+
+            _STUB           => [ dMAXWELL_and_later, ],
+         ],
+
+        GET_LWRRENT_AND_PENDING_INFO  => [
+
+            DESCRIPTION     => "gr_GetLwrrentAndPendingInfo",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32*, LwU32*",
+
+            _GF100          => [ MAXWELL_and_later, ],
+         ],
+
+        TEST_GRAPHICS_STATE => [
+
+            DESCRIPTION     => "test if graphics is in valid state",
+            RETURN_TYPE     =>  LW_STATUS,
+            ARGUMENTS       => "LwU32",
+            STUB_RETURNS    => ERROR,
+
+            _GF100          => [ MAXWELL_and_later, ],
+         ],
+
+        CHECK_FE_LWRRENT_OBJECT => [
+
+            DESCRIPTION     => "test if FE current object is in valid state",
+            RETURN_TYPE     =>  LwU32,
+            ARGUMENTS       => "void",
+            INTERFACE_TAG   => "grCheckFELwrrentObject", # FE instead of Fe
+            STUB_RETURNS    => LW_OK,
+
+            # This register was dropped for Pascal (bug 1330859)
+            _GF100          => [ pre_PASCAL, ],
+            _STUB           => [ PASCAL_and_later, ],
+         ],
+
+        CONSTRUCT_ROP_APERTURES_STRUCT => [
+            DESCRIPTION   => "Construct ROP-in-GPC apertures",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "GR_IO_APERTURE *pGrAperture, GR_IO_APERTURE *pGpcAperture",
+            STUB_RETURNS  => LW_OK,
+
+            _GA102        => [ AMPERE_and_later, -GA100,  ],
+            _STUB         => [ pre_AMPERE, GA100 ],
+        ],
+
+        CONSTRUCT_PPC_APERTURES => [
+            DESCRIPTION   => "Construct PPC-in-GPC apertures",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "GR_IO_APERTURE *pGrAperture, GR_IO_APERTURE *pGpcAperture",
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        CONSTRUCT_TPC_APERTURES => [
+            DESCRIPTION   => "Construct ROP-in-GPC apertures",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "GR_IO_APERTURE *pGrAperture, GR_IO_APERTURE *pGpcAperture, LwBool bIsExtended",
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        GET_UNIT_APERTURE_INFORMATION => [
+            DESCRIPTION   => "Get Aperture Information for each type of sub-unit with GR engine, as base address, length, broadcast index of GR, GPC, PPC, ROP",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "GR_UNIT_TYPE, LwU32*, LwU32*, LwS32*",
+            STUB_RETURNS  =>  LW_OK,
+
+            _GK104        => [ MAXWELL_thru_PASCAL, ],
+            _GV100        => [ VOLTA_thru_TURING, GA100],
+            _GA102        => [ AMPERE_thru_ADA, -GA100,  ],
+            _GH100        => [ HOPPER_and_later, -G00X, ],
+            _G000         => [ G00X, ],
+         ],
+
+        CONSTRUCT_SUB_APERTURES => [
+            DESCRIPTION   => "Construct and initialize unit apertures for zero based addressing",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "GR_IO_APERTURE*, GR_UNIT_TYPE, LwU32",
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        CONSTRUCT_IO_APERTURES => [
+            DESCRIPTION   => "Construct and initialize unit apertures for zero based addressing",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "GR_IO_APERTURE*, IO_APERTURE*",
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        DESTROY_IO_APERTURES => [
+            DESCRIPTION   => "Destroy unit apertures for zero based addressing",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "GR_IO_APERTURE*",
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        GET_APERTURE => [
+            DESCRIPTION   => "Retrieves GR_IO_APERTURE based on relative path from higher Aperture",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "GR_IO_APERTURE *pApertureIn, GR_IO_APERTURE **ppApertureOut, LwU32 *pTypeIndex, LwU32 count",
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        CONSTRUCT_GPC_APERTURES => [
+            DESCRIPTION   => "Constructs GPC/EGPC Apertures",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "GR_IO_APERTURE *pGrAperture, LwBool bIsExtended",
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        CONSTRUCT_EGPC_APERTURES_STRUCT => [
+            DESCRIPTION   => "Construct EGPC apertures",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "GR_IO_APERTURE *pGrAperture",
+            STUB_RETURNS  =>  LW_OK,
+
+            _GV100        => [ VOLTA_and_later, ],
+            _STUB         => [ pre_VOLTA ],
+        ],
+
+        GET_NUM_ACTIVE_GPC => [
+
+            DESCRIPTION     => "get num of gpcs",
+            RETURN_TYPE     =>  LwU32,
+            ARGUMENTS       => "LwU32",
+            STUB_RETURNS    => ZERO,
+
+            _GK104          => [ MAXWELL_thru_TURING, ],
+            _GA100          => [ AMPERE_and_later, ],
+         ],
+
+        GET_NUM_ACTIVE_FBP => [
+
+            DESCRIPTION     => "get num of fbps",
+            RETURN_TYPE     =>  LwU32,
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => ZERO,
+
+            _GK104          => [ MAXWELL_and_later, ],
+        ],
+
+        GET_NUM_ROP_FOR_GPC => [
+
+            DESCRIPTION     => "get num of rops in the given gpc",
+            RETURN_TYPE     =>  LwU32,
+            ARGUMENTS       => "LwU32, LwU32",
+            STUB_RETURNS    =>  ZERO,
+
+            _GA102          => [ AMPERE_and_later, -GA100,  ],
+            _STUB           => [ pre_AMPERE, GA100,  ]
+        ],
+
+        GET_NUM_TPC_FOR_GPC => [
+
+            DESCRIPTION     => "get num of tpcs in the given gpc",
+            RETURN_TYPE     =>  LwU32,
+            ARGUMENTS       => "LwU32, LwU32",
+            STUB_RETURNS    =>  ZERO,
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        GET_NUM_PPC_FOR_GPC => [
+
+            DESCRIPTION     => "get num of ppcs in the given gpc",
+            RETURN_TYPE     =>  LwU32,
+            ARGUMENTS       => "LwU32, LwU32",
+            STUB_RETURNS    =>  ZERO,
+
+            _GK104          => [ MAXWELL_and_later, ],
+        ],
+
+        GET_NUM_CPC_FOR_GPC => [
+
+            DESCRIPTION     => "get num of cpcs in the given gpc",
+            INTERFACE_TAG   => "grGetNumCPCsforGpc",
+            RETURN_TYPE     =>  LwU32,
+            ARGUMENTS       => "LwU32 gpcIdx",
+            STUB_RETURNS    =>  ZERO,
+
+            _GH100          => [ HOPPER_and_later, -GH202 ],
+            _STUB           => [ pre_HOPPER, GH202 ]
+        ],
+
+        GET_PES_TPC_MASK => [
+            DESCRIPTION     => "get PES's TPC mask",
+            RETURN_TYPE     =>  LwU32,
+            ARGUMENTS       => "LwU32 grIdx, LwU32 gpcIdx, LwU32 pesIdx",
+            STUB_RETURNS    =>  ZERO,
+
+            _GK104          => [ MAXWELL_thru_ADA, GH202,  ],
+            _GH100          => [ HOPPER_and_later, -GH202 ],
+
+        ],
+
+        GET_NUMBER_PES_PER_GPC => [
+            DESCRIPTION     => "get num of pes in the given gpc",
+            RETURN_TYPE     => LwU32,
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => ZERO,
+
+            _GM107          => [ GM10X, ],
+            _GM200          => [ GM20X, ],
+            _GP100          => [ GP100, ],
+            _GP102          => [ PASCAL, -GP100, ],
+            _GV100          => [ VOLTA, ],
+            _TU102          => [ TURING, ],
+            _GA100          => [ GA100, ],
+            _GA102          => [ AMPERE, ADA, GH20X, -GA100 ],
+            _GH100          => [ HOPPER_and_later, -GH20X ],
+        ],
+        # Our convention is to use Num instead of Number. However, RM uses a graphics HAL with the name GET_NUM_PES_PER_GPC.
+        # The linker in one of the DVS builds tries to link a build using both librm.lib and liblwwatch.lib, and complains
+        # about finding multiple definitions for the HALs. Hence, renaming to using Number. Relevant linker error below:
+        # liblwwatch.lib(halstubs.obj) : error LNK2005: _grGetNumPesPerGpc_STUB already defined in librm.lib(halstub.obj)
+
+        GET_MAX_TPC_PER_GPC  => [
+            DESCRIPTION        => "max num of tpc per gpc",
+            RETURN_TYPE        =>  LwU32,
+            ARGUMENTS          => "void",
+            STUB_RETURNS       =>  ZERO,
+
+            _GM107          => [ GM10X, ],
+            _GM200          => [ GM20X, ],
+            _GK20A          => [ tAMPERE_and_later, ],
+            _GP100          => [ GP100, ],
+            _GP102          => [ PASCAL, -GP100, ],
+            _GV100          => [ VOLTA, ],
+            _TU102          => [ TURING, ],
+            _GA100          => [ GA100, ],
+            _GA102          => [ dAMPERE, ADA, GH20X, -GA100 ],
+            _GH100          => [ HOPPER_and_later, -GH20X, ],
+        ],
+
+        GET_MAX_GPC => [
+            DESCRIPTION       => "max num of gpc",
+            RETURN_TYPE       => LwU32,
+            ARGUMENTS         => "void",
+            STUB_RETURNS      => ZERO,
+
+            _GM107  => [ GM10X, ],
+            _GM200  => [ GM20X, ],
+            _GK20A  => [ tAMPERE_and_later, ],
+            _GP100  => [ GP100, ],
+            _GA100  => [ GA100, GH100, GB100, ],
+            _GA102  => [ dAMPERE_and_later, -GA100, -GH100, -ADA, -GB100, ],
+            _AD102  => [ ADA, ],
+            _STUB   => [ dPASCAL_thru_dTURING, -GP100,  ],
+        ],
+
+        GET_MAX_FBP => [
+            DESCRIPTION       => "max num of fbp",
+            RETURN_TYPE       => LwU32,
+            ARGUMENTS         => "void",
+            STUB_RETURNS      => ZERO,
+
+            _GK20A  => [ tAMPERE_and_later, ],
+            _GM107  => [ GM10X, ],
+            _GM200  => [ GM20X, ],
+            _GP100  => [ GP100, ],
+            _STUB   => [ dPASCAL_and_later, -GP100, ],
+        ],
+
+        GET_ACTIVE_GPC_CONFIG => [
+            DESCRIPTION       => "current gpc config",
+            RETURN_TYPE       => LwBool,
+            ARGUMENTS         => "LwU32*, LwU32*",
+            STUB_RETURNS      => LW_FALSE,
+
+            _GM107  => [ MAXWELL_thru_TURING, ],
+            _GA100  => [ AMPERE_and_later, ],
+            _STUB   => [ pre_MAXWELL, ],
+        ],
+
+        GET_ACTIVE_TPC_CONFIG => [
+            DESCRIPTION       => "current tpc config",
+            RETURN_TYPE       => LwBool,
+            ARGUMENTS         => "LwU32, LwU32*, LwU32*",
+            STUB_RETURNS      => LW_FALSE,
+
+            _GM107  => [ MAXWELL_thru_TURING, ],
+            _GA100  => [ AMPERE_and_later, ],
+            _STUB   => [ pre_MAXWELL, ],
+       ],
+
+        GET_ACTIVE_ZLWLL_CONFIG => [
+            DESCRIPTION       => "current zlwll config",
+            RETURN_TYPE       => LwBool,
+            ARGUMENTS         => "LwU32, LwU32*, LwU32*",
+            STUB_RETURNS      => LW_FALSE,
+
+            _GM107  => [ MAXWELL_thru_TURING, ],
+            _GA100  => [ AMPERE, GH100,],
+            _STUB   => [ pre_MAXWELL, ADA, GH202, BLACKWELL_and_later ],
+       ],
+
+        GET_ACTIVE_FBP_CONFIG => [
+            DESCRIPTION       => "current fbp config",
+            RETURN_TYPE       => LwBool,
+            ARGUMENTS         => "LwU32*, LwU32*",
+            STUB_RETURNS      => LW_FALSE,
+
+            _GM107  => [ MAXWELL_thru_TURING, ],
+            _GA100  => [ AMPERE_and_later, ],
+            _STUB   => [ pre_MAXWELL, ],
+        ],
+
+        GET_ACTIVE_ROPS_FOR_GPC => [
+            DESCRIPTION       => "return active ROP mask for the GPC based on FUSE register",
+            INTERFACE_TAG     => "grGetActiveRopsForGpc",
+            RETURN_TYPE       => LwU32,
+            ARGUMENTS         => "LwU32 gpcIdx",
+            STUB_RETURNS      => ZERO,
+
+            _GH100  => [ HOPPER_and_later, -GH202 ],
+            _GA102  => [ AMPERE_thru_ADA, -GA100, GH202 ],
+            _STUB   => [ pre_AMPERE, GA100, ],
+        ],
+
+        GET_ACTIVE_CPCS_FOR_GPC => [
+            DESCRIPTION       => "return active CPC mask for the GPC based on FUSE register",
+            INTERFACE_TAG     => "grGetActiveCPCsForGpc",
+            RETURN_TYPE       => LwU32,
+            ARGUMENTS         => "LwU32 gpcIdx",
+            STUB_RETURNS      => ZERO,
+
+            _GH100  => [ HOPPER_and_later, -GH202 ],
+            _STUB   => [ pre_HOPPER, GH202 ],
+        ],
+
+        GET_ACTIVE_FBPA_CONFIG => [
+            DESCRIPTION       => "current fbpa config",
+            RETURN_TYPE       => LwBool,
+            ARGUMENTS         => "LwU32*, LwU32*",
+            STUB_RETURNS      => LW_FALSE,
+
+            _GM107  => [ MAXWELL_thru_TURING, ],
+            _GA100  => [ GA100,  ],
+            _GA102  => [ GA102_and_later, ],
+            _STUB   => [ pre_MAXWELL, ],
+        ],
+
+        GET_ACTIVE_LWENC_CONFIG => [
+            DESCRIPTION       => "current lwenc config",
+            RETURN_TYPE       => LwBool,
+            ARGUMENTS         => "LwU32*, LwU32*",
+            STUB_RETURNS      => LW_FALSE,
+
+            _GM107  => [ MAXWELL_thru_TURING, ],
+            _GA100  => [ AMPERE_and_later, ],
+            _STUB   => [ pre_MAXWELL, ],
+        ],
+
+        GET_ACTIVE_CE_CONFIG => [
+            DESCRIPTION       => "current ce config",
+            RETURN_TYPE       => LwBool,
+            ARGUMENTS         => "LwU32*, LwU32*",
+            STUB_RETURNS      => LW_FALSE,
+
+            _GM107  => [ MAXWELL, ],
+            _GP102  => [ PASCAL_and_later, ],
+            _STUB   => [ pre_MAXWELL, ],
+        ],
+
+        GET_ACTIVE_DISP_HEAD_CONFIG => [
+            DESCRIPTION       => "current disp_head config",
+            RETURN_TYPE       => LwBool,
+            ARGUMENTS         => "LwU32*, LwU32*",
+            STUB_RETURNS      => LW_FALSE,
+
+            _GM107  => [ MAXWELL_thru_TURING, ],
+            _GA100  => [ AMPERE_and_later, ],
+            _STUB   => [ pre_MAXWELL, ],
+        ],
+
+        GET_TEX_HANG_SIGNATURE_INFO_LWW => [
+
+            DESCRIPTION     => "get TEX hang signature",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32",
+
+            _STUB           => [ dMAXWELL_and_later, ],
+        ],
+
+        PRINT_ENGINE_GRAPHICS_STATUS => [
+
+            DESCRIPTION     => "grPrintEngineGraphicsStatus",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "void",
+
+            _GM107          => [ dMAXWELL_thru_TURING, -GV100, ],
+            _GA100          => [ dAMPERE_and_later,  -G00x, ],
+            _T124           => [ tAMPERE_and_later, ],
+            _STUB           => [ GV100,  G00X, ],
+        ],
+
+        PRINT_EXCEPTION_STATUS_REGISTER => [
+
+            DESCRIPTION     => "grPrintExceptionStatusRegister",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "void",
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        CHECK_BE_PIPELINE_STATUS => [
+
+            DESCRIPTION     => "grCheckPipelineStatus",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "char*, LwU32 grStatus, LwU32 numActiveFbps",
+
+            _GK104          => [ pre_AMPERE, GA100, ],
+            _STUB           => [ AMPERE_and_later, -GA100 ],
+        ],
+
+        CHECK_PIPELINE_STATUS => [
+
+            DESCRIPTION     => "grCheckPipelineStatus",
+            RETURN_TYPE     =>  LW_STATUS,
+            ARGUMENTS       => "char*, BOOL, LwU32",
+            STUB_RETURNS    =>  ERROR,
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        CHECK_PMM_STATUS => [
+
+            DESCRIPTION     => "grCheckPMMStatus: report PMM unit status ",
+            INTERFACE_TAG   => "grCheckPMMStatus",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "char*, LwU32, BOOL",
+
+            _GF100          => [ MAXWELL_thru_PASCAL, ],
+            _STUB           => [ VOLTA_and_later, ],
+        ],
+
+        CHECK_SKED_STATUS => [
+
+            DESCRIPTION     => "grCheckSkedStatus: report SKED unit status ",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "char*, BOOL",
+
+            _GK104          => [ MAXWELL_and_later, ],
+        ],
+
+        CHECK_FE_CONST_STATUS => [
+
+            DESCRIPTION     => "grCheckFeConstStatus: report FE_CONST unit status ",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "char*, BOOL",
+
+            _GK104          => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_XBAR_STATUS => [
+
+            DESCRIPTION     => "grDumpXbarStatus",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32",
+
+            _STUB           => [ dMAXWELL_and_later, ],
+            # Stubbed out for dMAXWELL_and_later. These are not part of gr idle because xbar is not part of gr.
+            # Yogesh Kulkarni has an AI to set up an algorithm to decode whether XBAR is idle. Once he's done,
+            # maybe we could implement this as a !xbarstate LwWatch extension. Refer bug 1050475.
+        ],
+
+        DUMP_ISO_HUB_STATUS => [
+
+            DESCRIPTION     => "grDumpIsoHubStatus",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "void",
+
+            _STUB           => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_NISO_HUB_STATUS => [
+
+            DESCRIPTION     => "grDumpNisoHubStatus",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "void",
+
+            _GK104          => [ MAXWELL, ],
+            _GP100          => [ PASCAL_and_later, -GH100, ],
+            _GH100          => [ GH100, ],
+
+        ],
+
+        DUMP_GPC_INFO => [
+
+            DESCRIPTION     => "grDumpGpcInfo",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32, LwU32",
+
+            _GF100          => [ MAXWELL_and_later, -PASCAL_and_later, ],
+            _GP100          => [ PASCAL_thru_TURING, GA100 ],
+            _GA102          => [ AMPERE_and_later, -GA100, ],
+        ],
+
+        DUMP_TPC_INFO => [
+
+            DESCRIPTION     => "grDumpTpcInfo",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32, LwU32",
+
+            _GM107          => [ GM10X, ],
+            _GM200          => [ MAXWELL_and_later, -VOLTA_and_later, -GM10X, ],
+            _GV100          => [ VOLTA_thru_ADA, ],
+            _GH100          => [ HOPPER_and_later, ],
+        ],
+
+        DUMP_WARP_PC => [
+
+            DESCRIPTION     => "grDumpWarpPc",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32, LwU32, LwU32, LwBool",
+
+            _GM200          => [ MAXWELL_and_later, -VOLTA_and_later, ],
+            _GV100          => [ VOLTA_and_later, -AMPERE_and_later],
+            _GA100          => [ GA100, HOPPER_and_later, ],
+            _GA102          => [ AMPERE_thru_ADA, -GA100, ],
+        ],
+
+        DUMP_PPC_INFO => [
+
+            DESCRIPTION     => "grDumpPpcInfo",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32, LwU32",
+
+            _GK104          => [ MAXWELL_and_later, -PASCAL_and_later, ],
+            _GP100          => [ PASCAL_and_later, ],
+        ],
+
+        GET_BUS_INFO => [
+
+            DESCRIPTION     => "grGetBusInfo",
+            RETURN_TYPE     =>  LW_STATUS,
+            ARGUMENTS       => "LwU32*, LwU32*, LwU32*, LwU32*, LwU32*, LwU32",
+            STUB_RETURNS    => ERROR,
+
+            _GF100          => [ MAXWELL_and_later, ],
+        ],
+
+        GET_TEX_PARITY_INFO => [
+
+            DESCRIPTION     => "grGetTexParityInfo",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32",
+            STUB_RETURNS    =>  void,
+
+            _STUB           => [ ALL ],
+        ],
+
+        PGRAPH_OFFSET => [
+
+            DESCRIPTION     => "check if offset falls within PGRAPH range",
+            RETURN_TYPE     =>  LwBool,
+            ARGUMENTS       => "LwU32",
+            STUB_RETURNS    =>  LW_FALSE,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+        CONFIG_BAR0_WINDOW => [
+
+            DESCRIPTION     => "sets the BAR0 window",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32, LwBool",
+            STUB_RETURNS    =>  void,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+        GET_SMC_STATE => [
+
+            DESCRIPTION     => "get SMC state: enabled or disabled",
+            RETURN_TYPE     =>  LwBool,
+            ARGUMENTS       => "void",
+            STUB_RETURNS    =>  LW_FALSE,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+        ENABLE_FE_PERFMON_REPORTING => [
+
+            DESCRIPTION     => "Enable fe perfmon reporting",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "void",
+
+            _TU102          => [ TURING_and_later, ],
+            _STUB           => [ pre_TURING, ],
+        ],
+
+        GET_GPC_IDS_FROM_GR_IDX => [
+
+            DESCRIPTION     => "get GPC Ids from Gr Index",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32, LwU32*, LwU32*",
+
+            _GF100          => [ MAXWELL_thru_TURING, USED_BY_GA100, ],
+            _GA100          => [ AMPERE_and_later, ]
+        ],
+
+        GET_GPC_MASK => [
+
+            DESCRIPTION     => "get GPC Ids mask",
+            RETURN_TYPE     =>  LwU32,
+            ARGUMENTS       => "LwU32",
+            STUB_RETURNS    =>  ZERO,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ]
+        ],
+
+        CALLWLATE_ADDRESS => [
+
+            DESCRIPTION     => "Callwlate Address of register Offset",
+            RETURN_TYPE     =>  PhysAddr,
+            ARGUMENTS       => "PhysAddr",
+            STUB_RETURNS    =>  ZERO,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ]
+        ],
+
+        READ_REG32  => [
+
+            DESCRIPTION   => "Read a byte from reg",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "PhysAddr",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ FERMI_thru_TURING, USED_BY_GA100, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+        WRITE_REG32  => [
+
+            DESCRIPTION   => "Write reg",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "PhysAddr, LwU32",
+
+            _GF100        => [ FERMI_thru_TURING, USED_BY_GA100, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+        READ_REG08  => [
+
+            DESCRIPTION   => "Read a byte from reg",
+            RETURN_TYPE   => LwU8,
+            ARGUMENTS     => "PhysAddr",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ FERMI_thru_TURING, USED_BY_GA100, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+        WRITE_REG08  => [
+
+            DESCRIPTION   => "Write a byte to reg",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "PhysAddr, LwU8",
+
+            _GF100        => [ FERMI_thru_TURING, USED_BY_GA100, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+        GET_SMC_PARTITION_INFO => [
+
+            DESCRIPTION     => "get partition specific info",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32",
+            STUB_RETURNS    =>  void,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+        PRINT_PARTITION_INFO => [
+
+            DESCRIPTION     => "print partition specific info",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32",
+            STUB_RETURNS    =>  void,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+        GET_SMC_ENGINE_INFO => [
+
+            DESCRIPTION     => "get smc engine specific info",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "void",
+            STUB_RETURNS    =>  void,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+        GET_SWIZZ_ID_FROM_GR_IDX => [
+
+            DESCRIPTION     => "get swizzid from given grIdx",
+            RETURN_TYPE     =>  LW_STATUS,
+            ARGUMENTS       => "LwU32, LwU32*",
+            STUB_RETURNS    =>  ERROR,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+        GET_SYS_PIPE_MASK => [
+
+            DESCRIPTION     => "get sys pipe mask",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32, LwU32*, LwU32*, LwU32*",
+            STUB_RETURNS    =>  void,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+        SWIZZ_ID_TO_ENGINE_CONFIG => [
+
+            DESCRIPTION     => "get engine config for given swizzId",
+            RETURN_TYPE     =>  LW_STATUS,
+            ARGUMENTS       => "LwU32, LwU32*, LwU32*",
+            STUB_RETURNS    =>  ERROR,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+        GET_PARTITION_TABLE_MASK => [
+
+            DESCRIPTION     => "get partition table mask",
+            RETURN_TYPE     =>  LwU32,
+            ARGUMENTS       => "LwU32",
+            STUB_RETURNS    =>  ZERO,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+        GET_GPC_SMC_MAP => [
+
+            DESCRIPTION     => "get gpc smc mapping",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32, LwU32*",
+            STUB_RETURNS    =>  void,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+
+        GET_VEID_SMC_CONFIG => [
+
+            DESCRIPTION     => "get veid smc mapping",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32, LwU32*, LwU32*, LwU32*",
+            STUB_RETURNS    =>  void,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+
+        GET_PARTITION_MEM_INFO => [
+
+            DESCRIPTION     => "get partition memory info",
+            RETURN_TYPE     =>  LW_STATUS,
+            ARGUMENTS       => "LwU32, LwU64*, LwU64*, LwU64*, LwU64*, LwU64*",
+            STUB_RETURNS    =>  ERROR,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+        GET_PARTITION_MEM_SIZE => [
+
+            DESCRIPTION     => "get partition memory size",
+            RETURN_TYPE     =>  LW_STATUS,
+            ARGUMENTS       => "LwU32, LwU64*, LwU64*, LwU32*, LwU32*, LwU64*",
+            STUB_RETURNS    =>  ERROR,
+
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_AMPERE, ],
+        ],
+
+        PRINT_MME_FE1_DISABLED => [
+
+            DESCRIPTION     => "Prints if MME_FE1 is disabled",
+            RETURN_TYPE     =>  void,
+            ARGUMENTS       => "LwU32",
+            STUB_RETURNS    =>  void,
+
+            _GA102          => [ AMPERE_and_later, -GA100,  ],
+            _STUB           => [ pre_AMPERE, GA100,  ],
+        ],
+    ],   # HAL_INTERFACES
+
+];
+
+
+# return a reference to the Hal definition
+return $grHal;

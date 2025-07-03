@@ -1,0 +1,297 @@
+	.version 3.1
+	.target sm_20
+	// compiled with c:\perforce\sw\compiler\test\gpgpu\bin\i686_win32_debug/open64/lib//be.exe
+	// lwopencc 2.3 built on 2009-03-17
+
+	.reg .u32 %ra<17>;
+	.reg .u64 %rda<17>;
+	.reg .f32 %fa<17>;
+	.reg .f64 %fda<17>;
+	.reg .u32 %rv<5>;
+	.reg .u64 %rdv<5>;
+	.reg .f32 %fv<5>;
+	.reg .f64 %fdv<5>;
+
+
+	//-----------------------------------------------------------
+	// Compiling forloop1.cpp3.i (c:/temp/ccBI#.a21712)
+	//-----------------------------------------------------------
+
+	//-----------------------------------------------------------
+	// Options:
+	//-----------------------------------------------------------
+	//  Target:ptx, ISA:sm_20, Endian:little, Pointer Size:32
+	//  -O3	(Optimization level)
+	//  -g0	(Debug level)
+	//  -m2	(Report advisories)
+	//-----------------------------------------------------------
+
+        // The lwca program used to produce the code        
+        // #define N 100
+        //__device__ unsigned int foo[N];
+        //__device__ unsigned int acc;
+        //__device__ float accf;
+        //
+        //extern "C" __global__ void entry(void) {
+        //
+        //  float i,j,k;
+        //  int idx = 0;
+        //  
+        //
+        //  // loop 0 - unroll factor should be 8
+        //  for (j = -0.625f; j < 1.25f; j += 0.25f) {
+        //	acc += foo[idx++];
+        //        accf += j;
+        //  }
+        //  if (acc == 3456)
+        //    return;
+        //
+        //  // loop 1 - unroll factor should be 5
+        //  for (j = 0; j < 1.25f; j += 0.25f) {
+        //	acc += foo[idx++];
+        //        accf += j;
+        //  }
+        //  if (acc == 3456)
+        //    return;
+        //
+        //  // loop 2 - unroll factor should be 6
+        //  for (j = 0; j <= 1.25f; j += 0.25f) {
+        //	acc += foo[idx++];
+        //        accf += j;
+        //  }
+        //  if (acc == 3456)
+        //    return;
+        //
+        //  // loop 3  - DO_NOT_UNROLL, infinite
+        //  for (j = 0; j != 1.24f; j += 0.25f) {
+        //	acc += foo[idx++];
+        //        accf += j;
+        //  }
+        //  if (acc == 3456)
+        //    return;
+        //
+        //  // loop 4 - unroll factor should be 1
+        //  for (j = -0.25; j <= 0; j += 0.25f) {
+        //	acc += foo[idx++];
+        //        accf += j;
+        //  }
+        //  if (acc == 3456)
+        //    return;
+        //
+        //  // loop 5 - DO_NOT_UNROLL, overflow
+        //  for (j = -0.0f; j <= 1.0f; j += 0.1f) {
+        //	acc += foo[idx++];
+        //        accf += j;
+        //  }
+        //  if (acc == 3456)
+        //    return;
+        //
+        //  // loop 6 - unroll factor should be 1
+        //  for (j = -0.25f; j != 0; j += 0.25f) {
+        //	acc += foo[idx++];
+        //        accf += j;
+        //  }
+        //  if (acc == 3456)
+        //    return;
+        //
+        //  // loop 7 - DO_NOT_UNROLL - overflow
+        //  for (j = 1.175494490952134e-38f; j <= 3.3895312e+38f; j += 0.25f) {
+        //	acc += foo[idx++];
+        //        accf += j;
+        //  }
+        //
+        //}
+
+
+	.global .align 4 .b8 foo[400];
+	.global .u32 acc;
+	.global .f32 accf;
+
+	.entry entry1
+	{
+	.reg .u32 %r<19>;
+	.reg .f32 %f<20>;
+	.reg .pred %p<17>;
+	.loc	15	8	0
+$LBB1_entry:
+	mov.u32 	%r1, foo;
+	ld.global.f32 	%f1, [accf];
+	ld.global.s32 	%r2, [acc];
+	mov.f32 	%f2, 0fbf200000;     	// -0.625
+$Lt_0_14338:
+ //<loop> Loop body line 8, nesting depth: 1, estimated iterations: unknown
+	.loc	15	16	0
+	add.u32 	%r1, %r1, 4;
+	ld.global.u32 	%r3, [%r1+-4];
+	add.u32 	%r2, %r2, %r3;
+	.loc	15	17	0
+	add.ftz.f32 	%f1, %f1, %f2;
+	mov.f32 	%f3, 0f3e800000;     	// 0.25
+	add.ftz.f32 	%f2, %f2, %f3;
+	mov.f32 	%f4, 0f3fa00000;     	// 1.25
+	setp.lt.ftz.f32 	%p1, %f2, %f4;
+	@%p1 bra 	$Lt_0_14338;
+	mov.u32 	%r4, 3456;
+	setp.ne.u32 	%p2, %r2, %r4;
+	@%p2 bra 	$Lt_0_15618;
+	.loc	15	20	0
+	st.global.u32 	[acc], %r2;
+	st.global.f32 	[accf], %f1;
+	bra.uni 	$LBB32_entry;
+$Lt_0_15618:
+	mov.f32 	%f2, 0f00000000;     	// 0
+$Lt_0_15874:
+ //<loop> Loop body line 20, nesting depth: 1, estimated iterations: unknown
+	.loc	15	24	0
+	add.u32 	%r1, %r1, 4;
+	ld.global.u32 	%r5, [%r1+-4];
+	add.u32 	%r2, %r2, %r5;
+	.loc	15	25	0
+	add.ftz.f32 	%f1, %f1, %f2;
+	mov.f32 	%f5, 0f3e800000;     	// 0.25
+	add.ftz.f32 	%f2, %f2, %f5;
+	mov.f32 	%f6, 0f3fa00000;     	// 1.25
+	setp.lt.ftz.f32 	%p3, %f2, %f6;
+	@%p3 bra 	$Lt_0_15874;
+	mov.u32 	%r6, 3456;
+	setp.ne.u32 	%p4, %r2, %r6;
+	@%p4 bra 	$Lt_0_17154;
+	.loc	15	28	0
+	st.global.u32 	[acc], %r2;
+	st.global.f32 	[accf], %f1;
+	bra.uni 	$LBB32_entry;
+$Lt_0_17154:
+	mov.f32 	%f2, 0f00000000;     	// 0
+$Lt_0_17410:
+ //<loop> Loop body line 28, nesting depth: 1, estimated iterations: unknown
+	.loc	15	32	0
+	add.u32 	%r1, %r1, 4;
+	ld.global.u32 	%r7, [%r1+-4];
+	add.u32 	%r2, %r2, %r7;
+	.loc	15	33	0
+	add.ftz.f32 	%f1, %f1, %f2;
+	mov.f32 	%f7, 0f3e800000;     	// 0.25
+	add.ftz.f32 	%f2, %f2, %f7;
+	mov.f32 	%f8, 0f3fa00000;     	// 1.25
+	setp.le.ftz.f32 	%p5, %f2, %f8;
+	@%p5 bra 	$Lt_0_17410;
+	mov.u32 	%r8, 3456;
+	setp.ne.u32 	%p6, %r2, %r8;
+	@%p6 bra 	$Lt_0_18690;
+	.loc	15	36	0
+	st.global.u32 	[acc], %r2;
+	st.global.f32 	[accf], %f1;
+	bra.uni 	$LBB32_entry;
+$Lt_0_18690:
+	mov.f32 	%f2, 0f00000000;     	// 0
+$Lt_0_18946:
+ //<loop> Loop body line 36, nesting depth: 1, estimated iterations: unknown
+	.loc	15	40	0
+	add.u32 	%r1, %r1, 4;
+	ld.global.u32 	%r9, [%r1+-4];
+	add.u32 	%r2, %r2, %r9;
+	.loc	15	41	0
+	add.ftz.f32 	%f1, %f1, %f2;
+	.loc	15	39	0
+	mov.f32 	%f9, 0f3e800000;     	// 0.25
+	add.ftz.f32 	%f2, %f2, %f9;
+	mov.f32 	%f10, 0f3f9eb852;    	// 1.24
+	setp.neu.ftz.f32 	%p7, %f2, %f10;
+	@%p7 bra 	$Lt_0_18946;
+	mov.u32 	%r10, 3456;
+	setp.ne.u32 	%p8, %r2, %r10;
+	@%p8 bra 	$Lt_0_20226;
+	.loc	15	44	0
+	st.global.u32 	[acc], %r2;
+	st.global.f32 	[accf], %f1;
+	bra.uni 	$LBB32_entry;
+$Lt_0_20226:
+	mov.f32 	%f2, 0fbe800000;     	// -0.25
+$Lt_0_20482:
+ //<loop> Loop body line 44, nesting depth: 1, estimated iterations: unknown
+	.loc	15	48	0
+	add.u32 	%r1, %r1, 4;
+	ld.global.u32 	%r11, [%r1+-4];
+	add.u32 	%r2, %r2, %r11;
+	.loc	15	49	0
+	add.ftz.f32 	%f1, %f1, %f2;
+	mov.f32 	%f11, 0f3e800000;    	// 0.25
+	add.ftz.f32 	%f2, %f2, %f11;
+	mov.f32 	%f12, 0f00000000;    	// 0
+	setp.le.ftz.f32 	%p9, %f2, %f12;
+	@%p9 bra 	$Lt_0_20482;
+	mov.u32 	%r12, 3456;
+	setp.ne.u32 	%p10, %r2, %r12;
+	@%p10 bra 	$Lt_0_21762;
+	.loc	15	52	0
+	st.global.u32 	[acc], %r2;
+	st.global.f32 	[accf], %f1;
+	bra.uni 	$LBB32_entry;
+$Lt_0_21762:
+	mov.f32 	%f2, 0f80000000;     	// 0
+$Lt_0_22018:
+ //<loop> Loop body line 52, nesting depth: 1, estimated iterations: unknown
+	.loc	15	56	0
+	add.u32 	%r1, %r1, 4;
+	ld.global.u32 	%r13, [%r1+-4];
+	add.u32 	%r2, %r2, %r13;
+	.loc	15	57	0
+	add.ftz.f32 	%f1, %f1, %f2;
+	mov.f32 	%f13, 0f3dcccccd;    	// 0.1
+	add.ftz.f32 	%f2, %f2, %f13;
+	mov.f32 	%f14, 0f3f800000;    	// 1
+	setp.le.ftz.f32 	%p11, %f2, %f14;
+	@%p11 bra 	$Lt_0_22018;
+	mov.u32 	%r14, 3456;
+	setp.ne.u32 	%p12, %r2, %r14;
+	@%p12 bra 	$Lt_0_23298;
+	.loc	15	60	0
+	st.global.u32 	[acc], %r2;
+	st.global.f32 	[accf], %f1;
+	bra.uni 	$LBB32_entry;
+$Lt_0_23298:
+	mov.f32 	%f2, 0fbe800000;     	// -0.25
+$Lt_0_23554:
+ //<loop> Loop body line 60, nesting depth: 1, estimated iterations: unknown
+	.loc	15	64	0
+	add.u32 	%r1, %r1, 4;
+	ld.global.u32 	%r15, [%r1+-4];
+	add.u32 	%r2, %r2, %r15;
+	.loc	15	65	0
+	add.ftz.f32 	%f1, %f1, %f2;
+	.loc	15	63	0
+	mov.f32 	%f15, 0f3e800000;    	// 0.25
+	add.ftz.f32 	%f2, %f2, %f15;
+	mov.f32 	%f16, 0f00000000;    	// 0
+	setp.neu.ftz.f32 	%p13, %f2, %f16;
+	@%p13 bra 	$Lt_0_23554;
+	mov.u32 	%r16, 3456;
+	setp.ne.u32 	%p14, %r2, %r16;
+	@%p14 bra 	$Lt_0_24834;
+	.loc	15	68	0
+	st.global.u32 	[acc], %r2;
+	st.global.f32 	[accf], %f1;
+	bra.uni 	$LBB32_entry;
+$Lt_0_24834:
+	mov.f32 	%f2, 0f00800001;     	// 1.17549e-038
+$Lt_0_25090:
+ //<loop> Loop body line 68, nesting depth: 1, estimated iterations: unknown
+	.loc	15	72	0
+	add.u32 	%r1, %r1, 4;
+	ld.global.u32 	%r17, [%r1+-4];
+	add.u32 	%r2, %r2, %r17;
+	.loc	15	73	0
+	add.ftz.f32 	%f1, %f1, %f2;
+	mov.f32 	%f17, 0f3e800000;    	// 0.25
+	add.ftz.f32 	%f2, %f2, %f17;
+	mov.f32 	%f18, 0f7f7effff;    	// 3.38953e+038
+	setp.le.ftz.f32 	%p15, %f2, %f18;
+	@%p15 bra 	$Lt_0_25090;
+	st.global.u32 	[acc], %r2;
+	st.global.f32 	[accf], %f1;
+$LBB32_entry:
+	.loc	15	76	0
+	exit;
+$LDWend_entry:
+	} // entry
+

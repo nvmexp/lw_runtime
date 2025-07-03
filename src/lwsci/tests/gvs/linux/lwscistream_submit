@@ -1,0 +1,66 @@
+-- 2>/dev/null; exec lua "`command -v \"\$0\"`" "$@" # -*-lua-*- vim:ft=lua
+--
+-- Copyright (c) 2019 LWPU Corporation.  All Rights Reserved.
+--
+-- Local submit test for lwscistream.
+--
+
+require("strict")
+local lwutil    = require("lwutil")
+local lwset     = require("lwset")
+local lwte      = require("lwte")
+local lwtc      = require("lwtc")
+
+local function get_parallel()
+    return
+end
+
+
+local function get_serial()
+    return {lwtest, [[test_lwscistream_api]], (t194 or t234)}
+end
+
+local dry_run   = false
+local durations = false
+local tegrasim  = false
+local opts, arg = lwutil.parse_argv(...)
+
+if arg ~= nil and #arg > 0 then
+     os.exit(1)
+end
+
+for name, value in pairs(opts) do
+    if (name == "n" or name == "dry-run") and value == true  then
+        dry_run = true
+    elseif (name == "d" or name == "durations") and value == true  then
+        durations = true
+    elseif name == "tegrasim" and value == true  then
+        tegrasim = true
+    else
+        io.stderr:write("Unknown option: ", name, "\n")
+        os.exit(1)
+     end
+end
+
+
+local elw       = lwte.get_elw()
+if tegrasim then
+    elw.soc_impl = "soc_tegrasim"
+end
+local feature   = lwte.map_elw(elw)
+local interp    = lwtc.interp
+
+assert(not lwset.is_intersecting(feature, interp))
+
+-- Run the test suites
+os.exit(lwtc.run(
+    "LWSCISTREAM SUBMIT",
+    lwtc.iter.sequence(
+
+            lwtc.iter.gen_suite_lists(lwtc.inf,
+                                        get_parallel, get_serial,
+                                        feature, interp)
+    ),
+    dry_run,
+    durations
+))

@@ -1,0 +1,68 @@
+ps_2_0
+def c4, 4.000000, -1.000000, 0.000000, 0.500000
+def c5, 2.000000, 0.450000, 0.250000, 1.000000
+def c6, 1.500000, 0.000000, 0.000000, 0.000000
+def c7, 2.000000, -1.000000, 0.000000, 0.000000
+dcl t0.rgb
+dcl t1.rg
+dcl t3
+dcl t4
+dcl_volume s0
+dcl_2d s1
+mul r0.rgb, t0, c2.b
+mul r7.rgb, r0, c4.r
+mul r2.rgb, t0.g, c3.g
+texld r9, r0, s0
+texld r4, r7, s0
+texld r11, r2, s0
+mad r11.a, r4.r, c4.a, r9.r
+mad r6.rgb, r11.a, c2.g, t0
+mad r6.a, c7.r, r11.r, c7.g
+mul r1.rb, r6.a, c3.r
+mul r1.g, r6.a, c4.b
+add r8.rgb, r6, r1
+mul r3.rb, r8, c3.a
+mul r3.g, r8.g, c4.b
+texld r10, r3, s0
+texld r5, t1, s1
+mul r5.a, r8.r, r8.r
+mad r5.a, r8.b, r8.b, r5.a
+rsq r7.a, r5.a
+mul r5.a, r7.a, r5.a
+mul r5.a, r5.a, c2.r
+mul r10.a, r5.a, c4.a
+add r10.a, r10.a, c5.r
+rcp r0.a, r5.a
+mul_sat r10.a, r10.a, r0.a
+mul r10.a, r10.a, c3.b
+mad r4.a, c7.r, r10.r, c7.g
+mad r5.a, r4.a, r10.a, r5.a
+frc r5.a, r5.a
+mul r11.a, r5.a, c4.a
+rcp r5.a, r5.a
+add r6.a, r11.a, c5.b
+add r1.a, r11.a, c5.g
+mul r8.a, r6.a, r5.a
+mul r5.a, r1.a, r5.a
+min r0.a, r8.a, c5.a
+add r10.a, r5.a, c4.g
+cmp r5.a, r10.a, c5.a, r5.a
+add r5.a, -r0.a, r5.a
+mov r2.rgb, -c0
+add r4.rgb, r2, c1
+mad r11.rgb, r4, r5.a, c0
+mul r6.rgb, r5, r11
+dp4 r6.a, t4, t4
+rsq r6.a, r6.a
+mul r1.rgb, r6.a, t4
+dp4 r1.a, t3, t3
+rsq r1.a, r1.a
+mul r8.rgb, r1.a, t3
+dp3 r6.a, r1, r8
+cmp r6.a, r6.a, r6.a, c4.b
+mul r6.a, r6.a, r6.a
+mul r6.a, r6.a, c6.r
+add r6.a, r6.a, c5.a
+mul r3.rgb, r6, r6.a
+mov r3.a, c4.b
+mov oC0, r3

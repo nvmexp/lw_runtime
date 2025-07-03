@@ -1,0 +1,87 @@
+[
+  {
+    "Type": "Control",
+    "OutputDirectory": "Initialization",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryList": [ "vcrt2015-9" ],
+    "TestDefinitions": [
+      {
+        "Command": "[Netapp]\\vcrt2015-9\\VC_redist.x64.exe",
+        "Arguments": "/install /quiet /norestart /log [OutputDirectory]\\VC_redist.x64.log"
+      },
+      {
+        "Command": "[Netapp]\\vcrt2015-9\\VC_redist.x86.exe",
+        "Arguments": "/install /quiet /norestart /log [OutputDirectory]\\VC_redist.x86.log"
+      },
+      {
+        "Command": "[bin]\\ModeSet.exe",
+        "Arguments": "-d 0 -w 1920 -h 1080 -b 32"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:head;q -o:[OutputDirectory]\\swak-display.txt"
+      },
+      {
+        "Command": "Verify",
+        "Arguments": "[OutputDirectory]\\swak-display.txt:1920x1080x32"
+      },
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-l"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:gpuclk;pstate;q -o:[OutputDirectory]\\swak-clocks.txt"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "OGL_LOAD_MONITOR_OUTPUT_LOGGING_FLAGS=GPU_TIME"
+      },
+      {
+        "Comment": "Place load monitor file in output directory of Unity runs",
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "PS_FILE_PATH=[RootOutputDirectory]\\GravityMark"
+      }
+    ]
+  },
+  {
+    "Type": "Application",
+    "SessionName": "GravityMark",
+    "TestCase": "GravityMark",
+    "OutputDirectory": "GravityMark",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryLookup": {
+      "GravityMark": "[Netapp]\\GravityMark"
+    },
+    "Server": "hqlwoglsql01:8211",
+    "LoadMonitor": "GpuTime",
+    "TestDefinitions": [
+      {
+        "Name": "GravityMark_Vulkan",
+        "WorkingDirectory": "[GravityMark]\\bin",
+        "FileName": "[GravityMark]\\bin\\GravityMark.exe",
+        "Arguments": "-vsync 0 -fps 1 -benchmark 1 -close 1 -fullscreen 1 -times [OutputDirectory]\\GravityMark_Vulkan_FrameTimes.txt -vulkan",
+        "Regex:FPS": "FPS: ([0-9]+.[0-9]+)"
+      }
+    ]
+  },
+  {
+    "Type": "Control",
+    "OutputDirectory": "Restore",
+    "TestDefinitions": [
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-u"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dOGL_LOAD_MONITOR_OUTPUT_LOGGING_FLAGS"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dPS_FILE_PATH"
+      }
+    ]
+  }
+]
+

@@ -1,0 +1,599 @@
+/*
+ *  Copyright (c) 2012, LWPU Corporation
+ *  All rights reserved.
+ *
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions are met:
+ *      * Redistributions of source code must retain the above copyright
+ *        notice, this list of conditions and the following disclaimer.
+ *      * Redistributions in binary form must reproduce the above copyright
+ *        notice, this list of conditions and the following disclaimer in the
+ *        documentation and/or other materials provided with the distribution.
+ *      * Neither the name of LWPU Corporation nor the
+ *        names of its contributors may be used to endorse or promote products
+ *        derived from this software without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ *  ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ *  DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+ *  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ *  (INCLUDING, BUT NOT LIMITED TO, PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ *  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ *  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ *  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+//------------------------------------------------------------------------
+//  GK104-optimized variant of the "Persistent spelwlative
+//  while-while" kernel used in:
+//
+//  "Understanding the Efficiency of Ray Traversal on GPUs",
+//  Timo Aila and Samuli Laine,
+//  Proc. High-Performance Graphics 2009
+//
+//  This variant fetches new work dynamically as soon as the
+//  warp oclwpancy drops below a pre-determined threshold.
+//------------------------------------------------------------------------
+
+#if (__LWDA_ARCH__ >= 700)
+ #include <cooperative_groups.h>
+#endif
+
+#include "TracerLwdaKernels.hpp"
+#include <prodlib/bvhtools/src/common/SharedKernelFunctions.hpp>
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+#define STACK_SIZE              64      // Size of the traversal stack in local memory.
+#define DYNAMIC_FETCH_THRESHOLD 20      // If fewer than this active, fetch new rays.
+//#define SCALAR
+
+#define TRACE_WARPS   4
+#define TRACE_BLOCKS  10
+#define TRACE2_WARPS  4
+#define TRACE2_BLOCKS 8
+
+// also see launch code at the very end of the file which replicates the shared mem constants for the host code!
+#if (__LWDA_ARCH__ == 600 ) || (__LWDA_ARCH__ == 500 )
+ #define BVH2_TRACE_SSTACK_SIZE 16  // seems like a good tradeoff, although oclwpancy not being "optimal"
+ #define BVH2_TRACE2_SSTACK_SIZE 16 // matches blocks/register usage
+#elif (__LWDA_ARCH__ < 700 )
+ #define BVH2_TRACE_SSTACK_SIZE 19  // matches blocks/register usage
+ #define BVH2_TRACE2_SSTACK_SIZE 24 // matches blocks/register usage
+#else
+ #define BVH2_TRACE_SSTACK_SIZE 12  // shared and L1 are unified on volta, but still makes sense to do this -> triggers 64kb configuration
+ #define BVH2_TRACE2_SSTACK_SIZE 8  // todo: 8 (triggers 32kb config) or 16 (triggers 64kb), more experiments needed for two level to decide for sure!
+#endif
+
+//------------------------------------------------------------------------
+// Experimentally determined best mix of float/int/video minmax instructions for Maxwell.
+
+#if (__LWDA_ARCH__ < 700)
+static __device__ __forceinline__ float fmin_fmax(const float a, const float b, const float c)
+{
+    int v;
+    asm("vmin.s32.s32.s32.max %0, %1, %2, %3;" : "=r"(v) : "r"(__float_as_int(a)), "r"(__float_as_int(b)), "r"(__float_as_int(c)));
+    return __int_as_float(v);
+}
+
+static __device__ __forceinline__ float fmax_fmin(const float a, const float b, const float c)
+{
+    int v;
+    asm("vmax.s32.s32.s32.min %0, %1, %2, %3;" : "=r"(v) : "r"(__float_as_int(a)), "r"(__float_as_int(b)), "r"(__float_as_int(c)));
+    return __int_as_float(v);
+}
+#endif
+
+// VMINMAX fast on Maxwell, Pascal. On Volta, use FMIN, FMAX.
+static __device__ __forceinline__ float spanBegin(const float a0, const float a1, const float b0, const float b1, const float c0, const float c1, const float d)
+{
+#if (__LWDA_ARCH__ >= 700)
+    float t1 = fminf(a0, a1);
+    float t2 = fminf(b0, b1);
+    float t3 = fminf(c0, c1);
+    return fmaxf(fmaxf(d, t1), fmaxf(t2, t3));
+#else
+    const float t1 = fmin_fmax(a0, a1, d);
+    const float t2 = fmin_fmax(b0, b1, t1);
+    const float t3 = fmin_fmax(c0, c1, t2);
+    return t3;
+#endif
+}
+
+static __device__ __forceinline__ float spanEnd(const float a0, const float a1, const float b0, const float b1, const float c0, const float c1, const float d)
+{
+#if (__LWDA_ARCH__ >= 700)
+    const float t1 = fmaxf(a0, a1);
+    const float t2 = fmaxf(b0, b1);
+    const float t3 = fmaxf(c0, c1);
+    return fminf(fminf(d, t1), fminf(t2, t3));
+#else
+    const float t1 = fmax_fmin(a0, a1, d);
+    const float t2 = fmax_fmin(b0, b1, t1);
+    const float t3 = fmax_fmin(c0, c1, t2);
+    return t3;
+#endif
+}
+
+//------------------------------------------------------------------------
+
+#define INCLUDE_AABB_TESTS
+#include "TracerLwdaKernels.inl"
+
+//------------------------------------------------------------------------
+
+static __device__ __forceinline__ void fetchChildNodes(const float4* const __restrict nodes, const int nodeIdx, Node& child0, Node& child1)
+{
+    const float4 n0 = LDG_OR_GLOBAL(nodes +  nodeIdx * 4     );
+    const float4 n1 = LDG_OR_GLOBAL(nodes + (nodeIdx * 4 + 1));
+    const float4 n2 = LDG_OR_GLOBAL(nodes + (nodeIdx * 4 + 2));
+    const float4 n3 = LDG_OR_GLOBAL(nodes + (nodeIdx * 4 + 3));
+
+    child0.bbox.lo = make_float3(n0.x, n0.y, n0.z);
+    child0.bbox.hi = make_float3(n0.w, n1.x, n1.y);
+    child1.bbox.lo = make_float3(n2.x, n2.y, n2.z);
+    child1.bbox.hi = make_float3(n2.w, n3.x, n3.y);
+
+    child0.addr = __float_as_int(n1.z);
+    child1.addr = __float_as_int(n3.z);
+}
+
+//------------------------------------------------------------------------
+
+__device__ __forceinline__
+static void push(const int entry, int& sstackPtr, const int sstackEnd, char* const __restrict stack, const int SSTACK_SIZE)
+{
+    if(SSTACK_SIZE == 0)
+    {
+        sstackPtr += (int)sizeof(int);
+        *(int*)(stack + sstackPtr) = entry;
+    }
+    else
+    {
+        sstackPtr += (int)sizeof(int);
+
+        // Push to stack in shared memory if possible, otherwise spill to local memory.
+        const int offs = sstackPtr - sstackEnd;
+        if (offs >= 0)
+            *(int*)(offs + stack) = entry;
+        else
+            sts4(sstackPtr, entry);
+    }
+}
+
+__device__ __forceinline__
+static int pop(int& sstackPtr, const int sstackEnd, char* const __restrict stack, const int SSTACK_SIZE)
+{
+    if(SSTACK_SIZE == 0)
+    {
+        const int entry = *(int*)(stack + sstackPtr);
+        sstackPtr -= (int)sizeof(int);
+        return entry;
+    }
+    else
+    {
+        int entry;
+
+        // Pop from shared or local.
+        const int offs = sstackPtr - sstackEnd;
+        if (offs >= 0)
+            entry = *(int*)(offs + stack);
+        else
+            entry = lds4(sstackPtr);
+
+        sstackPtr -= (int)sizeof(int);
+
+        return entry;
+    }
+}
+
+__device__ __forceinline__
+static void initStack(int& sstackPtr, int& sstackEnd, void* const __restrict stack, const int SSTACK_SIZE)
+{
+    if(SSTACK_SIZE == 0)
+    {
+        sstackPtr = 0;
+        *(int*)stack = EntrypointSentinel;
+    }
+    else
+    {
+        sstackPtr = SSTACK_SIZE * (int)sizeof(int) * (threadIdx.x + threadIdx.y * 32);
+        sstackEnd = sstackPtr + SSTACK_SIZE * (int)sizeof(int);
+        sts4(sstackPtr, EntrypointSentinel);
+    }
+}
+
+
+
+template <class C> static __global__ __launch_bounds__(TRACE_WARPS * 32, TRACE_BLOCKS)
+void trace(const TracerLwdaParams p)
+{
+    // Live state during traversal, stored in registers.
+    typename C::RayType ray;
+
+    int     rayIdx;                         // Index of current ray
+    int     nodeIdx = EntrypointSentinel;   // Non-negative: current internal node, negative: second postponed leaf.
+
+    int     hitTriIdx;                      // Triangle index of the closest intersection, -1 if none.
+    float   hitT;                           // t-value of the closest intersection.
+
+    int     sstackPtr;
+    int     sstackEnd;
+    char    traversalStack[(STACK_SIZE-BVH2_TRACE_SSTACK_SIZE)*sizeof(int)];
+
+#ifdef SCALAR
+    if(threadIdx.x != 0)
+        return;
+#endif
+
+    // Persistent threads: fetch and process rays in a loop.
+    do
+    {
+        // Fetch new rays from the global pool
+        if(nodeIdx==EntrypointSentinel)
+        {
+#if (__LWDA_ARCH__ >= 700)
+            cooperative_groups::coalesced_group g = cooperative_groups::coalesced_threads();
+            const unsigned int thread_rank = g.thread_rank();
+
+            // The first thread updates the shared counter in bulk
+            unsigned int prev;
+            if (thread_rank == 0)
+                prev = atomicAdd(p.warpCounter, g.size());
+
+            // The first thread shares the previous counter value so that each thread may compute its exclusive prefix
+            rayIdx = thread_rank + g.shfl(prev, 0);
+#else
+            const unsigned int maskTerminated = __ballot(true);
+            const int          idxTerminated = __popc(maskTerminated & getLaneMaskLt()); // index among terminated lanes
+    
+            int rayBase;
+            const int leader = findLeadingOne(maskTerminated);
+            if (threadIdx.x == leader) // first terminated thread fetches for the rest in the warp
+                rayBase = atomicAdd(p.warpCounter, __popc(maskTerminated));            
+            rayBase = __shfl(rayBase, leader);
+            rayIdx = rayBase + idxTerminated;
+#endif
+            if (rayIdx >= p.numRays)
+                return;
+
+            C::fetchRay( p.rays, rayIdx, p.rayFormat, ray );
+
+            hitTriIdx = -1;          // No triangle intersected so far.
+            hitT     = ray.tmax;
+
+            // Setup traversal.
+            nodeIdx = p.firstMesh.rootNode; // Start from the root.
+            initStack(sstackPtr, sstackEnd, traversalStack, BVH2_TRACE_SSTACK_SIZE);
+
+            // Check for NULL ray and short circuit traversal if found
+            if( ray.tmax < 0.0f || p.firstMesh.numRemaps == 0 )
+              nodeIdx = EntrypointSentinel;
+        }
+
+        // Traversal loop.
+        while(nodeIdx != EntrypointSentinel)
+        {
+            //
+            // Traverse internal nodes until all SIMD lanes have found a leaf.
+            //
+            while ((unsigned int)nodeIdx < (unsigned int)EntrypointSentinel)   // functionally equivalent to but faster than: while (nodeIdx >= 0 && nodeIdx != EntrypointSentinel)
+            {
+                Node child0, child1;
+                fetchChildNodes(p.firstMesh.nodes, nodeIdx, child0, child1);
+
+                float hitT0, hitT1; // nearest hit point on child AABBs
+                const bool traverseChild0 = C::intersectAabb(ray, child0.bbox, ray.tmin, hitT, hitT0 );
+                const bool traverseChild1 = C::intersectAabb(ray, child1.bbox, ray.tmin, hitT, hitT1 );
+
+                if (!traverseChild0 && !traverseChild1)   // Neither child was intersected => pop stack.
+                {
+                    nodeIdx = pop(sstackPtr, sstackEnd, traversalStack, BVH2_TRACE_SSTACK_SIZE);
+                }
+                else                                      // Otherwise => fetch child pointers.
+                {
+                  nodeIdx = (traverseChild0) ? child0.addr : child1.addr;
+
+                  if (traverseChild0 && traverseChild1)   // Both children were intersected => push the farther one.
+                  {
+                    if (hitT1 < hitT0)
+                      swap( nodeIdx, child1.addr );
+                    push(child1.addr, sstackPtr, sstackEnd, traversalStack, BVH2_TRACE_SSTACK_SIZE);
+                  }
+                }
+
+#if (__LWDA_ARCH__ < 700)
+                // All SIMD lanes have found a leaf? => process them.
+                if (__all(nodeIdx < 0)) break;
+#endif
+            }
+
+            //
+            // Process postponed leaf nodes.
+            //
+
+            while (nodeIdx < 0)
+            {
+                // Intersect the ray against each triangle
+                const int triIdx = ~nodeIdx;
+                int hitInstIdx;
+
+                if (C::intersectTriangles52(ray, p.firstMesh, 0, triIdx, hitT, hitTriIdx, hitInstIdx, p.anyhit) && p.anyhit)
+                {
+                    nodeIdx = EntrypointSentinel;
+                    break;
+                }
+
+                nodeIdx = pop(sstackPtr, sstackEnd, traversalStack, BVH2_TRACE_SSTACK_SIZE);
+            }
+
+#if (__LWDA_ARCH__ >= 700)
+            if( cooperative_groups::coalesced_threads().size() < DYNAMIC_FETCH_THRESHOLD )
+#else
+            if( __popc(__ballot(true)) < DYNAMIC_FETCH_THRESHOLD )
+#endif
+                break; // fetch more rays for warp
+
+        } // traversal
+
+
+        //
+        // Terminated => store result.
+        //
+        if (nodeIdx == EntrypointSentinel)
+        {
+            // Remap intersected triangle index and callwlate barys.
+            float hitU = 0.0f;
+            float hitV = 0.0f;
+            int outHitTriIdx = hitTriIdx;
+            int outHitInstIdx = -1;
+            if (hitTriIdx != -1)
+            {
+                outHitTriIdx = C::remap(p.firstMesh.remap, hitTriIdx);
+                outHitInstIdx = 0;
+
+                if( p.hitFormat > HIT_T_TRIID)
+                  C::computeUV(p.firstMesh, hitTriIdx, ray.orig, ray.dir, hitT, hitU, hitV);
+            }
+            else
+                hitT = -1;
+
+            storeHit(p.hits, rayIdx, p.hitFormat, outHitTriIdx, outHitInstIdx, hitT, hitU, hitV);
+        }
+    } while(true);
+}
+
+//------------------------------------------------------------------------
+
+
+template <class C> static __global__ __launch_bounds__(TRACE2_WARPS * 32, TRACE2_BLOCKS)
+void trace2(const TracerLwdaParams p)
+{
+    // Live state during traversal, stored in registers.
+
+    typename C::RayType ray;
+
+    int     rayIdx;
+    int     nodeIdx = EntrypointSentinel;
+    int     instIdx;                        // Instance index
+
+    int     hitTriIdx;                      // Triangle index of the closest intersection, -1 if none
+    int     hitInstIdx;                     // Instance index of the closest intersection, -1 if none
+    float   hitT;                           // t-value of the closest intersection.
+
+    const   float4* __restrict nodes;
+    const   TracerParamsGroup& tpg = *p.group;
+
+    int     sstackPtr;
+    int     sstackEnd;
+    char    traversalStack[(STACK_SIZE-BVH2_TRACE2_SSTACK_SIZE)*sizeof(int)];
+
+#ifdef SCALAR
+    if(threadIdx.x != 0)
+        return;
+#endif
+
+    // persistent threads: fetch and process rays in a loop
+    do
+    {
+        // Fetch new rays from the global pool
+        if(nodeIdx==EntrypointSentinel)
+        {
+#if (__LWDA_ARCH__ >= 700)
+            cooperative_groups::coalesced_group g = cooperative_groups::coalesced_threads();
+            const unsigned int thread_rank = g.thread_rank();
+
+            // The first thread updates the shared counter in bulk
+            unsigned int prev;
+            if (thread_rank == 0)
+                prev = atomicAdd(p.warpCounter, g.size());
+
+            // The first thread shares the previous counter value so that each thread may compute its exclusive prefix
+            rayIdx = thread_rank + g.shfl(prev, 0);
+#else
+            const unsigned int maskTerminated = __ballot(true);
+            const int          idxTerminated  = __popc(maskTerminated & getLaneMaskLt()); // index among terminated lanes
+
+            int rayBase;
+            const int leader = findLeadingOne(maskTerminated);
+            if (threadIdx.x == leader) // first terminated thread fetches for the rest in the warp
+                rayBase = atomicAdd(p.warpCounter, __popc(maskTerminated));
+            rayBase = __shfl(rayBase, leader);
+            rayIdx = rayBase + idxTerminated;
+#endif
+            if (rayIdx >= p.numRays)
+                return;
+
+            C::fetchRay(p.rays, rayIdx, p.rayFormat, ray);
+
+            hitTriIdx  = -1;          // No triangle intersected so far.
+            hitInstIdx = -1;          // No instance intersected so far.
+            hitT       = ray.tmax;
+
+            // setup traversal
+            instIdx  = -1;
+            nodes = (float4*)tpg.nodes;
+            nodeIdx = p.firstMesh.rootNode; // Start from the root.
+            initStack(sstackPtr, sstackEnd, traversalStack, BVH2_TRACE2_SSTACK_SIZE);
+
+            // Check for NULL ray and short circuit traversal if found
+            if( ray.tmax < 0.0f || tpg.numEntities == 0 )
+              nodeIdx = EntrypointSentinel;
+        }
+
+        // outer traversal loop
+        do
+        {
+            // traverse internal nodes until found a leaf
+            while((unsigned int)nodeIdx < (unsigned int)EntrypointSentinel)   // functionally equivalent to but faster than: while (nodeIdx >= 0 && nodeIdx != EntrypointSentinel)
+            {
+                Node child0, child1;
+                fetchChildNodes(nodes, nodeIdx, child0, child1);
+
+                float hitT0, hitT1; // nearest hit point on child AABBs
+                const bool traverseChild0 = C::intersectAabb(ray, child0.bbox, ray.tmin, hitT, hitT0 );
+                const bool traverseChild1 = C::intersectAabb(ray, child1.bbox, ray.tmin, hitT, hitT1 );
+
+                if (!traverseChild0 && !traverseChild1)   // Neither child was intersected => pop stack.
+                {
+                  nodeIdx = pop(sstackPtr, sstackEnd, traversalStack, BVH2_TRACE2_SSTACK_SIZE);
+                }
+                else                                      // Otherwise => fetch child pointers.
+                {
+                  nodeIdx = (traverseChild0) ? child0.addr : child1.addr;
+
+                  if (traverseChild0 && traverseChild1)   // Both children were intersected => push the farther one.
+                  {
+                    if (hitT1 < hitT0)
+                      swap( nodeIdx, child1.addr );
+                    push(child1.addr, sstackPtr, sstackEnd, traversalStack, BVH2_TRACE2_SSTACK_SIZE);
+                  }
+                }
+
+#if (__LWDA_ARCH__ < 700)
+                if (__all(nodeIdx < 0)) break;
+#endif
+            }
+
+            if (nodeIdx < 0)
+            {
+                const bool traforay = (instIdx < 0);
+                if(traforay)
+                    instIdx = tpg.remap[~nodeIdx] & RLLEPACK_INDEX_MASK;
+
+                const int modelId = tpg.modelId[instIdx];
+                const TracerParamsMesh& tpm = p.meshes[modelId];
+
+                if(traforay) // top-level - proceed to bottom level
+                {
+                    if (tpm.numRemaps != 0)
+                    {
+                        const float4* const __restrict ilwTransform = (float4*)getTransformPtr(tpg.ilwMatrices, instIdx, tpg.matrixStride);
+                        C::transformRay(ray, ilwTransform);
+
+                        push(EntrypointSentinel, sstackPtr, sstackEnd, traversalStack, BVH2_TRACE2_SSTACK_SIZE);// set an end mark for model traversal
+                        nodes = (float4*)tpm.nodes;
+                        nodeIdx = tpm.rootNode;
+                    }
+                    else                    
+                        nodeIdx = EntrypointSentinel;
+                }
+                else // bottom-level - intersect triangles
+                {
+                    C::intersectTriangles(ray, tpm, instIdx, hitT, hitTriIdx, hitInstIdx, nodeIdx, p.anyhit);
+                    
+                    if (p.anyhit && nodeIdx == EntrypointSentinel)
+                        break;
+
+                    nodeIdx = pop(sstackPtr, sstackEnd, traversalStack, BVH2_TRACE2_SSTACK_SIZE);
+                }
+            }
+            else if (instIdx >= 0 && nodeIdx == EntrypointSentinel) // Return from bottom-level 
+            {
+                instIdx = -1;
+                nodeIdx = pop(sstackPtr, sstackEnd, traversalStack, BVH2_TRACE2_SSTACK_SIZE);
+                nodes = (float4*)tpg.nodes + tpg.rootNode;
+                if (nodeIdx != EntrypointSentinel) // reload ray (undo transform)
+                    C::fetchRay(p.rays, rayIdx, p.rayFormat, ray);
+            }
+
+        } while ((nodeIdx != EntrypointSentinel) || (instIdx >= 0)); // traversal
+
+        // put this directly in isec function?! -> increases live state though
+
+        // ray Terminated => store result
+        if(nodeIdx == EntrypointSentinel)
+        {
+            // Remap intersected triangle index and callwlate barys.
+            float hitU = 0.0f;
+            float hitV = 0.0f;
+            int outHitTriIdx = hitTriIdx;
+            if(hitTriIdx != -1 && hitInstIdx != -1) // in theory it is not possible that only one is -1
+            {
+                const int modelId = tpg.modelId[hitInstIdx];
+                const TracerParamsMesh& hitTpm = p.meshes[modelId];
+
+                outHitTriIdx = C::remap(hitTpm.remap, hitTriIdx);
+
+                const float4* const __restrict ilwTransform = (float4*)getTransformPtr( tpg.ilwMatrices, hitInstIdx, tpg.matrixStride );
+                C::fetchAndTransformRay( p.rays, rayIdx, p.rayFormat, ray, ilwTransform );
+                if(p.hitFormat > HIT_T_TRIID && p.hitFormat != HIT_T_TRIID_INSTID)
+                  C::computeUV(hitTpm, hitTriIdx, ray.orig, ray.dir, hitT, hitU, hitV);
+            }
+            else
+                hitT = -1;
+
+            storeHit(p.hits, rayIdx, p.hitFormat, outHitTriIdx, hitInstIdx, hitT, hitU, hitV);
+        }
+    } while(true);
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchTrace52(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const TracerLwdaParams& p, const TracerLwdaConfig& c)
+{
+    void (*kernel)(TracerLwdaParams p) = NULL;
+
+    // BL: We have got to prune these!
+
+    if (!c.twoLevel &&  c.useWoop &&         1        && !c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadLdg<float4>, WoopTriangles< LoadLdg<float4>, LoadLdg<int> > > >;
+    if (!c.twoLevel && !c.useWoop && !c.useWatertight && !c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadLdg<float4>, MeshTriangles< TriIndexer::Branch<int3>, float3, int3, false > > >;
+    if (!c.twoLevel && !c.useWoop && !c.useWatertight && !c.useMasking &&  c.useFloat4)    kernel = trace< Combine< LoadLdg<float4>, MeshTriangles< TriIndexer::Branch<int3>, float4, int3, false > > >;
+    if (!c.twoLevel && !c.useWoop && !c.useWatertight &&  c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadLdg<float4>, MeshTriangles< TriIndexer::Indexed<int4>, float3, int4, true > > >;
+    if (!c.twoLevel && !c.useWoop && !c.useWatertight &&  c.useMasking &&  c.useFloat4)    kernel = trace< Combine< LoadLdg<float4>, MeshTriangles< TriIndexer::Indexed<int4>, float4, int4, true > > >;
+    if (!c.twoLevel && !c.useWoop &&  c.useWatertight && !c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadLdg<float4>, WatertightMeshTriangles< TriIndexer::Branch<int3>, float3, int3, false, true > > >;
+    if (!c.twoLevel && !c.useWoop &&  c.useWatertight && !c.useMasking &&  c.useFloat4)    kernel = trace< Combine< LoadLdg<float4>, WatertightMeshTriangles< TriIndexer::Branch<int3>, float4, int3, false, true > > >;
+    if (!c.twoLevel && !c.useWoop &&  c.useWatertight &&  c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadLdg<float4>, WatertightMeshTriangles< TriIndexer::Indexed<int4>, float3, int4, true, true > > >;
+    if (!c.twoLevel && !c.useWoop &&  c.useWatertight &&  c.useMasking &&  c.useFloat4)    kernel = trace< Combine< LoadLdg<float4>, WatertightMeshTriangles< TriIndexer::Indexed<int4>, float4, int4, true, true > > >;
+
+    if ( c.twoLevel &&  c.useWoop &&         1        && !c.useMasking && !c.useFloat4)    kernel = trace2< Combine< LoadLdg<float4>, WoopTrianglesNST< LoadLdg<float4>, LoadLdg<int> > > >;
+    if ( c.twoLevel && !c.useWoop && !c.useWatertight && !c.useMasking && !c.useFloat4)    kernel = trace2< Combine< LoadLdg<float4>, MeshTrianglesNST< TriIndexer::Branch<int3>, float3, int3, false > > >;
+    if ( c.twoLevel && !c.useWoop && !c.useWatertight && !c.useMasking &&  c.useFloat4)    kernel = trace2< Combine< LoadLdg<float4>, MeshTrianglesNST< TriIndexer::Branch<int3>, float4, int3, false > > >;
+    if ( c.twoLevel && !c.useWoop && !c.useWatertight &&  c.useMasking && !c.useFloat4)    kernel = trace2< Combine< LoadLdg<float4>, MeshTrianglesNST< TriIndexer::Indexed<int4>, float3, int4, true > > >;
+    if ( c.twoLevel && !c.useWoop && !c.useWatertight &&  c.useMasking &&  c.useFloat4)    kernel = trace2< Combine< LoadLdg<float4>, MeshTrianglesNST< TriIndexer::Indexed<int4>, float4, int4, true > > >;
+    if ( c.twoLevel && !c.useWoop &&  c.useWatertight && !c.useMasking && !c.useFloat4)    kernel = trace2< Combine< LoadLdg<float4>, WatertightMeshTrianglesNST< TriIndexer::Branch<int3>, float3, int3, false, true > > >;
+    if ( c.twoLevel && !c.useWoop &&  c.useWatertight && !c.useMasking &&  c.useFloat4)    kernel = trace2< Combine< LoadLdg<float4>, WatertightMeshTrianglesNST< TriIndexer::Branch<int3>, float4, int3, false, true > > >;
+    if ( c.twoLevel && !c.useWoop &&  c.useWatertight &&  c.useMasking && !c.useFloat4)    kernel = trace2< Combine< LoadLdg<float4>, WatertightMeshTrianglesNST< TriIndexer::Indexed<int4>, float3, int4, true, true > > >;
+    if ( c.twoLevel && !c.useWoop &&  c.useWatertight &&  c.useMasking &&  c.useFloat4)    kernel = trace2< Combine< LoadLdg<float4>, WatertightMeshTrianglesNST< TriIndexer::Indexed<int4>, float4, int4, true, true > > >;
+
+    if (!kernel) return false;
+
+    int warps = c.twoLevel ? TRACE2_WARPS : TRACE_WARPS;
+    lwdaFuncAttributes attr;
+    if (lwdaFuncGetAttributes(&attr, kernel) != lwdaSuccess) return false;
+    int tmp  = ((attr.binaryVersion == 60) || (attr.binaryVersion == 50)) ? 16 : (attr.binaryVersion < 70) ? 19 : 12;
+    int tmp2 = ((attr.binaryVersion == 60) || (attr.binaryVersion == 50)) ? 16 : (attr.binaryVersion < 70) ? 24 : 8;
+    int sstackSizeBytes = (c.twoLevel ? tmp2 : tmp) * 32 * warps * sizeof(int);
+
+    // On Volta, let driver go for maximum oclwpancy, otherwise always choose small SMEM/large L1 config (note though that the latter should not matter anyway, as only SM5.0->SM7.0 is considered in this file, e.g. only 0 or XKB available as SMEM configuration (unless Volta))
+    // Replace this (maybe), as soon as the more fine grained version (0..100%) of the SMEM/L1 API call is available (lwdaFuncAttribute PreferredSharedMemoryCarveout)
+    if (lwdaFuncSetCacheConfig(kernel, (attr.binaryVersion >= 70) ? lwdaFuncCachePreferNone : lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    kernel<<<gridDim, blockDim, sstackSizeBytes, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

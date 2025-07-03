@@ -1,0 +1,65 @@
+##############################################################################
+#
+# lwmk for the sharedfabricselector utility
+#
+##############################################################################
+
+LWRRENT_DIR = $(LW_SOURCE)/apps/fabricmanager
+LWMLCOMMON_DIR = $(LW_SOURCE)/apps/lwml/common
+
+##############################################################################
+# define SOURCES
+##############################################################################
+LOCAL_SOURCES :=
+LOCAL_SOURCES += ./Tools/shared_fabric/sharedFabricSelectorParser.cpp
+LOCAL_SOURCES += ./Tools/shared_fabric/sharedFabricSelector.cpp
+LOCAL_SOURCES += ../../drivers/resman/src/libraries/commandline/commandline.c
+LOCAL_SOURCES += ./Tools/libs/jsoncpp-0.10.6/src/jsoncpp.cpp
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+LOCAL_OBJECTS += $(OUTPUTDIR)/fabricmanagerHA.pb.o
+
+##############################################################################
+## define LOCAL_CFLAGS
+###############################################################################
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += .
+LOCAL_INCLUDES += $(LWRRENT_DIR)/sdk/public
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/resman/inc/libraries
+LOCAL_INCLUDES += $(LWRRENT_DIR)/Tools/libs/jsoncpp-0.10.6/include
+LOCAL_INCLUDES += $(LWRRENT_DIR)/libs/protobuf-2.6.0/include/
+
+# Do not modify CFLAGS because it will be global
+LOCAL_CFLAGS := $(FM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += -fPIC -Wno-write-strings
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+##############################################################################
+## define LOCAL_LDFLAGS
+###############################################################################
+LOCAL_LDFLAGS := $(FM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+LOCAL_LDFLAGS += -L $(LWRRENT_DIR)/$(OUTPUTDIR) -llwfm
+
+##############################################################################
+# build
+##############################################################################
+sharedfabricselector_TARGET  := $(OUTPUTDIR)/sharedfabricselector$(BINSUFFIX)
+sharedfabricselector_OBJECTS := $(LOCAL_OBJECTS)
+sharedfabricselector_CFLAGS  := $(LOCAL_CFLAGS)
+sharedfabricselector_LDFLAGS := $(LOCAL_LDFLAGS)
+sharedfabricselector_DEPENDS ?= $(fmlib_TARGET)
+
+#build: $(sharedfabricselector_TARGET)
+$(eval $(call MAKE_CXX_EXELWTABLE,sharedfabricselector))
+build: $(sharedfabricselector_TARGET).guardwords
+
+#clean:
+    #-$(RM) $(sharedfabricselector_TARGET) $(LOCAL_OBJECTS)
+
+#################################################################################
+## End of nested lwmk
+##################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

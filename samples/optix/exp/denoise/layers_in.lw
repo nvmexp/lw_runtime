@@ -1,0 +1,224 @@
+//
+// Copyright 2020 LWPU Corporation. All rights reserved.
+//
+
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+#include "layerdata_load.h"
+#include "layers.h"
+#include "layers_inline.h"
+#ifndef IRAY_BUILD
+#include <corelib/system/LwdaDriver.h>
+#endif
+
+namespace optix_exp {
+
+AEInputLayer::AEInputLayer( const char* name, const deviceInfo& info )
+    : AELayer( name, info )
+{
+}
+
+OptixResult AEInputLayer::init( int width, int height, int channels, int minsize, ErrorDetails& errDetails )
+{
+    OptixResult result = AELayer::init( errDetails );
+
+    if( result )
+        return result;
+
+    // save original resolution
+    m_width  = width;
+    m_height = height;
+
+    int pad = 32;
+    // pad resolution of input buffer to multiples of given pad size
+    m_outWidth  = std::max( minsize, ( ( width + pad - 1 ) / pad ) * pad );
+    m_outHeight = std::max( minsize, ( ( height + pad - 1 ) / pad ) * pad );
+
+    m_outChannels = channels;
+
+    m_outsize = getBufferTypeSize() * 1 * m_outChannels * m_outHeight * m_outWidth;
+
+    return result;
+}
+
+AEInputLayer::~AEInputLayer()
+{
+}
+
+OptixResult AEInputLayer::destroy( ErrorDetails& errDetails )
+{
+    return AELayer::destroy( errDetails );
+}
+
+// w, h: colwolution buffer size (multiple of 32)
+template <typename out_type>
+static __global__ void k_SetChannelRGB( out_type* out, floatRdAccess indata, int nc, int N, int start, int w, int h, int op, float c_logmul, float* intensity, float* hdrx )
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if( x < w && y < h )
+    {
+        out_type R, G, B;
+
+        if( x >= indata.image.width || y >= indata.image.height )
+        {
+            R = G = B = 0;
+        }
+        else
+        {
+            switch( op )
+            {
+                case IMPORT_LOG:
+                case IMPORT_LOG_SQRT:
+                {
+                    float fr = __clamp0( indata( x, y, 0 ) ) * *intensity;
+                    float fg = __clamp0( indata( x, y, 1 ) ) * *intensity;
+                    float fb = __clamp0( indata( x, y, 2 ) ) * *intensity;
+                    if( op == IMPORT_LOG_SQRT )
+                    {
+                        fr = __fsqrt_rn( fr );
+                        fg = __fsqrt_rn( fg );
+                        fb = __fsqrt_rn( fb );
+                    }
+                    R = __logf( fr + 1.f ) * c_logmul;
+                    G = __logf( fg + 1.f ) * c_logmul;
+                    B = __logf( fb + 1.f ) * c_logmul;
+                }
+                break;
+                case IMPORT_PQ:
+                {
+                    R = pq_encode( __clamp0( indata( x, y, 0 ) ) * *intensity );
+                    G = pq_encode( __clamp0( indata( x, y, 1 ) ) * *intensity );
+                    B = pq_encode( __clamp0( indata( x, y, 2 ) ) * *intensity );
+                }
+                break;
+                case IMPORT_A:
+                    R = G = B = __clamp01( indata( x, y, 3 ) );
+                    break;
+                case IMPORT_A_LOG:
+                case IMPORT_A_LOG_SQRT:
+                {
+                    float f = __clamp01( indata( x, y, 3 ) );
+                    if( op == IMPORT_A_LOG_SQRT )
+                        f = __fsqrt_rn( f );
+                    R = G = B = __logf( f + 1.f ) * c_logmul;
+                }
+                break;
+                case IMPORT_A_PRELOG:
+                {
+                    float fa = __clamp( indata( x, y, 3 ), 2.980233e-8 );
+                    if( fa == 0.f )
+                        R = G = B = 0;
+                    else
+                    {
+                        fa = __logf( fa ) - 0.5f;       // subtract estimated average
+                        R = hdrx[3] * fa + hdrx[6];
+                        G = hdrx[4] * fa + hdrx[7];
+                        B = hdrx[5] * fa + hdrx[8];
+                    }
+                }
+                break;
+                case IMPORT_XY:
+                    R = indata( x, y, 0 );
+                    G = indata( x, y, 1 );
+                    break;
+                case IMPORT_XYZ:
+                    R = indata( x, y, 0 );
+                    G = indata( x, y, 1 );
+                    B = indata( x, y, 2 );
+                    break;
+                case IMPORT_NORM3:
+                {
+                    const float fr = indata( x, y, 0 );
+                    const float fg = indata( x, y, 1 );
+                    const float fb = indata( x, y, 2 );
+                    const float dp = fr * fr + fg * fg + fb * fb;
+                    if ( dp > 1.0e-6 )
+                    {
+                        const float f = __frsqrt_rn( dp );
+                        R = fr * f;
+                        G = fg * f;
+                        B = fb * f;
+                    }
+                    else
+                    {
+                        R = fr;
+                        G = fg;
+                        B = fb;
+                    }
+               }
+               break;
+               case IMPORT_HDR:
+                    R = __clamp0( indata( x, y, 0 ), 65504.f );
+                    G = __clamp0( indata( x, y, 1 ), 65504.f );
+                    B = __clamp0( indata( x, y, 2 ), 65504.f );
+                    break;
+                case IMPORT_RGB:
+                    R = __clamp01( indata( x, y, 0 ) );
+                    G = __clamp01( indata( x, y, 1 ) );
+                    B = __clamp01( indata( x, y, 2 ) );
+                    break;
+                case IMPORT_PRELOG:
+                    float fr = __clamp( indata( x, y, 0 ), 2.980233e-8 );
+                    float fg = __clamp( indata( x, y, 1 ), 2.980233e-8 );
+                    float fb = __clamp( indata( x, y, 2 ), 2.980233e-8 );
+                    R = fr == 0.f ? 0 : hdrx[3] * (__logf(fr) - hdrx[0]) + hdrx[6];
+                    G = fg == 0.f ? 0 : hdrx[4] * (__logf(fg) - hdrx[1]) + hdrx[7];
+                    B = fb == 0.f ? 0 : hdrx[5] * (__logf(fb) - hdrx[2]) + hdrx[8];
+                    break;
+            }
+        }
+        out[( y * w + x ) * nc + ( start + 0 ) * N] = R;
+        out[( y * w + x ) * nc + ( start + 1 ) * N] = G;
+        if( op != IMPORT_XY )
+            out[( y * w + x ) * nc + ( start + 2 ) * N] = B;
+    }
+}
+
+void AEInputLayer::setChannelRGB( const OptixImage2D* indata, int start, int op, void* smem, lwdaStream_t stream )
+{
+    dim3 dimBlock( LWDA_BLOCK, LWDA_BLOCK );
+    dim3 blockGrid = dim3( roundUp( m_outWidth, dimBlock.x ), roundUp( m_outHeight, dimBlock.y ) );
+
+    int nc = m_tensorFormat == TENSOR_NHWC ? m_outChannels : 1;
+    int N  = m_tensorFormat == TENSOR_NHWC ? 1 : m_outWidth * m_outHeight;
+
+    if( m_dtype == DATA_HALF )
+    {
+        k_SetChannelRGB<__half><<<blockGrid, dimBlock, 0, stream>>>( (__half*)( (char*)smem + m_outDataIndex ),
+                                                                     floatRdAccess( *indata ), nc, N, start, m_outWidth,
+                                                                     m_outHeight, op, m_logmul,
+                                                                     (float*)( (char*)smem + m_intensityIndex ),
+                                                                     (float*)( (char*)smem + m_hdrTransformIndex ) );
+    }
+    else
+    {
+        k_SetChannelRGB<float><<<blockGrid, dimBlock, 0, stream>>>( (float*)( (char*)smem + m_outDataIndex ),
+                                                                    floatRdAccess( *indata ), nc, N, start, m_outWidth,
+                                                                    m_outHeight, op, m_logmul,
+                                                                    (float*)( (char*)smem + m_intensityIndex ),
+                                                                    (float*)( (char*)smem + m_hdrTransformIndex ) );
+    }
+}
+
+OptixResult AEInputLayer::setBuffer( void* smem, lwdaStream_t stream, float value, ErrorDetails& errDetails )
+{
+    LWresult lwret;
+    if( m_dtype == DATA_HALF )
+    {
+        __half h = cpu_float2half_rn( value );
+        unsigned int ui = ((unsigned int)*(unsigned short*)&h) << 16 | ((unsigned int)*(unsigned short*)&h);
+        lwret = corelib::lwdaDriver().LwMemsetD32Async( (LWdeviceptr)(char*)smem + m_outDataIndex, ui, m_outsize / 4, stream );
+    }
+    else
+    {
+        lwret = corelib::lwdaDriver().LwMemsetD32Async( (LWdeviceptr)(char*)smem + m_outDataIndex, *(unsigned int*)&value, m_outsize / 4, stream );
+    }
+    if( lwret )
+        return errDetails.logDetails( lwret, "setting input layer to value failed" );
+    return OPTIX_SUCCESS;
+}
+
+};  // namespace optix_exp

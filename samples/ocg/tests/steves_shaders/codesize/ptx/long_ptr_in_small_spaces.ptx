@@ -1,0 +1,28 @@
+.version 3.1
+.target sm_20
+
+.global .u64 g;
+
+.entry main()
+{
+    .reg .u64 addr, index;
+    .reg .u32 x, y, z;
+
+    ld.global.u64  addr, [g];
+    ld.global.u64  index, [g + 8];
+    add.u64        addr, addr, 16;
+    mul.lo.u64     index, index, 8;
+    add.u64        addr, addr, index;
+
+    bar.sync 0;
+
+    ld.local.u32   x, [addr + 16];
+    ld.shared.u32  y, [addr + 4];
+    ld.const.u32   z, [addr + 0];
+    add.u32        x, x, y;
+    xor.b32        x, x, z;
+
+    st.global.u32 [g], x;
+    exit;
+}
+

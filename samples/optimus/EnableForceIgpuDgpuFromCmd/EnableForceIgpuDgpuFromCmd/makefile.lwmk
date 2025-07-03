@@ -1,0 +1,255 @@
+LWMK_SOURCE = $(LW_SOURCE)/drivers/common/build
+
+# Lwstomize for your own disk layout.
+# This is for the layout on jjuliano's disk.
+LW_DRIVER_SOURCE = $(LW_SOURCE)
+
+##############################################################################
+
+# Include lwcommon before including anything else
+include $(LWMK_SOURCE)/lwCommon.lwmk
+
+# This generates and includes LWCFG_* makefile vars and C #defines in g_lwconfig.h
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+# Normally I put the "ifdef LWCFG_INITIALIZED" stuff into a separate
+# makefile. But since this one is so simple it is left inline in a
+# single makefile. To indent or not to indent, that is the question.
+ifdef LWCFG_INITIALIZED
+
+##############################################################################
+
+TARGET_EXE = EnableForceIgpuDgpuFromCmd.exe
+
+# SOURCES must be specified after including lwCommon.lwmk.
+SOURCES += $(LW_SOURCE)/apps/OptimusTools/Common/CoprocStatistics.cpp
+SOURCES += $(LW_SOURCE)/apps/OptimusTools/EnableForceIgpuDgpuFromCmd/EnableForceIgpuDgpuFromCmd/main.cpp
+
+
+##############################################################################
+
+LW_TARGET_OS_FAMILY := Windows
+LW_TARGET_OS_ARCH = $(LW_TARGET_OS)_$(LW_TARGET_ARCH)
+
+ifeq (,$(findstring $(LW_BUILD_TYPE),"debug release"))
+  $(error Only release and debug builds are supported)
+endif
+
+ifeq (,$(findstring $(LW_TARGET_ARCH),"x86 amd64 ARMv7"))
+  $(error Only x86, amd64, and ARMv7 architectures are supported)
+endif
+
+ifeq (,$(findstring $(LW_TARGET_OS),"win7 win8 wddm winnext"))
+  $(error Only win7, win8 wddm and winnext target OS are supported)
+endif
+
+##############################################################################
+
+LW_COMPILER ?= msvc110
+
+LW_SDK_DIR ?= $(LW_TOOLS)/ddk/nt8/9200
+LW_REQUIRED_DIRS += $(LW_SDK_DIR)
+
+# Define these before including the _tools_ file.
+LW_DDK_VER = nt8
+LW_DDK_SUBVER = 9200
+
+include $(LWMK_SOURCE)/$(LW_COMPILER)_tools_$(LW_TARGET_ARCH).lwmk
+LW_REQUIRED_DIRS += $(MSVC_COMPILER_DIR)
+
+ifeq (,$(findstring "/ddk/",$(LW_SDK_DIR)))
+  LW_TOOLS_INCLUDES += $(LW_SDK_DIR)/Include/um
+  LW_TOOLS_INCLUDES += $(LW_SDK_DIR)/Include/shared
+
+  # Needed for d3dkmthk.h
+  LW_TOOLS_INCLUDES += $(LW_SDK_DIR)/Include/km
+else
+  LW_TOOLS_INCLUDES += $(LW_SDK_DIR)/Include
+endif
+LW_TOOLS_INCLUDES += $(MSVC_COMPILER_DIR)/include
+
+LW_INCLUDES += $(OUTPUTDIR)
+LW_INCLUDES += $(LW_TOOLS_INCLUDES)
+LW_INCLUDES += $(LW_SOURCE)/apps/OptimusTools/Common
+
+ifeq (,$(findstring "/ddk/",$(LW_SDK_DIR)))
+  ifeq ($(LW_TARGET_ARCH),x86)
+    libraryDirs += $(LW_SDK_DIR)/Lib/win8/um/x86
+  else ifeq ($(LW_TARGET_ARCH),amd64)
+    libraryDirs += $(LW_SDK_DIR)/Lib/win8/um/x64
+  else
+    libraryDirs += $(LW_SDK_DIR)/Lib/win8/um/arm
+  endif
+else
+  ifeq ($(LW_TARGET_ARCH),x86)
+   libraryDirs += $(LW_SDK_DIR)/Lib
+  else ifeq ($(LW_TARGET_ARCH),amd64)
+    libraryDirs += $(LW_SDK_DIR)/Lib/x64
+  else
+    $(error missing SDK library dir for LW_TARGET_ARCH $(LW_TARGET_ARCH))
+  endif
+endif
+
+ifeq ($(LW_TARGET_ARCH),x86)
+  libraryDirs += $(MSVC_COMPILER_DIR)/lib
+else ifeq ($(LW_TARGET_ARCH),amd64)
+  libraryDirs += $(MSVC_COMPILER_DIR)/lib/amd64
+else
+  libraryDirs += $(MSVC_COMPILER_DIR)/lib/arm
+endif
+
+##############################################################################
+
+LW_INCLUDES += $(LW_DRIVER_SOURCE)/sdk/lwpu/inc
+LW_INCLUDES += $(LW_DRIVER_SOURCE)/drivers/common/inc
+
+# This is not needed if the DDK include/um directory contains all
+# necessary bits. So far it does.
+#
+#     LW_INCLUDES += $(LW_TOOLS)/sdk/DirectX_Jun2010/Include
+
+##############################################################################
+
+# Enable warnings and treated warnings as errors
+CFLAGS += -W3 -WX
+LFLAGS += -WX
+
+# catches C++ exceptions only and tells the compiler to assume that
+# extern C functions never throw a C++ exception
+CFLAGS += -EHsc
+
+# Default to unicode system calls
+LW_DEFINES += _UNICODE
+LW_DEFINES += UNICODE
+
+# Console app
+LW_DEFINES += _CONSOLE
+LFLAGS += -subsystem:console
+
+LFLAGS += -OUT:./$@
+LFLAGS += -INCREMENTAL:NO
+
+LFLAGS += $(addprefix -libpath:,$(libraryDirs))
+
+libraries += setupapi.lib
+libraries += kernel32.lib
+libraries += user32.lib
+libraries += gdi32.lib
+libraries += winspool.lib
+libraries += comdlg32.lib
+libraries += advapi32.lib
+libraries += shell32.lib
+libraries += ole32.lib
+libraries += oleaut32.lib
+libraries += uuid.lib
+libraries += odbc32.lib
+libraries += odbccp32.lib
+libraries += kernel32.lib
+libraries += user32.lib
+libraries += gdi32.lib
+libraries += winspool.lib
+libraries += comdlg32.lib
+libraries += advapi32.lib
+libraries += shell32.lib
+libraries += ole32.lib
+libraries += oleaut32.lib
+libraries += uuid.lib
+libraries += odbc32.lib
+libraries += odbccp32.lib
+
+##############################################################################
+
+LW_USE_LWAPI_IFACE = 1
+
+ifeq (0,$(LW_USE_LWAPI_IFACE))
+  # lwapi is not used
+  LWAPI_IFACE =
+else
+  # override
+  LWAPI_IFACE_INCLUDES = $(LW_TOOLS_INCLUDES)
+  # lwapi's lwlink_gen.cpp expects full <windows.h> so get rid of WIN32_LEAN_AND_MEAN
+  LWAPI_IFACE_DEFINES = $(subst WIN32_LEAN_AND_MEAN=1,,$(LW_TARGET_DEFINES))
+
+  # Depends on LWAPI_IFACE_DEFINES and LWAPI_IFACE_INCLUDES
+  #LWAPI_IFACE_USES_DEBUG_LIBCMT ?= 1
+
+  LWAPI_IFACE_DIR = $(LW_DRIVER_SOURCE)/drivers/lwapi
+
+  include $(LWAPI_IFACE_DIR)/lwapi_iface.lwmk
+
+  $(OBJECTS) $(PCH_OBJECTS): $(LWAPI_IFACE)
+
+  ifeq ($(LW_WOW64),1)
+    libraries += $(OUTPUTDIR)/lwapi.lib
+    $(OUTPUTDIR)/$(TARGET_EXE): $(LWAPI_IFACE)
+  else
+    ifeq ($(LW_TARGET_ARCH),x86)
+      libraries += $(OUTPUTDIR)/lwapi.lib
+      $(OUTPUTDIR)/$(TARGET_EXE): $(LWAPI_IFACE)
+    else ifeq ($(LW_TARGET_ARCH),amd64)
+      libraries += $(OUTPUTDIR)/lwapi64.lib
+      $(OUTPUTDIR)/$(TARGET_EXE): $(LWAPI_IFACE)
+    else
+      # armv7
+      libraries += $(OUTPUTDIR)/lwapi.lib
+      $(OUTPUTDIR)/$(TARGET_EXE): $(LWAPI_IFACE)
+    endif
+  endif
+endif
+
+##############################################################################
+
+# all OBJECTS depend on the top-level makefile
+$(call BUILD_OBJECT_LIST,$(OBJECTS)) $(OUTPUTDIR)/$(TARGET_EXE) $(LWAPI_IFACE): makefile.lwmk
+
+$(OUTPUTDIR)/$(TARGET_EXE): $(OBJECTS)
+	@$(ECHO) Building $@...
+	$(LINK) $(strip $(LFLAGS)) $(OBJECTS) $(libraries)
+
+build: $(LW_REQUIRED_DIRS) $(OUTPUTDIR)/$(TARGET_EXE)
+
+endif # LWCFG_INITIALIZED
+
+# Always include this last.
+include $(LWMK_SOURCE)/lwCommonRules.lwmk
+
+##############################################################################
+#
+# These are the command lines from the build logs created by visual
+# studio. This makefile intends to replicate/approximate the VS
+# command lines.
+#
+# Note, however, that I've not gone through the compile and link
+# arguments to make sure they match. I'm sure there are a bunch that
+# don't match. Fixing that is left as an exercise for the reader.
+#
+##############################################################################
+#
+# ^D:\P4\SW\DEV\GPU_DRV\BUGFIX_MAIN\APPS\COPROCSTATISTICS\COPROCSTATISTICS\STDAFX.CPP
+#
+# /c /ZI /nologo /W3 /WX- /Od /Oy- /D WIN32 /D _DEBUG /D _CONSOLE /D _UNICODE /D UNICODE /Gm /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Yc"StdAfx.h" /Fp"Debug\CoprocStatistics.pch" /Fo"Debug\\" /Fd"Debug\vc100.pdb" /Gd /TP /analyze- /errorReport:prompt D:\P4\SW\DEV\GPU_DRV\BUGFIX_MAIN\APPS\COPROCSTATISTICS\COPROCSTATISTICS\STDAFX.CPP
+#
+# ---
+#
+# ^D:\P4\SW\DEV\GPU_DRV\BUGFIX_MAIN\APPS\COPROCSTATISTICS\COPROCSTATISTICS\COPROCSTATISTICS.CPP
+#
+# /c /ZI /nologo /W3 /WX- /Od /Oy- /D WIN32 /D _DEBUG /D _CONSOLE /D _UNICODE /D UNICODE /Gm /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Yu"StdAfx.h" /Fp"Debug\CoprocStatistics.pch" /Fo"Debug\\" /Fd"Debug\vc100.pdb" /Gd /TP /analyze- /errorReport:prompt D:\P4\SW\DEV\GPU_DRV\BUGFIX_MAIN\APPS\COPROCSTATISTICS\COPROCSTATISTICS\COPROCSTATISTICS.CPP
+#
+# ---
+#
+# ^D:\P4\SW\DEV\GPU_DRV\BUGFIX_MAIN\APPS\COPROCSTATISTICS\COPROCSTATISTICS\DEBUG\COPROCSTATISTICS.EXE.EMBED.MANIFEST.RES|D:\P4\SW\DEV\GPU_DRV\BUGFIX_MAIN\APPS\COPROCSTATISTICS\COPROCSTATISTICS\DEBUG\COPROCSTATISTICS.OBJ|D:\P4\SW\DEV\GPU_DRV\BUGFIX_MAIN\APPS\COPROCSTATISTICS\COPROCSTATISTICS\DEBUG\STDAFX.OBJ
+#
+# /ERRORREPORT:PROMPT /OUT:"D:\P4\sw\dev\gpu_drv\bugfix_main\apps\CoprocStatistics\Debug\CoprocStatistics.exe" /INCREMENTAL /NOLOGO setupapi.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /ManifestFile:"Debug\CoprocStatistics.exe.intermediate.manifest" /MANIFESTUAC:"level='asIlwoker' uiAccess='false'" /DEBUG /PDB:"D:\P4\sw\dev\gpu_drv\bugfix_main\apps\CoprocStatistics\Debug\CoprocStatistics.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"D:\P4\sw\dev\gpu_drv\bugfix_main\apps\CoprocStatistics\Debug\CoprocStatistics.lib" /MACHINE:X86 Debug\CoprocStatistics.exe.embed.manifest.res
+#
+# Debug\CoprocStatistics.obj
+#
+# Debug\stdafx.obj
+#
+#
+# Include directories:
+# .;.\..\..\..\sdk\lwpu\inc;.\..\..\..\..\..\..\tools\sdk\DirectX_Jun2010\Include;.\..\..\..\..\..\..\tools\ddk\nt8\9200\Include;.\..\..\..\..\..\..\tools\ddk\nt8\9200\Include\um;.\..\..\..\..\..\..\tools\ddk\nt8\9200\Include\km;.\..\..\..\..\..\..\tools\ddk\nt8\9200\Include\shared;.\..\..\..\drivers\common\inc;$(IncludePath)
+#
+# Library directories:
+# .\..\..\..\..\..\..\tools\sdk\DirectX_Jun2010\Lib\x86;$(LibraryPath)
+
+##############################################################################

@@ -1,0 +1,148 @@
+##############################################################################
+# define LOCAL_SOURCES
+##############################################################################
+
+LW_CXX_EXCEPTIONS := 0
+LW_CXX_RTTI := 0
+
+LWRRENT_DIR := $(LW_SOURCE)/apps/fabricmanager
+
+###############################################################################
+# Google Protobuf
+###############################################################################
+FM_PROTO_DIR := $(LW_SOURCE)/apps/fabricmanager/infra/protobuf
+
+BUILD_PROTOC_H_LIST = $(addprefix $(OUTPUTDIR)/,$(notdir $(addsuffix .pb.h,$(basename $(1)))))
+BUILD_PROTOC_C_LIST = $(addprefix $(OUTPUTDIR)/,$(notdir $(addsuffix .pb.cc,$(basename $(1)))))
+
+# VPATH has to be defined for the build to happen properly in the FM directory
+VPATH :=
+VPATH += $(FM_PROTO_DIR)
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+	PROTOC = $(LW_TOOLS)/unix/hosts/Linux-x86/unix-build/bin/protoc_2.6.0
+else
+	PROTOC = $(LW_TOOLS)/win32/MiscBuildTools/protoc_2.6.0.exe
+endif
+PROTOC_INCLUDES += -I$(OUTPUTDIR)
+PROTOC_INCLUDES += -I$(FM_PROTO_DIR)
+PROTOC_OPTIONS += --cpp_out=$(OUTPUTDIR) --python_out=$(OUTPUTDIR)
+
+ifneq ($(TOPOLOGY_PROTO_ONLY),1)
+PROTOC_SOURCES += fmlib.proto
+PROTOC_SOURCES += fmInternalLib.proto
+PROTOC_SOURCES += $(OUTPUTDIR)/fabricmanager.proto
+PROTOC_SOURCES += $(OUTPUTDIR)/memmgr.proto
+PROTOC_SOURCES += fabricmanagerHA.proto
+endif
+
+PROTOC_SOURCES += $(OUTPUTDIR)/topology.proto
+
+ifeq ($(LWCFG_GLOBAL_LWSWITCH_IMPL_LS10),1)
+PROTOC_FLAGS = -DBUILD_LS_TOPOLOGY
+else
+PROTOC_FLAGS = 
+endif
+
+ifeq ($(LWCFG_GLOBAL_FEATURE_RID72837_KT_MULTINODE), 1)
+PROTOC_FLAGS += -DBUILD_KT_MULTINODE
+endif
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+
+$(OUTPUTDIR)/memmgr.proto: $(FM_PROTO_DIR)/memmgr.proto.precomp
+	$(CPP) -P $(PROTOC_FLAGS) $(FM_PROTO_DIR)/memmgr.proto.precomp  -o $(OUTPUTDIR)/memmgr.proto
+
+$(OUTPUTDIR)/topology.proto: $(FM_PROTO_DIR)/topology.proto.precomp
+	$(CPP) -P $(PROTOC_FLAGS) $(FM_PROTO_DIR)/topology.proto.precomp  -o $(OUTPUTDIR)/topology.proto
+    
+$(OUTPUTDIR)/fabricmanager.proto: $(FM_PROTO_DIR)/fabricmanager.proto.precomp $(OUTPUTDIR)/topology.proto $(OUTPUTDIR)/memmgr.proto
+	$(CPP) -P $(PROTOC_FLAGS) $(FM_PROTO_DIR)/fabricmanager.proto.precomp  -o $(OUTPUTDIR)/fabricmanager.proto
+
+else
+
+$(OUTPUTDIR)/memmgr.proto: $(FM_PROTO_DIR)/memmgr.proto.precomp
+	$(CPP) -P -EP /Fi$(OUTPUTDIR)/memmgr.proto $(PROTOC_FLAGS) $(FM_PROTO_DIR)/memmgr.proto.precomp
+    
+$(OUTPUTDIR)/topology.proto: $(FM_PROTO_DIR)/topology.proto.precomp
+	$(CPP) -P -EP /Fi$(OUTPUTDIR)/topology.proto $(PROTOC_FLAGS) $(FM_PROTO_DIR)/topology.proto.precomp
+    
+$(OUTPUTDIR)/fabricmanager.proto: $(FM_PROTO_DIR)/fabricmanager.proto.precomp $(OUTPUTDIR)/topology.proto $(OUTPUTDIR)/memmgr.proto
+	$(CPP) -P -EP /Fi$(OUTPUTDIR)/fabricmanager.proto $(PROTOC_FLAGS) $(FM_PROTO_DIR)/fabricmanager.proto.precomp
+
+endif 
+
+# Create source, header, and object macros based on list of proto files
+ALL_PB_CFILES := $(call BUILD_PROTOC_C_LIST, $(PROTOC_SOURCES))
+ALL_PB_HFILES := $(call BUILD_PROTOC_H_LIST, $(PROTOC_SOURCES))
+PROTOC_OBJECTS := $(call BUILD_OBJECT_LIST, $(ALL_PB_CFILES))
+
+LOCAL_SOURCES += $(ALL_PB_CFILES)
+
+FORCE_PB_HFILE_GENERATION_LWMK := $(OUTPUTDIR)/force_pb_hfile_generation.lwmk
+
+# declare ALL_PB_HFILES as a prerequisite of FORCE_PB_HFILE_GENERATION
+$(FORCE_PB_HFILE_GENERATION_LWMK): $(ALL_PB_HFILES)
+	$(TOUCH) $@
+
+# Force this lwmk fragment to be included; this should trigger
+# ALL_PB_HFILES and ALL_PB_CFILES generation.
+-include $(FORCE_PB_HFILE_GENERATION_LWMK)
+
+###############################################################################
+# End Google Protobuf
+###############################################################################
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+LOCAL_INCLUDES += $(FM_DIR)/infra/protobuf
+LOCAL_INCLUDES += $(FM_DIR)/libs/protobuf-2.6.0/include/
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+LOCAL_INCLUDES += $(LW_TOOLS)/win32/msvc120/VC/include/
+endif
+
+LOCAL_CFLAGS := $(FM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_CFLAGS += -fPIC -Wno-sign-compare
+endif
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+LOCAL_CFLAGS += /EHsc /wd4018 /wd4146 /wd4244 /wd4267 /wd4715 /wd4715 /wd4800 /wd4996
+endif
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+    FMPROTO_SHARED_LIBRARY_NAME:=libfmproto.a
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+    FMPROTO_SHARED_LIBRARY_NAME:=fmproto.dll
+endif
+
+
+LOCAL_LDFLAGS := $(FM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix) 
+LOCAL_LDFLAGS += -L $(OUTPUTDIR) -rdynamic
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS) -lprotobuf
+endif
+
+fmproto_TARGET  := $(OUTPUTDIR)/$(FMPROTO_SHARED_LIBRARY_NAME)
+fmproto_OBJECTS := $(LOCAL_OBJECTS)
+fmproto_CFLAGS  := $(LOCAL_CFLAGS)
+fmproto_LDFLAGS := $(LOCAL_LDFLAGS)
+fmproto_DEPENDS ?= $(libprotobuf_TARGET) 
+
+ifeq ($(LW_MODS),)
+  build: $(fmproto_TARGET)
+  fmbuildsyncpoint:: $(fmproto_TARGET)
+  $(eval $(call MAKE_STATIC_LIBRARY,fmproto))
+  build: $(fmproto_TARGET).guardwords
+else
+  $(eval $(call MAKE_MODS_FM_LIBRARY,fmproto))
+endif
+
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

@@ -1,0 +1,205 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include <stdio.h>
+#include <cstdint>
+#include <lwrand.h>
+#include <lwrand_kernel.h>
+#include "lwphy.hpp"
+#include "util.hpp"
+#include "ldpc_tv_util.hpp"
+#include "hdf5hpp.hpp"
+#include "lwphy_hdf5.hpp"
+
+using namespace lwphy;
+
+__global__ void setup_rand_kernel(lwrandState* state, int len)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if(idx < len)
+        lwrand_init(clock64(), idx, 0, &state[idx]);
+}
+
+// Kernel for generating random bits packed into an uint32_t
+__global__ void gen_randbit_kernel(lwrandState* state, uint32_t* dst, int len)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if(idx < len)
+    {
+        float       f;
+        uint32_t    val        = 0;
+        lwrandState localState = state[idx];
+
+        for(int i = 0; i < 32; i++)
+        {
+            f = lwrand_uniform(&localState);
+            val |= __float2uint_rn(f) << i;
+        }
+        dst[idx]   = val;
+        state[idx] = localState;
+    }
+}
+
+// Generate random bit using uniform distribution
+lwdaError_t gpu_gen_rand_bit(void* dst, int len, int gpuId, lwdaStream_t lwStrm)
+{
+    lwdaDeviceProp deviceProp;
+    LWDA_CHECK(lwdaGetDeviceProperties(&deviceProp, gpuId));
+    const uint32_t N_MAX_THRDS_PER_THRD_BLK = deviceProp.maxThreadsPerBlock;
+
+    // size to to uint32_t
+    len /= 32;
+    uint32_t     blocks = (len + N_MAX_THRDS_PER_THRD_BLK - 1) / N_MAX_THRDS_PER_THRD_BLK;
+    lwrandState* state;
+
+    lwdaMalloc(&state, len * sizeof(lwrandState));
+    setup_rand_kernel<<<dim3(blocks), dim3(N_MAX_THRDS_PER_THRD_BLK), 0, lwStrm>>>(state, len);
+    gen_randbit_kernel<<<dim3(blocks), dim3(N_MAX_THRDS_PER_THRD_BLK), 0, lwStrm>>>(state, static_cast<uint32_t*>(dst), len);
+    lwdaDeviceSynchronize();
+    lwdaFree(state);
+    return (lwdaGetLastError());
+}
+
+// kernel to colwert the bits to symbols
+__global__ void colwert_symbol(float* s, int len)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if(idx < len)
+    {
+        s[idx] = 1 - 2 * s[idx];
+    }
+}
+
+// Colwert bits into symbols
+lwdaError_t gpu_colwert_symbol(float* s, int len, int gpuId, lwdaStream_t lwStrm)
+{
+    lwdaDeviceProp deviceProp;
+    LWDA_CHECK(lwdaGetDeviceProperties(&deviceProp, gpuId));
+
+    const uint32_t N_MAX_THRDS_PER_THRD_BLK = deviceProp.maxThreadsPerBlock;
+    uint32_t       blocks                   = (len + N_MAX_THRDS_PER_THRD_BLK - 1) / N_MAX_THRDS_PER_THRD_BLK;
+    colwert_symbol<<<dim3(blocks), dim3(N_MAX_THRDS_PER_THRD_BLK), 0, lwStrm>>>(s, len);
+    lwdaDeviceSynchronize();
+    return (lwdaGetLastError());
+}
+
+// kernel to add noise to the symbols
+__global__ void add_noise(float* s, float* r, int len, float snr)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if(idx < len)
+    {
+        s[idx] = s[idx] + sqrtf(powf(10, -snr / 10)) * r[idx];
+    }
+}
+
+// Add noise to the symbols
+lwdaError_t gpu_add_noise(float* s, int len, float snr, int gpuId, lwdaStream_t lwStrm)
+{
+    float*            raddr;
+    lwrandGenerator_t gen;
+    lwdaDeviceProp    deviceProp;
+    LWDA_CHECK(lwdaGetDeviceProperties(&deviceProp, gpuId));
+    const uint32_t N_MAX_THRDS_PER_THRD_BLK = deviceProp.maxThreadsPerBlock;
+    uint32_t       blocks                   = (len + N_MAX_THRDS_PER_THRD_BLK - 1) / N_MAX_THRDS_PER_THRD_BLK;
+
+    // Generate noise
+    lwdaMalloc(&raddr, len * sizeof(float));
+    lwrandCreateGenerator(&gen, LWRAND_RNG_PSEUDO_DEFAULT);
+    lwrandSetPseudoRandomGeneratorSeed(gen, 1234ULL);
+    lwrandGenerateNormal(gen, (float*)raddr, len, 0, 1);
+
+    add_noise<<<dim3(blocks), dim3(N_MAX_THRDS_PER_THRD_BLK), 0, lwStrm>>>(s, raddr, len, snr);
+    lwdaDeviceSynchronize();
+    lwdaFree(raddr);
+
+    return (lwdaGetLastError());
+}
+
+// Kernel to replicate columns
+__global__ void repmat_col(float* s, float* d, int sdim0, int sdim1, int ry)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int len = sdim0 * sdim1;
+
+    if(idx < len)
+    {
+        for(int i = 0; i < ry; i++)
+        {
+            d[idx + (len * i)] = s[idx];
+        }
+    }
+}
+
+// Replicate columns.
+lwdaError_t gpu_repmat(float* s, float* d, int sdim0, int sdim1, int ry, int gpuId, lwdaStream_t lwStrm)
+{
+    lwdaDeviceProp deviceProp;
+    LWDA_CHECK(lwdaGetDeviceProperties(&deviceProp, gpuId));
+    int len = sdim0 * sdim1;
+
+    const uint32_t N_MAX_THRDS_PER_THRD_BLK = deviceProp.maxThreadsPerBlock;
+    uint32_t       blocks                   = (len + N_MAX_THRDS_PER_THRD_BLK - 1) / N_MAX_THRDS_PER_THRD_BLK;
+    repmat_col<<<dim3(blocks), dim3(N_MAX_THRDS_PER_THRD_BLK), 0, lwStrm>>>(s, d, sdim0, sdim1, ry);
+    lwdaDeviceSynchronize();
+    return (lwdaGetLastError());
+}
+
+// Kernel to init all elements of a row
+__global__ void init_elem(float* s, int dim0, int dim1, int rstart, int nr, float v)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if(idx < nr)
+    {
+        for(int i = 0; i < dim1; i++)
+        {
+            s[idx + rstart + i * dim0] = v;
+        }
+    }
+}
+
+// Init the given rows with data values
+lwdaError_t gpu_init_elem(float* s, int dim0, int dim1, int rstart, int nr, float v, int gpuId, lwdaStream_t lwStrm)
+{
+    lwdaDeviceProp deviceProp;
+    LWDA_CHECK(lwdaGetDeviceProperties(&deviceProp, gpuId));
+
+    const uint32_t N_MAX_THRDS_PER_THRD_BLK = deviceProp.maxThreadsPerBlock;
+    uint32_t       blocks                   = (nr + N_MAX_THRDS_PER_THRD_BLK - 1) / N_MAX_THRDS_PER_THRD_BLK;
+    init_elem<<<dim3(blocks), dim3(N_MAX_THRDS_PER_THRD_BLK), 0, lwStrm>>>(s, dim0, dim1, rstart, nr, v);
+    lwdaDeviceSynchronize();
+    return (lwdaGetLastError());
+}
+
+// Colwert given host buffer data to bit data in device buffer
+lwdaError_t colwert_to_bit(void* h_addr, int len, void* d_addr)
+{
+    int                            bit_len = len / 8;
+    buffer<uint32_t, pinned_alloc> h_b(bit_len);
+
+    uint8_t* v = (uint8_t*)h_b.addr();
+    uint8_t* s = (uint8_t*)h_addr;
+    for(int i = 0; i < bit_len; i++)
+    {
+        uint8_t bits = 0;
+        for(int j = 0; j < 8; j++)
+        {
+            uint8_t bit = s[i * 8 + j] & 0x1;
+            bits |= (bit << j);
+        }
+        v[i] = bits;
+    }
+    lwdaMemcpy(d_addr, h_b.addr(), bit_len, lwdaMemcpyHostToDevice);
+    return (lwdaGetLastError());
+}

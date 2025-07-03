@@ -1,0 +1,94 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+# WindowsUnitTest.lwmk - Variable definitions specific to compiling and linking Windows unit tests
+
+SRC_TESTS_LIBS = \
+  $(OUTPUTDIR)/srcTests.a \
+  $(OUTPUTDIR)/optix_static.a \
+  $(OUTPUTDIR)/Corelib.a \
+  $(OUTPUTDIR)/gmock.a
+
+SRC_TESTS_LIBS_BLACKBOX = \
+  $(OUTPUTDIR)/srcTests.a \
+  $(OUTPUTDIR)/Corelib.a \
+  $(OUTPUTDIR)/$(LWOPTIX_FILENAME) \
+  $(OUTPUTDIR)/gmock.a \
+  $(OUTPUTDIR)/exptest.a
+
+# create_unit_test_exelwtable
+#
+# Create unit test exelwtable for test $(1) from objects $(2).
+#
+# Input variables:
+# $(1)
+#   The name of the test exelwtable, without any platform specific suffix.  Use a prefix of
+#   "test_" for test names.  This keeps the make variables distinct from each other and
+#   reduces the likelihood that they will collide.
+#
+# $(2)
+#   List of object files to link together to form the exelwtable.
+#
+# Example: for Windows test_Foo.exe,
+#   $(call create_unit_test_exelwtable,test_Foo,$(test_Foo_OBJECTS))
+#
+define create_unit_test_exelwtable
+  # Link test case exelwtable from built objects and necessary libraries.
+  $$($(1)_EXE): $$(SRC_TESTS_LIBS) $(2)
+	$$(call quiet_cmd,LINKXX) \
+          -o $$($(1)_EXE) \
+          $(2) \
+          $$($(1)_LFLAGS) \
+          $$(LINK_LDFLAGS) \
+          $$(SRC_TESTS_LIBS) \
+          $$(OPTIX_LFLAGS) \
+          -lpthread \
+          -ldl
+endef
+
+# Link test case exelwtable from build objects and necessary libraries.
+define create_blackbox_unit_test_exelwtable
+  # Link test case exelwtable from built objects and necessary libraries.
+  $$($(1)_EXE): $$(SRC_TESTS_LIBS_BLACKBOX) $(2)
+	$$(call quiet_cmd,LINKXX) \
+          -o $$($(1)_EXE) \
+          $(2) \
+          $$($(1)_LFLAGS) \
+          $$(LINK_LDFLAGS) \
+          $$(SRC_TESTS_LIBS_BLACKBOX) \
+          $$(OPTIX_LFLAGS) \
+          -lpthread \
+          -ldl \
+          -L$(TARGET_LWDA_TOOLKIT_ROOT_DIR)/lib64/stubs -llwda
+endef
+
+# run_unit_test
+#
+# Generate a command-line for running a unit test exelwtable.  On Linux,
+# we need to ensure that LD_LIBRARY_PATH includes the directory containing
+# lwoptix, e.g. $(OUTPUTDIR)
+#
+# Input variables:
+# $(1)
+#   The name of the test case
+#
+define run_unit_test
+  LD_LIBRARY_PATH=$$(OUTPUTDIR):$$(LD_LIBRARY_PATH) $$($(1)_EXE)
+endef

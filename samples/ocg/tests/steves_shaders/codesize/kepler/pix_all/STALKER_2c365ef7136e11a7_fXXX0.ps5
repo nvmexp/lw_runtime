@@ -1,0 +1,1412 @@
+// BEGIN_SHADER
+//     BEGIN_SECTION SHADER_ID
+//         DIRECTX: 11.0
+//         TYPE: PIXEL 
+//         SHADER_HASH: 0x2c365ef7136e11a7
+//         FINGERPRINTER_HASH: 0x01776fb5f4e388b8
+//         UCODE_HASH: 0xb08c6a2c2c696c88
+//         POOL: APP
+//         VERSION: 20
+//         # USES: 105
+//         # Constant Folding: 1
+//         # Disable 595261: 0
+//         # Reduction Hack: 1
+//         # Tex / Tld vectorized: 1
+//         # Texture Filtering: 0
+//     END_SECTION
+//     BEGIN_SECTION CHIP_ID
+//         CLASS: FERMI
+//         CHIP_ID: GF104
+//         SM_VERSION: SMQuick  // SM 2.1
+//     END_SECTION
+//     BEGIN_SECTION RESOURCES
+//         REGISTER_COUNT: 25
+//         TEXTURE_SLOTS: 4
+//         SAMPLER_SLOTS: 2
+//     END_SECTION
+//     BEGIN_SECTION FERMI_SHADER_HEADER
+//         SPHType: TYPE_02_PS
+//         Version: 3
+//         ShaderType: PIXEL
+//         SassVersion: 3
+//         PROPERTIES:
+//             MRT_ENABLE
+//         IMAP:
+//             POSITION_X
+//             POSITION_Y
+//             POSITION_W
+//             GENERIC00_X          PERSPECTIVE
+//             GENERIC00_Y          PERSPECTIVE
+//         OMAP:
+//             TARGET00_R
+//             TARGET00_G
+//             TARGET00_B
+//             TARGET00_A
+//             DEPTH
+//     END_SECTION
+//     BEGIN_SECTION APP_SHADER_INFO
+        ps_5_0
+        dcl_globalflags refactoringAllowed
+        dcl_constantbuffer cb0[2].xyzw, immediateIndexed
+        dcl_constantbuffer cb1[22].xyzw, immediateIndexed
+        dcl_sampler s0, mode_default
+        dcl_sampler s1, mode_default
+        dcl_resource t0, texture2dms (4), (float, float, float, float)
+        dcl_resource t1, texture2d, (float, float, float, float)
+        dcl_resource t2, texture2d, (float, float, float, float)
+        dcl_resource t3, texture2dms (4), (float, float, float, float)
+        dcl_input_ps v0.xy, linear
+        dcl_input_ps_siv v5.xy, position, linear noperspective
+        dcl_output o0.xyzw
+        dcl_output oDepth
+        dcl_temps 8 
+        mul r0.xy, v0.xyxx, cb1[21].xyxx
+        ftoi r0.xy, r0.xyxx
+        mov r0.zw, l(0, 0, 0, 0)
+        ldms (texture2dms) (float,float,float,float) r0.xyz, r0.xyzw, t3.xyzw, l(0)
+        add r0.xy, r0.xyxx, l(-0.49803922, -0.49803922, 0.00000000, 0.00000000)
+        mul r1.xy, r0.xyxx, l(0.05000000, 0.05000000, 0.00000000, 0.00000000)
+        mad r0.xy, r0.xyxx, l(0.05000000, 0.05000000, 0.00000000, 0.00000000), v0.xyxx
+        mad r1.xy, r1.xyxx, cb1[21].xyxx, v5.xyxx
+        ftoi r1.xy, r1.xyxx
+        mov r1.zw, l(0, 0, 0, 0)
+        ldms (texture2dms) (float,float,float,float) r0.w, r1.xyzw, t0.xywz, l(0)
+        add r0.w, r0.w, l(0.00100000)
+        ftoi r1.xy, v5.xyxx
+        mov r1.zw, l(0, 0, 0, 0)
+        ldms (texture2dms) (float,float,float,float) r1.z, r1.xyzw, t0.xyzw, l(0)
+        lt r0.w, r0.w, r1.z
+        movc r0.xy, r0.wwww, v0.xyxx, r0.xyxx
+        sample (texture2d) (float,float,float,float) r2.xyz, r0.xyxx, t2.xyzw, s0
+        mov r3.zw, l(0, 0, 0, 0)
+        mov r4.zw, l(0, 0, 0, 0)
+        mul r5.xy, r0.xyxx, cb1[21].xyxx
+        ftoi r4.xy, r5.xyxx
+        ldms (texture2dms) (float,float,float,float) r0.w, r4.xyzw, t0.xywz, l(0)
+        ge r2.w, l(0.00010000), r0.w
+        movc r0.w, r2.w, cb0[0].w, r0.w
+        add r0.w, r0.w, -cb0[0].y
+        add r4.xy, -cb0[0].yyyy, cb0[0].zxzz
+        div_sat r4.zw, r0.wwww, r4.xxxy
+        add r0.w, r4.z, r4.w
+        mul r0.w, r0.w, r0.w
+        mul r0.w, r0.w, cb0[1].z
+        mad r4.zw, r0.wwww, l(0.00000000, 0.00000000, -0.00015928, -0.00026420), r0.xxxy
+        mul r5.xy, r4.zwzz, cb1[21].xyxx
+        sample (texture2d) (float,float,float,float) r6.xyz, r4.zwzz, t2.xyzw, s0
+        ftoi r3.xy, r5.xyxx
+        ldms (texture2dms) (float,float,float,float) r2.w, r3.xyzw, t0.xywz, l(0)
+        ge r3.x, l(0.00010000), r2.w
+        movc r2.w, r3.x, cb0[0].w, r2.w
+        add r2.w, r2.w, -cb0[0].y
+        div_sat r3.xy, r2.wwww, r4.xyxx
+        add r2.w, r3.x, r3.y
+        mul r3.x, r2.w, r2.w
+        mad r2.w, r2.w, r2.w, l(1.00000000)
+        mad r2.xyz, r6.xyzx, r3.xxxx, r2.xyzx
+        mov r3.zw, l(0, 0, 0, 0)
+        mad r4.zw, r0.wwww, l(0.00000000, 0.00000000, -0.00041023, -0.00004790), r0.xxxy
+        mul r5.xy, r4.zwzz, cb1[21].xyxx
+        sample (texture2d) (float,float,float,float) r6.xyz, r4.zwzz, t2.xyzw, s0
+        ftoi r3.xy, r5.xyxx
+        ldms (texture2dms) (float,float,float,float) r3.x, r3.xyzw, t0.zxyw, l(0)
+        ge r3.y, l(0.00010000), r3.x
+        movc r3.x, r3.y, cb0[0].w, r3.x
+        add r3.x, r3.x, -cb0[0].y
+        div_sat r3.xy, r3.xxxx, r4.xyxx
+        add r3.x, r3.x, r3.y
+        mul r3.y, r3.x, r3.x
+        mad r2.w, r3.x, r3.x, r2.w
+        mad r2.xyz, r6.xyzx, r3.yyyy, r2.xyzx
+        mov r3.zw, l(0, 0, 0, 0)
+        mad r4.zw, r0.wwww, l(0.00000000, 0.00000000, -0.00033980, 0.00029762), r0.xxxy
+        mul r5.xy, r4.zwzz, cb1[21].xyxx
+        sample (texture2d) (float,float,float,float) r6.xyz, r4.zwzz, t2.xyzw, s0
+        ftoi r3.xy, r5.xyxx
+        ldms (texture2dms) (float,float,float,float) r3.x, r3.xyzw, t0.zxyw, l(0)
+        ge r3.y, l(0.00010000), r3.x
+        movc r3.x, r3.y, cb0[0].w, r3.x
+        add r3.x, r3.x, -cb0[0].y
+        div_sat r3.xy, r3.xxxx, r4.xyxx
+        add r3.x, r3.x, r3.y
+        mul r3.y, r3.x, r3.x
+        mad r2.w, r3.x, r3.x, r2.w
+        mad r2.xyz, r6.xyzx, r3.yyyy, r2.xyzx
+        mov r3.zw, l(0, 0, 0, 0)
+        mad r4.zw, r0.wwww, l(0.00000000, 0.00000000, -0.00009929, 0.00040411), r0.xxxy
+        mul r5.xy, r4.zwzz, cb1[21].xyxx
+        sample (texture2d) (float,float,float,float) r6.xyz, r4.zwzz, t2.xyzw, s0
+        ftoi r3.xy, r5.xyxx
+        ldms (texture2dms) (float,float,float,float) r3.x, r3.xyzw, t0.zxyw, l(0)
+        ge r3.y, l(0.00010000), r3.x
+        movc r3.x, r3.y, cb0[0].w, r3.x
+        add r3.x, r3.x, -cb0[0].y
+        div_sat r3.xy, r3.xxxx, r4.xyxx
+        add r3.x, r3.x, r3.y
+        mul r3.y, r3.x, r3.x
+        mad r2.w, r3.x, r3.x, r2.w
+        mad r2.xyz, r6.xyzx, r3.yyyy, r2.xyzx
+        mov r3.zw, l(0, 0, 0, 0)
+        mad r4.zw, r0.wwww, l(0.00000000, 0.00000000, 0.00046989, -0.00012694), r0.xxxy
+        mul r5.xy, r4.zwzz, cb1[21].xyxx
+        sample (texture2d) (float,float,float,float) r6.xyz, r4.zwzz, t2.xyzw, s0
+        ftoi r3.xy, r5.xyxx
+        ldms (texture2dms) (float,float,float,float) r3.x, r3.xyzw, t0.zxyw, l(0)
+        ge r3.y, l(0.00010000), r3.x
+        movc r3.x, r3.y, cb0[0].w, r3.x
+        add r3.x, r3.x, -cb0[0].y
+        div_sat r3.xy, r3.xxxx, r4.xyxx
+        add r3.x, r3.x, r3.y
+        mul r3.y, r3.x, r3.x
+        mad r2.w, r3.x, r3.x, r2.w
+        mad r2.xyz, r6.xyzx, r3.yyyy, r2.xyzx
+        mov r3.zw, l(0, 0, 0, 0)
+        mad r4.zw, r0.wwww, l(0.00000000, 0.00000000, 0.00023117, -0.00031252), r0.xxxy
+        mul r5.xy, r4.zwzz, cb1[21].xyxx
+        sample (texture2d) (float,float,float,float) r6.xyz, r4.zwzz, t2.xyzw, s0
+        ftoi r3.xy, r5.xyxx
+        ldms (texture2dms) (float,float,float,float) r3.x, r3.xyzw, t0.zxyw, l(0)
+        ge r3.y, l(0.00010000), r3.x
+        movc r3.x, r3.y, cb0[0].w, r3.x
+        add r3.x, r3.x, -cb0[0].y
+        div_sat r3.xy, r3.xxxx, r4.xyxx
+        add r3.x, r3.x, r3.y
+        mul r3.y, r3.x, r3.x
+        mad r2.w, r3.x, r3.x, r2.w
+        mad r2.xyz, r6.xyzx, r3.yyyy, r2.xyzx
+        mov r3.zw, l(0, 0, 0, 0)
+        mad r4.zw, r0.wwww, l(0.00000000, 0.00000000, 0.00025364, 0.00049936), r0.xxxy
+        mul r5.xy, r4.zwzz, cb1[21].xyxx
+        sample (texture2d) (float,float,float,float) r6.xyz, r4.zwzz, t2.xyzw, s0
+        ftoi r3.xy, r5.xyxx
+        ldms (texture2dms) (float,float,float,float) r3.x, r3.xyzw, t0.zxyw, l(0)
+        ge r3.y, l(0.00010000), r3.x
+        movc r3.x, r3.y, cb0[0].w, r3.x
+        add r3.x, r3.x, -cb0[0].y
+        div_sat r3.xy, r3.xxxx, r4.xyxx
+        add r3.x, r3.x, r3.y
+        mul r3.y, r3.x, r3.x
+        mad r2.w, r3.x, r3.x, r2.w
+        mad r2.xyz, r6.xyzx, r3.yyyy, r2.xyzx
+        mov r3.zw, l(0, 0, 0, 0)
+        mad r4.zw, r0.wwww, l(0.00000000, 0.00000000, 0.00009056, -0.00058146), r0.xxxy
+        mul r5.xy, r4.zwzz, cb1[21].xyxx
+        sample (texture2d) (float,float,float,float) r6.xyz, r4.zwzz, t2.xyzw, s0
+        ftoi r3.xy, r5.xyxx
+        ldms (texture2dms) (float,float,float,float) r3.x, r3.xyzw, t0.zxyw, l(0)
+        ge r3.y, l(0.00010000), r3.x
+        movc r3.x, r3.y, cb0[0].w, r3.x
+        add r3.x, r3.x, -cb0[0].y
+        div_sat r3.xy, r3.xxxx, r4.xyxx
+        add r3.x, r3.x, r3.y
+        mul r3.y, r3.x, r3.x
+        mad r2.w, r3.x, r3.x, r2.w
+        mad r2.xyz, r6.xyzx, r3.yyyy, r2.xyzx
+        mad r3.xy, r0.wwww, l(0.00024777, 0.00004194, 0.00000000, 0.00000000), r0.xyxx
+        mul r3.zw, r3.xxxy, cb1[21].xxxy
+        sample (texture2d) (float,float,float,float) r5.xyz, r3.xyxx, t2.xyzw, s0
+        ftoi r3.xy, r3.zwzz
+        mov r3.zw, l(0, 0, 0, 0)
+        ldms (texture2dms) (float,float,float,float) r3.x, r3.xyzw, t0.zxyw, l(0)
+        ge r3.y, l(0.00010000), r3.x
+        movc r3.x, r3.y, cb0[0].w, r3.x
+        add r3.x, r3.x, -cb0[0].y
+        div_sat r3.xy, r3.xxxx, r4.xyxx
+        add r3.x, r3.x, r3.y
+        mul r3.y, r3.x, r3.x
+        mad r2.w, r3.x, r3.x, r2.w
+        mad r2.xyz, r5.xyzx, r3.yyyy, r2.xyzx
+        mad r3.xy, r0.wwww, l(0.00043771, 0.00026853, 0.00000000, 0.00000000), r0.xyxx
+        mul r3.zw, r3.xxxy, cb1[21].xxxy
+        sample (texture2d) (float,float,float,float) r5.xyz, r3.xyxx, t2.xyzw, s0
+        ftoi r3.xy, r3.zwzz
+        mov r3.zw, l(0, 0, 0, 0)
+        ldms (texture2dms) (float,float,float,float) r3.x, r3.xyzw, t0.zxyw, l(0)
+        ge r3.y, l(0.00010000), r3.x
+        movc r3.x, r3.y, cb0[0].w, r3.x
+        add r3.x, r3.x, -cb0[0].y
+        div_sat r3.xy, r3.xxxx, r4.xyxx
+        add r3.x, r3.x, r3.y
+        mul r3.y, r3.x, r3.x
+        mad r2.w, r3.x, r3.x, r2.w
+        mad r2.xyz, r5.xyzx, r3.yyyy, r2.xyzx
+        mad r3.xy, r0.wwww, l(-0.00015720, -0.00060717, 0.00000000, 0.00000000), r0.xyxx
+        mad r3.zw, r0.wwww, l(0.00000000, 0.00000000, -0.00038650, -0.00038913), r0.xxxy
+        sample (texture2d) (float,float,float,float) r5.xyzw, r0.xyxx, t1.xyzw, s1
+        mul r0.xy, r3.xyxx, cb1[21].xyxx
+        sample (texture2d) (float,float,float,float) r6.xyz, r3.xyxx, t2.xyzw, s0
+        ftoi r7.xy, r0.xyxx
+        mov r7.zw, l(0, 0, 0, 0)
+        ldms (texture2dms) (float,float,float,float) r0.x, r7.xyzw, t0.zxyw, l(0)
+        ge r0.y, l(0.00010000), r0.x
+        movc r0.x, r0.y, cb0[0].w, r0.x
+        add r0.x, r0.x, -cb0[0].y
+        div_sat r0.xy, r0.xxxx, r4.xyxx
+        add r0.x, r0.x, r0.y
+        mul r0.y, r0.x, r0.x
+        mad r0.x, r0.x, r0.x, r2.w
+        mad r2.xyz, r6.xyzx, r0.yyyy, r2.xyzx
+        mul r0.yw, r3.zzzw, cb1[21].xxxy
+        sample (texture2d) (float,float,float,float) r3.xyz, r3.zwzz, t2.xyzw, s0
+        ftoi r6.xy, r0.ywyy
+        mov r6.zw, l(0, 0, 0, 0)
+        ldms (texture2dms) (float,float,float,float) r0.y, r6.xyzw, t0.xzyw, l(0)
+        ge r0.w, l(0.00010000), r0.y
+        movc r0.y, r0.w, cb0[0].w, r0.y
+        add r0.y, r0.y, -cb0[0].y
+        div_sat r0.yw, r0.yyyy, r4.xxxy
+        add r0.y, r0.y, r0.w
+        mul r0.w, r0.y, r0.y
+        mad r0.x, r0.y, r0.y, r0.x
+        mad r2.xyz, r3.xyzx, r0.wwww, r2.xyzx
+        div r0.xyw, r2.xyxz, r0.xxxx
+        mad r2.xyz, r5.xyzx, l(9.00000000, 9.00000000, 9.00000000, 0.00000000), -r0.xywx
+        mad r0.xyz, r0.zzzz, r2.xyzx, r0.xywx
+        mad o0.xyz, r5.xyzx, r5.wwww, r0.xyzx
+        mov o0.w, l(0x3f800000)
+        mad r0.xy, v5.xyxx, cb1[20].zwzz, -cb1[20].xyxx
+        mul r1.xy, r0.xyxx, r1.zzzz
+        mov r1.w, l(0x3f800000)
+        dp4 r0.x, cb1[5].xyzw, r1.xyzw
+        dp4 r0.y, cb1[6].xyzw, r1.xyzw
+        div r0.x, r0.x, r0.y
+        eq r0.y, r0.y, l(0.00000000)
+        movc oDepth, r0.y, l(0x3f800000), r0.x
+        ret 
+//     END_SECTION
+//     BEGIN_SECTION COP_CONSTANTS
+//         COP_CONST[0]: 0x3d4ccccd // 0.050000
+//         COP_CONST[1]: 0x38d1b717 // 0.000100
+//         COP_CONST[2]: 0xb9270542 // -0.000159
+//         COP_CONST[3]: 0xb98a8438 // -0.000264
+//         COP_CONST[4]: 0x3f800000 // 1.000000
+//         COP_CONST[5]: 0xb9d713ad // -0.000410
+//         COP_CONST[6]: 0xb848ec26 // -0.000048
+//         COP_CONST[7]: 0xb9b2276b // -0.000340
+//         COP_CONST[8]: 0x399c093e // 0.000298
+//         COP_CONST[9]: 0xb8d039ac // -0.000099
+//         COP_CONST[10]: 0x39d3defe // 0.000404
+//         COP_CONST[11]: 0x39f65bea // 0.000470
+//         COP_CONST[12]: 0xb9051bc0 // -0.000127
+//         COP_CONST[13]: 0x397265f1 // 0.000231
+//         COP_CONST[14]: 0xb9a3d950 // -0.000313
+//         COP_CONST[15]: 0x3984fb12 // 0.000254
+//         COP_CONST[16]: 0x3a02e7b4 // 0.000499
+//         COP_CONST[17]: 0x38bde97d // 0.000091
+//         COP_CONST[18]: 0xba186d2f // -0.000581
+//         COP_CONST[19]: 0x3981e6ff // 0.000248
+//         COP_CONST[20]: 0x382fec57 // 0.000042
+//         COP_CONST[21]: 0x39e57bc8 // 0.000438
+//         COP_CONST[22]: 0x398cc921 // 0.000269
+//         COP_CONST[23]: 0xb924d552 // -0.000157
+//         COP_CONST[24]: 0xba1f2a92 // -0.000607
+//         COP_CONST[25]: 0xb9caa39c // -0.000387
+//         COP_CONST[26]: 0xb9cc04b2 // -0.000389
+//         COP_CONST[27]: 0x3f2b0dc1 // 0.668179
+//         COP_CONST[28]: 0xbf88d7ce // -1.069086
+//         COP_CONST[29]: 0x3f8012bd // 1.000572
+//     END_SECTION
+//     BEGIN_SECTION USER_CONSTANTS
+//         USER_CONST: c[0][0] = 0xbfa00000 // -1.250000
+//         USER_CONST: c[0][1] = 0x3fb33333 // 1.400000
+//         USER_CONST: c[0][2] = 0x43960000 // 300.000000
+//         USER_CONST: c[0][3] = 0x41f00000 // 30.000000
+//         USER_CONST: c[0][6] = 0x40a00000 // 5.000000
+//         USER_CONST: c[1][20] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][21] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][22] = 0x3f8012bd // 1.000572
+//         USER_CONST: c[1][23] = 0xbe4ceac8 // -0.200114
+//         USER_CONST: c[1][24] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][25] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][26] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][27] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][80] = 0x3f88d7ce // 1.069086
+//         USER_CONST: c[1][81] = 0xbf2b0dc1 // -0.668179
+//         USER_CONST: c[1][82] = 0x3a91f742 // 0.001114
+//         USER_CONST: c[1][83] = 0xba91f742 // -0.001114
+//         USER_CONST: c[1][84] = 0x44f00000 // 1920.000000
+//         USER_CONST: c[1][85] = 0x44960000 // 1200.000000
+//     END_SECTION
+//     # Exelwtion Time: 349.376ms [12.954 percent]
+//     BEGIN_SECTION COP_ARGS_INFO
+//         shaderType: pixel
+//         inputRegUsage: 45:
+//         (0x3 0 4 "POS" 28)
+//         (0x4 0 0 "PID" 24)
+//         (0x0 0 0 "CLIPLWLL0" 176)
+//         (0x0 0 0 "CLIPLWLL1" 180)
+//         (0x4 0 0 "RTIDX" 25)
+//         (0x4 0 0 "VPIDX" 26)
+//         (0x4 0 0 "SSA" 255)
+//         (0x0 0 0 "DEPTH" 65535)
+//         (0x0 0 4 "ATTR00" 32)
+//         (0x0 0 4 "ATTR01" 36)
+//         (0x0 0 2 "ATTR02" 40)
+//         (0x0 0 4 "ATTR03" 44)
+//         (0x0 0 4 "ATTR04" 48)
+//         (0x0 0 0 "ATTR05" 52)
+//         (0x0 0 0 "ATTR06" 56)
+//         (0x0 0 0 "ATTR07" 60)
+//         (0x0 0 0 "ATTR08" 64)
+//         (0x0 0 0 "ATTR09" 68)
+//         (0x0 0 0 "ATTR10" 72)
+//         (0x0 0 0 "ATTR11" 76)
+//         (0x0 0 0 "ATTR12" 80)
+//         (0x0 0 0 "ATTR13" 84)
+//         (0x0 0 0 "ATTR14" 88)
+//         (0x0 0 0 "ATTR15" 92)
+//         (0x0 0 0 "ATTR16" 96)
+//         (0x0 0 0 "ATTR17" 100)
+//         (0x0 0 0 "ATTR18" 104)
+//         (0x0 0 0 "ATTR19" 108)
+//         (0x0 0 0 "ATTR20" 112)
+//         (0x0 0 0 "ATTR21" 116)
+//         (0x0 0 0 "ATTR22" 120)
+//         (0x0 0 0 "ATTR23" 124)
+//         (0x0 0 0 "ATTR24" 128)
+//         (0x0 0 0 "ATTR25" 132)
+//         (0x0 0 0 "ATTR26" 136)
+//         (0x0 0 0 "ATTR27" 140)
+//         (0x0 0 0 "ATTR28" 144)
+//         (0x0 0 0 "ATTR29" 148)
+//         (0x0 0 0 "ATTR30" 152)
+//         (0x0 0 0 "ATTR31" 156)
+//         (0x0 0 0 "VID" 191)
+//         (0x0 0 0 "IID" 190)
+//         (0x4 0 0 "SID" 65535)
+//         (0x0 0 0 "COVERAGE" 65535)
+//         (0x0 0 0 "UV" 188)
+//         outputRegUsage: 45:
+//         (0x0 0 0 "POS" 28)
+//         (0x0 0 0 "PID" 24)
+//         (0x0 0 0 "CLIPLWLL0" 176)
+//         (0x0 0 0 "CLIPLWLL1" 180)
+//         (0x0 0 0 "RTIDX" 25)
+//         (0x0 0 0 "VPIDX" 26)
+//         (0x0 0 0 "SSA" 255)
+//         (0x0 0 2 "DEPTH" 65535)
+//         (0x0 0 4 "ATTR00" 32)
+//         (0x0 0 0 "ATTR01" 36)
+//         (0x0 0 0 "ATTR02" 40)
+//         (0x0 0 0 "ATTR03" 44)
+//         (0x0 0 0 "ATTR04" 48)
+//         (0x0 0 0 "ATTR05" 52)
+//         (0x0 0 0 "ATTR06" 56)
+//         (0x0 0 0 "ATTR07" 60)
+//         (0x0 0 0 "ATTR08" 64)
+//         (0x0 0 0 "ATTR09" 68)
+//         (0x0 0 0 "ATTR10" 72)
+//         (0x0 0 0 "ATTR11" 76)
+//         (0x0 0 0 "ATTR12" 80)
+//         (0x0 0 0 "ATTR13" 84)
+//         (0x0 0 0 "ATTR14" 88)
+//         (0x0 0 0 "ATTR15" 92)
+//         (0x0 0 0 "ATTR16" 96)
+//         (0x0 0 0 "ATTR17" 100)
+//         (0x0 0 0 "ATTR18" 104)
+//         (0x0 0 0 "ATTR19" 108)
+//         (0x0 0 0 "ATTR20" 112)
+//         (0x0 0 0 "ATTR21" 116)
+//         (0x0 0 0 "ATTR22" 120)
+//         (0x0 0 0 "ATTR23" 124)
+//         (0x0 0 0 "ATTR24" 128)
+//         (0x0 0 0 "ATTR25" 132)
+//         (0x0 0 0 "ATTR26" 136)
+//         (0x0 0 0 "ATTR27" 140)
+//         (0x0 0 0 "ATTR28" 144)
+//         (0x0 0 0 "ATTR29" 148)
+//         (0x0 0 0 "ATTR30" 152)
+//         (0x0 0 0 "ATTR31" 156)
+//         (0x0 0 0 "VID" 191)
+//         (0x0 0 0 "IID" 190)
+//         (0x0 0 0 "SID" 65535)
+//         (0x0 0 0 "COVERAGE" 65535)
+//         (0x0 0 0 "UV" 188)
+//         numCtaRegTargets: 0:
+//         optFlags: 0x5
+//         optLevel: 0
+//         oriControl: 0
+//         bAssume0: 0
+//         bInitOutputs: 0
+//         bCanPromoteFixed: 0
+//         bCanPromoteHalf: 0
+//         bCanReorderFixedWithCheck: 1
+//         bCanReorderHalf: 1
+//         bCanReorderFloat: 1
+//         bCanIgnoreNan: 0
+//         bCanDemoteNonFP32Targets: 0
+//         bCanUseNrmhAlways: 0
+//         bCanFudgeSqrtSign: 0
+//         eOutputMode: R0
+//         dwOutputMask: 0xf
+//         bUseDepth: 1
+//         bUseCoverage: 0
+//         dwNumCombiners: 0
+//         dwLevel: 0
+//         dwSupportsSignedRemap: 0x0
+//         dwTextureRange: 0x0
+//         dwPartialTexType: 0x0
+//         wTextureRemap: 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210
+//         normalizationLwbemap: 0 0 0 0 
+//         bUsingLRPD: 0
+//         dwConstIsInZeroOneRange: 0x0
+//         bNeedsFogHoist: 0
+//         bAssumeDemotedTXP: 0
+//         bOptimizeBranches: 1
+//         bUseDX10SAT: 0
+//         bUseDX10AddressInRange: 1
+//         maxCallDepthAllowed: 0
+//         maxDivergenceLevelAllowed: 0
+//         regAllocationMode: 2
+//         ApplyTXLLODWar: 1
+//         AddDummyCRead: 0
+//         fmtFlags: 0x0
+//         IsOGL: 0
+//         paramFlags: 0x0
+//         optimizerConstBank: 16
+//         deadOutputMask: 0x0 0x0
+//         mrtMask: 0x0
+//         maxRRegsAllowed: 0x0
+//                 indexableRanges: 2 :  (null 0 107482536 104) (null 0 6 0)
+//         Force2IBUFSlots: 0
+//         NoFloatMAD: 0
+//         SFUFloatMUL: 0
+//         InhibitBRXGeneration: 0
+//     END_SECTION
+//     BEGIN_SECTION LWINST_INFO
+//         movr (r) r4108, (r) c[1][21].xyxx  //   0 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         mulr (r) r9.xy, (r) v8.xyxx, (r) r4108  //   0 SHD
+//         movr (s32) r9.xy, (r) r9.xyxx  //   0 SHD
+//         movu32 (u32) r9.zw, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         movr (r) r4106, (r) r9  //   0 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  //   0 SHDOPT
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #3, #0, 2D, LOADMS  //   1 SHD
+//         movr (r) r9.xyz, (r) r4105  //   0 SHD
+//         addr (r) r9.xy, (r) r9.xyxx, (r) constant(-0.49803922, -0.49803922, 0.00000000, 0.00000000)  //   8 SHD
+//         mulr (r) r10.xy, (r) r9.xyxx, (r) constant(0.05000000, 0.05000000, 0.00000000, 0.00000000)  //   0 SHD
+//         madr (r) r9.xy, (r) r9.xyxx, (r) constant(0.05000000, 0.05000000, 0.00000000, 0.00000000), (r) v8.xyxx  //   0 SHD
+//         movr (r) r4108, (r) c[1][21].xyxx  //   0 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         madr (r) r10.xy, (r) r10.xyxx, (r) r4108, (r) v0.xyxx  //   0 SHD
+//         movr (s32) r10.xy, (r) r10.xyxx  //   0 SHD
+//         movu32 (u32) r10.zw, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         movr (r) r4106, (r) r10  // 133643280 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  //   0 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  //   0 SHD
+//         movr (r) r9.w, (r) r4105.xywz  //   0 SHD
+//         addr (r) r9.w, (r) r9.w, (r) constant(0.00100000, 0.00000000, 0.00000000, 0.00000000).x  // 133757968 SHD
+//         movr (s32) r10.xy, (r) v0.xyxx  // 133757968 SHD
+//         movu32 (u32) r10.zw, (u32) constant(0, 0, 0, 0)  // 133757968 SHD
+//         movr (r) r4106, (r) r10  // 133757968 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  // 133757968 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  // 133757968 SHD
+//         movr (r) r10.z, (r) r4105  // 133757968 SHD
+//         set_ltr.c (s32) r9.w, (r) r9.w, (r) r10.z  // 133642096 SHD
+//         movs32.c (s32) hc, (s32) r9.w  // 133642096 SHD
+//         movr (r) r4105, (r) v8.xyxx  // 133641632 SHD
+//         movr (r) r4105(EQ), (r) r9.xyxx  // 133641632 SHD
+//         movr (r) r9.xy, (r) r4105  // 133641168 SHD
+//         txgr (r) r4105, (r) r9.xyxx, (r) r4106, #2, #0, 2D, AUTO  // 133641168 SHD
+//         movr (r) r11.xyz, (r) r4105  // 133641168 SHD
+//         movu32 (u32) r12.zw, (u32) constant(0, 0, 0, 0)  // 133641168 SHD
+//         movu32 (u32) r13.zw, (u32) constant(0, 0, 0, 0)  // 133641168 SHD
+//         movr (r) r4108, (r) c[1][21].xyxx  //   0 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133640464 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133640464 SHD
+//         movr (r) r4108.w, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133640464 SHD
+//         mulr (r) r14.xy, (r) r9.xyxx, (r) r4108  // 133640464 SHD
+//         movr (s32) r13.xy, (r) r14.xyxx  // 133640464 SHD
+//         movr (r) r4106, (r) r13  // 133640464 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  // 133639280 SHDOPT
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  // 133639280 SHDOPT
+//         movr (r) r9.w, (r) r4105.xywz  // 133638608 SHDOPT
+//         set_ger.c (s32) r11.w, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r9.w  // 133638608 SHDOPT
+//         movs32.c (s32) hc, (s32) r11.w  //   0 SHD
+//         movr (r) r4107, (r) c[0][0].w  //   0 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133638384 SHDOPT
+//         movr (r) r4105, (r) r4107  // 133638384 SHDOPT
+//         movr (r) r4105(EQ), (r) r9.w  // 133638384 SHDOPT
+//         movr (r) r9.w, (r) r4105  // 133638384 SHDOPT
+//         movr (r) r4108, (r) -c[0][0].y  // 133638384 SHDOPT
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133638384 SHDOPT
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         addr (r) r9.w, (r) r9.w, (r) r4108  // 133637456 SHD
+//         movr (r) r4107, (r) -c[0][0].y  // 133637456 SHD
+//         movr (r) r4107.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133636992 SHD
+//         movr (r) r4107.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133636992 SHD
+//         movr (r) r4107.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133636528 SHD
+//         movr (r) r4107.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133636528 SHD
+//         movr (r) r4108, (r) c[0][0].zxzz  //   0 SHD
+//         movr (r) r4108.x, (r) constant(300.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(-1.25000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(300.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(300.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         addr (r) r13.xy, (r) r4107, (r) r4108  // 1028443341 SHD
+//         divr (r) r4105.z, (r) r9.w, (r) r13.x  // 1028443341 SHD
+//         divr (r) r4105.w, (r) r9.w, (r) r13.y  // 1028443341 SHD
+//         movr_sat (r) r13.zw, (r) r4105  // 1028443341 SHD
+//         addr (r) r9.w, (r) r13.z, (r) r13.w  // 133635136 SHD
+//         mulr (r) r9.w, (r) r9.w, (r) r9.w  // 133635136 SHD
+//         movr (r) r4108, (r) c[0][1].z  // 133634672 SHD
+//         movr (r) r4108.x, (r) constant(5.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133634672 SHD
+//         movr (r) r4108.y, (r) constant(5.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133634192 SHD
+//         movr (r) r4108.z, (r) constant(5.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133634192 SHD
+//         movr (r) r4108.w, (r) constant(5.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133633744 SHD
+//         mulr (r) r9.w, (r) r9.w, (r) r4108  // 133633744 SHD
+//         madr (r) r13.zw, (r) r9.w, (r) constant(0.00000000, 0.00000000, -0.00015928, -0.00026420), (r) r9.xxxy  // 133633744 SHD
+//         movr (r) r4108, (r) c[1][21].xyxx  // 1023969417 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 1023969417 SHD
+//         movr (r) r4108.y, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 1023969417 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 1023969417 SHD
+//         movr (r) r4108.w, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133633280 SHD
+//         mulr (r) r14.xy, (r) r13.zwzz, (r) r4108  // 133633280 SHD
+//         txgr (r) r4105, (r) r13.zwzz, (r) r4106, #2, #0, 2D, AUTO  // 133632576 SHDOPT
+//         movr (r) r15.xyz, (r) r4105  // 133632576 SHDOPT
+//         movr (s32) r12.xy, (r) r14.xyxx  // 133632576 SHDOPT
+//         movr (r) r4106, (r) r12  // 133632576 SHDOPT
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  // 133632576 SHDOPT
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  // 133632576 SHDOPT
+//         movr (r) r11.w, (r) r4105.xywz  // 133632576 SHDOPT
+//         set_ger.c (s32) r12.x, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r11.w  // 133632576 SHDOPT
+//         movs32.c (s32) hc, (s32) r12.x  // 133632576 SHDOPT
+//         movr (r) r4107, (r) c[0][0].w  // 133631888 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133631888 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133631120 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133631120 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133631120 SHD
+//         movr (r) r4105, (r) r4107  // 133631120 SHD
+//         movr (r) r4105(EQ), (r) r11.w  // 133630496 SHD
+//         movr (r) r11.w, (r) r4105  // 133630496 SHD
+//         movr (r) r4108, (r) -c[0][0].y  // 133630496 SHD
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133630496 SHD
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133630496 SHD
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133630496 SHD
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133630496 SHD
+//         addr (r) r11.w, (r) r11.w, (r) r4108  // 133629760 SHD
+//         divr (r) r4105.x, (r) r11.w, (r) r13.x  // 133629760 SHD
+//         divr (r) r4105.y, (r) r11.w, (r) r13.y  // 133628768 SHD
+//         movr_sat (r) r12.xy, (r) r4105  // 133628768 SHD
+//         addr (r) r11.w, (r) r12.x, (r) r12.y  // 133629104 SHD
+//         mulr (r) r12.x, (r) r11.w, (r) r11.w  // 133629104 SHD
+//         madr (r) r11.w, (r) r11.w, (r) r11.w, (r) constant(1.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133628368 SHD
+//         madr (r) r11.xyz, (r) r15.xyzx, (r) r12.x, (r) r11.xyzx  // 133628368 SHD
+//         movu32 (u32) r12.zw, (u32) constant(0, 0, 0, 0)  // 133628032 SHD
+//         madr (r) r13.zw, (r) r9.w, (r) constant(0.00000000, 0.00000000, -0.00041023, -0.00004790), (r) r9.xxxy  // 133628032 SHD
+//         movr (r) r4108, (r) c[1][21].xyxx  // 133628032 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133628032 SHD
+//         movr (r) r4108.y, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133628032 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133628032 SHD
+//         movr (r) r4108.w, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133628032 SHD
+//         mulr (r) r14.xy, (r) r13.zwzz, (r) r4108  // 133628032 SHD
+//         txgr (r) r4105, (r) r13.zwzz, (r) r4106, #2, #0, 2D, AUTO  // 133628032 SHD
+//         movr (r) r15.xyz, (r) r4105  // 133628032 SHD
+//         movr (s32) r12.xy, (r) r14.xyxx  // 133628032 SHD
+//         movr (r) r4106, (r) r12  // 133628032 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  // 133628032 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  // 133628032 SHD
+//         movr (r) r12.x, (r) r4105.zxyw  // 133626960 SHD
+//         set_ger.c (s32) r12.y, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r12.x  // 133626960 SHD
+//         movs32.c (s32) hc, (s32) r12.y  // 133626960 SHD
+//         movr (r) r4107, (r) c[0][0].w  // 133626960 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133626064 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133626064 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133625632 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133625632 SHD
+//         movr (r) r4105, (r) r4107  // 133625632 SHD
+//         movr (r) r4105(EQ), (r) r12.x  // 133625632 SHD
+//         movr (r) r12.x, (r) r4105  // 133625632 SHD
+//         movr (r) r4108, (r) -c[0][0].y  // 133625632 SHD
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133625632 SHD
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133625632 SHD
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133625632 SHD
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133624688 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r4108  // 133624688 SHD
+//         divr (r) r4105.x, (r) r12.x, (r) r13.x  // 133624688 SHD
+//         divr (r) r4105.y, (r) r12.x, (r) r13.y  // 133624688 SHD
+//         movr_sat (r) r12.xy, (r) r4105  // 133624688 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r12.y  // 133624688 SHD
+//         mulr (r) r12.y, (r) r12.x, (r) r12.x  // 133624688 SHD
+//         madr (r) r11.w, (r) r12.x, (r) r12.x, (r) r11.w  // 133624464 SHD
+//         madr (r) r11.xyz, (r) r15.xyzx, (r) r12.y, (r) r11.xyzx  // 133624464 SHD
+//         movu32 (u32) r12.zw, (u32) constant(0, 0, 0, 0)  // 133623712 SHD
+//         madr (r) r13.zw, (r) r9.w, (r) constant(0.00000000, 0.00000000, -0.00033980, 0.00029762), (r) r9.xxxy  // 133623712 SHD
+//         movr (r) r4108, (r) c[1][21].xyxx  // 133623296 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133623296 SHD
+//         movr (r) r4108.y, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133623296 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133623296 SHD
+//         movr (r) r4108.w, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133623296 SHD
+//         mulr (r) r14.xy, (r) r13.zwzz, (r) r4108  // 133623296 SHD
+//         txgr (r) r4105, (r) r13.zwzz, (r) r4106, #2, #0, 2D, AUTO  // 133623296 SHD
+//         movr (r) r15.xyz, (r) r4105  // 133623296 SHD
+//         movr (s32) r12.xy, (r) r14.xyxx  // 133623296 SHD
+//         movr (r) r4106, (r) r12  // 133623296 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  // 133623296 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  // 133623296 SHD
+//         movr (r) r12.x, (r) r4105.zxyw  // 133623296 SHD
+//         set_ger.c (s32) r12.y, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r12.x  // 133623296 SHD
+//         movs32.c (s32) hc, (s32) r12.y  // 133623296 SHD
+//         movr (r) r4107, (r) c[0][0].w  // 133623296 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133623296 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133623296 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133623296 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133623296 SHD
+//         movr (r) r4105, (r) r4107  // 133623296 SHD
+//         movr (r) r4105(EQ), (r) r12.x  // 133623296 SHD
+//         movr (r) r12.x, (r) r4105  // 133623296 SHD
+//         movr (r) r4108, (r) -c[0][0].y  // 133623296 SHD
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133623296 SHD
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133623296 SHD
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133621552 SHD
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 133621552 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r4108  // 133621552 SHD
+//         divr (r) r4105.x, (r) r12.x, (r) r13.x  // 133621552 SHD
+//         divr (r) r4105.y, (r) r12.x, (r) r13.y  // 133620960 SHDOPT
+//         movr_sat (r) r12.xy, (r) r4105  // 133620960 SHDOPT
+//         addr (r) r12.x, (r) r12.x, (r) r12.y  // 133620480 SHDOPT
+//         mulr (r) r12.y, (r) r12.x, (r) r12.x  // 133620480 SHDOPT
+//         madr (r) r11.w, (r) r12.x, (r) r12.x, (r) r11.w  //   0 SHD
+//         madr (r) r11.xyz, (r) r15.xyzx, (r) r12.y, (r) r11.xyzx  //   0 SHD
+//         movu32 (u32) r12.zw, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         madr (r) r13.zw, (r) r9.w, (r) constant(0.00000000, 0.00000000, -0.00009929, 0.00040411), (r) r9.xxxy  //   0 SHD
+//         movr (r) r4108, (r) c[1][21].xyxx  //   0 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133620000 SHD
+//         movr (r) r4108.y, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133620000 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133618992 SHD
+//         movr (r) r4108.w, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133618992 SHD
+//         mulr (r) r14.xy, (r) r13.zwzz, (r) r4108  // 133618992 SHD
+//         txgr (r) r4105, (r) r13.zwzz, (r) r4106, #2, #0, 2D, AUTO  // 133618992 SHD
+//         movr (r) r15.xyz, (r) r4105  // 133618848 SHD
+//         movr (s32) r12.xy, (r) r14.xyxx  // 133618848 SHD
+//         movr (r) r4106, (r) r12  // 133617696 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  // 133617696 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  // 133617968 SHD
+//         movr (r) r12.x, (r) r4105.zxyw  // 133617968 SHD
+//         set_ger.c (s32) r12.y, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r12.x  // 133617024 SHD
+//         movs32.c (s32) hc, (s32) r12.y  // 133617024 SHD
+//         movr (r) r4107, (r) c[0][0].w  // 133616800 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133616800 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133616576 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133616576 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133615888 SHD
+//         movr (r) r4105, (r) r4107  // 133615888 SHD
+//         movr (r) r4105(EQ), (r) r12.x  //   0 SHD
+//         movr (r) r12.x, (r) r4105  //   0 SHD
+//         movr (r) r4108, (r) -c[0][0].y  //   0 SHD
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r4108  //   0 SHD
+//         divr (r) r4105.x, (r) r12.x, (r) r13.x  //   0 SHD
+//         divr (r) r4105.y, (r) r12.x, (r) r13.y  // 133614592 SHD
+//         movr_sat (r) r12.xy, (r) r4105  // 133614592 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r12.y  // 133614160 SHD
+//         mulr (r) r12.y, (r) r12.x, (r) r12.x  // 133614160 SHD
+//         madr (r) r11.w, (r) r12.x, (r) r12.x, (r) r11.w  // 133613776 SHD
+//         madr (r) r11.xyz, (r) r15.xyzx, (r) r12.y, (r) r11.xyzx  // 133613776 SHD
+//         movu32 (u32) r12.zw, (u32) constant(0, 0, 0, 0)  // 133613776 SHD
+//         madr (r) r13.zw, (r) r9.w, (r) constant(0.00000000, 0.00000000, 0.00046989, -0.00012694), (r) r9.xxxy  // 133613776 SHD
+//         movr (r) r4108, (r) c[1][21].xyxx  // 133612720 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 1329 SHD
+//         movr (r) r4108.w, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         mulr (r) r14.xy, (r) r13.zwzz, (r) r4108  // 1232 SHD
+//         txgr (r) r4105, (r) r13.zwzz, (r) r4106, #2, #0, 2D, AUTO  //   0 SHD
+//         movr (r) r15.xyz, (r) r4105  //   0 SHD
+//         movr (s32) r12.xy, (r) r14.xyxx  //   0 SHD
+//         movr (r) r4106, (r) r12  //   0 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  //   0 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  //   0 SHD
+//         movr (r) r12.x, (r) r4105.zxyw  //   0 SHD
+//         set_ger.c (s32) r12.y, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r12.x  //   8 SHD
+//         movs32.c (s32) hc, (s32) r12.y  //   8 SHD
+//         movr (r) r4107, (r) c[0][0].w  //   0 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4105, (r) r4107  //   1 SHDOPT
+//         movr (r) r4105(EQ), (r) r12.x  //   0 SHDOPT
+//         movr (r) r12.x, (r) r4105  //   0 SHD
+//         movr (r) r4108, (r) -c[0][0].y  //   0 SHD
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r4108  //   0 SHD
+//         divr (r) r4105.x, (r) r12.x, (r) r13.x  //   0 SHDOPT
+//         divr (r) r4105.y, (r) r12.x, (r) r13.y  //   0 SHD
+//         movr_sat (r) r12.xy, (r) r4105  //   0 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r12.y  //   0 SHD
+//         mulr (r) r12.y, (r) r12.x, (r) r12.x  //   0 SHD
+//         madr (r) r11.w, (r) r12.x, (r) r12.x, (r) r11.w  //   0 SHD
+//         madr (r) r11.xyz, (r) r15.xyzx, (r) r12.y, (r) r11.xyzx  //   0 SHD
+//         movu32 (u32) r12.zw, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         madr (r) r13.zw, (r) r9.w, (r) constant(0.00000000, 0.00000000, 0.00023117, -0.00031252), (r) r9.xxxy  //   0 SHD
+//         movr (r) r4108, (r) c[1][21].xyxx  //   0 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         mulr (r) r14.xy, (r) r13.zwzz, (r) r4108  //   8 SHD
+//         txgr (r) r4105, (r) r13.zwzz, (r) r4106, #2, #0, 2D, AUTO  //   0 SHD
+//         movr (r) r15.xyz, (r) r4105  //   1 SHD
+//         movr (s32) r12.xy, (r) r14.xyxx  //   0 SHDOPT
+//         movr (r) r4106, (r) r12  //   0 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  //   0 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  //   0 SHD
+//         movr (r) r12.x, (r) r4105.zxyw  //   0 SHD
+//         set_ger.c (s32) r12.y, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r12.x  //   0 SHD
+//         movs32.c (s32) hc, (s32) r12.y  //   0 SHD
+//         movr (r) r4107, (r) c[0][0].w  //   0 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4105, (r) r4107  //   0 SHD
+//         movr (r) r4105(EQ), (r) r12.x  //   0 SHD
+//         movr (r) r12.x, (r) r4105  //   0 SHD
+//         movr (r) r4108, (r) -c[0][0].y  //   0 SHD
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r4108  //   0 SHD
+//         divr (r) r4105.x, (r) r12.x, (r) r13.x  //   0 SHD
+//         divr (r) r4105.y, (r) r12.x, (r) r13.y  //   8 SHD
+//         movr_sat (r) r12.xy, (r) r4105  //   0 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r12.y  //   1 SHD
+//         mulr (r) r12.y, (r) r12.x, (r) r12.x  //   0 SHDOPT
+//         madr (r) r11.w, (r) r12.x, (r) r12.x, (r) r11.w  //   0 SHD
+//         madr (r) r11.xyz, (r) r15.xyzx, (r) r12.y, (r) r11.xyzx  //   0 SHD
+//         movu32 (u32) r12.zw, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         madr (r) r13.zw, (r) r9.w, (r) constant(0.00000000, 0.00000000, 0.00025364, 0.00049936), (r) r9.xxxy  //   0 SHD
+//         movr (r) r4108, (r) c[1][21].xyxx  //   0 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133837096 SHD
+//         movr (r) r4108.w, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 133837096 SHD
+//         mulr (r) r14.xy, (r) r13.zwzz, (r) r4108  //   0 SHD
+//         txgr (r) r4105, (r) r13.zwzz, (r) r4106, #2, #0, 2D, AUTO  //   0 SHD
+//         movr (r) r15.xyz, (r) r4105  //   0 SHD
+//         movr (s32) r12.xy, (r) r14.xyxx  //   0 SHD
+//         movr (r) r4106, (r) r12  //   0 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  //   0 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  //   0 SHD
+//         movr (r) r12.x, (r) r4105.zxyw  //   8 SHD
+//         set_ger.c (s32) r12.y, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r12.x  //   0 SHD
+//         movs32.c (s32) hc, (s32) r12.y  //   1 SHD
+//         movr (r) r4107, (r) c[0][0].w  //   1 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 1179655 SHD
+//         movr (r) r4105, (r) r4107  //   0 SHDOPT
+//         movr (r) r4105(EQ), (r) r12.x  //   0 SHD
+//         movr (r) r12.x, (r) r4105  //   0 SHD
+//         movr (r) r4108, (r) -c[0][0].y  //   0 SHD
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r4108  //   0 SHD
+//         divr (r) r4105.x, (r) r12.x, (r) r13.x  //   0 SHD
+//         divr (r) r4105.y, (r) r12.x, (r) r13.y  //   0 SHD
+//         movr_sat (r) r12.xy, (r) r4105  //   0 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r12.y  //   0 SHD
+//         mulr (r) r12.y, (r) r12.x, (r) r12.x  //   0 SHD
+//         madr (r) r11.w, (r) r12.x, (r) r12.x, (r) r11.w  //   0 SHD
+//         madr (r) r11.xyz, (r) r15.xyzx, (r) r12.y, (r) r11.xyzx  //   0 SHD
+//         movu32 (u32) r12.zw, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         madr (r) r13.zw, (r) r9.w, (r) constant(0.00000000, 0.00000000, 0.00009056, -0.00058146), (r) r9.xxxy  //   8 SHD
+//         movr (r) r4108, (r) c[1][21].xyxx  //   0 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         mulr (r) r14.xy, (r) r13.zwzz, (r) r4108  //   0 SHD
+//         txgr (r) r4105, (r) r13.zwzz, (r) r4106, #2, #0, 2D, AUTO  //   1 SHD
+//         movr (r) r15.xyz, (r) r4105  //   0 SHDOPT
+//         movr (s32) r12.xy, (r) r14.xyxx  //   0 SHD
+//         movr (r) r4106, (r) r12  //   0 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  //   0 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  //   0 SHD
+//         movr (r) r12.x, (r) r4105.zxyw  //   0 SHD
+//         set_ger.c (s32) r12.y, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r12.x  //   0 SHD
+//         movs32.c (s32) hc, (s32) r12.y  //   0 SHD
+//         movr (r) r4107, (r) c[0][0].w  //   0 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4105, (r) r4107  //   0 SHD
+//         movr (r) r4105(EQ), (r) r12.x  //   0 SHDOPT
+//         movr (r) r12.x, (r) r4105  //   0 SHDOPT
+//         movr (r) r4108, (r) -c[0][0].y  //   0 SHDOPT
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHDOPT
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 1064960 SHD
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 1064960 SHD
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  // 1064960 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r4108  // 1064960 SHD
+//         divr (r) r4105.x, (r) r12.x, (r) r13.x  // 1064960 SHD
+//         divr (r) r4105.y, (r) r12.x, (r) r13.y  // 2593 SHD
+//         movr_sat (r) r12.xy, (r) r4105  // 385 SHDOPT
+//         addr (r) r12.x, (r) r12.x, (r) r12.y  // 385 SHDOPT
+//         mulr (r) r12.y, (r) r12.x, (r) r12.x  // 385 SHDOPT
+//         madr (r) r11.w, (r) r12.x, (r) r12.x, (r) r11.w  // 385 SHDOPT
+//         madr (r) r11.xyz, (r) r15.xyzx, (r) r12.y, (r) r11.xyzx  // 385 SHDOPT
+//         madr (r) r12.xy, (r) r9.w, (r) constant(0.00024777, 0.00004194, 0.00000000, 0.00000000), (r) r9.xyxx  //   0 
+//         movr (r) r4108, (r) c[1][21].xxxy  //   0 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         mulr (r) r12.zw, (r) r12.xxxy, (r) r4108  //   0 SHD
+//         txgr (r) r4105, (r) r12.xyxx, (r) r4106, #2, #0, 2D, AUTO  // 393 SHD
+//         movr (r) r14.xyz, (r) r4105  //   1 SHD
+//         movr (s32) r12.xy, (r) r12.zwzz  //   0 SHD
+//         movu32 (u32) r12.zw, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         movr (r) r4106, (r) r12  // 400 
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  // 358 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  // 358 SHD
+//         movr (r) r12.x, (r) r4105.zxyw  // 358 SHD
+//         set_ger.c (s32) r12.y, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r12.x  // 358 SHD
+//         movs32.c (s32) hc, (s32) r12.y  //   0 SHD
+//         movr (r) r4107, (r) c[0][0].w  //   0 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4105, (r) r4107  // 1823318604 
+//         movr (r) r4105(EQ), (r) r12.x  // 1823318604 
+//         movr (r) r12.x, (r) r4105  //   0 SHDOPT
+//         movr (r) r4108, (r) -c[0][0].y  //  44 SHD
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r4108  //   0 SHD
+//         divr (r) r4105.x, (r) r12.x, (r) r13.x  // 133583832 SHD
+//         divr (r) r4105.y, (r) r12.x, (r) r13.y  //   1 SHD
+//         movr_sat (r) r12.xy, (r) r4105  //   1 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r12.y  //   1 SHD
+//         mulr (r) r12.y, (r) r12.x, (r) r12.x  //   2 SHD
+//         madr (r) r11.w, (r) r12.x, (r) r12.x, (r) r11.w  //   2 SHD
+//         madr (r) r11.xyz, (r) r14.xyzx, (r) r12.y, (r) r11.xyzx  //   0 
+//         madr (r) r12.xy, (r) r9.w, (r) constant(0.00043771, 0.00026853, 0.00000000, 0.00000000), (r) r9.xyxx  //   0 SHD
+//         movr (r) r4108, (r) c[1][21].xxxy  //   0 SHD
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         mulr (r) r12.zw, (r) r12.xxxy, (r) r4108  //   0 SHD
+//         txgr (r) r4105, (r) r12.xyxx, (r) r4106, #2, #0, 2D, AUTO  //   0 SHD
+//         movr (r) r14.xyz, (r) r4105  // 568 SHD
+//         movr (s32) r12.xy, (r) r12.zwzz  // 568 SHD
+//         movu32 (u32) r12.zw, (u32) constant(0, 0, 0, 0)  // 568 SHD
+//         movr (r) r4106, (r) r12  // 256 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  //   0 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  // 1823318604 
+//         movr (r) r12.x, (r) r4105.zxyw  // 1823318604 
+//         set_ger.c (s32) r12.y, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r12.x  //   0 SHDOPT
+//         movs32.c (s32) hc, (s32) r12.y  //   0 SHDOPT
+//         movr (r) r4107, (r) c[0][0].w  //   0 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHDOPT
+//         movr (r) r4105, (r) r4107  // 133583832 SHD
+//         movr (r) r4105(EQ), (r) r12.x  //   1 SHD
+//         movr (r) r12.x, (r) r4105  //   1 SHD
+//         movr (r) r4108, (r) -c[0][0].y  //   0 SHDOPT
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   1 SHD
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   1 SHDOPT
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r4108  //   0 SHD
+//         divr (r) r4105.x, (r) r12.x, (r) r13.x  //   2 SHD
+//         divr (r) r4105.y, (r) r12.x, (r) r13.y  //   2 SHD
+//         movr_sat (r) r12.xy, (r) r4105  //   2 SHD
+//         addr (r) r12.x, (r) r12.x, (r) r12.y  //   0 SHD
+//         mulr (r) r12.y, (r) r12.x, (r) r12.x  //   0 SHD
+//         madr (r) r11.w, (r) r12.x, (r) r12.x, (r) r11.w  //   0 SHD
+//         madr (r) r11.xyz, (r) r14.xyzx, (r) r12.y, (r) r11.xyzx  //   0 SHD
+//         madr (r) r12.xy, (r) r9.w, (r) constant(-0.00015720, -0.00060717, 0.00000000, 0.00000000), (r) r9.xyxx  //   0 SHD
+//         madr (r) r12.zw, (r) r9.w, (r) constant(0.00000000, 0.00000000, -0.00038650, -0.00038913), (r) r9.xxxy  //   0 SHD
+//         txgr (r) r4105, (r) r9.xyxx, (r) r4106, #1, #1, 2D, AUTO  //   0 SHD
+//         movr (r) r14, (r) r4105  //   0 SHD
+//         movr (r) r4108, (r) c[1][21].xyxx  //   1 SHDOPT
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  // 1140850688 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         mulr (r) r9.xy, (r) r12.xyxx, (r) r4108  //   0 SHD
+//         txgr (r) r4105, (r) r12.xyxx, (r) r4106, #2, #0, 2D, AUTO  //   0 SHD
+//         movr (r) r15.xyz, (r) r4105  //   0 SHD
+//         movr (s32) r16.xy, (r) r9.xyxx  //   0 SHD
+//         movu32 (u32) r16.zw, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         movr (r) r4106, (r) r16  //   0 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  //   0 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  //   0 SHD
+//         movr (r) r9.x, (r) r4105.zxyw  //   0 SHD
+//         set_ger.c (s32) r9.y, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r9.x  //   0 SHD
+//         movs32.c (s32) hc, (s32) r9.y  //   0 SHD
+//         movr (r) r4107, (r) c[0][0].w  //   0 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4105, (r) r4107  //   0 SHD
+//         movr (r) r4105(EQ), (r) r9.x  //   0 SHD
+//         movr (r) r9.x, (r) r4105  //   0 SHD
+//         movr (r) r4108, (r) -c[0][0].y  //   0 SHD
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //  32 SHD
+//         addr (r) r9.x, (r) r9.x, (r) r4108  //  32 SHD
+//         divr (r) r4105.x, (r) r9.x, (r) r13.x  //  32 SHD
+//         divr (r) r4105.y, (r) r9.x, (r) r13.y  //  32 SHD
+//         movr_sat (r) r9.xy, (r) r4105  //  32 SHD
+//         addr (r) r9.x, (r) r9.x, (r) r9.y  //  32 SHD
+//         mulr (r) r9.y, (r) r9.x, (r) r9.x  //  32 SHD
+//         madr (r) r9.x, (r) r9.x, (r) r9.x, (r) r11.w  //  32 SHD
+//         madr (r) r11.xyz, (r) r15.xyzx, (r) r9.y, (r) r11.xyzx  //  32 SHD
+//         movr (r) r4108, (r) c[1][21].xxxy  //  26 
+//         movr (r) r4108.x, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //  26 
+//         movr (r) r4108.y, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(1920.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.w, (r) constant(1200.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         mulr (r) r9.yw, (r) r12.zzzw, (r) r4108  //   0 SHD
+//         txgr (r) r4105, (r) r12.zwzz, (r) r4106, #2, #0, 2D, AUTO  //   0 SHD
+//         movr (r) r12.xyz, (r) r4105  //   0 SHD
+//         movr (s32) r15.xy, (r) r9.ywyy  //   0 SHD
+//         movu32 (u32) r15.zw, (u32) constant(0, 0, 0, 0)  //   0 SHD
+//         movr (r) r4106, (r) r15  //   0 SHD
+//         movu32 (u32) r4106.z, (u32) constant(0, 0, 0, 0).x  //   0 SHD
+//         txgu32 (r) r4105, (u32) r4106, (u32) r4107, #0, #0, 2D, LOADMS  //   0 SHD
+//         movr (r) r9.y, (r) r4105.xzyw  //   0 SHD
+//         set_ger.c (s32) r9.w, (r) constant(0.00010000, 0.00000000, 0.00000000, 0.00000000).x, (r) r9.y  //   0 SHD
+//         movs32.c (s32) hc, (s32) r9.w  //   0 SHD
+//         movr (r) r4107, (r) c[0][0].w  //   0 SHD
+//         movr (r) r4107.x, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   2 SHD
+//         movr (r) r4107.y, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.z, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.w, (r) constant(30.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   1 SHD
+//         movr (r) r4105, (r) r4107  //   0 SHD
+//         movr (r) r4105(EQ), (r) r9.y  //   0 SHD
+//         movr (r) r9.y, (r) r4105  //   0 SHD
+//         movr (r) r4108, (r) -c[0][0].y  //   0 SHD
+//         movr (r) r4108.x, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   2 SHD
+//         movr (r) r4108.z, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   0 FPB0
+//         movr (r) r4108.w, (r) -constant(1.39999998, 0.00000000, 0.00000000, 0.00000000).x  //   2 
+//         addr (r) r9.y, (r) r9.y, (r) r4108  //   0 SHD
+//         divr (r) r4105.y, (r) r9.y, (r) r13.x  //   0 SHD
+//         divr (r) r4105.w, (r) r9.y, (r) r13.y  //   0 SHD
+//         movr_sat (r) r9.yw, (r) r4105  //   0 SHD
+//         addr (r) r9.y, (r) r9.y, (r) r9.w  //   0 SHD
+//         mulr (r) r9.w, (r) r9.y, (r) r9.y  //   0 SHD
+//         madr (r) r9.x, (r) r9.y, (r) r9.y, (r) r9.x  //   0 SHD
+//         madr (r) r11.xyz, (r) r12.xyzx, (r) r9.w, (r) r11.xyzx  //   0 SHD
+//         divr (r) r4105.x, (r) r11.x, (r) r9.x  //   0 SHD
+//         divr (r) r4105.y, (r) r11.y, (r) r9.x  //   0 SHD
+//         divr (r) r4105.w, (r) r11.z, (r) r9.x  //   1 SHD
+//         movr (r) r9.xyw, (r) r4105  //   0 SHD
+//         madr (r) r11.xyz, (r) r14.xyzx, (r) constant(9.00000000, 9.00000000, 9.00000000, 0.00000000), (r) -r9.xywx  //   1 SHDOPT
+//         madr (r) r9.xyz, (r) r9.z, (r) r11.xyzx, (r) r9.xywx  //   0 SHDOPT
+//         madr (r) r0.xyz, (r) r14.xyzx, (r) r14.w, (r) r9.xyzx  //   1 SHDOPT
+//         movu32 (u32) r0.w, (u32) constant(1065353216, 0, 0, 0).x  //   0 SHD
+//         movr (r) r4108, (r) c[1][20].zwzz  //   0 SHD
+//         movr (r) r4108.x, (r) constant(0.00111363, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.y, (r) constant(-0.00111363, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4108.z, (r) constant(0.00111363, 0.00000000, 0.00000000, 0.00000000).x  //   2 SHD
+//         movr (r) r4108.w, (r) constant(0.00111363, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4109, (r) -c[1][20].xyxx  //   2 
+//         movr (r) r4109.x, (r) -constant(1.06908584, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4109.y, (r) -constant(-0.66817862, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4109.z, (r) -constant(1.06908584, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4109.w, (r) -constant(1.06908584, 0.00000000, 0.00000000, 0.00000000).x  //   2 SHD
+//         madr (r) r9.xy, (r) v0.xyxx, (r) r4108, (r) r4109  //   0 SHD
+//         mulr (r) r10.xy, (r) r9.xyxx, (r) r10.z  //   0 SHD
+//         movu32 (u32) r10.w, (u32) constant(1065353216, 0, 0, 0).x  //   0 SHD
+//         movr (r) r4107, (r) c[1][5]  //   0 SHD
+//         movr (r) r4107.x, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   2 
+//         movr (r) r4107.y, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.z, (r) constant(1.00057185, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.w, (r) constant(-0.20011437, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         dp4r (r) r9.x, (r) r4107, (r) r10  //   0 SHD
+//         movr (r) r4107, (r) c[1][6]  //   2 SHD
+//         movr (r) r4107.x, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   2 SHD
+//         movr (r) r4107.y, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   2 
+//         movr (r) r4107.z, (r) constant(1.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4107.w, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         dp4r (r) r9.y, (r) r4107, (r) r10  //   0 SHD
+//         divr (r) r4105.x, (r) r9.x, (r) r9.y  //   0 SHD
+//         movr (r) r9.x, (r) r4105  //   0 SHD
+//         set_eqr.c (s32) r9.y, (r) r9.y, (r) constant(0.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movs32.c (s32) hc, (s32) r9.y  //   0 SHD
+//         movr (r) r4105, (r) constant(1.00000000, 0.00000000, 0.00000000, 0.00000000).x  //   0 SHD
+//         movr (r) r4105(EQ), (r) r9.x  //   0 SHD
+//         movr (r) r1.z, (r) r4105  //   0 SHD
+//         ret   //   0 SHD
+//     END_SECTION
+//     BEGIN_SECTION USER_CONSTANT_HISTOGRAM_INFO
+//                 ~c[0][0] = 100.00%@-1.25000000
+//                 ~c[0][1] = 100.00%@1.39999998
+//                 ~c[0][2] = 100.00%@300.00000000
+//                 ~c[0][3] = 100.00%@30.00000000
+//                 ~c[0][6] = 100.00%@5.00000000
+//                 ~c[1][20] = 100.00%@0.00000000
+//                 ~c[1][21] = 100.00%@0.00000000
+//                 ~c[1][22] = 100.00%@1.00057185
+//                 ~c[1][23] = 100.00%@-0.20011437
+//                 ~c[1][24] = 100.00%@0.00000000
+//                 ~c[1][25] = 100.00%@0.00000000
+//                 ~c[1][26] = 100.00%@1.00000000
+//                 ~c[1][27] = 100.00%@0.00000000
+//                 ~c[1][80] = 100.00%@1.06908584
+//                 ~c[1][81] = 100.00%@-0.66817862
+//                 ~c[1][82] = 100.00%@0.00111363
+//                 ~c[1][83] = 100.00%@-0.00111363
+//                 ~c[1][84] = 100.00%@1920.00000000
+//                 ~c[1][85] = 100.00%@1200.00000000
+//     END_SECTION
+//     BEGIN_SECTION TEXTURE_STATE_HISTOGRAM_INFO
+//         TEXTURE_SLOT 0x0
+//         100.00% width=0x780, height=0x4b0, mips=0x1, DXGI_FORMAT_R16G16B16A16_FLOAT
+//         TEXTURE_SLOT 0x1
+//         100.00% width=0x100, height=0x100, mips=0x1, DXGI_FORMAT_R8G8B8A8_UNORM
+//         TEXTURE_SLOT 0x2
+//         100.00% width=0x780, height=0x4b0, mips=0x1, DXGI_FORMAT_R8G8B8A8_UNORM
+//         TEXTURE_SLOT 0x3
+//         100.00% width=0x780, height=0x4b0, mips=0x1, DXGI_FORMAT_R8G8B8A8_UNORM
+//     END_SECTION
+//     BEGIN_SECTION SAMPLER_STATE_INFO
+//         SAMPLER_SLOT 0x0
+//         100.00%  min=Point, mag=Point, mip=Point aniso=1, minLOD=-340282346638528860000000000000000000000.000000, maxLOD=340282346638528860000000000000000000000.000000
+//         addressU=CLAMP, addressV=CLAMP, addressW=CLAMP
+//         SAMPLER_SLOT 0x1
+//         100.00%  min=Linear, mag=Linear, mip=Point aniso=1, minLOD=-340282346638528860000000000000000000000.000000, maxLOD=340282346638528860000000000000000000000.000000
+//         addressU=CLAMP, addressV=CLAMP, addressW=CLAMP
+//     END_SECTION
+//     BEGIN_SECTION UCODE
+//     	!!SPA2.3
+//     	.THREAD_TYPE pixel
+//     	IPA.PASS R0, a[0x7c];            # [  0][000000] POSITION_W
+//     	MUFU.RCP R0, R0;                 # [  1][000008]
+//     	IPA.PASS R3, a[0x70];            # [  2][000010] POSITION_X
+//     	IPA R9, a[0x84], R0;             # [  3][000018] GENERIC_ATTRIBUTE_00_Y
+//     	FMUL.FTZ R1, R9, 1200;           # [  4][000020]
+//     	IPA R8, a[0x80], R0;             # [  5][000028] ATTR0
+//     	F2I.TRUNC R1, R1;                # [  6][000030]
+//     	FMUL.FTZ R0, R8, 1920;           # [  7][000038]
+//     	F2I.TRUNC R0, R0;                # [  8][000040]
+//     	IPA.PASS R7, a[0x74];            # [  9][000048] POSITION_Y
+//     	F2I.TRUNC R10, R3;               # [ 10][000050]
+//     	TLD.LZ.MS.P R12, R0, 0x3, 2D, 0x7; # [ 11][000058]
+//     	F2I.TRUNC R11, R7;               # [ 12][000060]
+//     	FADD32I.FTZ R0, R12, 0xbefefeff; # [ 13][000068]
+//     	FADD32I.FTZ R2, R13, 0xbefefeff; # [ 14][000070]
+//     	FMUL32I.FTZ R1, R0, 0.05;        # [ 15][000078]
+//     	FMUL32I.FTZ R4, R2, 0.05;        # [ 16][000080]
+//     	FFMA.FTZ R1, R1, 1920, R3;       # [ 17][000088]
+//     	FFMA.FTZ R5, R4, 1200, R7;       # [ 18][000090]
+//     	TLD.LZ.MS.T R15, R10, 0x0, 2D, 0x4; # [ 19][000098]
+//     	F2I.TRUNC R4, R1;                # [ 20][0000a0]
+//     	F2I.TRUNC R5, R5;                # [ 21][0000a8]
+//     	TLD.LZ.MS.P R1, R4, 0x0, 2D, 0x4; # [ 22][0000b0]
+//     	FADD32I.FTZ R1, R1, 0.001;       # [ 23][0000b8]
+//     	FSETP.LT.FTZ.AND P0, PT, R1, R15, PT; # [ 24][0000c0]
+//     	@!P0 FFMA.FTZ R9, R2, c[0x10][0x0], R9; # [ 25][0000c8]
+//     	@!P0 FFMA.FTZ R8, R0, c[0x10][0x0], R8; # [ 26][0000d0]
+//     	FMUL.FTZ R1, R9, 1200;           # [ 27][0000d8]
+//     	FMUL.FTZ R0, R8, 1920;           # [ 28][0000e0]
+//     	F2I.TRUNC R1, R1;                # [ 29][0000e8]
+//     	F2I.TRUNC R0, R0;                # [ 30][0000f0]
+//     	TLD.LZ.MS.P R0, R0, 0x0, 2D, 0x4; # [ 31][0000f8]
+//     	FSETP.LE.FTZ.AND P0, PT, R0, c[0x10][0x4], PT; # [ 32][000100]
+//     	@P0 MOV32I R0, 0x41f00000;       # [ 33][000108]
+//     	FADD32I.FTZ R0, R0, -1.4;        # [ 34][000110]
+//     	FMUL32I.FTZ.SAT R1, R0, 0x3b5b7a41; # [ 35][000118]
+//     	FMUL32I.FTZ.SAT R0, R0, 0xbec13521; # [ 36][000120]
+//     	FADD.FTZ R0, R1, R0;             # [ 37][000128]
+//     	FMUL.FTZ R0, R0, R0;             # [ 38][000130]
+//     	FMUL.FTZ R20, R0, 5;             # [ 39][000138]
+//     	FFMA.FTZ R1, R20, c[0x10][0xc], R9; # [ 40][000140]
+//     	FFMA.FTZ R0, R20, c[0x10][0x8], R8; # [ 41][000148]
+//     	FMUL.FTZ R4, R1, 1200;           # [ 42][000150]
+//     	FMUL.FTZ R2, R0, 1920;           # [ 43][000158]
+//     	F2I.TRUNC R5, R4;                # [ 44][000160]
+//     	FFMA.FTZ R17, R20, c[0x10][0x18], R9; # [ 45][000168]
+//     	F2I.TRUNC R4, R2;                # [ 46][000170]
+//     	FFMA.FTZ R16, R20, c[0x10][0x14], R8; # [ 47][000178]
+//     	FMUL.FTZ R19, R17, 1200;         # [ 48][000180]
+//     	TLD.LZ.MS.NODEP.P R21, R4, 0x0, 2D, 0x4; # [ 49][000188]
+//     	FMUL.FTZ R18, R16, 1920;         # [ 50][000190]
+//     	TEX.NODEP R0, R0, 0x2, 0x0, 2D, 0x7; # [ 51][000198]
+//     	F2I.TRUNC R19, R19;              # [ 52][0001a0]
+//     	TEX.NODEP.P R4, R8, 0x2, 0x0, 2D, 0x7; # [ 53][0001a8]
+//     	FFMA.FTZ R11, R20, c[0x10][0x20], R9; # [ 54][0001b0]
+//     	F2I.TRUNC R18, R18;              # [ 55][0001b8]
+//     	FFMA.FTZ R10, R20, c[0x10][0x1c], R8; # [ 56][0001c0]
+//     	FMUL.FTZ R13, R11, 1200;         # [ 57][0001c8]
+//     	FMUL.FTZ R12, R10, 1920;         # [ 58][0001d0]
+//     	TLD.LZ.MS.NODEP.P R22, R18, 0x0, 2D, 0x4; # [ 59][0001d8]
+//     	F2I.TRUNC R13, R13;              # [ 60][0001e0]
+//     	F2I.TRUNC R12, R12;              # [ 61][0001e8]
+//     	FSETP.LE.FTZ.AND P0, PT, R21, c[0x10][0x4], PT; # [ 62][0001f0]
+//     	@P0 MOV32I R21, 0x41f00000;      # [ 63][0001f8]
+//     	FADD32I.FTZ R21, R21, -1.4;      # [ 64][000200]
+//     	TLD.LZ.MS.NODEP.P R19, R12, 0x0, 2D, 0x4; # [ 65][000208]
+//     	FMUL32I.FTZ.SAT R18, R21, 0x3b5b7a41; # [ 66][000210]
+//     	FMUL32I.FTZ.SAT R21, R21, 0xbec13521; # [ 67][000218]
+//     	FADD.FTZ R21, R18, R21;          # [ 68][000220]
+//     	FSETP.LE.FTZ.AND P0, PT, R22, c[0x10][0x4], PT; # [ 69][000228]
+//     	FMUL.FTZ R23, R21, R21;          # [ 70][000230]
+//     	TEX.NODEP.P R16, R16, 0x2, 0x0, 2D, 0x7; # [ 71][000238]
+//     	FFMA.FTZ R12, R0, R23, R4;       # [ 72][000240]
+//     	@P0 MOV32I R22, 0x41f00000;      # [ 73][000248]
+//     	FFMA.FTZ R13, R1, R23, R5;       # [ 74][000250]
+//     	FADD32I.FTZ R0, R22, -1.4;       # [ 75][000258]
+//     	FFMA.FTZ R2, R2, R23, R6;        # [ 76][000260]
+//     	FMUL32I.FTZ.SAT R4, R0, 0x3b5b7a41; # [ 77][000268]
+//     	FMUL32I.FTZ.SAT R5, R0, 0xbec13521; # [ 78][000270]
+//     	FFMA.FTZ R21, R21, R21, c[0x10][0x10]; # [ 79][000278]
+//     	FFMA.FTZ R1, R20, c[0x10][0x28], R9; # [ 80][000280]
+//     	FFMA.FTZ R0, R20, c[0x10][0x24], R8; # [ 81][000288]
+//     	FADD.FTZ R6, R4, R5;             # [ 82][000290]
+//     	FMUL.FTZ R5, R1, 1200;           # [ 83][000298]
+//     	FMUL.FTZ R4, R0, 1920;           # [ 84][0002a0]
+//     	FFMA.FTZ R22, R6, R6, R21;       # [ 85][0002a8]
+//     	F2I.TRUNC R5, R5;                # [ 86][0002b0]
+//     	FMUL.FTZ R21, R6, R6;            # [ 87][0002b8]
+//     	F2I.TRUNC R4, R4;                # [ 88][0002c0]
+//     	FSETP.LE.FTZ.AND P0, PT, R19, c[0x10][0x4], PT; # [ 89][0002c8]
+//     	@P0 MOV32I R19, 0x41f00000;      # [ 90][0002d0]
+//     	FFMA.FTZ R18, R18, R21, R2;      # [ 91][0002d8]
+//     	FADD32I.FTZ R6, R19, -1.4;       # [ 92][0002e0]
+//     	FFMA.FTZ R12, R16, R21, R12;     # [ 93][0002e8]
+//     	FMUL32I.FTZ.SAT R2, R6, 0x3b5b7a41; # [ 94][0002f0]
+//     	TLD.LZ.MS.NODEP.P R19, R4, 0x0, 2D, 0x4; # [ 95][0002f8]
+//     	FMUL32I.FTZ.SAT R6, R6, 0xbec13521; # [ 96][000300]
+//     	FFMA.FTZ R17, R17, R21, R13;     # [ 97][000308]
+//     	FADD.FTZ R23, R2, R6;            # [ 98][000310]
+//     	TEX.NODEP R4, R10, 0x2, 0x0, 2D, 0x7; # [ 99][000318]
+//     	FFMA.FTZ R16, R23, R23, R22;     # [100][000320]
+//     	TEX.NODEP.P R0, R0, 0x2, 0x0, 2D, 0x7; # [101][000328]
+//     	FMUL.FTZ R23, R23, R23;          # [102][000330]
+//     	FFMA.FTZ R11, R20, c[0x10][0x30], R9; # [103][000338]
+//     	FFMA.FTZ R10, R20, c[0x10][0x2c], R8; # [104][000340]
+//     	FSETP.LE.FTZ.AND P0, PT, R19, c[0x10][0x4], PT; # [105][000348]
+//     	FFMA.FTZ R21, R4, R23, R12;      # [106][000350]
+//     	FMUL.FTZ R12, R11, 1200;         # [107][000358]
+//     	FMUL.FTZ R4, R10, 1920;          # [108][000360]
+//     	@P0 MOV32I R19, 0x41f00000;      # [109][000368]
+//     	F2I.TRUNC R13, R12;              # [110][000370]
+//     	F2I.TRUNC R12, R4;               # [111][000378]
+//     	FADD32I.FTZ R4, R19, -1.4;       # [112][000380]
+//     	TLD.LZ.MS.NODEP.P R22, R12, 0x0, 2D, 0x4; # [113][000388]
+//     	FFMA.FTZ R19, R5, R23, R17;      # [114][000390]
+//     	FMUL32I.FTZ.SAT R12, R4, 0xbec13521; # [115][000398]
+//     	FFMA.FTZ R17, R6, R23, R18;      # [116][0003a0]
+//     	FFMA.FTZ R5, R20, c[0x10][0x38], R9; # [117][0003a8]
+//     	FMUL32I.FTZ.SAT R6, R4, 0x3b5b7a41; # [118][0003b0]
+//     	FFMA.FTZ R4, R20, c[0x10][0x34], R8; # [119][0003b8]
+//     	FADD.FTZ R18, R6, R12;           # [120][0003c0]
+//     	FMUL.FTZ R12, R5, 1200;          # [121][0003c8]
+//     	FMUL.FTZ R6, R4, 1920;           # [122][0003d0]
+//     	F2I.TRUNC R13, R12;              # [123][0003d8]
+//     	FMUL.FTZ R24, R18, R18;          # [124][0003e0]
+//     	F2I.TRUNC R12, R6;               # [125][0003e8]
+//     	FFMA.FTZ R23, R18, R18, R16;     # [126][0003f0]
+//     	TLD.LZ.MS.NODEP.P R6, R12, 0x0, 2D, 0x4; # [127][0003f8]
+//     	FFMA.FTZ R12, R2, R24, R17;      # [128][000400]
+//     	FFMA.FTZ R13, R1, R24, R19;      # [129][000408]
+//     	TEX.NODEP.P R16, R10, 0x2, 0x0, 2D, 0x7; # [130][000410]
+//     	FFMA.FTZ R1, R20, c[0x10][0x40], R9; # [131][000418]
+//     	FSETP.LE.FTZ.AND P0, PT, R22, c[0x10][0x4], PT; # [132][000420]
+//     	@P0 MOV32I R22, 0x41f00000;      # [133][000428]
+//     	FADD32I.FTZ R2, R22, -1.4;       # [134][000430]
+//     	FMUL32I.FTZ.SAT R10, R2, 0x3b5b7a41; # [135][000438]
+//     	FMUL32I.FTZ.SAT R11, R2, 0xbec13521; # [136][000440]
+//     	FSETP.LE.FTZ.AND P0, PT, R6, c[0x10][0x4], PT; # [137][000448]
+//     	FFMA.FTZ R2, R0, R24, R21;       # [138][000450]
+//     	FADD.FTZ R19, R10, R11;          # [139][000458]
+//     	FFMA.FTZ R0, R20, c[0x10][0x3c], R8; # [140][000460]
+//     	@P0 MOV32I R6, 0x41f00000;       # [141][000468]
+//     	FMUL.FTZ R11, R1, 1200;          # [142][000470]
+//     	FFMA.FTZ R21, R19, R19, R23;     # [143][000478]
+//     	FMUL.FTZ R10, R0, 1920;          # [144][000480]
+//     	FMUL.FTZ R19, R19, R19;          # [145][000488]
+//     	FADD32I.FTZ R6, R6, -1.4;        # [146][000490]
+//     	F2I.TRUNC R11, R11;              # [147][000498]
+//     	F2I.TRUNC R10, R10;              # [148][0004a0]
+//     	FFMA.FTZ R16, R16, R19, R2;      # [149][0004a8]
+//     	FMUL32I.FTZ.SAT R2, R6, 0x3b5b7a41; # [150][0004b0]
+//     	TLD.LZ.MS.NODEP.P R10, R10, 0x0, 2D, 0x4; # [151][0004b8]
+//     	FMUL32I.FTZ.SAT R6, R6, 0xbec13521; # [152][0004c0]
+//     	FFMA.FTZ R18, R18, R19, R12;     # [153][0004c8]
+//     	FADD.FTZ R11, R2, R6;            # [154][0004d0]
+//     	FFMA.FTZ R13, R17, R19, R13;     # [155][0004d8]
+//     	TEX.NODEP R4, R4, 0x2, 0x0, 2D, 0x7; # [156][0004e0]
+//     	FMUL.FTZ R12, R11, R11;          # [157][0004e8]
+//     	TEX.NODEP.P R0, R0, 0x2, 0x0, 2D, 0x7; # [158][0004f0]
+//     	FFMA.FTZ R17, R11, R11, R21;     # [159][0004f8]
+//     	FFMA.FTZ R11, R20, c[0x10][0x48], R9; # [160][000500]
+//     	FSETP.LE.FTZ.AND P0, PT, R10, c[0x10][0x4], PT; # [161][000508]
+//     	FFMA.FTZ R21, R5, R12, R13;      # [162][000510]
+//     	@P0 MOV32I R10, 0x41f00000;      # [163][000518]
+//     	FFMA.FTZ R6, R6, R12, R18;       # [164][000520]
+//     	FFMA.FTZ R18, R4, R12, R16;      # [165][000528]
+//     	FADD32I.FTZ R5, R10, -1.4;       # [166][000530]
+//     	FFMA.FTZ R10, R20, c[0x10][0x44], R8; # [167][000538]
+//     	FMUL32I.FTZ.SAT R12, R5, 0x3b5b7a41; # [168][000540]
+//     	FMUL32I.FTZ.SAT R13, R5, 0xbec13521; # [169][000548]
+//     	FMUL.FTZ R5, R11, 1200;          # [170][000550]
+//     	FMUL.FTZ R4, R10, 1920;          # [171][000558]
+//     	FADD.FTZ R16, R12, R13;          # [172][000560]
+//     	F2I.TRUNC R13, R5;               # [173][000568]
+//     	F2I.TRUNC R12, R4;               # [174][000570]
+//     	FFMA.FTZ R5, R20, c[0x10][0x50], R9; # [175][000578]
+//     	FFMA.FTZ R4, R20, c[0x10][0x4c], R8; # [176][000580]
+//     	FMUL.FTZ R23, R16, R16;          # [177][000588]
+//     	TLD.LZ.MS.NODEP.T R22, R12, 0x0, 2D, 0x4; # [178][000590]
+//     	FMUL.FTZ R13, R5, 1200;          # [179][000598]
+//     	FMUL.FTZ R12, R4, 1920;          # [180][0005a0]
+//     	F2I.TRUNC R13, R13;              # [181][0005a8]
+//     	F2I.TRUNC R12, R12;              # [182][0005b0]
+//     	TLD.LZ.MS.NODEP.P R12, R12, 0x0, 2D, 0x4; # [183][0005b8]
+//     	FFMA.FTZ R13, R16, R16, R17;     # [184][0005c0]
+//     	FFMA.FTZ R19, R0, R23, R18;      # [185][0005c8]
+//     	FFMA.FTZ R21, R1, R23, R21;      # [186][0005d0]
+//     	TEX.NODEP.P R16, R10, 0x2, 0x0, 2D, 0x7; # [187][0005d8]
+//     	FFMA.FTZ R2, R2, R23, R6;        # [188][0005e0]
+//     	FSETP.LE.FTZ.AND P0, PT, R22, c[0x10][0x4], PT; # [189][0005e8]
+//     	@P0 MOV32I R22, 0x41f00000;      # [190][0005f0]
+//     	FADD32I.FTZ R0, R22, -1.4;       # [191][0005f8]
+//     	FSETP.LE.FTZ.AND P0, PT, R12, c[0x10][0x4], PT; # [192][000600]
+//     	FMUL32I.FTZ.SAT R1, R0, 0x3b5b7a41; # [193][000608]
+//     	FMUL32I.FTZ.SAT R10, R0, 0xbec13521; # [194][000610]
+//     	@P0 MOV32I R12, 0x41f00000;      # [195][000618]
+//     	FADD32I.FTZ R0, R12, -1.4;       # [196][000620]
+//     	FADD.FTZ R6, R1, R10;            # [197][000628]
+//     	FFMA.FTZ R1, R20, c[0x10][0x58], R9; # [198][000630]
+//     	FMUL32I.FTZ.SAT R10, R0, 0x3b5b7a41; # [199][000638]
+//     	FMUL32I.FTZ.SAT R11, R0, 0xbec13521; # [200][000640]
+//     	FFMA.FTZ R13, R6, R6, R13;       # [201][000648]
+//     	FFMA.FTZ R0, R20, c[0x10][0x54], R8; # [202][000650]
+//     	FADD.FTZ R12, R10, R11;          # [203][000658]
+//     	FMUL.FTZ R11, R1, 1200;          # [204][000660]
+//     	FMUL.FTZ R10, R0, 1920;          # [205][000668]
+//     	F2I.TRUNC R11, R11;              # [206][000670]
+//     	F2I.TRUNC R10, R10;              # [207][000678]
+//     	TLD.LZ.MS.NODEP.P R10, R10, 0x0, 2D, 0x4; # [208][000680]
+//     	FMUL.FTZ R11, R6, R6;            # [209][000688]
+//     	FFMA.FTZ R18, R18, R11, R2;      # [210][000690]
+//     	TEX.NODEP R4, R4, 0x2, 0x0, 2D, 0x7; # [211][000698]
+//     	FFMA.FTZ R16, R16, R11, R19;     # [212][0006a0]
+//     	TEX.NODEP.P R0, R0, 0x2, 0x0, 2D, 0x7; # [213][0006a8]
+//     	FMUL.FTZ R19, R12, R12;          # [214][0006b0]
+//     	FFMA.FTZ R11, R17, R11, R21;     # [215][0006b8]
+//     	FSETP.LE.FTZ.AND P0, PT, R10, c[0x10][0x4], PT; # [216][0006c0]
+//     	FFMA.FTZ R22, R5, R19, R11;      # [217][0006c8]
+//     	@P0 MOV32I R10, 0x41f00000;      # [218][0006d0]
+//     	FFMA.FTZ R21, R4, R19, R16;      # [219][0006d8]
+//     	FADD32I.FTZ R10, R10, -1.4;      # [220][0006e0]
+//     	FFMA.FTZ R5, R20, c[0x10][0x60], R9; # [221][0006e8]
+//     	FMUL32I.FTZ.SAT R11, R10, 0x3b5b7a41; # [222][0006f0]
+//     	FFMA.FTZ R4, R20, c[0x10][0x5c], R8; # [223][0006f8]
+//     	FMUL32I.FTZ.SAT R10, R10, 0xbec13521; # [224][000700]
+//     	FFMA.FTZ R6, R6, R19, R18;       # [225][000708]
+//     	FADD.FTZ R16, R11, R10;          # [226][000710]
+//     	FFMA.FTZ R12, R12, R12, R13;     # [227][000718]
+//     	FMUL.FTZ R11, R5, 1200;          # [228][000720]
+//     	FMUL.FTZ R10, R4, 1920;          # [229][000728]
+//     	F2I.TRUNC R11, R11;              # [230][000730]
+//     	F2I.TRUNC R10, R10;              # [231][000738]
+//     	FMUL.FTZ R23, R16, R16;          # [232][000740]
+//     	TLD.LZ.MS.NODEP.P R17, R10, 0x0, 2D, 0x4; # [233][000748]
+//     	FFMA.FTZ R11, R20, c[0x10][0x68], R9; # [234][000750]
+//     	FFMA.FTZ R10, R20, c[0x10][0x64], R8; # [235][000758]
+//     	FFMA.FTZ R20, R2, R23, R6;       # [236][000760]
+//     	FFMA.FTZ R22, R1, R23, R22;      # [237][000768]
+//     	FMUL.FTZ R6, R11, 1200;          # [238][000770]
+//     	FMUL.FTZ R2, R10, 1920;          # [239][000778]
+//     	F2I.TRUNC R19, R6;               # [240][000780]
+//     	F2I.TRUNC R18, R2;               # [241][000788]
+//     	MOV32I R13, -0x456e08be;         # [242][000790]
+//     	TLD.LZ.MS.NODEP.P R18, R18, 0x0, 2D, 0x4; # [243][000798]
+//     	FFMA.FTZ R19, R0, R23, R21;      # [244][0007a0]
+//     	TEX.NODEP R4, R4, 0x2, 0x0, 2D, 0x7; # [245][0007a8]
+//     	FFMA.FTZ R12, R16, R16, R12;     # [246][0007b0]
+//     	TEX.NODEP.P R0, R10, 0x2, 0x0, 2D, 0x7; # [247][0007b8]
+//     	TEX.NODEP.P R8, R8, 0x1, 0x1, 2D; # [248][0007c0]
+//     	FFMA.FTZ R3, R3, -R13, c[0x10][0x70]; # [249][0007c8]
+//     	FFMA.FTZ R7, R7, R13, c[0x10][0x6c]; # [250][0007d0]
+//     	FMUL.FTZ R3, R3, R15;            # [251][0007d8]
+//     	FMUL.FTZ R13, R7, R15;           # [252][0007e0]
+//     	FMUL.FTZ R3, RZ, R3;             # [253][0007e8]
+//     	FFMA.FTZ R3, RZ, R13, R3;        # [254][0007f0]
+//     	FSETP.LE.FTZ.AND P0, PT, R17, c[0x10][0x4], PT; # [255][0007f8]
+//     	@P0 MOV32I R17, 0x41f00000;      # [256][000800]
+//     	FADD32I.FTZ R17, R17, -1.4;      # [257][000808]
+//     	FSETP.LE.FTZ.AND P0, PT, R18, c[0x10][0x4], PT; # [258][000810]
+//     	FMUL32I.FTZ.SAT R16, R17, 0x3b5b7a41; # [259][000818]
+//     	@P0 MOV32I R18, 0x41f00000;      # [260][000820]
+//     	FMUL32I.FTZ.SAT R17, R17, 0xbec13521; # [261][000828]
+//     	FADD.FTZ R16, R16, R17;          # [262][000830]
+//     	FADD32I.FTZ R17, R18, -1.4;      # [263][000838]
+//     	FMUL.FTZ R7, R16, R16;           # [264][000840]
+//     	FFMA.FTZ R12, R16, R16, R12;     # [265][000848]
+//     	FMUL32I.FTZ.SAT R13, R17, 0xbec13521; # [266][000850]
+//     	FFMA.FTZ R16, R4, R7, R19;       # [267][000858]
+//     	FMUL32I.FTZ.SAT R4, R17, 0x3b5b7a41; # [268][000860]
+//     	FFMA.FTZ R5, R5, R7, R22;        # [269][000868]
+//     	FADD.FTZ R17, R3, R15;           # [270][000870]
+//     	FADD.FTZ R13, R4, R13;           # [271][000878]
+//     	FFMA.FTZ R3, R15, c[0x10][0x74], R3; # [272][000880]
+//     	FSETP.EQ.FTZ.AND P0, PT, R17, RZ, PT; # [273][000888]
+//     	MUFU.RCP R17, R17;               # [274][000890]
+//     	MOV32I R4, 0x3f800000;           # [275][000898]
+//     	FADD32I.FTZ R15, R3, 0xbe4ceac8; # [276][0008a0]
+//     	FFMA.FTZ R7, R6, R7, R20;        # [277][0008a8]
+//     	@!P0 FMUL.FTZ R4, R15, R17;      # [278][0008b0]
+//     	MOV32I R3, 0x3f800000;           # [279][0008b8]
+//     	FFMA.FTZ R15, R13, R13, R12;     # [280][0008c0]
+//     	FMUL.FTZ R12, R13, R13;          # [281][0008c8]
+//     	MUFU.RCP R6, R15;                # [282][0008d0]
+//     	FFMA.FTZ R0, R0, R12, R16;       # [283][0008d8]
+//     	FFMA.FTZ R1, R1, R12, R5;        # [284][0008e0]
+//     	FFMA.FTZ R5, R2, R12, R7;        # [285][0008e8]
+//     	FMUL.FTZ R0, R0, R6;             # [286][0008f0]
+//     	FMUL.FTZ R2, R1, R6;             # [287][0008f8]
+//     	FMUL.FTZ R6, R5, R6;             # [288][000900]
+//     	FFMA.FTZ R1, R8, 9, -R0;         # [289][000908]
+//     	FFMA.FTZ R5, R9, 9, -R2;         # [290][000910]
+//     	FFMA.FTZ R7, R10, 9, -R6;        # [291][000918]
+//     	FFMA.FTZ R0, R14, R1, R0;        # [292][000920]
+//     	FFMA.FTZ R1, R14, R5, R2;        # [293][000928]
+//     	FFMA.FTZ R0, R8, R11, R0;        # [294][000930]
+//     	FFMA.FTZ R2, R14, R7, R6;        # [295][000938]
+//     	FFMA.FTZ R1, R9, R11, R1;        # [296][000940]
+//     	FFMA.FTZ R2, R10, R11, R2;       # [297][000948]
+//     	EXIT;                            # [298][000950]
+//     	END
+//     END_SECTION
+// END_SHADER
+// 

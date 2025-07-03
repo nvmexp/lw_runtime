@@ -1,0 +1,40 @@
+!!LWfp5.0
+TEXTURE textures[] = { texture[0..31] };
+ATTRIB tc = fragment.texcoord[0];
+ATTRIB tc2 = fragment.texcoord[1];
+ATTRIB expected[4] = { fragment.texcoord[2..5] };
+TEMP texval, t, u;
+MOV u.x, 0;
+TEX t.xyz, tc, texture[22], 2D; # none dead 0x7
+ADD u.x, u.x, t.x;
+ADD u.x, u.x, t.y;
+ADD u.x, u.x, t.z;
+TEX t.xyz, tc, texture[23], 2D; # x dead 0x6
+ADD u.x, u.x, t.y;
+ADD u.x, u.x, t.z;
+TEX t.xyz, tc, texture[24], 2D; # y dead 0x5
+ADD u.x, u.x, t.x;
+ADD u.x, u.x, t.z;
+TEX t.xyz, tc, texture[25], 2D; # z dead 0x3
+ADD u.x, u.x, t.x;
+ADD u.x, u.x, t.y;
+TEX t.xyz, tc, texture[26], 2D; # xy dead 0x4
+ADD u.x, u.x, t.z;
+TEX t.xyz, tc, texture[27], 2D; # xz dead 0x2
+ADD u.x, u.x, t.y;
+TEX t.xyz, tc, texture[28], 2D; # yz dead 0x1
+ADD u.x, u.x, t.x;
+TEX t.xyz, tc, texture[29], 2D; # all dead
+TEX t.xy, tc, texture[30], 2D; # none dead 0x3
+ADD u.x, u.x, t.x;
+ADD u.x, u.x, t.y;
+TEX t.xy, tc, texture[21], 2D; # x dead 0x2
+ADD u.x, u.x, t.y;
+TEX t.xy, tc, texture[20], 2D; # y dead 0x1
+ADD u.x, u.x, t.x;
+TEX t.xy, tc, texture[19], 2D; # all dead
+TEX t.x, tc, texture[18], 2D; # none dead 0x1
+ADD u.x, u.x, t.x;
+TEX t.x, tc, texture[17], 2D; # all dead
+MOV result.color, u.x;
+END

@@ -1,0 +1,90 @@
+# -*- mode: perl; -*-
+
+# FALCPHYS Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $falcphysHal = [
+
+    # per-GPU defaults for FALCPHYS for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+        IS_SUPPORTED => [
+
+            DESCRIPTION   => "Determine if falcphysdmacheck is supported on this GPU",
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _GM20X        => [ GM20X_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+            _STUB         => [ pre_dMAXWELL, GM10X, ],
+        ],
+
+        DMA_ACCESS_CHECK => [
+
+            DESCRIPTION   => "Verify falcon physical DMA access restrictions",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GM20X        => [ GM20X_thru_GP100, ],
+            _GP10X        => [ GP10X_and_later, -GP100, -G00X, ],
+            _STUB         => [ pre_dMAXWELL, GM10X, G00X, ],
+        ],
+
+        GET_MMU_PHYS_REG_CONFIG => [
+
+            DESCRIPTION   => "Returns the contents of the LW_PFB_PRI_MMU_PHYS_SELWRE register",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void *",
+
+            _GM20X        => [ GM20X, ],
+            _GP100        => [ PASCAL, ],
+            _GV100        => [ VOLTA_and_later, ],
+            _STUB         => [ pre_dMAXWELL, GM10X, ],
+        ],
+
+        GET_LWENC2_FALC_PHYS_PROP => [
+
+            DESCRIPTION   => "Get LWENC2 falcon properties",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "FALCONPROP *",
+
+            _GP100        => [ GP100, ],
+            _STUB         => [ ALL, -GP100, ],
+        ],
+
+        PROGRAM_DMA_BASE1_REG => [
+
+            DESCRIPTION   => "Program DMATRFBASE1 register",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "FALCONPROP *, LwU32, LwU64",
+
+            _GP100        => [ GP10X_and_later, ],
+            _STUB         => [ ALL, -GP10X_and_later, ],
+        ],
+
+        CHECK_ENGINE_IS_PRESENT => [
+            DESCRIPTION   => "Checks if engine is present or not",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_FALSE,
+
+            _GM20X        => [ GM20X_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+            _STUB         => [ pre_dMAXWELL, GM10X, ],
+        ]
+
+    ],   # HAL interfaces
+
+];
+
+# return a reference to the Hal definition
+return $falcphysHal;

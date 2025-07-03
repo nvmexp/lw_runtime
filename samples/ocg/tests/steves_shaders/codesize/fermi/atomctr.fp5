@@ -1,0 +1,22 @@
+!!LWfp5.0
+OPTION LW_shader_atomic_counters;
+OPTION LW_bindless_texture;
+OPTION LW_shader_atomic_float;
+# cgc version 3.1.0001, build date Jul 24 2012
+# command line args: 
+#vendor LWPU Corporation
+#version 3.1.0.1
+#profile gp5fp
+#program main
+#semantic ac : COUNTER[0]0
+#var int gl_SampleID : $vin.SAMPLEID_FLAT : SAMPLEID : -1 : 1
+#var uint ac[0] :  : counter[0][0] : -1 : 1
+#var uint ac[1] :  : counter[0][1] : -1 : 1
+#var uint ac[2] :  : counter[0][2] : -1 : 1
+#var uint ac[3] :  : counter[0][3] : -1 : 1
+COUNTER atomic_counter0[] = { program.counter[0] };
+TEMP R0;
+MOV.U R0.x, fragment.sampleid;
+ATOMCTR.INCR.U R0.x, atomic_counter0[R0.x];
+END
+# 2 instructions, 1 R-regs

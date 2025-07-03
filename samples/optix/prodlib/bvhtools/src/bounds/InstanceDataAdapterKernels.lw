@@ -1,0 +1,82 @@
+// Copyright LWPU Corporation 2015
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "InstanceDataAdapterKernels.hpp"
+#include "ApexPointMapLookup.hpp"
+
+using namespace prodlib::bvhtools;
+
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(INSTANCE_DATA_ADAPTER_EXEC_WARPS_PER_BLOCK * 32, INSTANCE_DATA_ADAPTER_EXEC_BLOCKS_PER_SM)
+void InstanceDataAdapterExec(InstanceDataAdapterExecParams p)
+{
+    int idx = threadIdx.x + 32 * (threadIdx.y + INSTANCE_DATA_ADAPTER_EXEC_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+    if (idx >= p.numInstances)
+        return;
+
+    if(p.inInstanceDesc )
+    {
+      InstanceDesc inInst = loadCachedAlign16(p.inInstanceDesc + idx);
+      const BvhHeader* bvhHeader = (const BvhHeader*)inInst.bvh;
+
+      BvhInstanceData outInst;
+      copyTransform(outInst.transform, inInst.transform);
+      computeIlwerse4x3_affine(outInst.ilwTransform, inInst.transform);
+      outInst.bvh = inInst.bvh;
+      outInst.instanceId = inInst.instanceId;
+      outInst.instanceOffset = inInst.instanceOffsetAndFlags & 0xffffff;
+      outInst.flags = inInst.instanceOffsetAndFlags >> 24;
+      storeCachedAlign16(p.outBvhInstanceData + idx, outInst);
+
+      if(p.outWorldSpaceAabbs)
+      {
+        PrimitiveAABB primAabb;     
+        computeAabb(
+          inInst.transform,
+          make_ptr<ApexPointMap>(bvhHeader, bvhHeader->apmOffset),
+          idx,
+          &primAabb
+        );
+        storeCachedAlign16(p.outWorldSpaceAabbs + idx, primAabb);
+      }
+    }
+    else
+    {
+      float transform[12];
+      copyTransform(transform, &p.inTransforms[idx * (p.matrixStride / 4)]);
+      computeIlwerse4x3_affine(&p.outIlwMatrices[idx * (p.matrixStride / 4)], transform);
+
+      PrimitiveAABB primAabb;
+      int instanceId = p.inInstanceIds[idx];
+      computeAabb(
+        transform,
+        p.inApexPointMaps[instanceId],
+        idx,
+        &primAabb);
+      p.outWorldSpaceAabbs[idx] = primAabb;            
+    }
+
+
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchInstanceDataAdapterExec(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const InstanceDataAdapterExecParams& p)
+{
+    if (lwdaFuncSetCacheConfig(InstanceDataAdapterExec, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    InstanceDataAdapterExec<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------
+

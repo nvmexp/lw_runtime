@@ -1,0 +1,83 @@
+microbench_dyn = LwnProcessDynamicLinkRule
+{
+    DescFile = desc.GetOutputFilePath;
+    MetaFile = config =>
+        f"." / FormatString("microbench.{0}${DescConstants.MetaExtension}", config.GetValue("architecture"));
+    SourceFiles = List(
+        f"bench.cpp",
+        f"bench_ogl.cpp",
+        f"glprogram.cpp",
+        f"hos_main.cpp",
+        f"utils.cpp",
+        f"options.cpp",
+        f"timer.cpp",
+        f"cases/clear_buffer.cpp",
+        f"cases/warp_lwlling.cpp",
+        f"cases/cbf.cpp",
+        f"cases/constantbind.cpp",
+        f"cases/cpu_overhead.cpp",
+        f"cases/drawtest.cpp",
+        f"cases/fillrate.cpp",
+        f"cases/fillrate_ogl.cpp",
+        f"cases/fillrate_compute.cpp",
+        f"cases/gpfifo.cpp",
+        f"cases/gpu_time.cpp",
+        f"cases/kickoff.cpp",
+        f"cases/malloc_perf.cpp",
+        f"cases/multibind.cpp",
+        f"cases/pool_flush.cpp",
+        f"cases/shaderbind.cpp",
+        f"cases/shaderperf.cpp",
+        f"cases/shaderperf/dce.cpp",
+        f"cases/shaderperf/expr.cpp",
+        f"cases/shaderperf/hoistDiscards.cpp",
+        f"cases/shaderperf/ipa.cpp",
+        f"cases/tex.cpp",
+        f"cases/tex_init.cpp",
+        f"cases/tiled_cache.cpp",
+        f"cases/trirate.cpp",
+        f"cases/trirate_ogl.cpp",
+        f"../samples/common/lwnutil.cpp",
+    );
+
+    SdkDynamicLinkLibraryNames = List(
+        ${LwnBaseDynamicLinkLibraryNames},
+        "opengl",
+    );
+
+    LibraryNames = List(
+        ${LwnBasicLibraryNames},
+        "libnn_pcv",
+    );
+
+    PreprocessorMacros = List(
+        ${LwnBasePreprocessorMacros}
+    );
+
+    Name = "microbench_dyn";
+
+    # closure that determines if a configuration is supported
+    IsSupported = config => And(
+      config.HasKeyValue("os", "horizon"),
+      Or (
+          config.HasKeyValue("hardware", "jetsontk2"),
+          config.HasKeyValue("soc", "cheetah-x1"),
+      )
+    );
+
+    IncludeDirectories = List(
+        f".",
+        f"../samples/common",
+        HosRoot.Combine("hos/drivers/Raptor/Include"),
+        ${LwnBaseIncludePaths}
+    );
+}
+
+desc = SdkDescRule2
+{
+    @override DescName = "${microbench_dyn.Name}";
+    @override SvcCategories = List("Base", "Dd");
+    @override PartialDescFilePaths = List(
+        f"${microbench_dyn.Name}.desc.partial.xml",
+    );
+}

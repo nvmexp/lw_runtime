@@ -1,0 +1,52 @@
+// Copyright LWPU Corporation 2014
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "TopTreeConnectorKernels.hpp"
+#include "../common/SharedKernelFunctions.hpp"
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(TOP_TREE_CONNECTOR_WARPS_PER_BLOCK * 32, TOP_TREE_CONNECTOR_BLOCKS_PER_SM)
+void TopTreeConnector(TopTreeConnectorParams p)
+{
+  Range nodeRange = *p.nodeRange;
+  p.ioNodes += nodeRange.start;
+
+  int idx = threadIdx.x + 32 * (threadIdx.y + TOP_TREE_CONNECTOR_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+  if( idx >= nodeRange.span() ) 
+    return;
+  
+  if( p.ioNodes[idx].c1num == BVHNODE_NOT_IN_USE ) 
+    return;
+
+  BvhHalfNode* hn = (BvhHalfNode*)&p.ioNodes[idx];
+  connectTopTreeLeaf( p.inTrimmedAabbs, p.inRemap, hn[0] );
+  connectTopTreeLeaf( p.inTrimmedAabbs, p.inRemap, hn[1] );
+
+  if( idx==0 ) 
+  {
+    *p.outRoot = p.ioNodes[0];
+    p.ioNodes[0].c1num = BVHNODE_NOT_IN_USE;
+  }
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchTopTreeConnector(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const TopTreeConnectorParams& p)
+{
+    if (lwdaFuncSetCacheConfig(TopTreeConnector, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    TopTreeConnector<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

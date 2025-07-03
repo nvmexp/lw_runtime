@@ -1,0 +1,76 @@
+##############################################################################
+# define LOCAL_SOURCES
+# This is not all of hwloc, but just what is needed.  This makefile should
+# only be called for Linux builds.  No support for windows.
+##############################################################################
+
+LWRRENT_DIR := $(LWVS_DIR)/libs/yaml-0.3.0
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += src/aliasmanager.cpp
+LOCAL_SOURCES += src/directives.cpp
+LOCAL_SOURCES += src/emitterstate.cpp
+LOCAL_SOURCES += src/iterator.cpp
+LOCAL_SOURCES += src/nodeownership.cpp
+LOCAL_SOURCES += src/parser.cpp
+LOCAL_SOURCES += src/scanscalar.cpp
+LOCAL_SOURCES += src/simplekey.cpp
+LOCAL_SOURCES += src/tag.cpp
+LOCAL_SOURCES += src/binary.cpp
+LOCAL_SOURCES += src/emitfromevents.cpp
+LOCAL_SOURCES += src/emitterutils.cpp
+LOCAL_SOURCES += src/nodebuilder.cpp
+LOCAL_SOURCES += src/null.cpp
+LOCAL_SOURCES += src/regex.cpp
+LOCAL_SOURCES += src/scantag.cpp
+LOCAL_SOURCES += src/singledocparser.cpp
+LOCAL_SOURCES += src/colwersion.cpp
+LOCAL_SOURCES += src/emitter.cpp
+LOCAL_SOURCES += src/exp.cpp
+LOCAL_SOURCES += src/node.cpp
+LOCAL_SOURCES += src/ostream.cpp
+LOCAL_SOURCES += src/scanner.cpp
+LOCAL_SOURCES += src/scantoken.cpp
+LOCAL_SOURCES += src/stream.cpp
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+LOCAL_INCLUDES += $(LWRRENT_DIR)/src
+LOCAL_INCLUDES += $(LWRRENT_DIR)/include
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+  LOCAL_CFLAGS += /EHsc -D_SCL_SELWRE_NO_WARNINGS
+endif
+
+ifeq ($(LW_TARGET_ARCH),ppc64le)
+  COMMON_GCC_OPTIMIZE_CFLAGS =
+endif
+LOCAL_CFLAGS += -Wno-deprecated-declarations -g -O
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+
+##############################################################################
+# build
+###############################################################################
+
+YAML_LIB := libyaml-cpp$(STATIC_LIBSUFFIX)
+
+yaml_TARGET  := $(OUTPUTDIR)/$(YAML_LIB)
+yaml_OBJECTS := $(LOCAL_OBJECTS)
+yaml_CFLAGS  := $(LOCAL_CFLAGS)
+yaml_LDFLAGS := $(LOCAL_LDFLAGS)
+yaml_DEPENDS ?=
+
+build: $(yaml_TARGET)
+$(eval $(call MAKE_STATIC_LIBRARY,yaml))
+
+clean:
+
+#################################################################################
+## Finish
+##################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

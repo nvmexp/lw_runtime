@@ -1,0 +1,37 @@
+!!LWgp4.0
+# Shader from bug 240174
+PRIMITIVE_OUT LINE_STRIP;
+VERTICES_OUT 5;
+PRIMITIVE_IN POINTS;
+TEMP loop, cc;
+INT TEMP ci;
+main:
+MOV loop, vertex[0].texcoord[0];
+MOV loop.z, 0;
+SUB loop.yw, loop.xyxx, 1;
+RCP loop.w, loop.w;
+REP loop.x;
+CAL emit;
+ADD loop.z, loop.z, 1.0;
+ENDREP;
+RET;
+emit:
+SUB.CC cc.x, loop.z, loop.y;
+MOV result.color, {1,0,0,1};
+MOV result.color (LT.x), {0,1,0,1};
+MOV result.color (EQ.x), {0,0,1,1};
+MUL cc.x, loop.z, loop.w;
+MAD result.position.x, cc.x, 1.6, -0.8;
+FLR.S ci.x, loop.z;
+AND.S.CC ci.y, ci.x, 1;
+IF NE.y;
+MOV result.position.y, 0.75;
+ELSE;
+MOV result.position.y, -0.75;
+ENDIF;
+MOV result.position.zw, {0,0,0,1};
+MOV result.attrib[0].xyzw, vertex[0].texcoord[1];
+EMIT;
+RET;
+END
+

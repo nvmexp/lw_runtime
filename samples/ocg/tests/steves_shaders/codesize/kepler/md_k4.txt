@@ -1,0 +1,166 @@
+# Register encoding: 0..63: [general regs][temp regs][bypass regs][result buf]. 
+
+# We are going to want to study these techniques in isolation and/or
+# in comibination. So, I think the above flexible encoding for
+# register IDs will be useful. One thing to keep in mind is that the
+# register encoding information should be output in all SASS files we
+# generate.
+
+[options]
+temp_regs=4
+bypass_regs=4
+result_buffers=0
+# read_width=64
+# write_width=64
+# pairing=1
+# bindless_textures=1
+
+# latency penalties for the compiler to use in its cost function to
+# determine when it is OK to conflict vs. inserting copies.
+
+per_conflict_penalty=1 # -1 is infinity
+max_vliw_conflicts=3
+max_free_conflicts=3
+
+
+[op_types] 
+
+# format: optype: setexp(op and/or opgroup) 
+# available case-sensitive opgroup names: AGUop, ALUops, BRAops, FP32ops, *.
+# FMALITEops, FP64ops, IPAops, TEXops, XLUops, MUFUops, and the wildcard
+# You can write an expression ilwolving both opgroups and
+# individual ops.  for e.g.: FMAXops - FFMA would be valid.
+
+type_FP32 : FP32ops - FMALITEops
+type_FMAlite: FMALITEops 
+type_FP64 : FP64ops
+type_ALU: ALUops 
+type_IPA: IPAops
+type_AGU : AGUops
+type_TEX : TEXops 
+type_MUFU : MUFUops
+type_XLU: XLUops
+type_BRA: BRAops
+
+[exec_units]
+# format: exec_unit_name : num_units
+unit_FMAlite : 2
+unit_FMAX    : 1
+unit_ALU     : 2
+unit_MUFU    : 1
+unit_AGU     : 1
+unit_XLU     : 1
+unit_TEX     : 1
+unit_IPA     : 1
+
+#unit_FMAlite : 3
+#unit_FMAX    : 1
+#unit_ALU     : 1
+#unit_MUFU    : 1
+#unit_AGU     : 1
+#unit_XLU     : 1
+#unit_TEX     : 1
+#unit_IPA     : 1
+
+[optype_to_exec_units]
+# format: optype : setexp(unit)
+type_FP32 : unit_FMAX
+type_FMAlite : unit_FMAlite + unit_FMAX
+type_FP64 : unit_FMAX
+type_MUFU : unit_MUFU
+type_XLU :  unit_XLU
+type_ALU : unit_ALU
+type_AGU : unit_AGU
+type_IPA : unit_IPA
+type_BRA : unit_AGU
+type_TEX : unit_TEX
+
+
+[vliw_format]
+# format: slotnum : setexp(optype)
+# setexp stands for "set expression". support for universal set (*), union (+), and difference (-) operators.
+0: *
+
+
+[repeat_latency]
+# specifies the latency between an instruction and an *independent* instruction issued to a particular exelwtion unit.
+# format: slot, optype, exelwnit : latency
+*, type_FP32,    unit_FMAX    : 4
+*, type_FMAlite, unit_FMAX    : 4
+*, type_FMAlite, unit_FMAlite : 4
+*, type_FP64,    unit_FMAX    : 8
+*, type_ALU,     unit_ALU     : 4
+*, type_AGU,     unit_AGU     : vecsize_dependent 1 4
+*, type_AGU,     unit_AGU     : vecsize_dependent 2 8
+*, type_AGU,     unit_AGU     : vecsize_dependent 3 12
+*, type_AGU,     unit_AGU     : vecsize_dependent 4 16
+*, type_IDC,     unit_AGU     : vecsize_dependent 1 4
+*, type_IDC,     unit_AGU     : vecsize_dependent 2 8
+*, type_IDC,     unit_AGU     : vecsize_dependent 3 12
+*, type_IDC,     unit_AGU     : vecsize_dependent 4 16
+*, type_BRA,     unit_AGU     : 4
+*, type_XLU,     unit_XLU     : 4
+*, type_IPA,     unit_IPA     : 4
+*, type_MUFU,    unit_MUFU    : 4
+*, type_TEX,     unit_TEX     : 8
+
+
+[instr_latency]
+# specifies the latency between an instruction and a *dependent* instruction issued to a particular exelwtion unit.
+# latency of communicating an operand from a producer instruction to a consumer instruction via the register file
+# format: slot, optype, exelwnit : latency
+
+  *, type_FP32,    unit_FMAX    :  6
+  *, type_FMAlite, unit_FMAX    :  6
+  *, type_FMAlite, unit_FMAlite :  4
+  *, type_FP64,    unit_FMAX    : 11
+  *, type_ALU,     unit_ALU     :  2
+  *, type_AGU,     unit_AGU     : 20
+  *, type_IDC,     unit_AGU     : 13
+  *, type_BRA,     unit_AGU     : indexed 0 8
+  *, type_BRA,     unit_AGU     : indexed 1 16
+  *, type_XLU,     unit_XLU     :  5
+  *, type_IPA,     unit_IPA     : indexed 0 8   # 4 + MUL
+  *, type_IPA,     unit_IPA     : indexed 1 16
+  *, type_MUFU,    unit_MUFU    :  5
+  *, type_TEX,     unit_TEX     : 300
+
+# TODO: take care of indexed IPAs, indexed BRAs
+
+[bypass_latency]
+
+# latency of communicating an operand from a producer instruction to a consumer instruction via bypass paths
+# format: producer_slot, setexp(producer_optype), consumer_slot, setexp(consumer_optype) :  latency
+
+*,*,*,*      : -1  # no bypass paths by default (all paths initialized to 'infinity')
+
+[bank_specification]
+
+# format: bank_id : regnum1 regnum2 ...
+# general_bank0  : 0 1 2 3 4 5 6 7
+# general_bank1  : 8 9 10 11 12 13 14 15 
+# general_bank2  : 16 17 18 19 20 21 22 23
+# general_bank3  : 24 25 26 27 28 29 30 31
+# general_bank4  : 32 33 34 35 36 37 38 39
+# general_bank5  : 40 41 42 43 44 45 46 47
+# general_bank6  : 48 49 50 51 52 53 54 55
+# temp_bank0     : 56 57 
+# temp_bank1     : 58 59
+# bypass_bank0   : 60 
+# bypass_bank1   : 61 62
+general_bank0  : 0 2 4 6 8 10 12 14 16 18 20 22 24 26 28 30 32 34 36 38 40 42 44 46 48 50 52 54 56 58 60 62
+general_bank1  : 1 3 5 7 9 11 13 15 17 19 21 23 25 27 29 31 33 35 37 39 41 43 45 47 49 51 53 55 57 59 61
+
+[slot_read_regbank_constraints]
+# format: slotnum : setexp(bank_id)
+# write * : * to specify no register bank constraints for instructions in any slot.
+
+0 : *                                               # slot 0 instructions can read from all banks
+
+[slot_write_regbank_constraints]
+0 : *
+
+[slot_conflict_info]
+# format: conflict_type : slotnum1 slotnum2 ...
+R : 0   # avoid read conflicts across and within instructions in slots 0, 1, 2, 3.
+

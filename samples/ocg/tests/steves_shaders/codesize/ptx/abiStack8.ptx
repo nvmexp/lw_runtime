@@ -1,0 +1,71 @@
+.version 3.1
+.target sm_20
+
+.func (.param .align 4 .b8 out[4]) myadd (.param .align 4 .b8 in[4],
+                                          .reg .u32 a, .reg .u32 b, .reg .u32 c, .reg .u32 d,
+                                          .reg .u32 e, .reg .u32 f, .reg .u32 g, .reg .u32 h,
+                                          .reg .u32 i, .reg .u32 j, .reg .u32 k, .reg .u32 l,
+                                          .param .align 4 .b8 in1[4])
+{
+    .reg .u32 r, s, aa, bb, cc, dd;
+
+    ld.param.u8   aa, [in+0];
+    ld.param.u8   bb, [in+1];
+    add.u32       r, aa, bb;
+    add.u32       r, r, a;
+    add.u32       r, r, b;
+    add.u32       r, r, c;
+    add.u32       r, r, d;
+    add.u32       r, r, e;
+    add.u32       r, r, f;
+    ld.param.u8   aa, [in1+0];
+    ld.param.u8   bb, [in1+1];
+    add.u32       r, r, aa;
+    add.u32       r, r, bb;
+    ld.param.u8   cc, [in+2];
+    ld.param.u8   dd, [in+3];
+    add.u32       s, cc, dd;
+    add.u32       s, s, g;
+    add.u32       s, s, h;
+    add.u32       s, s, i;
+    add.u32       s, s, j;
+    add.u32       s, s, k;
+    add.u32       s, s, l;
+    ld.param.u8   cc, [in1+2];
+    ld.param.u8   dd, [in1+3];
+    add.u32       r, r, cc;
+    add.u32       r, r, dd;
+    st.param.u8   [out+0], r;
+    st.param.u8   [out+1], s;
+    ret;
+}
+
+.entry main(.param .u32 output, .param .u32 output1)
+{
+    .param .align 4 .b8 in[4];
+    .param .align 4 .b8 out[4];
+    .reg .u32 r, s, o;
+
+    st.param.u8   [in+0], 2;
+    st.param.u8   [in+1], 4;
+    st.param.u8   [in+2], 6;
+    st.param.u8   [in+3], 8;
+    call (out), myadd, (in, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, in);
+    ld.param.u8   r, [out+0];
+    ld.param.u8   s, [out+1];
+    ld.param.u32  o, [output];
+    st.v2.b32     [o], {r, s};
+
+    st.param.u8   [in+0], r;
+    st.param.u8   [in+1], s;
+    st.param.u8   [in+2], r;
+    st.param.u8   [in+3], s;
+    call (out), myadd, (in, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, in);
+    ld.param.u8   r, [out+0];
+    ld.param.u8   s, [out+1];
+    ld.param.u32  o, [output1];
+    st.v2.b32     [o], {r, s};
+
+    exit;
+}
+ 

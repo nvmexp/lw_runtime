@@ -1,0 +1,149 @@
+#include "utils.h"
+#define LAZYKBEST_THREADS 32
+
+__global__ void lwnnx_LazyKBest_updateOutput_kernel(
+  float *output, float *indice, const float *input, 
+  int inputSize, int outputSize)
+{
+  __shared__ float bufferVal[LAZYKBEST_THREADS];
+  __shared__ float bufferIdx[LAZYKBEST_THREADS];
+  const int tx = threadIdx.x;
+  const int step = blockDim.x;
+  const int k = blockIdx.x;
+  
+  float *output_k = output + k*outputSize;
+  float *indice_k = indice + k*outputSize;
+  const float *input_k = input + k*inputSize;
+  
+  float maxVal = -FLT_MAX;
+  int maxIdx = -1;
+  
+  for (int i=tx; i<inputSize; i+=step)
+  {
+    float val = input_k[i];
+    if (val > maxVal)
+    {
+      maxVal = val;
+      maxIdx = i;
+    }
+  }
+  
+  bufferVal[tx] = maxVal;
+  bufferIdx[tx] = maxIdx;
+  
+  // reduce
+  for (unsigned int stride = blockDim.x >> 1; stride > outputSize-1; stride >>= 1)
+  {
+    __syncthreads();
+    if (tx < stride)
+    {
+      float val = bufferVal[tx+stride];
+      if (val > bufferVal[tx])
+      {
+        bufferVal[tx] = val;
+        bufferIdx[tx] = bufferIdx[tx+stride];
+      }
+    }
+  }
+  
+  if (tx < outputSize)
+  {
+    output_k[tx] = bufferVal[tx];
+    indice_k[tx] = bufferIdx[tx] + 1;
+  }
+}
+
+
+static int lwnnx_LazyKBest_updateOutput(lua_State *L)
+{   
+  THCState *state = getLwtorchState(L);
+  THLwdaTensor *input = (THLwdaTensor*)luaT_checkudata(L, 2, "torch.LwdaTensor");  
+  
+  THLwdaTensor *output = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "_output", "torch.LwdaTensor");
+  THLwdaTensor *indice = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "_indice", "torch.LwdaTensor");
+  int k = luaT_getfieldcheckint(L, 1, "k");
+
+  luaL_argcheck(L, input->nDimension == 2, 2, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, k <= LAZYKBEST_THREADS, 1, "k must be smaller than KBEST_THREADS");
+  luaL_argcheck(L, THLwdaTensor_isContiguous(state, input), 2, "Expecting contiguous input");
+  
+  THLwdaTensor_resize2d(state, output, input->size[0], k);
+  THLwdaTensor_resize2d(state, indice, input->size[0], k);
+ 
+  /* call lwdakernel */
+  dim3 blocks(input->size[0]); // each lwca-block is an example
+  dim3 threads(LAZYKBEST_THREADS);
+  lwnnx_LazyKBest_updateOutput_kernel<<<blocks,threads>>>(
+    THLwdaTensor_data(state, output), THLwdaTensor_data(state, indice), 
+    THLwdaTensor_data(state, input), input->size[1], k
+  );
+  
+  lwdaError errcode = lwdaGetLastError();
+  if(errcode != lwdaSuccess)
+    THError(lwdaGetErrorString(errcode));
+
+  return 1;
+}
+ 
+ 
+__global__ void lwnnx_LazyKBest_updateGradInput_kernel(
+  float *gradInput, const float *indice, const float *gradOutput, 
+  int inputSize, int outputSize)
+{
+  int tx = threadIdx.x;
+  int step = blockDim.x;
+  int k = blockIdx.x;
+  
+  float *gradInput_k = gradInput + k*inputSize;
+  const float *gradOutput_k = gradOutput + k*outputSize;
+  const float *indice_k = indice + k*outputSize;
+  
+  for (int i=tx; i<outputSize; i+=step)
+    gradInput_k[(int)(indice_k[i] - 1)] = gradOutput_k[i];
+}
+
+
+static int lwnnx_LazyKBest_updateGradInput(lua_State *L)
+{   
+  THCState *state = getLwtorchState(L);
+  THLwdaTensor *input = (THLwdaTensor*)luaT_checkudata(L, 2, "torch.LwdaTensor");  
+  THLwdaTensor *indice = (THLwdaTensor*)luaT_checkudata(L, 3, "torch.LwdaTensor");
+  THLwdaTensor *gradOutput = (THLwdaTensor*)luaT_checkudata(L, 4, "torch.LwdaTensor");
+  
+  THLwdaTensor *gradInput = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.LwdaTensor");
+  int k = luaT_getfieldcheckint(L, 1, "k");
+  
+  luaL_argcheck(L, input->nDimension == 2, 2, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, indice->nDimension == 2, 3, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, THLwdaTensor_isContiguous(state, input), 2, "Expecting contiguous input");
+  
+  THLwdaTensor_resizeAs(state, gradInput, input);
+  THLwdaTensor_fill(state, gradInput, 0);
+ 
+  /* call lwdakernel */
+  dim3 blocks(input->size[0]); // each lwca-block is an example
+  dim3 threads(LAZYKBEST_THREADS);
+  lwnnx_LazyKBest_updateGradInput_kernel<<<blocks,threads>>>(
+    THLwdaTensor_data(state, gradInput), THLwdaTensor_data(state, indice), 
+    THLwdaTensor_data(state, gradOutput), input->size[1], k
+  );
+  
+  lwdaError errcode = lwdaGetLastError();
+  if(errcode != lwdaSuccess)
+    THError(lwdaGetErrorString(errcode));
+
+  return 1;
+} 
+  
+static const struct luaL_Reg lwnnx_LazyKBest__ [] = {
+  {"LazyKBest_updateOutput", lwnnx_LazyKBest_updateOutput},
+  {"LazyKBest_updateGradInput", lwnnx_LazyKBest_updateGradInput},
+  {NULL, NULL}
+};
+
+static void lwnnx_LazyKBest_init(lua_State *L)
+{
+  luaT_pushmetatable(L, "torch.LwdaTensor");
+  luaT_registeratname(L, lwnnx_LazyKBest__, "nn");
+  lua_pop(L,1);
+}

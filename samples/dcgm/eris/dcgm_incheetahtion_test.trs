@@ -1,0 +1,40 @@
+# DCGM Diag Testsuite configuration
+{
+  # Descriptive name for the testsuite
+  "name"        : "DCGM Diag Testsuite",
+  "version" : "2",
+  "extrapath" : [ "{TR_INSTALL_DIR}/bin/{TR_ARCH_PATH}" ],
+  # Testsuite owner's email
+  "owner"       : "dcgm-dev@exchange.lwpu.com",
+  # Define variables for this testsuite that are available as environment variables
+  # when running tests
+  "elw"         : [
+                        "TEST_ROOT_DIR={TR_INSTALL_DIR}/Linux_amd64_release"
+                  ],
+  # Define paths containing shared libraries required by the tests. Use elwvar VULCAN_SHAREDLIB_DIR to refer 
+  # to the platform specific portion of the path (e.g. bin/ for windows, lib64/ for 64-bit
+  # Linux, etc.)
+  "librarypath"     : [
+                        "{TEST_ROOT_DIR}",
+                        "{TR_INSTALL_DIR}/bin/{TR_ARCH_PATH}"
+                      ],
+  # Default working directory for test runs
+  "cwd"         : "{TEST_ROOT_DIR}",
+  # Timeout for entire testsuite, in seconds
+  "timeout"     : "48000",
+  # Default timeout for individual tests, in seconds
+  "testtimeout" : "48000",
+  # The tests in the testsuite
+  "tests" : [
+              { "attributes": [
+                  "result=multi"
+                ]
+              },
+              {
+                # LD_LIBRARY_PATH will be automatically unset when exelwting a privileged program due to security reason.
+                # So pass the elw variable explicitly in the command
+                "exe": "/usr/bin/sudo LD_LIBRARY_PATH={TEST_ROOT_DIR}:{TR_INSTALL_DIR}/bin/{TR_ARCH_PATH} /bin/bash dcgm_integration_test.sh",
+                "attributes": [ { "filter": { "os": "Windows" }}, "result=skip" ]
+              }
+  ]
+}

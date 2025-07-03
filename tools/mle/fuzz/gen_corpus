@@ -1,0 +1,55 @@
+#!/bin/bash
+
+set -e
+
+PROTOC="$P4ROOT/sw/tools/linux/mods/protobuf/protoc_3.11.4"
+
+if [[ ! -x $PROTOC ]]; then
+    echo "$PROTOC does not exist or is not exelwtable"
+    exit 1
+fi
+
+MLE_DIR="$P4ROOT/sw/dev/gpu_drv/chips_a/diag/mle"
+
+if [[ ! -f $MLE_DIR/mle.proto ]]; then
+    echo "$MLE_DIR/mle.proto does not exist"
+    exit 1
+fi
+
+gen_mle()
+{   
+    "$PROTOC" --encode=MLE --proto_path="$MLE_DIR" mle.proto
+}
+
+mkdir -p corpus_gen
+
+gen_mle > corpus_gen/header.mle <<EOF
+file_type: "MLE"
+EOF
+
+gen_mle > corpus_gen/sync.mle <<EOF
+sync: { signature: "SYNC", sync_pos: 1 }
+EOF
+
+gen_mle > corpus_gen/context.mle <<EOF
+entry: {
+    uid_delta: 1,
+    timestamp_delta: 1,
+    thread_id: 1,
+    test_id: 1,
+    dev_id: 1,
+    priority: 1
+}
+EOF
+
+gen_mle > corpus_gen/print.mle <<EOF
+entry: { print: "X" }
+EOF
+
+gen_mle > corpus_gen/progress.mle <<EOF
+entry: { progress_update: 100 }
+EOF
+
+gen_mle > corpus_gen/mods_end.mle <<EOF
+entry: { mods_end: { rc: 1 } }
+EOF

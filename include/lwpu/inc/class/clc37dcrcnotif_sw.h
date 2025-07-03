@@ -1,0 +1,114 @@
+/* _LWRM_COPYRIGHT_BEGIN_
+ *
+ * Copyright 2016 by LWPU Corporation.  All rights reserved.  All
+ * information contained herein is proprietary and confidential to LWPU
+ * Corporation.  Any use, reproduction, or disclosure without the written
+ * permission of LWPU Corporation is prohibited.
+ *
+ * _LWRM_COPYRIGHT_END_
+ */
+
+#ifndef __clc37dcrcnotif_h__
+#define __clc37dcrcnotif_h__
+
+#define LWC37D_NOTIFIER_CRC                                                    0x00000000
+#define LWC37D_NOTIFIER_CRC_SIZEOF                                             0x00000040
+#define LWC37D_NOTIFIER_CRC_STATUS_0                                           0x00000000
+#define LWC37D_NOTIFIER_CRC_STATUS_0_DONE                                      0:0
+#define LWC37D_NOTIFIER_CRC_STATUS_0_DONE_FALSE                                0x00000000
+#define LWC37D_NOTIFIER_CRC_STATUS_0_DONE_TRUE                                 0x00000001
+#define LWC37D_NOTIFIER_CRC_STATUS_0_OVERRUN                                   1:1
+#define LWC37D_NOTIFIER_CRC_STATUS_0_OVERRUN_FALSE                             0x00000000
+#define LWC37D_NOTIFIER_CRC_STATUS_0_OVERRUN_TRUE                              0x00000001
+#define LWC37D_NOTIFIER_CRC_STATUS_0_FE_OVERFLOW                               2:2
+#define LWC37D_NOTIFIER_CRC_STATUS_0_FE_OVERFLOW_FALSE                         0x00000000
+#define LWC37D_NOTIFIER_CRC_STATUS_0_FE_OVERFLOW_TRUE                          0x00000001
+#define LWC37D_NOTIFIER_CRC_STATUS_0_COMPOSITOR_OVERFLOW                       3:3
+#define LWC37D_NOTIFIER_CRC_STATUS_0_COMPOSITOR_OVERFLOW_FALSE                 0x00000000
+#define LWC37D_NOTIFIER_CRC_STATUS_0_COMPOSITOR_OVERFLOW_TRUE                  0x00000001
+#define LWC37D_NOTIFIER_CRC_STATUS_0_RG_OVERFLOW                               4:4
+#define LWC37D_NOTIFIER_CRC_STATUS_0_RG_OVERFLOW_FALSE                         0x00000000
+#define LWC37D_NOTIFIER_CRC_STATUS_0_RG_OVERFLOW_TRUE                          0x00000001
+#define LWC37D_NOTIFIER_CRC_STATUS_0_PRIMARY_OUTPUT_OVERFLOW                   5:5
+#define LWC37D_NOTIFIER_CRC_STATUS_0_PRIMARY_OUTPUT_OVERFLOW_FALSE             0x00000000
+#define LWC37D_NOTIFIER_CRC_STATUS_0_PRIMARY_OUTPUT_OVERFLOW_TRUE              0x00000001
+#define LWC37D_NOTIFIER_CRC_STATUS_0_SECONDARY_OUTPUT_OVERFLOW                 6:6
+#define LWC37D_NOTIFIER_CRC_STATUS_0_SECONDARY_OUTPUT_OVERFLOW_FALSE           0x00000000
+#define LWC37D_NOTIFIER_CRC_STATUS_0_SECONDARY_OUTPUT_OVERFLOW_TRUE            0x00000001
+#define LWC37D_NOTIFIER_CRC_STATUS_0_EXPECT_BUFFER_COLLAPSE                    7:7
+#define LWC37D_NOTIFIER_CRC_STATUS_0_EXPECT_BUFFER_COLLAPSE_FALSE              0x00000000
+#define LWC37D_NOTIFIER_CRC_STATUS_0_EXPECT_BUFFER_COLLAPSE_TRUE               0x00000001
+#define LWC37D_NOTIFIER_CRC_STATUS_0_COLOR_DEPTH_AGNOSTIC                      8:8
+#define LWC37D_NOTIFIER_CRC_STATUS_0_COLOR_DEPTH_AGNOSTIC_FALSE                0x00000000
+#define LWC37D_NOTIFIER_CRC_STATUS_0_COLOR_DEPTH_AGNOSTIC_TRUE                 0x00000001
+#define LWC37D_NOTIFIER_CRC_STATUS_0_RESERVED_FLAG_HEAD_ROOM0                  15:9
+#define LWC37D_NOTIFIER_CRC_STATUS_0_COUNT                                     27:16
+#define LWC37D_NOTIFIER_CRC_STATUS_0_RESERVED_COUNT_HEAD_ROOM0                 31:28
+#define LWC37D_NOTIFIER_CRC_STATUS_1                                           0x00000001
+#define LWC37D_NOTIFIER_CRC_STATUS_1_RESERVED0                                 31:0
+#define LWC37D_NOTIFIER_CRC_STATUS_2                                           0x00000002
+#define LWC37D_NOTIFIER_CRC_STATUS_2_RESERVED1                                 31:0
+#define LWC37D_NOTIFIER_CRC_STATUS_3                                           0x00000003
+#define LWC37D_NOTIFIER_CRC_STATUS_3_RESERVED2                                 31:0
+#define LWC37D_NOTIFIER_CRC_STATUS_4                                           0x00000004
+#define LWC37D_NOTIFIER_CRC_STATUS_4_RESERVED3                                 31:0
+#define LWC37D_NOTIFIER_CRC_STATUS_5                                           0x00000005
+#define LWC37D_NOTIFIER_CRC_STATUS_5_RESERVED4                                 31:0
+#define LWC37D_NOTIFIER_CRC_STATUS_6                                           0x00000006
+#define LWC37D_NOTIFIER_CRC_STATUS_6_RESERVED5                                 31:0
+#define LWC37D_NOTIFIER_CRC_STATUS_7                                           0x00000007
+#define LWC37D_NOTIFIER_CRC_STATUS_7_RESERVED6                                 31:0
+#define LWC37D_NOTIFIER_CRC_ENTRY_BASE                                         0x00000008
+#define LWC37D_NOTIFIER_CRC_ENTRY(i)                                           (LWC37D_NOTIFIER_CRC_ENTRY_BASE + (i * 8))
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY(i,j)                               LWC37D_NOTIFIER_CRC_ENTRY(i) + j
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_0(i)                               LWC37D_NOTIFIER_CRC_ENTRY(i)
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_0_RESERVED                         19:0
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_0_TAG                              27:20
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_0_TAG_HEAD_ROOM0                   30:28
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_0_PRESENT_INTERVAL_MET             31:31
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_0_PRESENT_INTERVAL_MET_FALSE       0x00000000
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_0_PRESENT_INTERVAL_MET_TRUE        0x00000001
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1(i)                               LWC37D_NOTIFIER_CRC_ENTRY(i) + 1
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_INTERLACED                       0:0
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_INTERLACED_FALSE                 0x00000000
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_INTERLACED_TRUE                  0x00000001
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_DITHER                           1:1
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_DITHER_FALSE                     0x00000000
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_DITHER_TRUE                      0x00000001
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_STEREO                           2:2
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_STEREO_FALSE                     0x00000000
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_STEREO_TRUE                      0x00000001
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_TIMESTAMP_MODE                   3:3
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_TIMESTAMP_MODE_FALSE             0x00000000
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_TIMESTAMP_MODE_TRUE              0x00000001
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_SLI                              4:4
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_SLI_FALSE                        0x00000000
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_SLI_TRUE                         0x00000001
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_RESERVED_MODE_HEAD_ROOM          11:5
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_INTERLACED_MODE                  12:12
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_INTERLACED_MODE_NORMAL           0x00000000
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_INTERLACED_MODE_IN_OUT           0x00000001
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_STEREO_MODE                      13:13
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_STEREO_MODE_PAIR_FLIP            0x00000000
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_STEREO_MODE_FRAME_FLIP           0x00000001
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_RESERVED_SUB_MODE_HEAD_ROOM      20:14
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_DITHER_PHASE                     22:21
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_STEREO_PHASE                     23:23
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_STEREO_PHASE_LEFT                0x00000000
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_STEREO_PHASE_RIGHT               0x00000001
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_INTERLACED_FIELD                 24:24
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_1_RESERVED_PHASE_HEAD_ROOM         31:25
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_2(i)                               LWC37D_NOTIFIER_CRC_ENTRY(i) + 2
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_2_USER_DEFINED_INFO                31:0
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_3(i)                               LWC37D_NOTIFIER_CRC_ENTRY(i) + 3
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_3_COMPOSITOR_CRC                   31:0
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_4(i)                               LWC37D_NOTIFIER_CRC_ENTRY(i) + 4
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_4_RG_CRC                           31:0
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_5(i)                               LWC37D_NOTIFIER_CRC_ENTRY(i) + 5
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_5_PRIMARY_OUTPUT_CRC               31:0
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_6(i)                               LWC37D_NOTIFIER_CRC_ENTRY(i) + 6
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_6_SECONDARY_OUTPUT_CRC             31:0
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_7(i)                               LWC37D_NOTIFIER_CRC_ENTRY(i) + 7
+#define LWC37D_NOTIFIER_CRC_ENTRY_SUB_ENTRY_7_RESERVED0                        31:0
+
+#endif // __clc37dcrcnotif_h__

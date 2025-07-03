@@ -1,0 +1,41 @@
+.version 3.1 
+.target sm_20
+.global .f32 gf;
+.global .s32 gs;
+.global .u32 gu;
+.global .u64 gul;
+.const  .u32 gc;
+
+.entry main {
+   .reg .u32 barid;
+   .reg .u32 barcount;
+   .reg .pred p0, p1, p2;
+   .reg .u32  pop;
+
+   ld.global.u32  barid, [gu];
+   ld.global.u32  barcount, [gu + 4];
+
+   bar.sync   0, 120;
+   bar.arrive 1, 130;
+   bar.sync   barid, 130;
+   bar.sync   1, barcount;
+   bar.sync   barid, barcount;
+   bar.sync   barid;
+
+   ld.const.u32      barid, [gc];
+   setp.lt.u32       p0, barid, 10;
+   bar.red.popc.u32  pop, barid, barcount, p0;
+   st.global.u32     [gu], pop;
+   bar.red.and.pred  p1, barid, barcount, p0;
+   bar.red.or.pred   p2, barid, barcount, p0;
+  
+   and.pred  p0, p1, p2;
+   @p0  st.global.u32 [gu + 16], pop; 
+
+   bar.red.and.pred  p1, barid, p0;
+   bar.red.or.pred   p2, barid, p0;
+   and.pred  p0, p1, p2;
+   @p0  st.global.u32 [gu + 16], pop; 
+
+   exit;
+}

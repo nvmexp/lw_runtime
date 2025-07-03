@@ -1,0 +1,72 @@
+
+//
+//  Copyright (c) 2020 LWPU Corporation.  All rights reserved.
+//
+//  LWPU Corporation and its licensors retain all intellectual property and proprietary
+//  rights in and to this software, related documentation and any modifications thereto.
+//  Any use, reproduction, disclosure or distribution of this software and related
+//  documentation without an express license agreement from LWPU Corporation is strictly
+//  prohibited.
+//
+//  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+//  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+//  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+//  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+//  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+//  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+//  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+//  SUCH DAMAGES
+//
+
+#pragma once
+
+#define OPTIX_OPTIONAL_FEATURE_OPTIX7_LWRVES
+
+#include <optix_types.h>
+
+// optixIsTriangle*Hit family of functions are valid in CH and AH programs.
+enum OptixProgramTypeTriangleHit
+{
+    PROGRAM_TYPE_ANY_HIT,
+    PROGRAM_TYPE_CLOSEST_HIT,
+};
+
+enum ExpectedTriangleHitType
+{
+    EXPECTED_TRIANGLE_HIT_TYPE_HIT,
+    EXPECTED_TRIANGLE_HIT_TYPE_FRONT_FACE_HIT,
+    EXPECTED_TRIANGLE_HIT_TYPE_BACK_FACE_HIT,
+};
+
+enum UseHitTypeArgument
+{
+    USE_HIT_TYPE_TRIANGLE_IMPLICIT,
+    USE_HIT_TYPE_ARGUMENT,  // Overload added with Lwrves API.
+    USE_HIT_TYPE_IMPLICIT,
+    USE_HIT_TYPE_UNDEF
+};
+
+enum TriangleHitId
+{
+    TRIANGLE_HIT_ID_HIT   = 0xdeadbeef,
+    TRIANGLE_HIT_ID_FRONT = 0xfeedface,
+    TRIANGLE_HIT_ID_BACK  = 0xbeefface,
+    TRIANGLE_HIT_ID_NONE  = 0x0
+};
+
+struct Params
+{
+    OptixProgramTypeTriangleHit optixProgramType;
+    ExpectedTriangleHitType     expectedTriangleHitType;
+    UseHitTypeArgument          useHitTypeArgument;
+    TriangleHitId*              d_triangleHitResultOutPointer;
+    OptixPrimitiveType*         d_optixPrimitiveTypeResultOutPointer;
+    OptixTraversableHandle      handle;
+    float3*                     d_hitPoint;
+#ifdef OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+    char* covered;
+#endif  // OPTIX_OPTIONAL_TEST_CALL_COVERAGE
+};
+
+const float3 EXPECTED_HIT_POINT{ 0.f, 0.f, 0.f };

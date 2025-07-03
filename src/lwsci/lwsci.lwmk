@@ -1,0 +1,93 @@
+###############################################################################
+#
+# Copyright (c) 2020-2021 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+#
+###############################################################################
+
+##############################################################################
+# drivers/lwsci/lwsci.lwmk
+##############################################################################
+
+##############################################################################
+# Identify this module to lwCommon.lwmk so it can decide the build type
+##############################################################################
+
+LW_MODULE_BUILD_TYPE_ALIASES = lwsci
+
+# Work around LW_VCAST not being defined on DVS since it gets included after.
+# (This is the same thing done in drivers/common/build/lwCommon.lwmk)
+LW_VCAST ?=
+
+# Only opt in on non-VectorCast builds
+ifneq ($(LW_VCAST),1)
+  # Enable subtractive warning system
+  # All warnings are enabled and treated as errors by default
+  LW_DEFAULT_WALL_WERROR := 1
+endif
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+##############################################################################
+# Identify if we are building for cheetah or x86
+##############################################################################
+LW_BACKEND_RESMAN := 0
+ifeq ($(LW_TARGET_ARCH), amd64)
+  ifeq ($(LW_TARGET_OS), Linux)
+    LW_BACKEND_RESMAN = 1
+
+    # Any warnings to outright disable
+    LW_WARNINGS_DISABLE += \
+      declaration-after-statement \
+      missing-braces \
+      missing-field-initializers
+
+    # Any warnings to not error on
+    LW_WARNINGS_NOERROR += \
+      unused-parameter
+  endif
+endif
+
+#include rmapi_tegra_mirror.lwmk if we are building for cheetah
+ifeq ($(LW_BACKEND_RESMAN), 0)
+  include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+endif
+
+##############################################################################
+# Identify if we are building from git tree or perforce tree
+##############################################################################
+LW_GIT_TREE := 0
+ifdef TEGRA_TOP
+  LW_GIT_TREE = 1
+endif
+
+LW_TEGRA_MIRROR_INCLUDES := 0
+LW_TEGRA_DIRECT_INCLUDES := 0
+ifeq ($(LW_BACKEND_RESMAN), 0)
+  ifeq ($(LW_GIT_TREE), 0)
+    LW_DEFINES += LW_TEGRA_MIRROR_INCLUDES
+    LW_TEGRA_MIRROR_INCLUDES = 1
+  else
+    LW_DEFINES += LW_TEGRA_DIRECT_INCLUDES
+    LW_TEGRA_DIRECT_INCLUDES = 1
+  endif
+endif
+
+# Right now, LwMake does not explicitly provide any flag to identify L4T OS.
+# Add this WAR For now where in $(TEGRA_TOP)/tmake/artifacts/CommonRulesLwMake.tmk
+# (this is tmake to lwmake bridge) if tmake variable is
+# LW_BUILD_CONFIGURATION_LINUX_USERSPACE_IS_L4T then lwmake variable
+# LW_TEGRA_PLATFORM_SUPPORTS_LWN is set to 1. In future, we should request
+# build team to give us explicit variable.
+ifeq ($(LW_TEGRA_PLATFORM_SUPPORTS_LWN), 1)
+  LW_DEFINES += LW_L4T=1
+else
+  LW_DEFINES += LW_L4T=0
+endif

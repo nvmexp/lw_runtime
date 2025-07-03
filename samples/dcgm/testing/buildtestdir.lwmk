@@ -1,0 +1,85 @@
+##############################################################################
+# Define the rules to create testing packages
+##############################################################################
+
+TEST_DIR_TARGET := $(OUTPUTDIR)/testing$(ARCHIVESUFFIX)
+SDK_SAMPLES_DIR := sdk_samples
+DEST_SDK_SAMPLES_DIR := $(OUTPUTDIR)/testing/$(SDK_SAMPLES_DIR)
+
+TESTING_VERSION := $(OUTPUTDIR)/testing/data/version.txt
+BUILD_VERSION   := $(OUTPUTDIR)/testing/version.py
+
+STUB_LIBRARY_TESTER := $(OUTPUTDIR)/stub_library_test
+DEST_NOARCH_APP_DIR := $(OUTPUTDIR)/testing/apps
+DEST_APP_DIR := $(DEST_NOARCH_APP_DIR)/$(LW_TARGET_ARCH)/
+LWVS_APP_DIR := $(DEST_NOARCH_APP_DIR)/lwvs
+
+# decode_logs doesn't get our flags and isn't built with coverage, so it
+# breaks compilation. Don't build it with coverage builds. Soon we will not
+# be including it in the project anyway.
+ifndef VULCAN
+ifneq ($(LW_BUILD_TYPE), develop)
+include $(LWML_DIR)/internal/decode_logs.lwmk
+DECODE_LOG_DEP := $(internal_decode_logs_TARGET)
+endif
+endif
+
+build: $(TEST_DIR_TARGET) $(DEST_SDK_SAMPLES_DIR) $(LWVS_APP_DIR)
+dcgmbuildsyncpoint:: $(TEST_DIR_TARGET) $(DEST_SDK_SAMPLES_DIR) $(LWVS_APP_DIR)
+
+$(TEST_DIR_TARGET).cleanup:
+	@$(FORCE_RMDIR) $(OUTPUTDIR)/testing
+	@$(COPYDIR) "testing/python/" "$(OUTPUTDIR)/testing/"
+
+$(TEST_DIR_TARGET).version: $(TEST_DIR_TARGET).cleanup
+	@$(call gen_version_file,$(BUILD_VERSION).in,$(BUILD_VERSION))
+	@$(RM) $(BUILD_VERSION).in
+
+$(TEST_DIR_TARGET): $(TEST_DIR_TARGET).version $(testdcgmunittests_TARGET) $(DCGM_DECODE_DB) $(dcgmi_TARGET) $(lwpu-he_TARGET) $(dcgm_stub_library_tester_TARGET) $(OUTPUTDIR)/lwvs $(DECODE_LOG_DEP) $(dcgmproftester_TARGET)
+	@$(ECHO) Generating testing package for $@...
+
+	@$(MKDIR) $(dir $(TESTING_VERSION))
+	@$(DATETIME) > $(TESTING_VERSION) 
+	@$(ECHO) "Build branch : " $(BUILD_BRANCH)         >> $(TESTING_VERSION)
+	@$(ECHO) "Build CL     : " $(CHANGELIST)           >> $(TESTING_VERSION)
+
+	@$(COPY) $(OUTPUTDIR)/dcgm_decode_db.txt $(OUTPUTDIR)/testing/data
+	@$(COPYDIR) $(LWML_DIR)/testing2/apps/lwda_ctx_create $(DEST_NOARCH_APP_DIR)/lwda_ctx_create
+
+#copy needed binaries
+	@$(MKDIR) $(DEST_APP_DIR)
+	@$(COPY) $(testdcgmunittests_TARGET) $(DEST_APP_DIR)
+	@$(COPY) $(lwpu-he_TARGET) $(DEST_APP_DIR)
+	@$(COPY) $(dcgmi_TARGET) $(DEST_APP_DIR)
+	@$(COPY) $(config_TARGET) $(DEST_APP_DIR)
+	@$(COPY) $(health_TARGET) $(DEST_APP_DIR)
+	@$(COPY) $(policy_TARGET) $(DEST_APP_DIR)
+	@$(COPY) $(process_TARGET) $(DEST_APP_DIR)
+	@$(COPY) $(field_value_TARGET) $(DEST_APP_DIR)
+	@$(COPY) $(STUB_LIBRARY_TESTER) $(DEST_APP_DIR)
+	@$(COPY) $(dcgmproftester_TARGET) $(DEST_APP_DIR)
+
+# copy sdk_sample directory to be under _out/testing/ directory
+$(DEST_SDK_SAMPLES_DIR): $(TEST_DIR_TARGET) $(config_TARGET) $(policy_TARGET) $(process_TARGET) $(modules_TARGET) $(health_TARGET) $(field_value_TARGET)
+	@$(MKDIR) $@
+	@$(COPYDIR) "$(DCGM_DIR)/$(SDK_SAMPLES_DIR)" $@
+
+# decode_logs doesn't get our flags and isn't built with coverage, so it
+# breaks compilation. Don't build it with coverage builds.
+ifndef VULCAN
+ifneq ($(LW_BUILD_TYPE), develop)
+	@$(COPY) $(OUTPUTDIR)/decode_logs $(DEST_APP_DIR)
+endif
+endif
+
+#Copy the minimum pieces for LWVS to our testing directory so we can run it from tests 
+$(LWVS_APP_DIR): $(TEST_DIR_TARGET) $(OUTPUTDIR)/lwvs $(OUTPUTDIR)/plugins
+	@$(MKDIR) $(LWVS_APP_DIR)
+	@$(MKDIR) $(LWVS_APP_DIR)/plugins
+	@$(ECHO) Deploying LWVS to testing/apps/lwvs
+	@$(COPY) $(OUTPUTDIR)/lwvs $(LWVS_APP_DIR)/
+	@$(COPYDIR) $(OUTPUTDIR)/plugins $(LWVS_APP_DIR)/plugins
+	@$(ECHO) Deploying LWVS to testing/apps/lwvs is DONE
+
+
+

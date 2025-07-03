@@ -1,0 +1,360 @@
+[
+  {
+    "Type": "Control",
+    "OutputDirectory": "Initialization",
+    "ResolutionLookup": {
+      "default": "3840x2160",
+      "ausvrl761": "1920x1080"
+    },
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryList": [ "vcrt2015-9", "Vulkan-SDK\\1.2.148.0" ],
+    "TestDefinitions": [
+      {
+        "Command": "[Netapp]\\vcrt2015-9\\VC_redist.x64.exe",
+        "Arguments": "/install /quiet /norestart /log [OutputDirectory]\\VC_redist.x64.log"
+      },
+      {
+        "Command": "[Netapp]\\vcrt2015-9\\VC_redist.x86.exe",
+        "Arguments": "/install /quiet /norestart /log [OutputDirectory]\\VC_redist.x86.log"
+      },
+      {
+        "Command": "SetVulkanExplicitLayers",
+        "Arguments": "[Netapp]\\Vulkan-SDK\\1.2.148.0"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "OGL_DEFAULT_SWAP_INTERVAL=DISABLE"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VSYNCMODE=FORCEOFF"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VK_ABORT_ON_DEVICE_LOST=ENABLED"
+      },
+      {
+        "Command": "[bin]\\ModeSet.exe",
+        "Arguments": "-d 0 -w [ScreenWidth] -h [ScreenHeight] -b 32"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:head;q -o:[OutputDirectory]\\swak-display.txt"
+      },
+      {
+        "Command": "Verify",
+        "Arguments": "[OutputDirectory]\\swak-display.txt:[ScreenWidth]x[ScreenHeight]x32"
+      },
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-l"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:gpuclk;pstate;q -o:[OutputDirectory]\\swak-clocks.txt"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:nodeinfo;q -o:[OutputDirectory]\\swak-nodeinfo.txt"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "OGL_LOAD_MONITOR_OUTPUT_LOGGING_FLAGS=GPU_TIME"
+      },
+      {
+        "Comment": "Place load monitor file in output directory of VKD3D runs",
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "PS_FILE_PATH=[RootOutputDirectory]\\VKD3D"
+      }
+    ]
+  },
+  {
+    "Type": "VKD3D",
+    "SessionName": "VKD3D",
+    "TestCase": "VKD3D",
+    "OutputDirectory": "VKD3D",
+    "Version": "2.4",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryLookup": {
+      "DXVK": "[Netapp]\\DXVK\\DXVK-1.9.3",
+      "VKD3D": "[Netapp]\\VKD3D\\vkd3d-proton-2.4",
+      "ImageMagick": "[Netapp]\\ImageMagick",
+      "PerfDebug": "[Netapp]\\perfdebug_3.21"
+    },
+    "Server": "hqlwoglsql01:8211",
+    "ElwironmentVariables": {
+      "VK_INSTANCE_LAYERS": "VK_LAYER_LUNARG_screenshot",
+      "VK_SCREENSHOT_FRAMES": "0",
+      "VKD3D_DEBUG": "info",
+      "VKD3D_LOG_FILE": "vkd3d.log"
+    },
+    "LoadMonitor": "Enabled",
+    "PerfDebug": "--poll 500 --graphEff --tj --csv --pollend",
+    "Timeout": 180,
+    "TestDefinitions": [
+      {
+        "Title": "AshesEscalation",
+        "Name": "AshesEscalation_Extreme_3840x2160_2xAA_8xAF",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\AshesEscalation_Extreme_3840x2160_2xAA_8xAF",
+        "CompressedFile": "AshesEscalation_Extreme_3840x2160_2xAA_8xAF.zip",
+        "FileName": "AshesEscalation_DX12.exe",
+        "AllowGPU": "gp*, ga*",
+        "Comment": "Skip Turing due to variance"
+      },
+      {
+        "Title": "CivilizatiolwI",
+        "Name": "Civ6_Ultra_3840x2160_8xAA_1xAF",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Civ6_Ultra_3840x2160_8xAA_1xAF",
+        "CompressedFile": "Civ6_Ultra_3840x2160_8xAA_1xAF.zip",
+        "FileName": "CivilizatiolwI_DX12.exe"
+      },
+      {
+        "Title": "Control",
+        "Name": "Control_noDXR_2560x1440_4xAA_8xAF",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Control_noDXR_2560x1440_4xAA_8xAF",
+        "CompressedFile": "Control_noDXR_2560x1440_4xAA_8xAF.zip",
+        "FileName": "Control_DX12.exe"
+      },
+      {
+        "Title": "Control",
+        "Name": "Control_noDXR_High_1920x1080_1xAA_8xAF_FogAndLightEffect",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Control_noDXR_High_1920x1080_1xAA_8xAF_FogAndLightEffect",
+        "CompressedFile": "Control_noDXR_High_1920x1080_1xAA_8xAF_FogAndLightEffect.zip",
+        "FileName": "Control_DX12.exe"
+      },
+      {
+        "Title": "Control",
+        "Name": "Control_noDXR_Ultra_3840x2160_1xAA_8xAF_DepthOfField",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Control_noDXR_Ultra_3840x2160_1xAA_8xAF_DepthOfField",
+        "CompressedFile": "Control_noDXR_Ultra_3840x2160_1xAA_8xAF_DepthOfField.zip",
+        "FileName": "Control_DX12.exe"
+      },
+      {
+        "Title": "EvilGenius2",
+        "Name": "Evil_Genius_2_2560x1440_1xAA_1xAF",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Evil_Genius_2_2560x1440_1xAA_1xAF",
+        "CompressedFile": "Evil_Genius_2_2560x1440_1xAA_1xAF.zip",
+        "FileName": "evilgenius_profile_dx12.exe",
+        "State": "Skipped due to failure.  Bug 3417838"
+      },
+      {
+        "Title": "F1-2020",
+        "Name": "F1_2020_High_2560x1440_1xAA_8xAF_China_VeryWet",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\F1_2020_High_2560x1440_1xAA_8xAF_China_VeryWet",
+        "CompressedFile": "F1_2020_High_2560x1440_1xAA_8xAF_China_VeryWet.zip",
+        "FileName": "F1_2020_dx12.exe"
+      },
+      {
+        "Title": "F1-2020",
+        "Name": "F1_2020_Medium_1920x1080_2xAA_4xAF_Australia_Dry",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\F1_2020_Medium_1920x1080_2xAA_4xAF_Australia_Dry",
+        "CompressedFile": "F1_2020_Medium_1920x1080_2xAA_4xAF_Australia_Dry.zip",
+        "FileName": "F1_2020_dx12.exe"
+      },
+      {
+        "Title": "F1-2020",
+        "Name": "F1_2020_Ultra_3840x2160_1xAA_16xAF_Spain_Dry",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\F1_2020_Ultra_3840x2160_1xAA_16xAF_Spain_Dry",
+        "CompressedFile": "F1_2020_Ultra_3840x2160_1xAA_16xAF_Spain_Dry.zip",
+        "FileName": "F1_2020_dx12.exe"
+      },
+      {
+        "Title": "SeriousSam4",
+        "Name": "Serious_Sam_4_1920x1080_1xAA_4xAF_Man_Vs_Beast",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Serious_Sam_4_1920x1080_1xAA_4xAF_Man_Vs_Beast",
+        "CompressedFile": "Serious_Sam_4_1920x1080_1xAA_4xAF_Man_Vs_Beast.zip",
+        "FileName": "Sam4.exe"
+      },
+      {
+        "Title": "SeriousSam4",
+        "Name": "Serious_Sam_4_2560x1440_1xAA_4xAF_Death_From_Above",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Serious_Sam_4_2560x1440_1xAA_4xAF_Death_From_Above",
+        "CompressedFile": "Serious_Sam_4_2560x1440_1xAA_4xAF_Death_From_Above.zip",
+        "FileName": "Sam4.exe"
+      },
+      {
+        "Title": "SeriousSam4",
+        "Name": "Serious_Sam_4_3840x2160_1xAA_4xAF_Death_From_Above",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Serious_Sam_4_3840x2160_1xAA_4xAF_Death_From_Above",
+        "CompressedFile": "Serious_Sam_4_3840x2160_1xAA_4xAF_Death_From_Above.zip",
+        "FileName": "Sam4.exe"
+      },
+      {
+        "Title": "StrangeBrigade",
+        "Name": "Strange_Brigade_2560x1440_1xAA_1xAF",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Strange_Brigade_2560x1440_1xAA_1xAF",
+        "CompressedFile": "Strange_Brigade_2560x1440_1xAA_1xAF.zip",
+        "FileName": "StrangeBrigade_DX12.exe"
+      },
+      {
+        "Title": "TomClancy_TheDivision",
+        "Name": "Tom_Clancy_The_Division_Tier1_High_1920x1080_1xAA_1xAF",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Tom_Clancy_The_Division_Tier1_High_1920x1080_1xAA_1xAF",
+        "CompressedFile": "Tom_Clancy_The_Division_Tier1_High_1920x1080_1xAA_1xAF.zip",
+        "FileName": "TheDivision.exe",
+        "AllowGPU": "gp*, ga*",
+        "Comment": "Skip Turing due to variance"
+      },
+      {
+        "Title": "Warhammer2",
+        "Name": "Warhammer_2_High_2560x1440_1xAA_8xAF_Map2",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Warhammer_2_High_2560x1440_1xAA_8xAF_Map2",
+        "CompressedFile": "Warhammer_2_High_2560x1440_1xAA_8xAF_Map2.zip",
+        "FileName": "Warhammer2.exe"
+      },
+      {
+        "Title": "WOW_Azeroth",
+        "Name": "WOW_Azeroth_2560x1440_4xAA_16xAF",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\WOW_Azeroth_2560x1440_4xAA_16xAF",
+        "CompressedFile": "WOW_Azeroth_2560x1440_4xAA_16xAF.zip",
+        "FileName": "WoW.exe"
+      },
+      {
+        "Title": "WOW_Azeroth",
+        "Name": "WOW_Azeroth_3840x2160_4xAA_16xAF",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\WOW_Azeroth_3840x2160_4xAA_16xAF",
+        "CompressedFile": "WOW_Azeroth_3840x2160_4xAA_16xAF.zip",
+        "FileName": "WoW.exe"
+      },
+      {
+        "Title": "ZombieArmy4",
+        "Name": "Zombie_Army_Dead_War_4_High_2560x1440_1xAA_1xAF",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Zombie_Army_Dead_War_4_High_2560x1440_1xAA_1xAF",
+        "CompressedFile": "Zombie_Army_Dead_War_4_High_2560x1440_1xAA_1xAF.zip",
+        "FileName": "za4_dx12.exe"
+      },
+      {
+        "Title": "ZombieArmy4",
+        "Name": "Zombie_Army_Dead_War_4_Ultra_3840x2160_1xAA_1xAF",
+        "Directory": "[Netapp]\\DXGPerf\\Tests\\apic_perf_dx12\\apics\\Zombie_Army_Dead_War_4_Ultra_3840x2160_1xAA_1xAF",
+        "CompressedFile": "Zombie_Army_Dead_War_4_Ultra_3840x2160_1xAA_1xAF.zip",
+        "FileName": "za4_dx12.exe"
+      }
+    ],
+    "Arguments": "500(0.1%) 300 fps_log",
+    "AllowedRMSE": 0.02
+  },
+  {
+    "Type": "Control",
+    "OutputDirectory": "DirectoryChange",
+    "TestDefinitions": [
+      {
+        "Comment": "Place load monitor file in output directory of VKD3D runs",
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "PS_FILE_PATH=[RootOutputDirectory]\\VKD3D-Nsight"
+      }
+    ]
+  },
+  {
+    "Type": "VKD3D",
+    "SessionName": "VKD3D-Nsight",
+    "TestCase": "VKD3D-Nsight",
+    "OutputDirectory": "VKD3D-Nsight",
+    "Version": "kniski",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryLookup": {
+      "DXVK": "[Netapp]\\DXVK\\DXVK-1.9.3",
+      "VKD3D": "[Netapp]\\VKD3D\\vkd3d-kniski",
+      "ImageMagick": "[Netapp]\\ImageMagick",
+      "PerfDebug": "[Netapp]\\perfdebug_3.21"
+    },
+    "Server": "hqlwoglsql01:8211",
+    "ElwironmentVariables": {
+      "VK_INSTANCE_LAYERS": "VK_LAYER_LUNARG_screenshot",
+      "VK_SCREENSHOT_FRAMES": "0",
+      "VKD3D_DEBUG": "info",
+      "VKD3D_LOG_FILE": "vkd3d.log"
+    },
+    "LoadMonitor": "Enabled",
+    "PerfDebug": "--poll 500 --graphEff --tj --csv --pollend",
+    "Timeout": 300,
+    "TestDefinitions": [
+      {
+        "Title": "Cyberpunk2077",
+        "Name": "Cyberpunk2077_2021_02_26_4k_Ultra_NoRTX_NoDLSS",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vkd3d\\Cyberpunk2077\\Cyberpunk2077_2021_02_26_4k_Ultra_NoRTX_NoDLSS",
+        "CompressedFile": "Cyberpunk2077_2021_02_26_4k_Ultra_NoRTX_NoDLSS.zip",
+        "FileName": "Cyberpunk2077.exe",
+        "Comment": "Trace and VKD3D DDL supplied by Krysztof Niski, not from DX source control."
+      },
+      {
+        "Title": "ResidentEvil2",
+        "Name": "ResidentEvil2_2021_02_05_Balanced_1080p",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vkd3d\\ResidentEvil2\\ResidentEvil2_2021_02_05_Balanced_1080p",
+        "CompressedFile": "re2_dx12_balanced_1080p__2021_02_05.zip",
+        "FileName": "re2.exe",
+        "Comment": "Trace and VKD3D DDL supplied by Krysztof Niski, not from DX source control"
+      }
+    ],
+    "Arguments": "-noreset -repeat 1000 -dumpframetimes -capture-screenshot=1",
+    "AllowedRMSE": 0.01
+  },
+  {
+    "Type": "VKD3D",
+    "SessionName": "VKD3D-Nsight",
+    "TestCase": "VKD3D-Nsight",
+    "OutputDirectory": "VKD3D-Custom",
+    "Version": "kniski-ds",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryLookup": {
+      "DXVK": "[Netapp]\\DXVK\\DXVK-kniski",
+      "VKD3D": "[Netapp]\\VKD3D\\vkd3d-kniski-ds",
+      "ImageMagick": "[Netapp]\\ImageMagick",
+      "PerfDebug": "[Netapp]\\perfdebug_3.21"
+    },
+    "Server": "hqlwoglsql01:8211",
+    "ElwironmentVariables": {
+      "VK_INSTANCE_LAYERS": "VK_LAYER_LUNARG_screenshot",
+      "VK_SCREENSHOT_FRAMES": "1",
+      "VKD3D_DEBUG": "info",
+      "VKD3D_LOG_FILE": "vkd3d.log"
+    },
+    "LoadMonitor": "Enabled",
+    "PerfDebug": "--poll 500 --graphEff --tj --csv --pollend",
+    "Timeout": 300,
+    "TestDefinitions": [
+      {
+        "Title": "DeathStranding",
+        "Name": "DeathStranding_2021_04_06_4K_High_NoDLSS",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vkd3d\\DeathStranding\\DeathStranding_2021_04_06_4K_High_NoDLSS",
+        "CompressedFile": "DeathStranding_2021_04_06_4K_High_NoDLSS.zip",
+        "FileName": "ds.exe",
+        "Comment": "Trace and VKD3D DDL supplied by Krysztof Niski, not from DX source control.",
+        "Comment2": "Screenshot cannot be frame 0."
+      }
+    ],
+    "Arguments": "-noreset -repeat 1000 -dumpframetimes -capture-screenshot=1",
+    "AllowedRMSE": 0.01
+  },
+  {
+    "Type": "Control",
+    "OutputDirectory": "Restore",
+    "TestDefinitions": [
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:head;q -o:[OutputDirectory]\\swak-display.txt"
+      },
+      {
+        "Command": "Verify",
+        "Arguments": "[OutputDirectory]\\swak-display.txt:[ScreenWidth]x[ScreenHeight]x32"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dOGL_DEFAULT_SWAP_INTERVAL"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVSYNCMODE"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVK_ABORT_ON_DEVICE_LOST"
+      },
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-u"
+      }
+    ]
+  }
+]
+

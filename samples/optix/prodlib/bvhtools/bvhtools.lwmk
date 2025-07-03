@@ -1,0 +1,100 @@
+#
+#  Copyright (c) 2019 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *Device IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HDevice BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+bvhtools_CFLAGS ?=
+ifeq ($(LW_HOST_OS_FAMILY),Windows)
+  # Warnings
+  bvhtools_CFLAGS += \
+    /wd4577 \
+    /wd4530 \
+    /wd4267 \
+    /wd4244
+endif # Windows
+
+# apps/optix/prodlib/bvhtools     TypesInternal.hpp
+# drivers/rtcore                  <corelib/...>
+bvhtools_INCLUDES = \
+  $(LW_OPTIX)/prodlib/bvhtools \
+  $(LW_SOURCE)/drivers/rtcore
+
+bvhtools_SOURCES +=  $(addprefix $(LW_OPTIX)/prodlib/bvhtools/src/, \
+  BuildingBlock.cpp \
+  BVH8Builder.cpp \
+  BvhBuilder.cpp \
+  ChunkedTrbvhBuilder.cpp \
+  bounds/AabbAdapter.cpp \
+  bounds/ApexPointMapConstructor.cpp \
+  bounds/InstanceDataAdapter.cpp \
+  bounds/TriangleAdapter.cpp \
+  bvh8/AacBuilder.cpp \
+  bvh8/BVH8Constructor.cpp \
+  bvh8/BVH8Fitter.cpp \
+  bvh8/WideBvhPlanner.cpp \
+  chunking/Chunker.cpp \
+  chunking/TopTreeConnector.cpp \
+  chunking/TreeTopTrimmer.cpp \
+  common/BufferRef.cpp \
+  common/BufferStorage.cpp \
+  common/LwdaUtils.cpp \
+  common/DbgComp.cpp \
+  common/ParameterList.cpp \
+  common/TypesInternal.cpp \
+  common/Utils.cpp \
+  misc/GatherPrimBits.cpp \
+  misc/InputAdapter.cpp \
+  misc/InputArrayIndexer.cpp \
+  misc/MortonSorter.cpp \
+  misc/MotionRefitter.cpp \
+  misc/OptixColwerter.cpp \
+  misc/Sorter.cpp \
+  misc/TriangleWooper.cpp \
+  trbvh/MortonTriangleSplitter.cpp \
+  trbvh/TrBvhBuilder.cpp \
+)
+
+bvhtools_LW_SOURCES +=  $(addprefix $(LW_OPTIX)/prodlib/bvhtools/src/, \
+  bounds/AabbAdapterKernels.lw \
+  bounds/ApexPointMapConstructorKernels.lw \
+  bounds/InstanceDataAdapterKernels.lw \
+  bounds/TriangleAdapterKernels.lw \
+  bvh8/AacBuilderKernels.lw \
+  bvh8/BVH8ConstructorKernels.lw \
+  bvh8/BVH8FitterKernels.lw \
+  bvh8/WideBvhPlannerKernels.lw \
+  chunking/ChunkerKernels.lw \
+  chunking/TopTreeConnectorKernels.lw \
+  chunking/TreeTopTrimmerKernels.lw \
+  common/UtilsKernels.lw \
+  common/SetIntKernel.lw \
+  misc/GatherPrimBitsKernels.lw \
+  misc/InputArrayIndexerKernels.lw \
+  misc/MortonSorterKernels.lw \
+  misc/OptixColwerterKernels.lw \
+  misc/SorterKernels.lw \
+  misc/TriangleWooperKernels.lw \
+  trbvh/MortonTriangleSplitterKernels.lw \
+  trbvh/TrBvhBuilderKernels.lw \
+)
+
+$(call optix_module,bvhtools)

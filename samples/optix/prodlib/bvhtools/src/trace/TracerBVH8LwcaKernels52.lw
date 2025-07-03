@@ -1,0 +1,1168 @@
+/*
+ *  Copyright (c) 2018, LWPU Corporation
+ *  All rights reserved.
+ *
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions are met:
+ *      * Redistributions of source code must retain the above copyright
+ *        notice, this list of conditions and the following disclaimer.
+ *      * Redistributions in binary form must reproduce the above copyright
+ *        notice, this list of conditions and the following disclaimer in the
+ *        documentation and/or other materials provided with the distribution.
+ *      * Neither the name of LWPU Corporation nor the
+ *        names of its contributors may be used to endorse or promote products
+ *        derived from this software without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ *  ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ *  DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+ *  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ *  (INCLUDING, BUT NOT LIMITED TO, PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ *  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ *  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ *  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+//------------------------------------------------------------------------
+// LWCA tracer for 8-wide BVHs.
+// For further details, please refer to the paper:
+// "Efficient Incoherent Ray Traversal on GPUs Through Compressed Wide BVHs"
+//------------------------------------------------------------------------
+
+//!! needs --use_fast_math replaced by --ftz=false --prec-div=false --prec-sqrt=false --fmad=true
+
+#if (__LWDA_ARCH__ >= 700)
+ #include <cooperative_groups.h>
+#endif
+
+#include "TracerBVH8LwdaKernels.hpp"
+#include <prodlib/bvhtools/src/common/SharedKernelFunctions.hpp>
+#include "WatertightOptimized.lwh"
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+#define STACK_SIZE                                  64 // Size of the traversal stack in local memory.
+
+#define BVH8_WARPS                                  4
+#define BVH8_INST_WARPS                             4
+
+// also see launch code at the very end of the file which replicates the shared mem constants for the host code!
+#if (__LWDA_ARCH__ == 600 ) || (__LWDA_ARCH__ == 500 )
+ #define BVH8_SSTACK_SIZE 8      // matches blocks/register usage for 8 blocks
+ #define BVH8_INST_SSTACK_SIZE 8 // matches blocks/register usage for 8 blocks
+#elif (__LWDA_ARCH__ < 500 )
+ #define BVH8_SSTACK_SIZE 0      // use no SMEM on Kepler
+ #define BVH8_INST_SSTACK_SIZE 0
+#elif (__LWDA_ARCH__ < 700 )
+ #define BVH8_SSTACK_SIZE 12     // matches blocks/register usage for 8 blocks
+ #define BVH8_INST_SSTACK_SIZE 12// matches blocks/register usage for 8 blocks
+#else
+ #define BVH8_SSTACK_SIZE 8      // shared and L1 are unified on volta, but still makes sense to do this -> triggers the 64kb SMEM configuration at 8 blocks
+ #define BVH8_INST_SSTACK_SIZE 8 // dto.
+#endif
+
+#define BVH8_DYNAMIC_FETCH_LOST_WORK_THRESHOLD      16 // same for inst/flat, have specialized versions?
+#define BVH8_DYNAMIC_FETCH_POSTPONE_ON_COHERENT     4  // same for inst/flat, have specialized versions?
+#define BVH8_PRIMITIVES_TO_TEST_AT_ONCE             1  // instancing only, 1 will trigger a slightly faster path
+
+#define WATERTIGHT_NODE_EPS      (5.0f * exp2f(-24.0f))
+#define WATERTIGHT_NODE_EPS_MIN  (exp2f(-75.0f))
+
+//------------------------------------------------------------------------
+
+static __device__ __forceinline__ float fabsmax(const float3& a, const float3& b)
+{
+    return fmaxf(fmaxf(fmaxf(fabsf(a.x),fabsf(b.x)), //!! opt.?
+                       fmaxf(fabsf(a.y),fabsf(a.z))),
+                 fmaxf(fabsf(b.y),fabsf(b.z)));
+}
+
+static __device__ __forceinline__ float3& operator*=(float3& a, const float3& b)
+{
+    a.x *= b.x; a.y *= b.y; a.z *= b.z; return a;
+}
+
+static __device__ __forceinline__ float3& operator-=(float3& a, const float3& b)
+{
+    a.x -= b.x; a.y -= b.y; a.z -= b.z; return a;
+}
+
+static __device__ __forceinline__ float3 operator-(const float3& a, const float3& b)
+{
+    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+static __device__ __forceinline__ float3 operator+(const float3& a, const float3& b)
+{
+    return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+
+static __device__ __forceinline__ float3 operator*(const float3& a, const float b)
+{
+    return make_float3(a.x * b, a.y * b, a.z * b);
+}
+
+#if (__LWDA_ARCH__ < 700)
+static __device__ __forceinline__ float fmin_fmin(const float a, const float b, const float c)
+{
+    int v;
+    asm("vmin.s32.s32.s32.min %0, %1, %2, %3;" : "=r"(v) : "r"(__float_as_int(a)), "r"(__float_as_int(b)), "r"(__float_as_int(c)));
+    return __int_as_float(v);
+}
+
+static __device__ __forceinline__ float fmin_fmax(const float a, const float b, const float c)
+{
+    int v;
+    asm("vmin.s32.s32.s32.max %0, %1, %2, %3;" : "=r"(v) : "r"(__float_as_int(a)), "r"(__float_as_int(b)), "r"(__float_as_int(c)));
+    return __int_as_float(v);
+}
+
+static __device__ __forceinline__ float fmax_fmin(const float a, const float b, const float c)
+{
+    int v;
+    asm("vmax.s32.s32.s32.min %0, %1, %2, %3;" : "=r"(v) : "r"(__float_as_int(a)), "r"(__float_as_int(b)), "r"(__float_as_int(c)));
+    return __int_as_float(v);
+}
+
+static __device__ __forceinline__ float fmax_fmax(const float a, const float b, const float c)
+{
+    int v;
+    asm("vmax.s32.s32.s32.max %0, %1, %2, %3;" : "=r"(v) : "r"(__float_as_int(a)), "r"(__float_as_int(b)), "r"(__float_as_int(c)));
+    return __int_as_float(v);
+}
+#endif
+
+//------------------------------------------------------------------------
+
+struct StackEntry
+{
+    union {
+      struct {
+        int32_t firstIdx;
+        uint32_t hits;
+      };
+      int2 i;
+    };
+};
+
+__device__ __forceinline__
+static void initStack(int& sstackPtr, int& sstackEnd, const int SSTACK_SIZE)
+{
+    if (SSTACK_SIZE > 0) // Maxwell and above
+    {
+        sstackPtr = (int)(SSTACK_SIZE * sizeof(StackEntry)) * (threadIdx.x + threadIdx.y * 32);
+        sstackEnd = sstackPtr + (int)(SSTACK_SIZE * sizeof(StackEntry));
+    }
+    else // Kepler
+    {
+        sstackPtr = 0;
+        sstackEnd = 0;
+    }
+}
+
+__device__ __forceinline__
+static void push(const StackEntry& entry, int& sstackPtr, const int sstackEnd, char* const __restrict stack, const int SSTACK_SIZE)
+{
+    if (SSTACK_SIZE > 0) // Maxwell and above
+    {
+        const int offset = sstackPtr - sstackEnd;
+        // Push to stack in shared memory if possible, otherwise spill to local memory.
+        if (offset >= 0)
+            *(int2*)(offset + stack) = entry.i;
+        else
+            sts8(sstackPtr, entry.i);
+
+        sstackPtr += (int)sizeof(StackEntry);
+    }
+    else // Kepler
+    {
+        // Push directly to local memory.
+        *(int2*)(stack + sstackPtr) = entry.i;    
+
+        sstackPtr += (int)sizeof(StackEntry);
+    }
+}
+
+__device__ __forceinline__
+static StackEntry pop(int& sstackPtr, const int sstackEnd, char* const __restrict stack, const int SSTACK_SIZE)
+{
+    if (SSTACK_SIZE > 0) // Maxwell and above
+    {
+        sstackPtr -= (int)sizeof(StackEntry);
+
+        const int offset = sstackPtr - sstackEnd;
+        // Pop from shared or local.
+        StackEntry entry;
+        if (offset >= 0)
+            entry.i = *(int2*)(offset + stack);
+        else
+            entry.i = lds8(sstackPtr);
+
+        return entry;
+    }
+    else // Kepler
+    {
+        sstackPtr -= (int)sizeof(StackEntry);
+
+        // Pop from local memory.
+        StackEntry entry;
+        entry.i = *(int2*)(stack + sstackPtr);
+
+        return entry;
+    }
+}
+
+__device__ __forceinline__
+static void transformRay(const float3& orig, const float3& dir, const float4* const __restrict im, float3& o, float3& d)
+{
+    const float4 m0 = loadCachedAlign16(im);
+    o.x = m0.x * orig.x + m0.y * orig.y + m0.z * orig.z + m0.w;
+    d.x = m0.x * dir.x  + m0.y * dir.y  + m0.z * dir.z;
+    //d.x = fadd_rn(ffma_rn(m0.x, dir.x, 0), ffma_rn(m0.y, dir.y, fmul_rn(m0.z, dir.z))); // TTU code
+  
+    const float4 m1 = loadCachedAlign16(im+1);
+    o.y = m1.x * orig.x + m1.y * orig.y + m1.z * orig.z + m1.w;
+    d.y = m1.x * dir.x  + m1.y * dir.y  + m1.z * dir.z;    
+    //d.y = fadd_rn(ffma_rn(m1.x, dir.x, 0), ffma_rn(m1.y, dir.y, fmul_rn(m1.z, dir.z)));
+  
+    const float4 m2 = loadCachedAlign16(im+2);
+    o.z = m2.x * orig.x + m2.y * orig.y + m2.z * orig.z + m2.w;
+    d.z = m2.x * dir.x  + m2.y * dir.y  + m2.z * dir.z;
+    //d.z = fadd_rn(ffma_rn(m2.x, dir.x, 0), ffma_rn(m2.y, dir.y, fmul_rn(m2.z, dir.z)));
+}
+
+//------------------------------------------------------------------------
+
+#define MAKE_PRMT_KEYS(i0, i1, i2, i3) ((i3) << 12) | ((i2) << 8) | ((i1) << 4) | ((i0) << 0)
+
+__device__ __forceinline__
+static uint32_t initOctantData(const float3& dir)
+{
+    // Use integer sign bit to prevent -0.0 to be treated as 0.0 = positive.
+
+    uint32_t oct = shf_l_clamp(__float_as_uint(dir.z), 0, 1);
+             oct = shf_l_clamp(__float_as_uint(dir.y), oct, 1);
+    return         shf_l_clamp(__float_as_uint(dir.x), oct, 1);
+}
+
+__device__ __forceinline__ 
+static uint32_t insertHit(const uint32_t hits, const uint32_t trimask, const uint32_t ofs, const int i)
+{
+    // If hit, insert bit(s) to correct position in hitmask
+#if (__LWDA_ARCH__ >= 700) // vshl emulated on volta in 6 instructions and possibly wrapped in conditional branch
+    const uint32_t shift = prmt(MAKE_PRMT_KEYS(i, i + 8, i + 8, i + 8), ofs, ofs);
+    const uint32_t bits  = prmt(MAKE_PRMT_KEYS(i, i + 8, i + 8, i + 8), trimask, trimask);
+    return (hits | shf_l_wrap(0,bits,shift)); // includes "& 0x1f" for shift value
+#else
+    if (i == 0) return vshl_wrap_add_b0_b0(trimask, ofs, hits);
+    if (i == 1) return vshl_wrap_add_b1_b1(trimask, ofs, hits);
+    if (i == 2) return vshl_wrap_add_b2_b2(trimask, ofs, hits);
+    /*if (i == 3)*/ return vshl_wrap_add_b3_b3(trimask, ofs, hits);
+#endif
+}
+
+//------------------------------------------------------------------------
+
+// modifies the node to save on temporary registers/outsmart the compiler
+template <class Spec> __device__ __forceinline__
+static void intersectNode(BVH8Node& node, const float3& ray_orig, const float ray_tmin, const float ray_tmax, const float3& ray_ilwDir, const uint32_t duplicatedOctant, StackEntry& innerHits, StackEntry& leafHits)
+{
+    node.header.pos3 -= ray_orig;
+
+    // Shift 8-bit scale to floating-point exponent bits.
+#if (__LWDA_ARCH__ >= 700) // vshl is slower on Volta
+    float3 m = make_float3(__uint_as_float((node.header.scale_innerMask&0xFFu) << 23),
+                           __uint_as_float((node.header.scale_innerMask&0xFF00u) << 15),
+                           __uint_as_float((node.header.scale_innerMask&0xFF0000u) << 7));
+#else
+    float3 m = make_float3(__uint_as_float(vshl_clamp_b0(node.header.scale_innerMask, 23)),
+                           __uint_as_float(vshl_clamp_b1(node.header.scale_innerMask, 23)),
+                           __uint_as_float(vshl_clamp_b2(node.header.scale_innerMask, 23)));
+#endif
+
+    float3 anear,afar;
+    if(!Spec::useWatertight()) // Approximate => premultiply tlo and thi with ilwDir; more efficient.
+    {
+        m *= ray_ilwDir;
+        node.header.pos3 *= ray_ilwDir;
+
+        anear = node.header.pos3;
+        afar  = node.header.pos3;
+    }
+    else // do it in intersectTRanges() instead; more precise
+    {
+        // Also, compute nudged bbox corners
+        const float3 relMax = node.header.pos3 + m * 255.f; //!! round up?
+        const float Xerr = __fmaf_ru(WATERTIGHT_NODE_EPS, fabsmax(node.header.pos3, relMax), WATERTIGHT_NODE_EPS_MIN);
+
+        const float3 Xerr3 = make_float3(
+                              __int_as_float(__float_as_int(Xerr) | (__float_as_int(ray_ilwDir.x) & 0x80000000u)), // Pick up sign from ilwDir
+                              __int_as_float(__float_as_int(Xerr) | (__float_as_int(ray_ilwDir.y) & 0x80000000u)),
+                              __int_as_float(__float_as_int(Xerr) | (__float_as_int(ray_ilwDir.z) & 0x80000000u)));
+
+        anear = node.header.pos3 - Xerr3;
+        afar  = node.header.pos3 + Xerr3;
+    }
+
+    innerHits.firstIdx = node.header.firstChildIdx;
+    innerHits.hits = node.header.scale_innerMask;
+    leafHits.firstIdx = node.header.firstRemapIdx;
+    leafHits.hits = 0; // will store the hits that we find in here, then extracted at the end
+
+    #pragma unroll
+    for (int j = 0; j < 2; j++) // loop over 2x4 bboxes
+    {
+        // Select tnear, tfar by ray sign for x and y. These replace 2 vmnmx per box.        
+        const uint32_t prmtKeysX = slct(MAKE_PRMT_KEYS(0, 1, 2, 3), MAKE_PRMT_KEYS(4, 5, 6, 7), __float_as_int(ray_ilwDir.x));
+        const uint32_t nearx = prmt(prmtKeysX, node.lox4[j], node.hix4[j]);
+        const uint32_t farx  = prmt(prmtKeysX, node.hix4[j], node.lox4[j]);
+        const uint32_t prmtKeysY = slct(MAKE_PRMT_KEYS(0, 1, 2, 3), MAKE_PRMT_KEYS(4, 5, 6, 7), __float_as_int(ray_ilwDir.y));
+        const uint32_t neary = prmt(prmtKeysY, node.loy4[j], node.hiy4[j]);
+        const uint32_t fary  = prmt(prmtKeysY, node.hiy4[j], node.loy4[j]);        
+#if (__LWDA_ARCH__ >= 700) // vmnmx is slower on Volta, always do permutation
+        const uint32_t prmtKeysZ = slct(MAKE_PRMT_KEYS(0, 1, 2, 3), MAKE_PRMT_KEYS(4, 5, 6, 7), __float_as_int(ray_ilwDir.z));
+        const uint32_t nearz = prmt(prmtKeysZ, node.loz4[j], node.hiz4[j]);
+        const uint32_t farz  = prmt(prmtKeysZ, node.hiz4[j], node.loz4[j]);
+#else
+        uint32_t nearz, farz;
+        if (!Spec::useWatertight()) // tnear, tfar permute for z is done in intersectTRanges() because it's free there (due to vmnmx)
+        {
+            nearz = node.loz4[j];
+            farz  = node.hiz4[j];
+        }
+        else // do a permute as using min/max (or vmnmx) in intersectTRanges() would lead to issues with special cases (NaNs and Infs)
+        {
+            const uint32_t prmtKeysZ = slct(MAKE_PRMT_KEYS(0, 1, 2, 3), MAKE_PRMT_KEYS(4, 5, 6, 7), __float_as_int(ray_ilwDir.z));
+            nearz = prmt(prmtKeysZ, node.loz4[j], node.hiz4[j]);
+            farz  = prmt(prmtKeysZ, node.hiz4[j], node.loz4[j]);
+        }
+#endif
+
+        // Leaves insert numtris bits to dynamic hitmask; inner nodes insert 1 and empty nodes 0.
+        const uint32_t trimask = ((node.header.meta4[j] >> 5) & 0x07070707); // empty children insert 0 even if hit (shouldn't normally happen).
+        uint32_t innermask = (node.header.meta4[j] & (node.header.meta4[j] << 1)); // all inner nodes have bit 5,4 (16,8). Leaves may have one set bot not both.
+        innermask = vsignExtend4(innermask << 3); // sbyte sign marks inner nodes, extend sign to all bits.
+        node.header.meta4[j] ^= (duplicateByte(duplicatedOctant) & innermask); // compute traversal priority for inner node children only.
+
+        // now extract the quantized bboxes, scale, and translate
+        // then translate values by ray_orig, and swap each xyz-component pair by ray_ilwDir sign
+
+        // i == 0 explicitly done to save some bfe's (separate bfe, i2f when i == 0 (extracting low byte), optimal sass is i2f.u8 r, r.b0; Avoids approx 1-3% perf loss)
+        {
+            float3 tlo, thi;
+            tlo.x = anear.x + m.x * __uint2float_rn(nearx&0xFFu);
+            tlo.y = anear.y + m.y * __uint2float_rn(neary&0xFFu);
+            tlo.z = anear.z + m.z * __uint2float_rn(nearz&0xFFu);
+            thi.x = afar.x  + m.x * __uint2float_rn(farx &0xFFu);
+            thi.y = afar.y  + m.y * __uint2float_rn(fary &0xFFu);
+            thi.z = afar.z  + m.z * __uint2float_rn(farz &0xFFu);
+
+            if (Spec::intersectTRanges(tlo, thi, ray_tmin, ray_tmax, ray_ilwDir))
+                leafHits.hits = insertHit(leafHits.hits, trimask, node.header.meta4[j], 0 / 8);
+        }
+        #pragma unroll
+        for (int i = 8; i < 32; i+=8)
+        {
+            float3 tlo, thi;
+#if (__LWDA_ARCH__ >= 700) // bfe is slower on Volta
+            tlo.x = anear.x + m.x * __uint2float_rn((nearx >> i) & 0xFFu);
+            tlo.y = anear.y + m.y * __uint2float_rn((neary >> i) & 0xFFu);
+            tlo.z = anear.z + m.z * __uint2float_rn((nearz >> i) & 0xFFu);
+            thi.x = afar.x  + m.x * __uint2float_rn((farx  >> i) & 0xFFu);
+            thi.y = afar.y  + m.y * __uint2float_rn((fary  >> i) & 0xFFu);
+            thi.z = afar.z  + m.z * __uint2float_rn((farz  >> i) & 0xFFu);
+#else
+            tlo.x = anear.x + m.x * __uint2float_rn(bfe(nearx, i, 8));
+            tlo.y = anear.y + m.y * __uint2float_rn(bfe(neary, i, 8));
+            tlo.z = anear.z + m.z * __uint2float_rn(bfe(nearz, i, 8));
+            thi.x = afar.x  + m.x * __uint2float_rn(bfe(farx,  i, 8));
+            thi.y = afar.y  + m.y * __uint2float_rn(bfe(fary,  i, 8));
+            thi.z = afar.z  + m.z * __uint2float_rn(bfe(farz,  i, 8));
+#endif
+            if (Spec::intersectTRanges(tlo, thi, ray_tmin, ray_tmax, ray_ilwDir))
+                leafHits.hits = insertHit(leafHits.hits, trimask, node.header.meta4[j], i / 8);
+        }
+    }
+
+    // Extract inner, leaf node hits
+    innerHits.hits = prmt(MAKE_PRMT_KEYS(7, 1, 2, 3), leafHits.hits, innerHits.hits); // Move valid inner node mask (originating from node.scale_innerMask) to low byte
+    leafHits.hits &= 0x00FFFFFF;
+}
+
+//------------------------------------------------------------------------
+
+template <bool USE_EXTERNAL_TRIS, bool USE_WATERTIGHT>
+struct TraceSpecialization
+{
+    struct Ray_data
+    {
+        float           tmin;
+        float           tmax;
+        unsigned int    mask;
+    };
+    struct WatertightTri_data // Additional data for ray/watertight triangle test        
+    {
+        float3          shear;
+        bool            axisx;
+        bool            axisy;
+        bool            axisz;
+    };
+
+    struct Model
+    {
+        const BVH8Node* __restrict nodes;
+        int             modelId;
+    };
+
+    __device__ __forceinline__
+    static bool useWatertight()
+    {
+        return USE_WATERTIGHT;
+    }
+
+    __device__ __forceinline__
+    static void fetchRay(float3& ray_orig, float3& ray_dir, Ray_data& ray, const void* const __restrict rays, const int rayIdx, const int rayFormat)
+    {
+        switch (rayFormat)
+        {
+        default:
+        case RAY_ORIGIN_DIRECTION:
+            loadCSFloat6((float3*)rays + (rayIdx * 2), ray_orig.x, ray_orig.y, ray_orig.z, ray_dir.x, ray_dir.y, ray_dir.z);
+            ray.tmin = 0.0f;
+            ray.tmax = 1.0e34f;
+            ray.mask = 0;
+            break;
+
+        case RAY_ORIGIN_MASK_DIRECTION_TMAX:
+        case RAY_ORIGIN_TMIN_DIRECTION_TMAX:
+            {
+                const float4 o = loadCS((float4*)rays + (rayIdx * 2));
+                const float4 d = loadCS((float4*)rays + (rayIdx * 2 + 1));
+                ray_orig = make_float3( o.x, o.y, o.z );
+                ray_dir  = make_float3( d.x, d.y, d.z );
+                ray.tmin = (rayFormat == RAY_ORIGIN_MASK_DIRECTION_TMAX) ? 0.0f : o.w;
+                ray.tmax = d.w;
+                ray.mask = (rayFormat == RAY_ORIGIN_MASK_DIRECTION_TMAX) ? __float_as_int(o.w) : 0;
+            }
+            break;
+        }        
+    }
+
+    static __device__ __forceinline__
+    void storeHit(void* const __restrict hits, const int rayIdx, const int hitFormat, const int triIndex, const int instanceIndex, const float t, const float2& uv)
+    {
+        switch( hitFormat )
+        {
+        case HIT_T_TRIID_INSTID:
+        {
+            const int offs = rayIdx * 3;
+            storeCS ((float*)hits +  offs     , t);
+            storeCS ((float*)hits + (offs + 1), __int_as_float(triIndex));
+            storeCS ((float*)hits + (offs + 2), __int_as_float(instanceIndex));
+            break;
+        }
+
+        case HIT_T_TRIID_INSTID_U_V:
+        {
+            const int offs = rayIdx * 5;
+            storeCS ((float*)hits +  offs     , t);
+            storeCS ((float*)hits + (offs + 1), __int_as_float(triIndex));
+            storeCS ((float*)hits + (offs + 2), __int_as_float(instanceIndex));
+            storeCS ((float*)hits + (offs + 3), uv.x);
+            storeCS ((float*)hits + (offs + 4), uv.y);
+            break;
+        }
+
+        case HIT_T_TRIID_U_V:
+            storeCS ((float4*)hits + rayIdx, make_float4(t, __int_as_float(triIndex), uv.x, uv.y));
+            break;
+
+        case HIT_T_TRIID:
+            storeCS ((float2*)hits + rayIdx, make_float2(t, __int_as_float(triIndex)));
+            break;
+
+        case HIT_T:
+            storeCS ((float *)hits + rayIdx, t);
+            break;
+
+        case HIT_BITMASK:
+            if (t >= 0.0f) // TODO: try triIndex. A previous comment said this was faster
+            {
+                const uint32_t offset = rayIdx / 32;
+                const uint32_t bit = 1u << (rayIdx % 32);
+                atomicOr((uint32_t*)hits + offset, bit);
+            }
+            break;
+        }
+    }
+
+    __device__ __forceinline__
+    static void clampRayDir(float3& ray_dir)
+    {
+        if (!USE_WATERTIGHT)
+        {
+            // Clamp ray direction to avoid division by zero.
+            const float eps = exp2f(-80.0f);
+            ray_dir.x = bitSelect(ray_dir.x, fmaxf(eps, fabsf(ray_dir.x)), __uint_as_float(0x80000000u));
+            ray_dir.y = bitSelect(ray_dir.y, fmaxf(eps, fabsf(ray_dir.y)), __uint_as_float(0x80000000u));
+            ray_dir.z = bitSelect(ray_dir.z, fmaxf(eps, fabsf(ray_dir.z)), __uint_as_float(0x80000000u));
+        }
+        else
+        {
+            // In the watertight mode, we have to clamp to zero for special cases:
+            // Flush denormalized ray direction components to zero.
+            // The ilwerse of a denom will result in an inf, which makes the node test hard to bound.
+            const float denomThreshold = __int_as_float(0x00800000);
+            if (fabsf(ray_dir.x) < denomThreshold) ray_dir.x = 0.0f;
+            if (fabsf(ray_dir.y) < denomThreshold) ray_dir.y = 0.0f;
+            if (fabsf(ray_dir.z) < denomThreshold) ray_dir.z = 0.0f;
+        }
+    }
+
+    __device__ __forceinline__
+    static void initModel(Model& model, const TracerParamsMesh* const __restrict mesh, const int modelId)
+    {
+        model.nodes = (const BVH8Node*)mesh[modelId].nodes;
+        model.modelId = modelId;
+    }
+
+    __device__ __forceinline__
+    static void initModel(Model& model, const TracerParamsGroup& group)
+    {
+        model.nodes = (const BVH8Node*)group.nodes;
+        //model.modelId = -1;
+    }
+
+    __device__ __forceinline__
+    static bool fetchAndIntersectTriangle(const TracerParamsMesh& mesh, const int triIdx, const int rayFormat, const float3& ray_orig, const Ray_data& ray_data, const WatertightTri_data& ray_tri, float& outT, float2& outUV, int& outID)
+    {
+        float3 v0,v1,v2;
+        int userTriangleID;
+        if (!USE_EXTERNAL_TRIS)
+        {
+#if (__LWDA_ARCH__ >= 350)
+            const BVH8Triangle* const ptr = (const BVH8Triangle*)mesh.triangles + triIdx;
+            float triID;
+            // load the correct parts of the 48bytes directly into the float3s
+            asm ("{\n ld.global.nc.v4.f32 {%0,%1,%2,%3}, [%10];\n ld.global.nc.v4.f32 {%4,%5,%6,_}, [%10+16];\n ld.global.nc.v4.f32 {%7,%8,%9,_}, [%10+32]; \n}" : "=f"(v0.x), "=f"(v1.x), "=f"(v2.x), "=f"(triID), "=f"(v0.y), "=f"(v1.y), "=f"(v2.y), "=f"(v0.z), "=f"(v1.z), "=f"(v2.z) : PTX_PTRARG(ptr));
+            userTriangleID = float_as_int(triID);
+#else
+            const BVH8Triangle tri = loadCachedAlign16(&((const BVH8Triangle*)mesh.triangles)[triIdx]);
+            v0 = make_float3(tri.v0x, tri.v0y, tri.v0z);
+            v1 = make_float3(tri.v1x, tri.v1y, tri.v1z);
+            v2 = make_float3(tri.v2x, tri.v2y, tri.v2z);
+            userTriangleID = tri.userTriangleID;
+#endif
+        }
+        else
+        {
+            // Fetch triangle index from the remap array.
+
+            userTriangleID = loadCachedAlign4(&mesh.remap[triIdx]);
+
+            // Fetch vertex indices and mask.
+
+            int3 vidx;
+            if (!mesh.indices)
+            {
+                const int base = userTriangleID * 3;
+                vidx = make_int3(base + 0, base + 1, base + 2);
+            }
+            else
+            {
+                const char* const __restrict indexPtr = (const char*)mesh.indices + (size_t)userTriangleID * mesh.indexStride;
+                vidx = loadCachedAlign4((const int3*)indexPtr);
+                if((rayFormat == RAY_ORIGIN_MASK_DIRECTION_TMAX) && ((loadCachedAlign4((const int*)indexPtr + 3) & ray_data.mask) != 0))
+                    return false;
+            }
+
+            // Fetch vertex positions.
+
+            v0 = loadCachedAlign4((const float3*)((const char*)mesh.vertices + (size_t)vidx.x * mesh.vertexStride));
+            v1 = loadCachedAlign4((const float3*)((const char*)mesh.vertices + (size_t)vidx.y * mesh.vertexStride));
+            v2 = loadCachedAlign4((const float3*)((const char*)mesh.vertices + (size_t)vidx.z * mesh.vertexStride));
+        }
+
+        const bool hit = WatertightOptimized::intersectTriangle<USE_WATERTIGHT>(ray_orig, ray_tri.axisx,ray_tri.axisy,ray_tri.axisz, ray_tri.shear,
+                                                                                v0,v1,v2, ray_data.tmin, ray_data.tmax, outT, outUV);
+
+        if(hit)
+            outID = userTriangleID;
+
+        return hit;
+    }
+
+    // Recompute ilwDir in instanced traversal to save registers.
+    // Precompute it in flat traversal, as ray.dir is then not needed anymore.
+    __device__ __forceinline__
+    static float3 getRayDirIlwerse(const float3& ray_dir)
+    {
+        return make_float3(WatertightOptimized::frcp(ray_dir.x), WatertightOptimized::frcp(ray_dir.y), WatertightOptimized::frcp(ray_dir.z)); // precision good enough in LWCA (does not handle denormals though)
+    }
+
+    __device__ __forceinline__
+    static bool intersectTRanges(float3& tlo, float3& thi, const float ray_tmin, const float ray_tmax, const float3& ilwDir)
+    {
+        // Here, tlo and thi correspond to the per-slab t-ranges computed in intersectNode():
+        // xrange = [tlo.x, thi.x]
+        // yrange = [tlo.y, thi.y]
+        // zrange = [min(tlo.z,thi.z), max(tlo.z,thi.z)] except on volta and later OR for watertight, this is [tlo.z, thi.z]
+
+        if (!USE_WATERTIGHT)
+        {
+#if (__LWDA_ARCH__ >= 700) // vmnmx is slower on Volta
+            const float tmin = fmaxf(fmaxf(tlo.x, ray_tmin), fmaxf(tlo.y, tlo.z));
+            const float tmax = fminf(fminf(thi.x, ray_tmax), fminf(thi.y, thi.z));
+#else
+            const float tmin = fmax_fmax(fmin_fmax(tlo.z, thi.z, ray_tmin), tlo.x, tlo.y);
+            const float tmax = fmin_fmin(fmax_fmin(tlo.z, thi.z, ray_tmax), thi.x, thi.y);
+#endif
+            return (tmin <= tmax);
+        }
+        else
+        {
+            // Multiply tlo and thi with ilwDir, since we did not pre-multiply them in intersectNode().
+
+            tlo.x = __fmul_rd(tlo.x, ilwDir.x);
+            tlo.y = __fmul_rd(tlo.y, ilwDir.y);
+            tlo.z = __fmul_rd(tlo.z, ilwDir.z);
+            thi.x = __fmul_ru(thi.x, ilwDir.x);
+            thi.y = __fmul_ru(thi.y, ilwDir.y);
+            thi.z = __fmul_ru(thi.z, ilwDir.z);
+
+            // tlo, thi may contain NaNs if (bbox.lo - ray.orig) == 0 and ray.ilwDir == inf, for some axis.
+            // LWCA float min, max are IEEE 754 compliant and suppress NaNs if either one of the arguments is not NaN, see
+            // http://docs.lwpu.com/lwca/parallel-thread-exelwtion/index.html#floating-point-instructions-min
+            // We assume that the ray span [tmin, tmax] doesn't have NaNs so there are non NaNs left in the final comparison.
+            // Effectively dimensions with zero direction are ignored and dimensionality of the intersection test is reduced. 
+            // Note that integer VMNMX should not be used as they can propagate NaNs.
+            // Also note that the incoming per-slab t-ranges MUST be computed using permutation/selection, and not min/max
+            // operations, as otherwise not all special cases will be handled correctly
+            // (for example if two ray dir components 0 plus ray origin component(s) similar to bbox)
+
+            // Previously NaNs were manually replaced here with INFs, similarly to
+            // Berger-Perrin, 2004, SSE ray/box intersection test (flipcode).
+            // This is not necessary, the Berger-Perrin method is only needed with SSE where float min, max behave differently and
+            // return NaN if second argument is NaN.
+
+            const float tmin = fmaxf(fmaxf(tlo.x, ray_tmin), fmaxf(tlo.y, tlo.z));
+            const float tmax = fminf(fminf(thi.x, ray_tmax), fminf(thi.y, thi.z));
+
+            //!! not needed anymore, due to blowup of node
+            // Robust BVH Ray Traversal, Thiago Ize, JCGT 2013
+            // 1+3*ulp, suggested by cwaechter (maybe due to rcp.approximate being triggered for ilwDir? -> check)
+            //tmax *= 1.0000003576278687f;
+
+            return (tmin <= tmax);
+        }
+    }
+};
+
+//------------------------------------------------------------------------
+
+template <class Spec, bool ANYHIT, int NUM_BLOCKS>
+static __global__ __launch_bounds__(BVH8_WARPS * 32, NUM_BLOCKS)
+void traceFlat(const TracerBVH8LwdaParams p)
+{
+    // Live state during traversal, stored in registers.
+    float3  ray_orig;
+    typename Spec::Ray_data ray_data;
+    // Precomputed ray data.
+    typename Spec::WatertightTri_data ray_tri;
+    float3  ray_ilw_dir;
+
+    int     rayIdx;                         // Index of current ray
+    int     hitTriID;                       // Triangle index of the closest intersection, -1 if none.
+    float2  hitUV = make_float2(0.0f,0.0f); //!! remove ??
+
+    char    stack[(STACK_SIZE-BVH8_SSTACK_SIZE)*sizeof(StackEntry)];
+    StackEntry nodeGroup;
+    nodeGroup.firstIdx = -1;
+    int     sstackPtr;
+    int     sstackEnd;
+
+    // Persistent threads: fetch and process rays in a loop.
+    do
+    {
+        if (nodeGroup.firstIdx == -1)
+        {
+            // Fetch new rays from the global pool
+#if (__LWDA_ARCH__ >= 700)
+            cooperative_groups::coalesced_group g = cooperative_groups::coalesced_threads();
+            const unsigned int thread_rank = g.thread_rank();
+
+            // The first thread updates the shared counter in bulk
+            unsigned int prev;
+            if (thread_rank == 0)
+                prev = atomicAdd(p.warpCounter, g.size());
+
+            // The first thread shares the previous counter value so that each thread may compute its exclusive prefix
+            rayIdx = thread_rank + g.shfl(prev, 0);
+#else
+            const uint32_t maskTerminated = __ballot(true);
+            const int      idxTerminated = __popc(maskTerminated & getLaneMaskLt()); // index among terminated lanes
+
+            int rayBase;
+            const int leader = findLeadingOne(maskTerminated);
+            if (threadIdx.x == leader) // 1 thread fetches for the rest in the warp
+                rayBase = atomicAdd(p.warpCounter, __popc(maskTerminated));
+            rayBase = __shfl(rayBase, leader);
+            rayIdx = rayBase + idxTerminated;
+#endif
+            if (rayIdx >= p.numRays)
+                break;
+
+            float3 ray_dir;
+            Spec::fetchRay(ray_orig, ray_dir,ray_data, p.rays, rayIdx, p.rayFormat);
+            Spec::clampRayDir(ray_dir);
+            WatertightOptimized::setupRay(ray_dir, ray_tri.axisx,ray_tri.axisy,ray_tri.axisz, ray_tri.shear);
+            ray_ilw_dir = Spec::getRayDirIlwerse(ray_dir);
+
+            hitTriID = -1;          // No triangle intersected so far.
+            initStack(sstackPtr, sstackEnd, BVH8_SSTACK_SIZE);
+            nodeGroup.hits = 1u << 24;
+            nodeGroup.firstIdx = 0; // root
+        }
+        int lostMainloopIterations = 0;
+
+
+        // Traversal loop.
+        while (true)
+        {
+            StackEntry triangleGroup;
+
+            if (nodeGroup.hits > 0x00FFFFFF) // if inner node hits
+            {
+                const int bitIdx = findLeadingOne(nodeGroup.hits);
+#if (__LWDA_ARCH__ >= 700) // bfi slower on Volta
+                nodeGroup.hits ^= 1u << bitIdx;
+#else
+                nodeGroup.hits = bfi(0, nodeGroup.hits, bitIdx, 1);
+#endif
+                // Find index of the child slot by reversing traversal priority computation and removing bias of 24.
+                const uint32_t duplicatedOctant = initOctantData(ray_ilw_dir);
+                const int slotIdx = (bitIdx ^ duplicatedOctant) & 0x7;
+
+                // Compute number of internal siblings nodes in memory before this node using imask in low byte of nodeGroup.hits.
+                const int relativeIdx = __popc(shf_r_clamp(0, nodeGroup.hits, slotIdx));
+
+                // Issue global loads as early as possible
+                BVH8Node node = loadCachedAlign16(&((const BVH8Node*)p.mesh.nodes)[nodeGroup.firstIdx + relativeIdx]);
+
+                // If nodeGroup still contains hits to test, push it to stack.
+                if (nodeGroup.hits > 0x00FFFFFF)
+                    push(nodeGroup, sstackPtr, sstackEnd, stack, BVH8_SSTACK_SIZE);
+
+                intersectNode<Spec>(node, ray_orig, ray_data.tmin, ray_data.tmax, ray_ilw_dir, duplicatedOctant, nodeGroup, triangleGroup);
+            }
+            else
+            {
+                triangleGroup = nodeGroup;
+                nodeGroup.hits = 0;
+            }
+
+#if (__LWDA_ARCH__ >= 700)
+            const int ntrav = cooperative_groups::coalesced_threads().size() >> 2;
+#else
+            const int ntrav = __popc(__ballot(true)) >> 2;
+#endif
+            while (triangleGroup.hits)
+            {
+                // Postpone triangle intersection if less than 25% of active threads would execute it.
+#if (__LWDA_ARCH__ >= 700)
+                if (cooperative_groups::coalesced_threads().size() < ntrav)
+#else
+                if (__popc(__ballot(true)) < ntrav)
+#endif
+                {
+                    push(triangleGroup, sstackPtr, sstackEnd, stack, BVH8_SSTACK_SIZE);
+                    break;
+                }
+
+                // Select a Triangle
+                const int idx = findLeadingOne(triangleGroup.hits);
+                // Clear it from list
+#if (__LWDA_ARCH__ >= 700) // bfi slower on Volta
+                triangleGroup.hits ^= 1u << idx;
+#else
+                triangleGroup.hits = bfi(0, triangleGroup.hits, idx, 1);
+#endif
+
+                if (Spec::fetchAndIntersectTriangle(p.mesh, triangleGroup.firstIdx + idx, p.rayFormat, ray_orig, ray_data, ray_tri, ray_data.tmax, hitUV, hitTriID))
+                {
+                    if (ANYHIT)
+                    {
+                        nodeGroup.firstIdx = -1; // terminated = true
+                        nodeGroup.hits = 0;
+                        triangleGroup.hits = 0; // Break triangle loop
+                        sstackPtr = sstackEnd - BVH8_SSTACK_SIZE * /*(int)*/sizeof(StackEntry);
+                        //break; // putting a break here appears to confuse the compiler (LWCA 8.5)
+                    }
+                }
+            }
+
+            // pop
+            if (nodeGroup.hits <= 0x00FFFFFF)
+            {
+                if (sstackPtr == sstackEnd - BVH8_SSTACK_SIZE * /*(int)*/sizeof(StackEntry))
+                {
+                    nodeGroup.firstIdx = -1;
+                    break;
+                }
+                nodeGroup = pop(sstackPtr, sstackEnd, stack, BVH8_SSTACK_SIZE);
+            }
+
+            // Add approx. number of threads that are going to be inactive next iteration
+            // By adding less than then exact inactive thread count (32 - __popc(__ballot(true))),
+            // lostIterations counter gets negative when thread divergence is low (rays are coherent),
+            // --> ray fetching code gets called less often.
+            // --> limit for lost iterations can be lower
+            // --> inactive threads fetch new work often when divergence is high, and rarely when divergence is low.
+#if (__LWDA_ARCH__ >= 700)
+            lostMainloopIterations = lostMainloopIterations + 32 - cooperative_groups::coalesced_threads().size() - BVH8_DYNAMIC_FETCH_POSTPONE_ON_COHERENT;
+#else
+            lostMainloopIterations = lostMainloopIterations + 32 - __popc(__ballot(true)) - BVH8_DYNAMIC_FETCH_POSTPONE_ON_COHERENT;
+#endif
+            if (lostMainloopIterations > BVH8_DYNAMIC_FETCH_LOST_WORK_THRESHOLD)
+                break;
+
+        }// traversal
+
+
+        //
+        // Terminated => store result.
+        //
+        if (nodeGroup.firstIdx == -1)
+        {
+            int hitInstIdx = 0;
+            if (hitTriID == -1)
+            {
+                ray_data.tmax = -1.0f;
+                hitInstIdx = -1;
+            }
+            Spec::storeHit(p.hits, rayIdx, p.hitFormat, hitTriID, hitInstIdx, ray_data.tmax, hitUV);
+        }
+    } while (true);
+}
+
+//------------------------------------------------------------------------
+
+template <class Spec, bool ANYHIT, int NUM_BLOCKS>
+static __global__ __launch_bounds__(BVH8_INST_WARPS * 32, NUM_BLOCKS)
+void traceInst(const TracerBVH8LwdaParams p)
+{
+    // Live state during traversal, stored in registers.
+    float3  ray_orig;
+    float3  ray_dir;
+    typename Spec::Ray_data ray_data;
+    // In instanced mode we do not precompute any additional ray/tri data to save on registers
+
+    int     rayIdx;                         // Index of current ray
+    int     hitTriID;                       // Triangle index of the closest intersection, -1 if none
+    int     hitInstIdx;                     // Instance index of the closest intersection, -1 if none
+    int     instIdx;                        // Instance index
+    float2  hitUV = make_float2(0.0f,0.0f); //!! remove ??
+
+    float3  worldRayOrig, worldRayDir; // cached ray in worldspace coordinates
+    typename Spec::Model model;
+
+    char    stack[(STACK_SIZE-BVH8_INST_SSTACK_SIZE)*sizeof(StackEntry)];
+    StackEntry nodeGroup;
+    nodeGroup.firstIdx = -1;
+    int     sstackPtr;
+    int     sstackEnd;
+
+    int bottomLevelEntryPoint;
+
+    // Persistent threads: fetch and process rays in a loop.
+    do
+    {
+        if (nodeGroup.firstIdx == -1)
+        {
+            // Fetch new rays from the global pool
+#if (__LWDA_ARCH__ >= 700)
+            cooperative_groups::coalesced_group g = cooperative_groups::coalesced_threads();
+            const unsigned int thread_rank = g.thread_rank();
+
+            // The first thread updates the shared counter in bulk
+            unsigned int prev;
+            if (thread_rank == 0)
+                prev = atomicAdd(p.warpCounter, g.size());
+
+            // The first thread shares the previous counter value so that each thread may compute its exclusive prefix
+            rayIdx = thread_rank + g.shfl(prev, 0);
+#else
+            const uint32_t maskTerminated = __ballot(true);
+            const int      idxTerminated = __popc(maskTerminated & getLaneMaskLt()); // index among terminated lanes
+
+            int rayBase;
+            const int leader = findLeadingOne(maskTerminated);
+            if (threadIdx.x == leader)// 1 thread fetches for the rest in the warp
+                rayBase = atomicAdd(p.warpCounter, __popc(maskTerminated));
+            rayBase = __shfl(rayBase, leader);
+            rayIdx = rayBase + idxTerminated;
+#endif
+            if (rayIdx >= p.numRays)
+                break;
+
+            Spec::fetchRay(ray_orig, ray_dir, ray_data, p.rays, rayIdx, p.rayFormat);
+            Spec::clampRayDir(ray_dir); // clamp before copy to worldRayDir is less precise, but this is done in non-watertight mode only, so we do not really care
+            worldRayOrig = ray_orig;
+            worldRayDir = ray_dir;
+
+            hitTriID = -1;          // No triangle intersected so far.
+            hitInstIdx = -1;
+            instIdx = -1;
+            Spec::initModel(model, p.group);
+
+            initStack(sstackPtr, sstackEnd, BVH8_INST_SSTACK_SIZE);
+            nodeGroup.hits = 1u << 24;
+            nodeGroup.firstIdx = 0; // root
+            bottomLevelEntryPoint = 0;
+        }
+        int lostMainloopIterations = 0;
+
+        // Traversal loop.
+        while (true)
+        {
+            StackEntry primitiveGroup;
+
+            if (nodeGroup.hits > 0x00FFFFFF) // if inner node hits
+            {
+                const int bitIdx = findLeadingOne(nodeGroup.hits);
+#if (__LWDA_ARCH__ >= 700) // bfi slower on Volta
+                nodeGroup.hits ^= 1u << bitIdx;
+#else
+                nodeGroup.hits = bfi(0, nodeGroup.hits, bitIdx, 1);
+#endif
+                // Find index of the child slot by reversing traversal priority computation and removing bias of 24.
+                const uint32_t duplicatedOctant = initOctantData(ray_dir);
+                const int slotIdx = (bitIdx ^ duplicatedOctant) & 0x7;
+
+                // Compute number of internal siblings nodes in memory before this node using imask in low byte of nodeGroup.hits.
+                const int relativeIdx = __popc(shf_r_clamp(0, nodeGroup.hits, slotIdx));
+
+                // Issue global loads as early as possible
+                BVH8Node node = loadCachedAlign16(&model.nodes[nodeGroup.firstIdx + relativeIdx]);
+                const float3 ray_ilw_dir = Spec::getRayDirIlwerse(ray_dir);
+
+                // If nodeGroup still contains hits to test, push it to stack.
+                if (nodeGroup.hits > 0x00FFFFFF)
+                    push(nodeGroup, sstackPtr, sstackEnd, stack, BVH8_INST_SSTACK_SIZE);
+
+                intersectNode<Spec>(node, ray_orig, ray_data.tmin, ray_data.tmax, ray_ilw_dir, duplicatedOctant, nodeGroup, primitiveGroup);
+            }
+            else
+            {
+                primitiveGroup = nodeGroup;
+                nodeGroup.hits = 0;
+            }
+
+            if (primitiveGroup.hits)
+            {
+#if BVH8_PRIMITIVES_TO_TEST_AT_ONCE > 1
+                if (instIdx < 0)
+                {
+#endif
+                    // Select a leaf
+                    const int idx = findLeadingOne(primitiveGroup.hits);
+                    // Clear it from list
+#if (__LWDA_ARCH__ >= 700) // bfi slower on Volta
+                    primitiveGroup.hits ^= 1u << idx;
+#else
+                    primitiveGroup.hits = bfi(0, primitiveGroup.hits, idx, 1);
+#endif
+
+#if BVH8_PRIMITIVES_TO_TEST_AT_ONCE <= 1
+                if (instIdx < 0)
+                {
+#endif
+                    const int leafIdx = primitiveGroup.firstIdx + idx;
+
+                    instIdx = p.group.remap[leafIdx];
+                    const int modelId = p.group.modelId[instIdx]; // nodes, leaves ptrs could be stored together with xform
+
+                    const float4* const __restrict ilwTransform = getTransformPtr(p.group.ilwMatrices, instIdx, p.group.matrixStride);
+                    transformRay(worldRayOrig, worldRayDir, ilwTransform, ray_orig, ray_dir); // not needed (could just use ray_orig and ray_dir instead of the world space data), but actually reduces temporary register pressure it seems (if worldRayXXX is already in regs)
+
+                    Spec::clampRayDir(ray_dir);
+
+                    Spec::initModel(model, p.meshes, modelId);
+
+                    // push old nodeGroup
+                    if (nodeGroup.hits > 0x00FFFFFF)
+                        push(nodeGroup, sstackPtr, sstackEnd, stack, BVH8_INST_SSTACK_SIZE);
+
+#if BVH8_PRIMITIVES_TO_TEST_AT_ONCE > 1
+                    // push remaining instances
+                    if (primitiveGroup.hits)
+                        push(primitiveGroup, sstackPtr, sstackEnd, stack, BVH8_INST_SSTACK_SIZE);
+#endif
+                    // set an end mark for model traversal
+                    bottomLevelEntryPoint = sstackPtr;
+#if BVH8_PRIMITIVES_TO_TEST_AT_ONCE <= 1
+                    // in this case use the sstackPtr that is optionally pushed below/after tri-intersect (e.g. increased by one there)
+                    if(primitiveGroup.hits)
+                        bottomLevelEntryPoint += (int)sizeof(StackEntry);
+#endif
+                    // make nodeGroup to be new model's root
+                    nodeGroup.hits = 1u << 24;
+                    nodeGroup.firstIdx = 0; // root
+                }
+                else
+                {
+                    // precompute watertight triangle ray shear and main axis
+                    typename Spec::WatertightTri_data ray_tri;
+                    WatertightOptimized::setupRay(ray_dir, ray_tri.axisx,ray_tri.axisy,ray_tri.axisz, ray_tri.shear);
+
+#if BVH8_PRIMITIVES_TO_TEST_AT_ONCE > 1
+                    int itest = 0;
+                    while (primitiveGroup.hits)
+#endif
+                    {
+#if BVH8_PRIMITIVES_TO_TEST_AT_ONCE > 1
+                        if (itest >= BVH8_PRIMITIVES_TO_TEST_AT_ONCE)
+                        {
+                            // never leave tris to be tested to nodeGroup, always push to stack if any remain.
+                            push(primitiveGroup, sstackPtr, sstackEnd, stack, BVH8_INST_SSTACK_SIZE);
+                            break;
+                        }
+
+                        itest++;
+
+                        // Select a leaf
+                        const int idx = findLeadingOne(primitiveGroup.hits);
+                        // Clear it from list
+#if (__LWDA_ARCH__ >= 700) // bfi slower on Volta
+                        primitiveGroup.hits ^= 1u << idx;
+#else
+                        primitiveGroup.hits = bfi(0, primitiveGroup.hits, idx, 1);
+#endif
+#endif
+                        if (Spec::fetchAndIntersectTriangle(p.meshes[model.modelId], primitiveGroup.firstIdx + idx, p.rayFormat, ray_orig, ray_data, ray_tri, ray_data.tmax, hitUV, hitTriID))
+                        {
+                            hitInstIdx = instIdx;
+
+                            if (ANYHIT)
+                            {
+                                nodeGroup.firstIdx = -1; // terminated = true
+                                nodeGroup.hits = 0;
+                                primitiveGroup.hits = 0; // break triangle loop
+                                sstackPtr = sstackEnd - BVH8_INST_SSTACK_SIZE * /*(int)*/sizeof(StackEntry);
+                                //break; // putting a break here appears to confuse the compiler (LWCA 8.5)
+                            }
+                        }
+                    }
+                }
+
+#if BVH8_PRIMITIVES_TO_TEST_AT_ONCE <= 1
+                if (primitiveGroup.hits)
+                    push(primitiveGroup, sstackPtr, sstackEnd, stack, BVH8_INST_SSTACK_SIZE);
+#endif
+            }
+
+            // pop
+            if (nodeGroup.hits <= 0x00FFFFFF)
+            {
+                if (sstackPtr == sstackEnd - BVH8_INST_SSTACK_SIZE * /*(int)*/sizeof(StackEntry))
+                {
+                    nodeGroup.firstIdx = -1;
+                    break;
+                }
+
+                // Return to top-level
+                if (sstackPtr == bottomLevelEntryPoint)
+                {
+                    instIdx = -1; // switch to toplevel
+                    Spec::initModel(model, p.group); // no need to set tris
+
+                    // Copy the ray used in top-level traversal before, no need to clamp direction again.
+                    ray_orig = worldRayOrig;
+                    ray_dir = worldRayDir;
+                }
+
+                nodeGroup = pop(sstackPtr, sstackEnd, stack, BVH8_INST_SSTACK_SIZE);
+            }
+
+
+            // Add approx. number of threads that are going to be inactive next iteration
+            // By adding less than then exact inactive thread count (32 - __popc(__ballot(true))),
+            // lostIterations counter gets negative when thread divergence is low (rays are coherent),
+            // --> ray fetching code gets called less often.
+            // --> limit for lost iterations can be lower
+            // --> inactive threads fetch new work often when divergence is high, and rarely when divergence is low.
+#if (__LWDA_ARCH__ >= 700)
+            lostMainloopIterations = lostMainloopIterations + 32 - cooperative_groups::coalesced_threads().size() - BVH8_DYNAMIC_FETCH_POSTPONE_ON_COHERENT;
+#else
+            lostMainloopIterations = lostMainloopIterations + 32 - __popc(__ballot(true)) - BVH8_DYNAMIC_FETCH_POSTPONE_ON_COHERENT;
+#endif
+            if (lostMainloopIterations > BVH8_DYNAMIC_FETCH_LOST_WORK_THRESHOLD)
+                break;
+
+        }// traversal
+
+
+        //
+        // Terminated => store result.
+        //
+        if (nodeGroup.firstIdx == -1)
+        {
+            if (hitTriID == -1)
+                ray_data.tmax = -1.0f;
+            Spec::storeHit(p.hits, rayIdx, p.hitFormat, hitTriID, hitInstIdx, ray_data.tmax, hitUV);
+        }
+    } while (true);
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchBVH8Trace52(int smArch, int numSMs, lwdaStream_t stream, const TracerBVH8LwdaParams& p, const TracerBVH8LwdaConfig& c)
+{
+    void(*kernel)(TracerBVH8LwdaParams p) = NULL;
+    int numWarps = 0;
+    int numBlocks = 0;
+    int sstackSizeBytes; // Amount of shared memory dynamically allocated for traversal stacks.
+
+    // in case of future tweakings: note that smArch 52 and smArch 61 are always a bit special due to their differences in SMEM, so double check these ones
+    if (!c.useInstancing)
+    {
+        numWarps = BVH8_WARPS;                                                                       // EXT    WATER   ANY    BLK
+        if (!c.useExternalTris && !c.anyhit &&         1       ) kernel = traceFlat<TraceSpecialization<false, false>, false, 8>, numBlocks = 8;
+        if (!c.useExternalTris &&  c.anyhit &&         1       ) kernel = traceFlat<TraceSpecialization<false, false>, true,  8>, numBlocks = 8;
+        if ( c.useExternalTris && !c.anyhit && !c.useWatertight) kernel = traceFlat<TraceSpecialization<true,  false>, false, 8>, numBlocks = 8;
+        if ( c.useExternalTris &&  c.anyhit && !c.useWatertight) kernel = traceFlat<TraceSpecialization<true,  false>, true,  8>, numBlocks = 8;
+        if ( c.useExternalTris && !c.anyhit &&  c.useWatertight) kernel = traceFlat<TraceSpecialization<true,  true >, false, 8>, numBlocks = 8;
+        if ( c.useExternalTris &&  c.anyhit &&  c.useWatertight) kernel = traceFlat<TraceSpecialization<true,  true >, true,  8>, numBlocks = 8;
+    }
+    else
+    {
+        numWarps = BVH8_INST_WARPS;                                                                  // EXT    WATER   ANY    BLK
+        if (!c.useExternalTris && !c.anyhit &&         1       ) kernel = traceInst<TraceSpecialization<false, false>, false, 8>, numBlocks = 8;
+        if (!c.useExternalTris &&  c.anyhit &&         1       ) kernel = traceInst<TraceSpecialization<false, false>, true,  8>, numBlocks = 8;
+        if ( c.useExternalTris && !c.anyhit && !c.useWatertight) kernel = traceInst<TraceSpecialization<true,  false>, false, 8>, numBlocks = 8;
+        if ( c.useExternalTris &&  c.anyhit && !c.useWatertight) kernel = traceInst<TraceSpecialization<true,  false>, true,  8>, numBlocks = 8;
+        if ( c.useExternalTris && !c.anyhit &&  c.useWatertight) kernel = traceInst<TraceSpecialization<true,  true >, false, 8>, numBlocks = 8;
+        if ( c.useExternalTris &&  c.anyhit &&  c.useWatertight) kernel = traceInst<TraceSpecialization<true,  true >, true,  8>, numBlocks = 8;
+    }
+
+    if (!kernel) return false;
+
+    // shared mem, replicated numbers from top of file :/
+    int tmp  = ((smArch == 60) || (smArch == 50)) ? 8 : (smArch < 50) ? 0 : (smArch < 70) ? 12 : 8;
+    int tmp2 = ((smArch == 60) || (smArch == 50)) ? 8 : (smArch < 50) ? 0 : (smArch < 70) ? 12 : 8;
+    sstackSizeBytes = (c.useInstancing ? tmp2 : tmp) * 32 * numWarps * sizeof(StackEntry);
+
+    if (lwdaFuncSetCacheConfig(kernel, smArch >= 70 ? lwdaFuncCachePreferNone : lwdaFuncCachePreferL1) != lwdaSuccess) return false; // Prefer L1 on Kepler; no effect on Maxwell/Pascal. On Volta, let driver go for maximum oclwpancy (needs to be revisited as soon as more fine grained SMEM configs available in LWCA API).
+    if (lwdaFuncSetSharedMemConfig(kernel, lwdaSharedMemBankSizeEightByte) != lwdaSuccess) return false;    // To match sizeof(StackEntry); no noticeable effect on perf.
+
+    dim3 blockDim(32, numWarps);
+    dim3 gridDim(numSMs * numBlocks);
+    kernel << <gridDim, blockDim, sstackSizeBytes, stream >> >(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

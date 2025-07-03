@@ -1,0 +1,57 @@
+#include <optix_world.h>
+
+#include <lwca.h>
+
+#include <stdio.h>
+
+using namespace optix;
+
+
+rtDeclareVariable( float, value, , );
+rtDeclareVariable( uint1, launch_index, rtLaunchIndex, );
+
+RT_PROGRAM void rg()
+{
+    printf( "[%u]: Testing from LWCA version %d.%d.%d\n", launch_index.x, LWDA_VERSION / 1000,
+            ( LWDA_VERSION % 1000 ) / 10, LWDA_VERSION % 10 );
+    printf( "[%u]: \tvalue = %f\n", launch_index.x, value );
+}
+
+// Structured Initializer Tests, to validate the unpacking performed by the PTX Frontend
+
+struct TS0
+{
+    const char* s;
+};
+
+struct TS1
+{
+    uint64_t    u;
+    const char* s;
+};
+
+struct TS2
+{
+    const char* s;
+    uint64_t    u;
+};
+
+struct TS3
+{
+    float       f;
+    int32_t     i;
+    const char* s;
+};
+
+__device__ TS0 ts0 = {"test_0"};
+__device__ TS1 ts1 = {1, "test_1"};
+__device__ TS2 ts2 = {"test_2", 2};
+__device__ TS3 ts3 = {0.5f, 3, "test_3"};
+
+RT_PROGRAM void struct_test()
+{
+    printf( "[%u]: Testing from LWCA version %d.%d.%d\n", launch_index.x, LWDA_VERSION / 1000,
+            ( LWDA_VERSION % 1000 ) / 10, LWDA_VERSION % 10 );
+    printf( "[%u]: \tts0: %s\tts1: %lu, %s\tts2: %s, %lu\tts3: %.1f, %d, %s\n", launch_index.x, ts0.s, ts1.u, ts1.s,
+            ts2.s, ts2.u, ts3.f, ts3.i, ts3.s );
+}

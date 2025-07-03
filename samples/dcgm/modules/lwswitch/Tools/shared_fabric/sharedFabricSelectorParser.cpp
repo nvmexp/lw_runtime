@@ -1,0 +1,276 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "DcgmStringTokenize.h"
+#include "sharedFabricSelectorParser.h"
+
+/*****************************************************************************
+ Method to Initialize the command parser
+ *****************************************************************************/
+SharedFabricCmdParser_t * sharedFabricCmdParserInit(int argc, char **argv,
+        struct all_args * pAllArgs,
+        int numberElementsInAllArgs,
+        void (*pfCmdUsage)(void *),
+        void (*pfCmdHelp)(void *))
+{
+    SharedFabricCmdParser_t *pCmdParser;
+    int cmdLineResult = 0;
+
+    if ((NULL == pAllArgs) || (NULL == pfCmdUsage) || (NULL == pfCmdHelp)) {
+        return NULL;
+    }
+
+    pCmdParser = (SharedFabricCmdParser_t *)malloc(sizeof (*pCmdParser));
+    if (NULL == pCmdParser) {
+        return NULL;
+    }
+
+    /* memset to 0 */
+    memset(pCmdParser, 0, sizeof (*pCmdParser));
+
+    /* Default to connect to localhost */
+    strncpy(pCmdParser->mHostname, "127.0.0.1", sizeof(pCmdParser->mHostname)-1);
+
+    /* Store the callbacks */
+    pCmdParser->pfCmdUsage = pfCmdUsage;
+    pCmdParser->pfCmdHelp = pfCmdHelp;
+
+    cmdLineResult = cmdline_init(argc, argv, pAllArgs, numberElementsInAllArgs, &pCmdParser->pCmdLine);
+    if (0 != cmdLineResult) {
+        free(pCmdParser);
+        pCmdParser = NULL;
+        return NULL;
+    }
+
+    return pCmdParser;
+}
+
+/*****************************************************************************
+ Method to destroy Command Line Parser
+ *****************************************************************************/
+void sharedFabricCmdParserDestroy(SharedFabricCmdParser_t *pCmdParser)
+{
+    if (NULL != pCmdParser) 
+    {
+        if (NULL != pCmdParser->pCmdLine) 
+        {
+            cmdline_destroy(pCmdParser->pCmdLine);
+        }
+
+        free(pCmdParser);
+    }
+}
+
+/*****************************************************************************
+ Internal Method to verify basic correctness for command line
+ *****************************************************************************/
+static int sharedFabricCmdVerifyOptions(SharedFabricCmdParser_t *pCmdParser)
+{
+    int cmdLineResult;
+    char * firstUnknownOptionName = NULL, *firstArgWithMissingOption = NULL;
+
+    cmdLineResult = cmdline_checkOptions(pCmdParser->pCmdLine,
+            (const char **) &firstUnknownOptionName,
+            (const char **) &firstArgWithMissingOption);
+
+    switch (cmdLineResult) {
+        case CMDLINE_CHECK_OPTIONS_UNKNOWN_OPTION_FOUND:
+            printf("Option \"%s\" is not recognized.\n", firstUnknownOptionName);
+            return DCGM_ST_GENERIC_ERROR;
+
+        case CMDLINE_CHECK_OPTIONS_MISSING_REQUIRED_VALUE:
+            printf( "Option \"%s\" is missing its value.\n", firstArgWithMissingOption);
+            return DCGM_ST_GENERIC_ERROR;
+
+        case CMDLINE_CHECK_OPTIONS_SUCCESS:
+            break;
+    }
+
+    return DCGM_ST_OK;
+}
+
+dcgmReturn_t parsePartitionIdlistString(std::string &partitionListStr,
+                                        SharedFabricCmdParser_t *pCmdParser)
+{
+    std::vector<std::string>tokens;
+    std::vector<std::string>::iterator tokenIt;
+    int haveSeen[DCGM_MAX_FABRIC_PARTITIONS] = {0};
+
+    tokenizeString(partitionListStr, ",", tokens);
+
+    if(!tokens.size())
+    {
+        printf("No values provided for --set-activated-list\n");
+        return DCGM_ST_BADPARAM;
+    }
+
+    pCmdParser->mNumPartitions = 0;
+
+    for (tokenIt = tokens.begin(); tokenIt != tokens.end(); ++tokenIt)
+    {
+        unsigned partitionId = atoi((*tokenIt).c_str());
+        if(partitionId < 0 || partitionId >= DCGM_MAX_FABRIC_PARTITIONS)
+        {
+            printf("Invalid partition Id %u was given.\n", partitionId);
+            return DCGM_ST_BADPARAM;
+        }
+
+        if(haveSeen[partitionId])
+            continue; /* Just ignore it and move on */
+        haveSeen[partitionId] = 1;
+
+        pCmdParser->mPartitionIds[pCmdParser->mNumPartitions] = partitionId;
+        pCmdParser->mNumPartitions++;
+    }
+
+    return DCGM_ST_OK;
+}
+
+/*****************************************************************************
+ Method to Parse Command Line
+ *****************************************************************************/
+dcgmReturn_t sharedFabricCmdProcessing(SharedFabricCmdParser_t *pCmdParser)
+{
+    if (NULL == pCmdParser) {
+        return DCGM_ST_BADPARAM;
+    }
+
+    /* Check if there is a help option specified for the command line */
+    if (cmdline_exists(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_HELP)) {
+        pCmdParser->pfCmdHelp(pCmdParser->pCmdLine);
+        return DCGM_ST_OK;
+    }
+
+    if (cmdline_exists(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_LIST_PARTITION)) {
+        pCmdParser->mListPartition = 1;
+        return DCGM_ST_OK;
+    }
+
+    /* Check if partitionId is specified  */
+    if (cmdline_exists(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_ACTIVATE_PARTITION)) {
+
+        unsigned long long partitionId = 0;
+        /* Get the partition id */
+        if (!cmdline_getIntegerVal(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_ACTIVATE_PARTITION,
+                                   &partitionId)) {
+            return DCGM_ST_BADPARAM;
+        }
+
+        // Check if partition ID is valid
+        if ((partitionId < SHARED_FABRIC_SELECTOR_PARTITION_ID_MIN) ||
+            (partitionId > SHARED_FABRIC_SELECTOR_PARTITION_ID_MAX)) {
+            fprintf(stderr, "Invalid Partition ID: %d. Valid Partition ID ranges from %d to %d.\n",
+                    (int)partitionId, SHARED_FABRIC_SELECTOR_PARTITION_ID_MIN,
+                    SHARED_FABRIC_SELECTOR_PARTITION_ID_MAX);
+            return DCGM_ST_BADPARAM;
+        }
+
+        pCmdParser->mActivatePartition = 1;
+        pCmdParser->mPartitionId = (unsigned)partitionId;
+    }
+
+    if (cmdline_exists(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_DEACTIVATE_PARTITION)) {
+
+        unsigned long long partitionId = 0;
+        /* Get the partition id */
+        if (!cmdline_getIntegerVal(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_DEACTIVATE_PARTITION,
+                                   &partitionId)) {
+            return DCGM_ST_BADPARAM;
+        }
+
+        // Check if partition ID is valid
+        if ((partitionId < SHARED_FABRIC_SELECTOR_PARTITION_ID_MIN) ||
+            (partitionId > SHARED_FABRIC_SELECTOR_PARTITION_ID_MAX)) {
+            fprintf(stderr, "Invalid Partition ID: %d. Valid Partition ID ranges from %d to %d.\n",
+                    (int)partitionId, SHARED_FABRIC_SELECTOR_PARTITION_ID_MIN,
+                    SHARED_FABRIC_SELECTOR_PARTITION_ID_MAX);
+            return DCGM_ST_BADPARAM;
+        }
+
+        pCmdParser->mDeactivatePartition = 1;
+        pCmdParser->mPartitionId = (unsigned)partitionId;
+    }
+
+    /* Check if activated partition Ids is specified */
+    if (cmdline_exists(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_SET_ACTIVATED_PARTITION_LIST)) {
+        char *partitionList = NULL;
+        pCmdParser->mSetActivatedPartitions = 1;
+        pCmdParser->mNumPartitions = 0;
+
+        if (cmdline_getStringVal(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_SET_ACTIVATED_PARTITION_LIST,
+                                 (const char **) &partitionList))
+        {
+            std::string partitionListStr = partitionList;
+            dcgmReturn_t ret = parsePartitionIdlistString(partitionListStr, pCmdParser);
+            if (ret != DCGM_ST_OK) {
+                return ret;
+            }
+        }
+    }
+
+    /* Check if listen interface is specified */
+    if (cmdline_exists(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_HOSTNAME)) {
+        char *hostname = NULL;
+
+        if (cmdline_getStringVal(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_HOSTNAME,
+                                 (const char **) &hostname))
+        {
+            strncpy(pCmdParser->mHostname, hostname,
+                    sizeof(pCmdParser->mHostname)-1);
+        }
+    }
+
+    /* Check if a binary state file to be colwerted to text file */
+    if (cmdline_exists(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_COLWERT_BIN_TO_TXT)) {
+        char *filename = NULL;
+
+        if (cmdline_getStringVal(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_COLWERT_BIN_TO_TXT,
+                                 (const char **) &filename))
+        {
+            pCmdParser->mBinToTxt = true;
+            strncpy(pCmdParser->mInFileName, filename,
+                    sizeof(pCmdParser->mInFileName)-1);
+
+            if (strlen(filename) < (256 - 5)) {
+                strncpy(pCmdParser->mOutFileName, filename,
+                        sizeof(pCmdParser->mOutFileName)-1);
+            } else {
+                strncpy(pCmdParser->mOutFileName, filename,
+                        (256 - 5));
+            }
+
+            strncat(pCmdParser->mOutFileName, ".txt",
+                    sizeof(pCmdParser->mOutFileName)-1);
+        }
+    }
+
+    /* Check if a text state file to be colwerted to binary file */
+    if (cmdline_exists(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_COLWERT_TXT_TO_BIN)) {
+        char *filename = NULL;
+
+        if (cmdline_getStringVal(pCmdParser->pCmdLine, SHARED_FABRIC_CMD_COLWERT_TXT_TO_BIN,
+                                 (const char **) &filename))
+        {
+            pCmdParser->mTxtToBin = true;
+            strncpy(pCmdParser->mInFileName, filename,
+                    sizeof(pCmdParser->mInFileName)-1);
+
+            if (strlen(filename) < (256 - 5)) {
+                strncpy(pCmdParser->mOutFileName, filename,
+                        sizeof(pCmdParser->mOutFileName)-1);
+            } else {
+                strncpy(pCmdParser->mOutFileName, filename,
+                        (256 - 5));
+            }
+
+            strncat(pCmdParser->mOutFileName, ".bin",
+                    sizeof(pCmdParser->mOutFileName)-1);
+        }
+    }
+
+    if (DCGM_ST_OK != sharedFabricCmdVerifyOptions(pCmdParser)) {
+        return DCGM_ST_GENERIC_ERROR;
+    }
+
+    return DCGM_ST_OK;
+}

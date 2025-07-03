@@ -1,0 +1,264 @@
+[
+  {
+    "Type": "Control",
+    "Description": "Set regkeys, VulkanSDK, 4K, lock clocks",
+    "OutputDirectory": "Initialization",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryList": [ "vcrt2015-9", "Vulkan-SDK-1.2.135.0" ],
+    "TestDefinitions": [
+      {
+        "Command": "[Netapp]\\vcrt2015-9\\VC_redist.x64.exe",
+        "Arguments": "/install /quiet /norestart /log [OutputDirectory]\\VC_redist.x64.log"
+      },
+      {
+        "Command": "[Netapp]\\vcrt2015-9\\VC_redist.x86.exe",
+        "Arguments": "/install /quiet /norestart /log [OutputDirectory]\\VC_redist.x86.log"
+      },
+      {
+        "Command": "SetVulkanExplicitLayers",
+        "Arguments": "[Netapp]\\Vulkan-SDK-1.2.135.0"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "OGL_DEFAULT_SWAP_INTERVAL=DISABLE"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VSYNCMODE=FORCEOFF"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VK_ABORT_ON_DEVICE_LOST=ENABLED"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VK_HIDE_UNUSED_MEMORY_TYPES=DISABLE"
+      },
+      {
+        "Command": "[bin]\\SetEDID.exe",
+        "Arguments": "[bin]\\acerB286HK-DP.hex"
+      },
+      {
+        "Command": "SetColossusDisplay",
+        "Arguments": "3840 2160 32"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:head;q -o:[OutputDirectory]\\swak-display.txt"
+      },
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-l"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:gpuclk;pstate;q -o:[OutputDirectory]\\swak-clocks.txt"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:nodeinfo;q -o:[OutputDirectory]\\swak-nodeinfo.txt"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "OGL_LOAD_MONITOR_OUTPUT_LOGGING_FLAGS=GPU_TIME"
+      },
+      {
+        "Comment": "Place load monitor file in output directory of Nsight runs",
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "PS_FILE_PATH=[RootOutputDirectory]\\Nsight"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:all;q -o:[OutputDirectory]\\swak-all.txt"
+      },
+      {
+        "Command": "C:\\Windows\\System32\\cmd.exe",
+        "Arguments": "/C C:\\Windows\\System32\\vulkaninfo.exe > [OutputDirectory]\\VulkanInfo.txt 2> [OutputDirectory]\\VulkanInfo-stderr.txt",
+        "ElwironmentVariable": "VK_LOADER_DEBUG=all"
+      }
+    ]
+  },
+  {
+    "Type": "Nsight",
+    "Description": "Run 4K nsight traces",
+    "SessionName": "Nsight",
+    "TestCase": "Nsight",
+    "OutputDirectory": "Nsight",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryLookup": {
+      "ImageMagick": "[Netapp]\\ImageMagick",
+      "PerfDebug": "[Netapp]\\perfdebug_3.21"
+    },
+    "Server": "hqlwoglsql01:8211",
+    "ElwironmentVariables": {
+      "VK_INSTANCE_LAYERS": "VK_LAYER_LUNARG_screenshot",
+      "VK_SCREENSHOT_FRAMES": "0,999"
+    },
+    "PerfDebug": "--poll 500 --graphEff --tj --csv --pollend",
+    "LoadMonitor": "Enabled",
+    "TestDefinitions": [
+      {
+        "Title": "AshesEscalation",
+        "Name": "AshesEscalation_2021_10_11_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\AshesEscalation\\AshesEscalation_2021_10_11_4K",
+        "CompressedFile": "AshesEscalation_2021_10_11_4K.zip",
+        "FileName": "AshesEscalation_Vulkan.exe",
+        "Source": "\\\\netapp-hq04\\opengl\\traces\\nsightApic\\AshesEscalation_Vulkan__4K_2021_10_11__02_39_39",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "ga*"
+      },
+      {
+        "Title": "EvilGenius2",
+        "Name": "EvilGenius2_2021_01_20_Ultra_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\EvilGenius2\\EvilGenius2_2021_01_20_Ultra_4K",
+        "CompressedFile": "EvilGenius2_2021_01_20_Ultra_4K.zip",
+        "FileName": "evilgenius_profile_vulkan.exe",
+        "Source": "http://lwgtl/fileinfo/062A4568-BF3C-433A-A576-10B830050AF9",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "Hades",
+        "Name": "Hades_VK_4K__2021_01_06",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\Hades\\Hades_VK_4K__2021_01_06",
+        "CompressedFile": "Hades_VK_4K__2021_01_06.zip",
+        "FileName": "Hades.exe",
+        "Source": "http://lwgtl/fileinfo/79219648-DBC4-47F7-A0CF-14AD2EE2E237",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "Hyperscape",
+        "Name": "Hyperscape_2020_07_21_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\Hyperscape_4K__2020_07_21\\Hyperscape_4K__2020_07_21",
+        "FileName": "Hyperscape.exe",
+        "GRT": "B8CA8B9A-B308-4AAF-88D7-F24B4BA391C5",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "KnockoutCity",
+        "Name": "KnockoutCity_2021_03_23_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\KnockoutCity\\KnockoutCity_2021_03_23_4K",
+        "CompressedFile": "KnockoutCity_2021_03_23_4K.zip",
+        "FileName": "vcatch-win64-release.exe",
+        "Source": "http://lwgtl/fileinfo/95FDE17B-C963-4463-9AD7-D89AE509042D",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, ga*"
+      },
+      {
+        "Title": "MetroExodus",
+        "Name": "MetroExodus_2021_04_22_VKRT_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\MetroExodus\\MetroExodus_2021_04_22_VKRT_4K",
+        "CompressedFile": "MetroExodus_2021_04_22_VKRT_4K.zip",
+        "FileName": "MetroExodus.exe",
+        "Source": "http://lwgtl/fileinfo/A093B6F9-413E-4212-A767-BD3FA6F63C7F",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "PathOfExile",
+        "Name": "PathOfExile_2020_06_11_x64Steam_4k_Max_Beach",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\PathOfExile_x64Steam_4k_Max_Beach_2020_06_11__16_09_40",
+        "CompressedFile": "PathOfExile_x64Steam_4k_Max_Beach_2020_06_11__16_09_40.zip",
+        "FileName": "PathOfExile_x64Steam.exe",
+        "GRT": "C0B6498A-0FAD-4A64-9F69-DF00332E07B9",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "SecondExtinction",
+        "Name": "SecondExtinction_2021_03_11_Jeannot_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\SecondExtinction\\SecondExtinction_2021_03_11_Jeannot_4K",
+        "CompressedFile": "SecondExtinction_2021_03_11_Jeannot_4K.zip",
+        "FileName": "SecondExtinction_F.exe",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Comment": "Provided by Jeannot Breton"
+      },
+      {
+        "Title": "SeriousSam4",
+        "Name": "SeriousSam4_2020_08_14_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\SeriousSam4_4K__2020_08_14",
+        "FileName": "Sam4.exe",
+        "GRT": "ED050529-24D8-4D75-9DC0-47F1709DB32A",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "tu10*, ga*",
+        "ScreenshotComment": "Do not capture last frame as varies from run to run.",
+        "ScreenshotFrames": "0"
+      },
+      {
+        "Title": "StrangeBrigade",
+        "Name": "StrangeBrigade_4k_SCG_Ultra",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\StrangeBrigade\\StrangeBrigade_4k_SCG_Ultra",
+        "FileName": "StrangeBrigade_Vulkan__2018_08_28__11_30_16.exe",
+        "ProfileName": "StrangeBrigade_Vulkan.exe",
+        "Arguments": "-log -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "WWZ_Aftermath",
+        "Name": "WWZ_Aftermath_2021_10_11_4K_Trace1",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\WWZ_Aftermath\\WWZ_Aftermath_2021_10_11_4K_Trace1",
+        "CompressedFile": "WWZ_Aftermath_2021_10_11_4K_Trace1.zip",
+        "FileName": "wwzRetail.exe",
+        "Source": "\\\\netapp-hq04\\opengl\\traces\\nsightApic\\wwzAftermath__4K_2021_10_11__02_47_01",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "ga*"
+      },
+      {
+        "Title": "Youngblood",
+        "Name": "Youngblood_2021_10_21_Riverside_MeinLeben_RTOn_3840x2160_DLSSPerf",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\Youngblood\\Youngblood_2021_10_21_Riverside_MeinLeben_RTOn_3840x2160_DLSSPerf",
+        "CompressedFile": "Youngblood_2021_10_21_Riverside_MeinLeben_RTOn_3840x2160_DLSSPerf.zip",
+        "FileName": "Youngblood_x64vk.exe",
+        "Source": "https://gtl-ui.lwpu.com/file/9FD03A98-565A-4DDF-A0B9-802D117A77D",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "ga*"
+      }
+    ],
+    "SkipList": {
+    },
+    "Arguments": "-noreset -repeat 1000",
+    "AllowedRMSE": 0.02
+  },
+  {
+    "Type": "Control",
+    "Description": "Clear regkeys, unlock clocks",
+    "OutputDirectory": "Restore",
+    "TestDefinitions": [
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dOGL_DEFAULT_SWAP_INTERVAL"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVSYNCMODE"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVK_ABORT_ON_DEVICE_LOST"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVK_HIDE_UNUSED_MEMORY_TYPES"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVK_HOST_VISIBLE_VIDMEM"
+      },
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-u"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dOGL_LOAD_MONITOR_OUTPUT_LOGGING_FLAGS"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dPS_FILE_PATH"
+      }
+    ]
+  }
+]

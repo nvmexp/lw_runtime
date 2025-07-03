@@ -1,0 +1,125 @@
+##############################################################################
+# LwBucket Debugger Extension Makefile
+##############################################################################
+# Include LwBucket extension common makefile settings
+include lwbucketCommon.lwmk
+
+# Include subdirectory makefile fragments (Order matters to prevent "death by static initializers")
+include string/string.lwmk
+include dml/dml.lwmk
+include progress/progress.lwmk
+include os/os.lwmk
+include oca/oca.lwmk
+include symbol/symbol.lwmk
+include analyze/analyze.lwmk
+include debugger/debugger.lwmk
+include parse/parse.lwmk
+include getopt/getopt.lwmk
+include regex/regex.lwmk
+include protobuf/protobuf.lwmk
+include commands/commands.lwmk
+
+childLibraries :=
+
+# Define our subdirectory dependencies
+SUBDIRS := $(subst /$(OUTPUTDIR)/,,$(dir $(childLibraries)))
+targetList_pass1 = $(addsuffix .build,$(SUBDIRS))
+
+# Extension source files
+LWBUCKET_SOURCES += lwbucket.cpp
+LWBUCKET_SOURCES += annotation.cpp
+LWBUCKET_SOURCES += error.cpp
+LWBUCKET_SOURCES += event.cpp
+LWBUCKET_SOURCES += exception.cpp
+LWBUCKET_SOURCES += helper.cpp
+LWBUCKET_SOURCES += input.cpp
+LWBUCKET_SOURCES += logging.cpp
+LWBUCKET_SOURCES += memory.cpp
+LWBUCKET_SOURCES += module.cpp
+LWBUCKET_SOURCES += output.cpp
+LWBUCKET_SOURCES += sort.cpp
+
+# Define the extension source location
+LWBUCKET_DIR = $(LW_SOURCE)/apps/lwbucket/source
+
+# Build the list of extension objects
+LWBUCKET_OBJECTS = $(call BUILD_OBJECT_LIST,$(LWBUCKET_SOURCES))
+
+# Add extension source files to source list
+SOURCES += $(addprefix $(LWBUCKET_DIR)/,$(LWBUCKET_SOURCES))
+
+# Use the precompiled header built from precomp.cpp for all objects built from LWBUCKET_SOURCES
+$(eval $(call REGISTER_PCH,$(LWBUCKET_OBJECTS),precomp.cpp))
+
+DRIVER_BASE_NAME := lwbucket
+
+targetList_pass2 := $(OUTPUTDIR)/$(DRIVER_BASE_NAME).dll
+
+ifeq ($(LW_GEN_BSC),1)
+  targetList_pass2 += $(LW_BSC_FILE)
+endif
+
+ifeq ($(LW_DO_INSTALL),1)
+  targetList_pass3 += $(LW_INSTALL_DIR)/$(DRIVER_BASE_NAME).dll
+  targetList_pass3 += $(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).map
+  ifeq ($(LW_GEN_PDB),1)
+    targetList_pass3 += $(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).pdb
+  endif
+endif
+
+$(OUTPUTDIR)/$(DRIVER_BASE_NAME).map: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).dll
+$(OUTPUTDIR)/$(DRIVER_BASE_NAME).pdb: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).dll
+
+# Break our build into 3 passes that cannot be parallelized
+#   In pass 1, we do any subdirectories, this builds any .libs or whatever that are out of date
+#   In pass 2, we build our main targets, DLLs, EXEs etc.
+#   In pass 3, we copy our built items to our install and symbol directories
+#
+# We do this in 3 passes by calling this makefile relwrsively so that our time stamps on dependencies
+# are re-evaluated.  If we try to do all this in 1 pass during a parallel build, we'd find that subdirs
+# could trigger a .lib to be rebuilt -- but we wouldn't relink the DLL because when the makefile for 
+# this directory was STARTED... the .lib was not out of date.  [It was only out of date AFTER the child
+# directory was complete.]
+build: buildSequence
+
+buildSequence:
+	@$(MAKE) -f makefile.lwmk LW_TARGET_OS=$(LW_TARGET_OS) LW_TARGET_ARCH=$(LW_TARGET_ARCH) LW_BUILD_TYPE=$(LW_BUILD_TYPE) pass1
+	@$(MAKE) -f makefile.lwmk LW_TARGET_OS=$(LW_TARGET_OS) LW_TARGET_ARCH=$(LW_TARGET_ARCH) LW_BUILD_TYPE=$(LW_BUILD_TYPE) pass2
+	@$(MAKE) -f makefile.lwmk LW_TARGET_OS=$(LW_TARGET_OS) LW_TARGET_ARCH=$(LW_TARGET_ARCH) LW_BUILD_TYPE=$(LW_BUILD_TYPE) pass3
+
+pass1: $(targetList_pass1)
+pass2: $(targetList_pass2)
+pass3: $(targetList_pass3)
+
+# Code a couple of dependencies manually... since we don't auto-generate dependencies for RC files
+$(OUTPUTDIR)/$(DRIVER_BASE_NAME).res: $(DRIVER_BASE_NAME).rc
+
+$(OUTPUTDIR)/$(DRIVER_BASE_NAME).dll: $(childLibraries) $(OBJECTS) $(OUTPUTDIR)/$(DRIVER_BASE_NAME).res $(DRIVER_BASE_NAME).def
+	$(FILEECHO) $(OUTPUTDIR)/linkParameters.txt $(strip $(LFLAGS)) $(childLibraries) $(OBJECTS) -out:$@
+	$(call_linker)
+
+$(LW_INSTALL_DIR)/$(DRIVER_BASE_NAME).dll: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).dll
+	$(standard_install)
+
+$(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).pdb: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).pdb
+	$(standard_install)
+
+$(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).map: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).map
+	$(standard_install)
+
+# Linker flags
+LFLAGS += -dll
+LFLAGS += -map:$(OUTPUTDIR)/$(DRIVER_BASE_NAME).map
+LFLAGS += -nodefaultlib
+LFLAGS += -def:$(DRIVER_BASE_NAME).def
+LFLAGS += -subsystem:windows,6.0
+LFLAGS += $(OUTPUTDIR)/$(DRIVER_BASE_NAME).res
+LFLAGS += $(PCH_OBJECTS)
+
+ifeq ($(LW_BUILD_TYPE),debug)
+LFLAGS += -opt:noref,noicf
+else
+LFLAGS += -opt:ref,icf
+endif
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

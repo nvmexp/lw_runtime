@@ -1,0 +1,49 @@
+pass_template: 
+    samplerstates:
+        samLinear:
+            filter: MIN_MAG_MIP_LINEAR
+            addressU: CLAMP
+            addressV: CLAMP
+        samNearestClamp:
+            filter: MIN_MAG_MIP_POINT
+            addressU: CLAMP
+            addressV: CLAMP
+    type: match-color-input
+    constant-buffers: 
+        globalParams: {screenSize: SCREEN_SIZE, elapsedTime: ELAPSED_TIME, captureState: CAPTURE_STATE}
+        controlBuf: {g_sldDepth: depthSlider, g_sldMultiPart: multipartSlider, g_sldScreenSize: screenSizeSlider} 
+
+typical_slider:
+      type: float
+      minimum-value: 0.0
+      maximum-value: 1.0
+      default-value: 0.5
+      ui-sticky-value: 0.0
+      ui-sticky-region: 0.01
+      ui-value-step: 0.1
+
+user-constants:
+    - name: depthSlider 
+      ui-hint: "Use this to set depth test intensity, 0% to 100%"
+      ui-label: "Depth Test"
+      default-value: 0.0
+      import: [typical_slider]
+    - name: multipartSlider 
+      ui-hint: "Use this to set multipart test intensity, 0% to 100%"
+      ui-label: "Multi Part"
+      default-value: 0.0
+      import: [typical_slider]
+    - name: screenSizeSlider 
+      ui-hint: "Use this to set screen size test intensity, 0% to 100%"
+      ui-label: "Screen Size"
+      default-value: 0.0
+      import: [typical_slider]
+
+main:
+    import: [pass_template]
+    shader: PS_Testing@Testing.yfx
+    textures:
+        txDiffuse:
+            channel: PIPE_INPUTS_COLOR
+        txDepth:
+            channel: PIPE_INPUTS_DEPTH

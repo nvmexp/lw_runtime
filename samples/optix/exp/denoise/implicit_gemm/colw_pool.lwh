@@ -1,0 +1,365 @@
+//
+// Copyright 2020 LWPU Corporation. All rights reserved.
+//
+
+// common colwolution kernel code, fused bias+relu+pooling, pooling fusion
+
+namespace optix_exp {
+
+using Filter = xmma::implicit_gemm::Input_related<1, 3, 3, false>;
+
+using Pooling_functor = xmma::ext::colw_with_2x2_pooling::Max_fp16;
+
+// The basic kernel traits.
+using Kernel_traits_base = xmma::ext::colw_with_2x2_pooling::Kernel_traits<
+    Traits, 
+    Cta_tile, 
+    Simple_tile_distribution, 
+    Colw_tile,
+    Filter, 
+    Pooling_functor>;
+
+// The default callbacks.
+using Callbacks_default_base = xmma::helpers::Empty_callbacks_epilogue<
+    Traits, 
+    Cta_tile,
+    typename Kernel_traits_base::Epilogue::Fragment_pre_swizzle,
+    typename Kernel_traits_base::Epilogue::Fragment_post_swizzle,
+    typename Kernel_traits_base::Epilogue::Fragment_c>;
+
+template<typename Gmem_tile_epilog>
+struct Callbacks_default_template : public Callbacks_default_base {
+  using Gmem_tile = Gmem_tile_epilog;
+  using Base = Callbacks_default_base;
+  // Ctor.
+  template< typename Params >
+  inline __device__ Callbacks_default_template(Params const& params,
+                                             void* smem,
+                                             int bidm,
+                                             int bidn,
+                                             int bidz,
+                                             int tidx)
+    : Base(params, smem, bidm, bidn, bidz, tidx) {
+  }
+  inline __device__ void load(int mi) {}
+};
+using Callbacks_default = Callbacks_default_template<Kernel_traits_base::Gmem_tile_epilogue>;
+
+// The callbacks with bias.
+struct Call_backs_with_bias_0 : public Callbacks_default {
+  // The base class.
+  using Base = Callbacks_default;
+  // The fragment after the swizzle.
+  using Fragment_post_swizzle = typename Base::Fragment_post_swizzle;
+  // The fragment to store to memory.
+  using Fragment_c = typename Base::Fragment_c;
+
+  // The number of threads per pixel.
+  enum { THREADS_PER_PIXEL = Kernel_traits_base::Gmem_tile_epilogue::THREADS_PER_ROW };
+  // The number of channels per STG.
+  enum { CHANNELS_PER_STG = Kernel_traits_base::Gmem_tile_epilogue::ELEMENTS_PER_STG };
+  // The number of registers after the reduction.
+  enum { REGS_AFTER_REDUCTION = Fragment_post_swizzle::NUM_REGS / Cta_tile::WARPS_K };
+
+  // Ctor.
+  template< typename Params >
+  inline __device__ Call_backs_with_bias_0(Params const& params,
+                                        void* smem,
+                                        int bidm,
+                                        int bidn,
+                                        int bidz,
+                                        int tidx)
+    : Base(params, smem, bidm, bidn, bidz, tidx) {
+    // The position of the thread in the output tile.
+    int k = tidx % THREADS_PER_PIXEL * CHANNELS_PER_STG;
+    // The position in the output.
+    k += bidn * Cta_tile::N;
+    // Compute the source pointer.
+    char* ptr = static_cast<char*>(params.fusion0.bias) + Traits::offset_in_bytes_c(k);
+    // Trigger the loads.
+    if( k < params.k ) {
+
+      bias_.ldg(ptr);
+    }
+  }
+  // Before storing to global memory.
+  template< typename Epilogue >
+  inline __device__ void pre_pack(Epilogue& epilogue, int mi, int ii, Fragment_post_swizzle &f) {
+    Base::pre_pack(epilogue, mi, ii, f);
+    #pragma unroll
+    for( int ii = 0; ii < REGS_AFTER_REDUCTION; ++ii ) {
+      f.reg(ii) = xmma::hadd2(f.reg(ii), bias_.reg(ii % Fragment_c::NUM_REGS));
+    }
+  }
+
+  // The registers to hold the data.
+  Fragment_c bias_;
+};
+
+static inline __device__ uint32_t leaky_relu_function1(uint32_t x, uint32_t leak_minus_one) {
+  uint32_t res, zero = 0u;
+  asm volatile( \
+    "{\n" \
+    "\t .reg .f16x2 tmp;\n" \
+    "\n" \
+    "\t set.ltu.f16x2.f16x2 tmp, %1, %2;\n" \
+    "\t mul.f16x2 tmp, tmp, %3;\n"
+    "\t fma.rn.f16x2 %0, tmp, %1, %1;\n"
+    "}\n" : "=r"(res) : "r"(x), "r"(zero), "r"(leak_minus_one));
+  return res;
+}
+
+// The callbacks with extra support for leaky relu.
+struct Call_backs_with_relu_1 : public Call_backs_with_bias_0 {
+  // The base class.
+  using Base = Call_backs_with_bias_0;
+  // The fragment after the swizzle.
+  using Fragment_post_swizzle = typename Base::Fragment_post_swizzle;
+  enum { REGS_AFTER_REDUCTION = Fragment_post_swizzle::NUM_REGS / Cta_tile::WARPS_K };
+
+
+  // Ctor.
+  template< typename Params >
+  inline __device__ Call_backs_with_relu_1(Params const& params,
+                                                   void* smem,
+                                                   int bidm,
+                                                   int bidn,
+                                                   int bidz,
+                                                   int tidx)
+    : Base(params, smem, bidm, bidn, bidz, tidx) {
+    leak_minus_one_ = params.fusion1.leak_minus_one;
+  }
+
+  // Before storing to global memory.
+  template< typename Epilogue >
+  inline __device__ void pre_pack(Epilogue &epilogue, int mi, int ii, Fragment_post_swizzle &f) {
+    Base::pre_pack(epilogue, mi, ii, f);
+    if( leak_minus_one_ == 0xbc00bc00 ) {
+        #pragma unroll
+        for( int jj = 0; jj < REGS_AFTER_REDUCTION; ++jj )
+          f.reg(jj) = xmma::relu_fp16x2(f.reg(jj));
+    } else if( leak_minus_one_ != ~0u ) {
+        #pragma unroll
+        for( int jj = 0; jj < REGS_AFTER_REDUCTION; ++jj )
+          f.reg(jj) = leaky_relu_function1(f.reg(jj), leak_minus_one_);
+    }
+  }
+  // The constant leak - 1.f to implement leaky relu.
+  uint32_t leak_minus_one_;
+};
+
+// Skip the support for epilog_fusion in the callbacks.
+using Callbacks_with_epilog_fusion = Call_backs_with_relu_1;
+ 
+// Callbacks with pooling support.
+using Callbacks_with_pooling = xmma::ext::colw_with_2x2_pooling::Callbacks<
+    Traits, 
+    Cta_tile,
+    typename Kernel_traits_base::Fragment_pre_swizzle,
+    typename Kernel_traits_base::Fragment_post_swizzle,
+    typename Kernel_traits_base::Fragment_c,
+    Pooling_functor,
+    Callbacks_with_epilog_fusion>;
+
+// End the chain of callbacks.
+using Callbacks = Callbacks_with_pooling;
+
+struct Kernel_traits : public Kernel_traits_base {
+  // The base class.
+  using Base = Kernel_traits_base;
+  // Our tile distribution is much simpler than the default one in XMMA.
+  using Tile_distribution = Simple_tile_distribution;
+  // The callbacks for the epilogue.
+  using Callbacks_epilogue = Callbacks;
+  // The epilogue per say.
+  using Epilogue_base = xmma::helpers::Epilogue<Traits,
+                                               Cta_tile,
+                                               xmma::Row,
+                                               typename Base::Gmem_tile_epilogue,
+                                               Callbacks_epilogue,
+                                               typename Base::Swizzle_epilogue>;
+  struct Epilogue_ext : public Epilogue_base {
+    // Ctor.
+    template< typename Params >
+    inline __device__ Epilogue_ext(const Params &params,
+                               Gmem_tile &gmem_tile,
+                               Swizzle &swizzle,
+                               Callbacks &callbacks,
+                               const xmma::Named_barrier &epi_sync = xmma::Named_barrier(),
+                               const int bidm = blockIdx.x,
+                               const int bidn = blockIdx.y,
+                               const int bidz = blockIdx.z,
+                               const int tidx = threadIdx.x,
+                               const bool is_warp_specialized = false)
+        : Epilogue_base(params, gmem_tile, swizzle, callbacks,epi_sync, bidm, bidn, bidz, tidx, is_warp_specialized) {
+          }
+    // Do the epilogue.
+    template< bool WITH_RESIDUAL, typename Fragment_aclwmulator, int M, int N >
+    inline __device__ void execute(Fragment_aclwmulator (&acc)[M][N]) {
+
+        #pragma unroll
+        for( int mi = 0; mi < M; ++mi ) {
+            this->step<WITH_RESIDUAL>(mi, acc[mi]);
+        }
+    }
+    // Execute a single iteration of the loop.
+    template< bool WITH_RESIDUAL, typename Fragment_aclwmulator, int N >
+    inline __device__ void step(int mi, Fragment_aclwmulator (&acc)[N]) {
+
+        //load for what's extra data needed by fusion, e.g. residual
+        callbacks_.load(mi);
+
+        // The output masks.
+        int out_masks[Gmem_tile::STGS];
+        #pragma unroll
+        for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+            out_masks[ii] = this->gmem_tile_.compute_output_mask(mi, ii);
+        }
+
+        // Load valid values if beta is not zero.
+        Fragment_c res_fetch[Gmem_tile::STGS];
+        if( WITH_RESIDUAL ) {
+            #pragma unroll
+            for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+                this->gmem_tile_.load(res_fetch[ii], mi, ii, out_masks[ii], mem_desc_c_);
+            }
+        }
+
+        // Do something before we colwert.
+        #pragma unroll
+        for( int ni = 0; ni < N; ++ni ) {
+            callbacks_.pre_colwert(*this, mi, ni, acc[ni]);
+        }
+
+        // Colwert the aclwmulators to the epilogue format (or keep them as-is).
+        Fragment_pre_swizzle pre_swizzle[N];
+        #pragma unroll
+        for( int ni = 0; ni < N; ++ni ) {
+            pre_swizzle[ni].shuffle_groups(acc[ni]);
+        }
+
+        // Load alpha.
+        Fragment_alpha_pre_swizzle alpha_pre_swizzle[N];
+        #pragma unroll
+        for( int ni = 0; ni < N; ++ni ) {
+            callbacks_.alpha_pre_swizzle(*this, mi, ni, alpha_pre_swizzle[ni]);
+        }
+
+        // Do the colwersion.
+        #pragma unroll
+        for( int ni = 0; ni < N; ++ni ) {
+            pre_swizzle[ni].colwert(alpha_pre_swizzle[ni], acc[ni]);
+        }
+
+        // Do something before we swizzle.
+        #pragma unroll
+        for( int ni = 0; ni < N; ++ni ) {
+            callbacks_.pre_swizzle(*this, mi, ni, pre_swizzle[ni]);
+        }
+
+        // Make sure the main loop or the previous loop of the epilogue are finished.
+        if( !Swizzle::SKIP_SYNCTHREADS ) {
+            if( epi_sync_.invalid() ) {
+                __syncthreads();
+            } else {
+                epi_sync_.wait();
+            }
+        }
+
+        // Store the data in shared memory to produce more friendly stores.
+        #pragma unroll
+        for( int ni = 0; ni < N; ++ni ) {
+            this->swizzle_.store(ni, pre_swizzle[ni]);
+        }
+
+        // Make sure the data is in SMEM.
+        if( !Swizzle::SKIP_SYNCTHREADS ) {
+            if( epi_sync_.invalid() ) {
+                __syncthreads();
+            } else {
+                epi_sync_.wait();
+            }
+        }
+
+        // The fragments after the swizzle. One fragment per STG.128.
+        Fragment_post_swizzle post_swizzle[Gmem_tile::STGS];
+        #pragma unroll
+        for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+            this->swizzle_.load(post_swizzle[ii], ii);
+        }
+
+        // Load alpha post swizzle.
+        Fragment_alpha_post_swizzle alpha_post_swizzle[Gmem_tile::STGS];
+        #pragma unroll
+        for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+            callbacks_.alpha_post_swizzle(*this, mi, ii, alpha_post_swizzle[ii]);
+        }
+
+        // Do the parallel reduction, if needed.
+        #pragma unroll
+        for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+            post_swizzle[ii].reduce(alpha_post_swizzle[ii]);
+        }
+
+        // Do something now that the data has been swizzled.
+        #pragma unroll
+        for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+            callbacks_.post_swizzle(*this, mi, ii, post_swizzle[ii], out_masks[ii]);
+        }
+
+        // Load beta. TODO: We should not need a loop.
+        Fragment_beta beta[Gmem_tile::STGS];
+        if( WITH_RESIDUAL ) {
+            #pragma unroll
+            for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+                callbacks_.beta(*this, mi, ii, beta[ii]);
+            }
+        }
+
+        // Add the residual value before packing. TODO: We should be able to pass a single beta.
+        if( WITH_RESIDUAL ) {
+            #pragma unroll
+            for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+                post_swizzle[ii].add_residual(res_fetch[ii], beta[ii]);
+            }
+        }
+
+        // Do something before pack.
+        #pragma unroll
+        for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+            callbacks_.pre_pack(*this, mi, ii, post_swizzle[ii]);
+        }
+
+        // Pack the elements to produce a STG.128.
+        Fragment_c out_regs[Gmem_tile::STGS];
+        #pragma unroll
+        for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+            out_regs[ii].pack(alpha_post_swizzle[ii], post_swizzle[ii]);
+        }
+
+        // Add the residual value.
+        if( WITH_RESIDUAL ) {
+            #pragma unroll
+            for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+                out_regs[ii].add_residual(res_fetch[ii], beta[ii]);
+            }
+        }
+
+        // Do something before we store.
+        #pragma unroll
+        for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+            callbacks_.pre_store(*this, mi, ii, out_regs[ii], out_masks[ii]);
+        }
+
+        // Write valid values.
+        #pragma unroll
+        for( int ii = 0; ii < Gmem_tile::STGS; ++ii ) {
+            this->gmem_tile_.store(mi, ii, out_regs[ii], out_masks[ii], mem_desc_d_);
+        }
+    }
+
+  };
+  using Epilogue = Epilogue_ext;
+};
+
+};

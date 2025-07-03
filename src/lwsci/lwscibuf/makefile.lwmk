@@ -1,0 +1,45 @@
+###############################################################################
+#
+# Copyright (c) 2019 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+#
+###############################################################################
+
+##############################################################################
+# drivers/lwsci/lwscibuf/makefile.lwmk
+##############################################################################
+
+OUTPUTDIR_COMMON = $(OUTPUTDIR)
+
+include $(LW_SOURCE)/drivers/lwsci/lwscibuf/lwscibuf.lwmk
+
+##############################################################################
+# link liblwscibuf.so
+##############################################################################
+
+LIBLWSCIBUF_SONAME = liblwscibuf.so.1
+LIBLWSCIBUF_NAME = liblwscibuf.so
+LIBLWSCIBUF = $(OUTPUTDIR)/$(LIBLWSCIBUF_SONAME)
+
+LW_SUPPORTS_SEPARATE_DEBUG_INFO = 1
+LIBLWSCIBUF_LD_TARGET = $(OUTPUTDIR)/$(LIBLWSCIBUF_NAME).unstripped
+LIBLWSCIBUF_DEBUG_INFO = $(OUTPUTDIR)/$(LIBLWSCIBUF_NAME).debug
+$(eval $(call LW_DEBUG_INFO_CMD,$(LIBLWSCIBUF_LD_TARGET),$(LIBLWSCIBUF),$(LIBLWSCIBUF_DEBUG_INFO)))
+
+build: $(LIBLWSCIBUF)
+
+$(LIBLWSCIBUF_LD_TARGET): $(LINK_OBJECTS) $(LWSCIBUF_LINKER_SCRIPT) $(DSO_STUBS)
+	$(call quiet_cmd,LINK) -o $@ $(LINK_OBJECTS) \
+	  -Wl,--version-script=$(LWSCIBUF_LINKER_SCRIPT) \
+	  -Wl,-soname,$(LIBLWSCIBUF_SONAME) \
+	  $(LINK_LDFLAGS) \
+	  $(LINK_DSO_LDFLAGS) \
+	  $(DSO_STUBS)
+	$(call quiet_cmd,POST_LINK) $(LWSCIBUF_EXPORTS)
+	$(call SYMLINK) $(LIBLWSCIBUF_SONAME) $(OUTPUTDIR)/$(LIBLWSCIBUF_NAME)

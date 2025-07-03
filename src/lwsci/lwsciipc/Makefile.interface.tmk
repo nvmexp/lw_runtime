@@ -1,0 +1,57 @@
+################################### tell Emacs this is a -*- makefile-gmake -*-
+#
+# Copyright (c) 2018-2021, LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+###############################################################################
+
+ifdef LW_INTERFACE_FLAG_SHARED_LIBRARY_SECTION
+
+LW_INTERFACE_NAME := lwsciipc
+LW_INTERFACE_SONAME := lib$(LW_INTERFACE_NAME).so
+
+#-----------------------------------------------------------------------------
+# LINUX OS
+#-----------------------------------------------------------------------------
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_LINUX),1)
+LW_INTERFACE_EXPORTS := lib$(LW_INTERFACE_NAME)_linux
+
+LW_COMPONENT_CFLAGS += -DLINUX
+LW_INTERFACE_PUBLIC_INCLUDES := \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/inc/public \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/inc/internal \
+	$(LW_SOURCE)/gpu/drv/drivers/unix/rmapi_tegra/mirror/mirror/tegra_top/lwscic2c/include/public
+endif
+
+#-----------------------------------------------------------------------------
+# QNX OS
+#-----------------------------------------------------------------------------
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_QNX),1)
+ifeq ($(LW_BUILD_CONFIGURATION_IS_SAFETY),1)
+LW_INTERFACE_EXPORTS := lib$(LW_INTERFACE_NAME)_qnx_safety
+else
+LW_INTERFACE_EXPORTS := lib$(LW_INTERFACE_NAME)_qnx_nonsafety
+endif
+
+LW_INTERFACE_PUBLIC_INCLUDES := \
+	$(LW_SOURCE)/ivclib/include \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/inc/public \
+	$(LW_SOURCE)/gpu/drv/drivers/lwsci/inc/internal
+
+ifeq ($(LW_BUILD_CONFIGURATION_IS_SAFETY),0)
+LW_INTERFACE_PUBLIC_INCLUDES += \
+	$(LW_SOURCE)/gpu/drv/drivers/unix/rmapi_tegra/mirror/mirror/tegra_top/lwscic2c/include/public
+endif
+endif
+
+endif
+
+# Local Variables:
+# indent-tabs-mode: t
+# tab-width: 8
+# End:

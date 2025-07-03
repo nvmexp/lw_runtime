@@ -1,0 +1,381 @@
+cbuffer globalParams
+{
+	float2 screenSize;
+	int captureState;
+	float4 tileUV;
+}
+
+cbuffer controlBuf
+{
+	float g_sldSketch;
+	float g_sldHalfTone;
+	float g_sldRetro;
+	float g_sldSepia;
+}
+
+Texture2D texColor;
+Texture2D texNoise;
+SamplerState samLinear;
+
+// This should move to a centralized file but not appropriate to make that change now.
+#ifndef LW_COMMON
+#define LW_COMMON
+
+#define CAPTURE_STATE_NOT_STARTED		0
+#define CAPTURE_STATE_REGULAR			1
+#define CAPTURE_STATE_REGULARSTEREO		2
+#define CAPTURE_STATE_HIGHRES			3
+#define CAPTURE_STATE_360				4
+#define CAPTURE_STATE_360STEREO			5
+
+#endif
+
+#define packed_array_get(arr, i) arr[i/4][i%4]
+
+//SKETCH
+float3 sketch(float3 colorInput, float2 uv, Texture2D texColor)
+{
+	const int ks = 3;
+	// Sobel Horizontal //vertical is just transposed
+	float filterKernelH[ks * ks] =
+	{
+		 -1,  0,  1,
+		 -2,  0,  2,
+		 -1,  0,  1
+	};
+
+	float3 clrH = 0;
+	float3 clrV = 0;
+	float3 clr;
+
+	[unroll]for(int i = -1; i <=1; i++)
+	[unroll]for(int j = -1; j <=1; j++)
+	{
+		clr = texColor.Sample(samLinear, uv, int2(i, j)).rgb;
+		clrH += clr * filterKernelH[(i+1) + (j+1) * ks];
+		clrV += clr * filterKernelH[(j+1) + (i+1) * ks];
+	}
+
+	float3 sobelLengths = sqrt(clrH * clrH + clrV * clrV);
+
+#define ILWERT
+#ifndef ILWERT
+	float3 outputColor = lerp(colorInput, sobelLengths, 0.45);
+#else
+	float3 outputColor = lerp(colorInput, 1-sobelLengths, 0.45);
+#endif	
+	return lerp(colorInput, outputColor, g_sldSketch);
+}
+
+//HALFTONE
+#define FREQUENCY ((float)(screenSize.x) / 6.0)
+#define CONTRAST 0.7
+
+float AntiAlias(float threshold, float value)
+{
+	float width = 0.75 * fwidth(value);
+	return smoothstep(threshold - width, threshold + width, value);
+}
+
+float DotGrid(float2 uvSquare, float angle, float radius, float noise, float coeff)
+{
+	noise *= 0.1; // Noise breaks up moire etc
+	float s = sin(angle);
+	float c = cos(angle);
+	float2 uvRot = mul(float2x2(c, -s, s, c), uvSquare);
+	float2 nearest = 2.0 * frac(FREQUENCY / coeff * uvRot) - 1.0;
+	return AntiAlias(1.0 - radius, length(nearest) * CONTRAST - noise) + noise;
+}
+
+float4 CmykFromRgb(float3 c)
+{
+	float k = 1.0 - max(max(c.r, c.g), c.b);
+	float4 cmyk;
+	cmyk.rgb = (1.0.xxx - c.rgb - k.xxx) / (1.0 - k);
+	cmyk.a = k;
+	return cmyk;
+}
+
+float3 RgbFromCmyk(float4 c)
+{
+	return (1.0.xxx - c.rgb) * (1.0 - c.a);
+}
+
+float twodnoise(float2 uv)
+{
+	// This is 128 int4s instead of 512 ints because array elements are often stored as float4s
+	// 512 ints would use 512 float4s, but 128 int4s use only 128 float4s
+	const static int4 perm[128] = {
+		{72,229,137,240}, {182,104,87,93}, {205,8,220,105}, {85,140,245,139},
+		{253,102,241,58}, {230,175,239,61}, {185,155,54,116}, {36,183,55,131},
+		{246,103,221,150}, {86,215,192,179}, {67,134,22,148}, {92,141,63,251},
+		{0,171,160,97}, {34,156,10,5}, {136,226,20,235}, {142,176,31,18},
+		{80,51,78,250}, {193,154,52,162}, {180,90,60,19}, {167,153,147,15},
+		{218,98,184,45}, {187,209,165,13}, {110,33,157,124}, {164,46,126,206},
+		{173,40,73,200}, {127,168,151,138}, {159,204,57,72}, {231,27,38,132},
+		{237,101,48,197}, {66,247,21,236}, {39,50,88,178}, {125,1,82,129},
+		{75,234,243,194}, {123,35,29,44}, {219,202,118,14}, {163,120,238,6},
+		{122,252,62,30}, {113,169,207,76}, {143,130,146,225}, {49,198,109,201},
+		{149,244,84,99}, {26,100,212,94}, {186,210,43,195}, {223,47,121,128},
+		{81,112,74,222}, {199,232,217,3}, {115,172,16,190}, {41,227,28,135},
+		{181,158,64,12}, {189,233,254,70}, {228,161,96,65}, {4,107,196,255},
+		{25,144,114,24}, {224,248,208,108}, {213,42,203,32}, {216,56,111,191},
+		{89,91,242,59}, {145,152,214,68}, {174,106,117,95}, {188,53,7,211},
+		{23,9,77,177}, {166,119,249,133}, {170,11,69,2}, {37,17,79,83},
+
+		{71,229,137,240}, {182,104,87,93}, {205,8,220,105}, {85,140,245,139},
+		{253,102,241,58}, {230,175,239,61}, {185,155,54,116}, {36,183,55,131},
+		{246,103,221,150}, {86,215,192,179}, {67,134,22,148}, {92,141,63,251},
+		{0,171,160,97}, {34,156,10,5}, {136,226,20,235}, {142,176,31,18},
+		{80,51,78,250}, {193,154,52,162}, {180,90,60,19}, {167,153,147,15},
+		{218,98,184,45}, {187,209,165,13}, {110,33,157,124}, {164,46,126,206},
+		{173,40,73,200}, {127,168,151,138}, {159,204,57,72}, {231,27,38,132},
+		{237,101,48,197}, {66,247,21,236}, {39,50,88,178}, {125,1,82,129},
+		{75,234,243,194}, {123,35,29,44}, {219,202,118,14}, {163,120,238,6},
+		{122,252,62,30}, {113,169,207,76}, {143,130,146,225}, {49,198,109,201},
+		{149,244,84,99}, {26,100,212,94}, {186,210,43,195}, {223,47,121,128},
+		{81,112,74,222}, {199,232,217,3}, {115,172,16,190}, {41,227,28,135},
+		{181,158,64,12}, {189,233,254,70}, {228,161,96,65}, {4,107,196,255},
+		{25,144,114,24}, {224,248,208,108}, {213,42,203,32}, {216,56,111,191},
+		{89,91,242,59}, {145,152,214,68}, {174,106,117,95}, {188,53,7,211},
+		{23,9,77,177}, {166,119,249,133}, {170,11,69,2}, {37,17,79,83}
+	}; // permutation of 0 to 255, repeated (to avoid wrapping indices when we later use the array with indices from 0 to 511)
+	// Generated via "python2 generate_perm_255_x2.py"
+
+	// The possible gradients of the corners of the simplexes (triangles)
+	static float2 grad[8] = 
+	{
+		float2(0.0, 1.0), float2(-1.0, 1.0), 
+		float2(-1.0, 0), float2(-1.0, -1.0),
+		float2(0.0, -1.0), float2(1.0, -1.0), 
+		float2(1.0, 0.0), float2(1.0, 1.0),
+	};
+
+	// Simplex noise consists of interpolating gradients at the corners of simplexes tiled infinitely across the plane
+	// In 2d, the simplex is a triangle.
+	// To callwlate the noise value at a given point, we determine which simplex it is in, and then interpolate the gradients at the edges of that simplex
+
+	float3 contributions;
+
+	// We callwlate which simplex a point is in by treating pairs of simplexes as skewed squares
+	float F = 0.5*(sqrt(3.0) - 1.0); // 2d skew factor
+	float G = (3.0 - sqrt(3.0)) / 6.0; // 2d unskew factor
+
+	float skew = F * (uv.x + uv.y);
+	int skewed_x = floor(uv.x + skew);
+	int skewed_y = floor(uv.y + skew);
+
+	float unskew = G * (skewed_x + skewed_y);
+
+	// This is the origin of the simplex we're in
+	float X_0 = skewed_x - unskew;
+	float Y_0 = skewed_y - unskew;
+
+	// distance to the cell origin
+	float x0 = uv.x - X_0;
+	float y0 = uv.y - Y_0;
+
+	// The simplex has three corners, where two are shared between both of the simplexes making up a square
+	// Here, we determine the non-shared co-ordinate based on which part of the square the point is in.
+	int i1; int j1;
+	if (x0 > y0)
+	{	
+		i1 = 1; j1 = 0;
+	}
+	else
+	{
+		i1 = 0; j1 = 1; 
+	}
+
+	// Cllwlate the distance other two corners based on this winding direction
+	float x1 = x0 - i1 + G;
+	float y1 = y0 - j1 + G;
+	float x2 = x0 - 1.0 + 2.0 * G;
+	float y2 = y0 - 1.0 + 2.0 * G;
+
+	int perm_i = skewed_x & 255;
+	int perm_j = skewed_y & 255;
+
+	// Pick a "random" (deterministic, based on the permutation array) gradient for each corner.
+	int gradient_i0 = fmod(packed_array_get(perm, perm_i +      packed_array_get(perm, perm_j     )), 8);
+	int gradient_i1 = fmod(packed_array_get(perm, perm_i + i1 + packed_array_get(perm, perm_j + j1)), 8);
+	int gradient_i2 = fmod(packed_array_get(perm, perm_i + 1 +  packed_array_get(perm, perm_j + 1 )), 8);
+
+	// Get the contributions from each corner.
+	float t0 = 0.5 - x0 * x0 - y0 * y0;
+	if (t0 < 0) 
+	{
+		contributions.x = 0.0;
+	}
+	else
+	{
+		t0 = t0 * t0;
+		contributions.x = t0 * t0 * dot(grad[gradient_i0] , float2(x0, y0));
+	}
+
+	float t1 = 0.5 - x1 * x1 - y1 * y1;
+	if (t1 < 0) 
+	{
+		contributions.y = 0.0;
+	}
+	else
+	{
+		t1 = t1 * t1;
+		contributions.y = t1 * t1 * dot(grad[gradient_i1] , float2(x1, y1));
+	}
+
+	float t2 = 0.5 - x2 * x2 - y2 * y2;
+	if (t2 < 0) 
+	{
+		contributions.z = 0.0;
+	}
+	else
+	{
+		t2 = t2 * t2;
+		contributions.z = t2 * t2 * dot(grad[gradient_i2] , float2(x2, y2));
+	}
+
+	return ((35.0 * (contributions.x + contributions.y + contributions.z)) + 0.5); // Scale between 0 and 1
+}
+
+float3 halftone(float3 color, float2 uv)
+{
+	if (captureState == CAPTURE_STATE_360 ||
+		captureState == CAPTURE_STATE_360STEREO) return color;
+
+	float aspect = screenSize.y / screenSize.x;
+	float2 uvSquare = float2(uv.x, uv.y * aspect);
+	// Three Octave Fractal Noise
+	float3 noise = 0.1*twodnoise(uv*100.0) + 0.05 * twodnoise(uv*200.0) + 0.025*twodnoise(uv*400.0) + 0.1;
+	float4 cmyk = 1.0.xxxx - CmykFromRgb(color);
+
+	float coeff = 1.0;
+
+	float4 cmykDot;
+	cmykDot.r = DotGrid(uvSquare, 0.261799, cmyk.r, noise.x, coeff);	// C 15 degrees
+	cmykDot.g = DotGrid(uvSquare, 1.309, cmyk.g, noise.y, coeff);		// M 75 degrees
+	cmykDot.b = DotGrid(uvSquare, 0, cmyk.b, noise.z, coeff);			// Y  0 degrees
+	cmykDot.a = DotGrid(uvSquare, 0.785398, cmyk.a, noise.x, coeff);	// K 45 degrees
+
+	// Colwert to RGB
+	return lerp(color, RgbFromCmyk(1.0.xxxx - cmykDot), g_sldHalfTone);
+}
+
+// Blur
+#define fBlurSpeed				0.4 // [0.0 to 0.5] Speed at which to lerp to blur texture in half uv
+// Toning (for the actual lwrves, see the shader)
+#define fToningSpeed			0.4 // [0.0 to 0.5] Speed of toning change from center, in half uv
+// Distort
+#define fDistortStrength		0.2
+// Desat
+#define fDesat					0.2
+// Vignette
+#define g_sldVignette			1.5 //[0.0 to 1.0] Vignette amount
+
+
+// Parameters for smart fetch
+#define SMART_CLAMP_CONSTR_BORDER	2.0
+#define SMART_CLAMP_FETCH_BORDER	15.0
+
+float Lwrve(float x, float contrast, float scale)
+{
+	x -= 0.5;
+	x *= contrast;
+	x += 0.5;
+	x *= scale;
+	return x;
+}
+
+// special clamping for games that have garbage on the edge of the frame
+float2 smartClampUV(float2 uvTexCoord, float constrainBorderWidth, float fetchBorderWidth)
+{
+	const float2 oneTexel = float2(1.0/screenSize.x, 1.0/screenSize.y);
+	if (uvTexCoord.x > 1.0 - constrainBorderWidth*oneTexel.x) uvTexCoord.x = 1.0 - constrainBorderWidth*oneTexel.x - fetchBorderWidth*oneTexel.x;
+	if (uvTexCoord.x < 0.0 + constrainBorderWidth*oneTexel.x) uvTexCoord.x = 0.0 + constrainBorderWidth*oneTexel.x + fetchBorderWidth*oneTexel.x;
+	if (uvTexCoord.y > 1.0 - constrainBorderWidth*oneTexel.y) uvTexCoord.y = 1.0 - constrainBorderWidth*oneTexel.y - fetchBorderWidth*oneTexel.y;
+	if (uvTexCoord.y < 0.0 + constrainBorderWidth*oneTexel.y) uvTexCoord.y = 0.0 + constrainBorderWidth*oneTexel.y + fetchBorderWidth*oneTexel.y;
+	return uvTexCoord;
+}
+
+float3 retro(float3 color, inout float2 inout_tile_uv)
+{
+	//porting this with no warranty ..
+	float2 uv = (tileUV.zw - tileUV.xy) * inout_tile_uv.xy + tileUV.xy; //colwert local tile uv to global screen uv
+	float2 uvScreen = uv;
+
+	//doing this in main pass
+	//bool arePartsAllowed = (captureState != CAPTURE_STATE_360 && captureState != CAPTURE_STATE_360STEREO);
+
+	// Barrel distortion
+	float2 uvDistort = (uv - 0.5);
+	float2 uvTexCoord = inout_tile_uv;
+	//if (arePartsAllowed)
+	//{
+		float maxDistort = (1.0 - 0.5) * (fDistortStrength / (tileUV.z - tileUV.x));
+		float distortNrm = 1.0;
+		// For highres pictures, we need to limit distortion to avoid artifacts
+		if (captureState == CAPTURE_STATE_HIGHRES)
+		{
+			const float maxDistortAllowed = 0.2;
+			if (maxDistort > maxDistortAllowed)
+				distortNrm = maxDistortAllowed / maxDistort;
+		}
+		float distort = saturate(dot(uvDistort, uvDistort)) * (fDistortStrength / (tileUV.z - tileUV.x)) * distortNrm;
+		uvTexCoord -= normalize(uvDistort) * distort * g_sldRetro;
+		
+		if (captureState == CAPTURE_STATE_HIGHRES)
+		{
+			uvTexCoord = smartClampUV(uvTexCoord, SMART_CLAMP_CONSTR_BORDER, SMART_CLAMP_FETCH_BORDER);
+		}
+	//}
+	
+	inout_tile_uv = uvTexCoord;
+
+	color = texColor.Sample(samLinear, uvTexCoord).rgb;
+	color = lerp(color, dot(color, 0.333), fDesat * g_sldRetro);
+
+	// Toning
+	//if (arePartsAllowed)
+	//{
+		float toning = saturate(smoothstep(0.0, fToningSpeed, dot(uvDistort, uvDistort)));
+		float3 colorCenter = color.rgb;
+		colorCenter.r = Lwrve(colorCenter.r, 1.3, 1.4);
+		colorCenter.g = Lwrve(colorCenter.g, 1.3, 1.3);
+		colorCenter.b = Lwrve(colorCenter.b, 0.7, 0.8);
+		float3 colorEdge = color.rgb;
+		colorEdge.r = Lwrve(colorEdge.r, 1.0, 0.6);
+		colorEdge.g = Lwrve(colorEdge.g, 1.0, 0.7);
+		colorEdge.b = Lwrve(colorEdge.b, 0.5, 1.5);
+
+		color.xyz = lerp(color.xyz, saturate(lerp(colorCenter, colorEdge, toning)), g_sldRetro);
+	//}
+
+	// Apply vignette
+	//if (arePartsAllowed)
+	//{
+		float2 inTex = uv - 0.5.xx; // Distance from center
+		inTex.x *= 1.2; // Slight aspect ratio correction
+		float vignette = saturate(1.0 - dot( inTex, inTex )); // Length
+		vignette = saturate(smoothstep(0.3, 1.0, vignette)); // Smoothstep
+		color.xyz = lerp(color.xyz, float3(0.0, 0.0, 0.0), (1.0 - vignette) * g_sldVignette * g_sldRetro);
+	//}
+	return color;
+}
+
+float3 sepia(float3 color)
+{
+	return lerp(color, dot(color, float3( 0.2126, 0.7152, 0.0722)) * float3(1.2, 1.0, 0.8), g_sldSepia);
+}
+
+void PS(in float4 position : SV_Position, in float2 uv : TexCoord, out float4 color : SV_Target)
+{
+	color = texColor.Sample(samLinear, uv);
+
+	if(captureState != CAPTURE_STATE_360 && captureState != CAPTURE_STATE_360STEREO)
+	{
+		if(g_sldRetro != 0) color.rgb = retro(color, uv);
+		if(g_sldSketch != 0) color.rgb = sketch(color.rgb, uv, texColor);
+		if(g_sldHalfTone != 0) color.rgb = halftone(color.rgb, uv);	
+		if(g_sldSepia != 0) color.rgb = sepia(color.rgb);	
+	}
+}

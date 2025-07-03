@@ -1,0 +1,482 @@
+//
+// Copyright 2020 LWPU Corporation. All rights reserved.
+//
+
+#include <string>
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+#include "layers.h"
+#include "layers_inline.h"
+
+namespace optix_exp {
+
+// taken from src_dltss_decoder_with_bilinear_interp_upsampling_kernel.lw (modified) (not used at the moment)
+static __global__ void k_bilScale2x_NHWC( const uint16_t* input, const uint16_t* skip, uint16_t* out, int width, int height, int channels, int channelsSkip )
+{
+#if( __LWDA_ARCH__ >= 530 || !defined( __LWDA_ARCH__ ) )
+    const int p = height * 2;
+    const int q = width  * 2;
+
+    // The coordinates of the image pixel read by this thread.
+    int img_h = (blockIdx.z*blockDim.z + threadIdx.z);
+    int img_w = (blockIdx.y*blockDim.y + threadIdx.y);
+    int img_c = (blockIdx.x*blockDim.x + threadIdx.x)*8;
+
+    if( img_c >= channels )
+        return;
+
+    // Read the image pixels (8 fp16s per thread).
+    int4 img_fetch[3][3];
+    for( int hi = 0; hi < 3; ++hi ) {
+        for( int wi = 0; wi < 3; ++wi ) {
+            // The coordinates. Use CLAMP accessing.
+            int h = clamp(img_h + hi - 1, 0, height-1);
+            int w = clamp(img_w + wi - 1, 0, width-1);
+            
+            // The offset in memory.
+            int offset = h*width*channels + w*channels + img_c;
+
+            // Trigger the load.
+            const int4 *ptr = reinterpret_cast<const int4*>(&input[offset]);
+            img_fetch[hi][wi] = ptr[0];
+        }
+    }
+
+    // The coordinates of the residual pixel read by this thread.
+    int res_p = img_h*2;
+    int res_q = img_w*2;
+    int res_c = img_c;
+
+    // Compute the horizontal linear interp. 0x3400 == 0.25 and 0x3a00 == 0.75.
+    int4 tmp[3][2];
+    #pragma unroll
+    for( int jj = 0; jj < 3; ++jj ) {
+        tmp[jj][0] = hlerp8(0x34003400, img_fetch[jj][0], 
+                            0x3a003a00, img_fetch[jj][1]); 
+        tmp[jj][1] = hlerp8(0x34003400, img_fetch[jj][2], 
+                            0x3a003a00, img_fetch[jj][1]); 
+    }
+
+    // Compute the vertical linear interp. 0x3400 == 0.25 and 0x3a00 == 0.75.
+    int4 upsampled[2][2];
+    #pragma unroll
+    for( int jj = 0; jj < 2; ++jj ) {
+        upsampled[0][jj] = hlerp8(0x34003400, tmp[0][jj], 
+                                  0x3a003a00, tmp[1][jj]); 
+        upsampled[1][jj] = hlerp8(0x34003400, tmp[2][jj], 
+                                  0x3a003a00, tmp[1][jj]); 
+    }
+
+    const int tc = channels + channelsSkip;
+    const int out_offset = res_p * q * tc + res_q * tc + res_c;
+
+    // Store the result.
+    for( int pi = 0; pi < 2; ++pi ) {
+        for( int qi = 0; qi < 2; ++qi ) {
+            int offset = out_offset + pi*q*tc + qi*tc;
+            if( res_p+pi < p && res_q+qi < q ) {
+                uint16_t *ptr = (uint16_t*)&out[offset];
+                reinterpret_cast<int4*>(ptr)[0] = upsampled[pi][qi];
+            }
+        }
+    }
+#endif
+}
+
+// upsample input 2x, write to out, copy the first 32 channels of new output to reformat (if nonzero)
+static __global__ void k_Scale2x_NHWC( const uint16_t* input, uint16_t* out, int width, int height, int channels, int channelsSkip, uint16_t* reformat )
+{
+    int img_h = ( blockIdx.z * blockDim.z + threadIdx.z );
+    int img_w = ( blockIdx.y * blockDim.y + threadIdx.y );
+    int img_c = ( blockIdx.x * blockDim.x + threadIdx.x ) * 8;
+
+    if( img_h < height && img_w < width )
+    {
+        int hWidth  = width / 2;
+        int hHeight = height / 2;
+
+        int lrx = min( img_w / 2, max( hWidth, 1 ) - 1 );
+        int lry = min( img_h / 2, max( hHeight, 1 ) - 1 );
+
+        int tc = channels + channelsSkip;
+
+        const int4 * src = (const int4*)&input[lry * hWidth * channels + lrx * channels + img_c];
+        *(int4*)&out[img_h * width * tc + img_w * tc + img_c] = *src;
+
+        if( reformat && img_c < 32 )
+            *(int4*)&reformat[img_h * width * 32 + img_w * 32 + img_c] = *src;
+    }
+}
+
+static __global__ void k_concatSkip_NHWC( const uint16_t* skip, uint16_t* out, int width, int height, int channels, int channelsSkip )
+{
+    int img_h = ( blockIdx.z * blockDim.z + threadIdx.z );
+    int img_w = ( blockIdx.y * blockDim.y + threadIdx.y );
+    int img_c = ( blockIdx.x * blockDim.x + threadIdx.x ) * 8;
+
+    int tc = channels + channelsSkip;
+
+    if( img_h < height && img_w < width )
+    {
+        const int4 * src = (const int4*)&skip[img_h * width * channelsSkip + img_w * channelsSkip + img_c];
+        *(int4*)&out[channels + img_h * width * tc + img_w * tc + img_c] = *src;
+    }
+}
+
+template <typename dtype>
+static __global__ void k_Scale2xConcat_NCHW( const dtype* decode, const dtype* skip, dtype* output, int width, int height, int channelsDecode, int channelsSkip )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int lrx = min( x / 2, ( width / 2 ) - 1 );
+    int lry = min( y / 2, ( height / 2 ) - 1 );
+
+    if( x < width && y < height )
+    {
+        // Scale up decoder layer (low res image) by replicating
+        for( int i = 0; i < channelsDecode; ++i )
+            output[i * height * width + y * width + x] = decode[i * ( height / 2 ) * ( width / 2 ) + lry * ( width / 2 ) + lrx];
+
+        // Concatenate skip values (high res image)
+        for( int i = 0; i < channelsSkip; ++i )
+            output[( i + channelsDecode ) * height * width + y * width + x] = skip[i * height * width + y * width + x];
+    }
+}
+
+template <typename dtype>
+static __global__ void k_Scale2x_NHWC_singleElement( const dtype* input, dtype* out, int width, int height, int channels )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z * blockDim.z + threadIdx.z;
+
+    int hWidth  = width / 2;
+    int hHeight = height / 2;
+
+    int lrx = min( x / 2, max( hWidth, 1 ) - 1 );
+    int lry = min( y / 2, max( hHeight, 1 ) - 1 );
+
+    if( x < width && y < height )
+    {
+        // Scale up input layer (low res image coming from decoder part) by replicating
+        for( int cblock = 0; cblock < channels; cblock += blockDim.z )
+            out[addrNHWC( channels, height, width, 0, cblock + c, y, x )] =
+                input[addrNHWC( channels, hHeight, hWidth, 0, cblock + c, lry, lrx )];
+    }
+}
+
+static __global__ void k_Scale2xSum_NHWC( const __half* input, const __half* skip, __half* out, int width, int height, int channels )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z * blockDim.z + threadIdx.z;
+
+    int hWidth  = width / 2;
+    int hHeight = height / 2;
+
+    int lrx = min( x / 2, max( hWidth, 1 ) - 1 );
+    int lry = min( y / 2, max( hHeight, 1 ) - 1 );
+
+    if( x < width && y < height )
+    {
+        // Scale up input layer (low res image coming from decoder part) by replicating, then add the skip values
+        for( int cblock = 0; cblock < channels; cblock += blockDim.z )
+            out[addrNHWC( channels, height, width, 0, cblock + c, y, x )] =
+                __hadd( input[addrNHWC( channels, hHeight, hWidth, 0, cblock + c, lry, lrx )],
+                        skip[addrNHWC( channels, height, width, 0, cblock + c, y, x )] );
+    }
+}
+
+static __global__ void k_Scale2xSum_NCHW( const __half* decode, const __half* skip, __half* output, int width, int height, int channelsDecode )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int lrx = min( x / 2, ( width / 2 ) - 1 );
+    int lry = min( y / 2, ( height / 2 ) - 1 );
+
+    if( x < width && y < height )
+    {
+        // Scale up decoder layer (low res image) by replicating
+        for( int i = 0; i < channelsDecode; ++i )
+            output[i * height * width + y * width + x] =
+                __hadd( decode[i * ( height / 2 ) * ( width / 2 ) + lry * ( width / 2 ) + lrx],
+                        skip[i * height * width + y * width + x] );
+    }
+}
+
+static __global__ void k_Scale2xSum_NCHW( const float* decode, const float* skip, float* output, int width, int height, int channelsDecode )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int lrx = min( x / 2, ( width / 2 ) - 1 );
+    int lry = min( y / 2, ( height / 2 ) - 1 );
+
+    if( x < width && y < height )
+    {
+        // Scale up decoder layer (low res image) by replicating
+        for( int i = 0; i < channelsDecode; ++i )
+            output[i * height * width + y * width + x] = decode[i * ( height / 2 ) * ( width / 2 ) + lry * ( width / 2 ) + lrx]
+                                                         + skip[i * height * width + y * width + x];
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+AEUpscaleConcat::AEUpscaleConcat( const char* name, const deviceInfo& info )
+    : AELayer( name, info )
+{
+}
+
+OptixResult AEUpscaleConcat::init( const AELayer* decoder, const AELayer* skip, bool bilinear, ErrorDetails& errDetails )
+{
+    OptixResult result = AELayer::init( errDetails );
+
+    if( result )
+        return result;
+
+    m_input = m_decoder = decoder;
+    m_skip              = skip;
+    m_bilinearScale     = bilinear;
+
+    if( !( m_skip->m_outWidth / 2 == m_decoder->m_outWidth && m_skip->m_outHeight / 2 == m_decoder->m_outHeight ) )
+        return errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "wrong skip layer dimensions" );
+
+    m_outWidth    = m_skip->m_outWidth;
+    m_outHeight   = m_skip->m_outHeight;
+    m_outChannels = m_decoder->m_outChannels + m_skip->m_outChannels;
+
+    m_outsize = getBufferTypeSize() * 1 * m_outChannels * m_outHeight * m_outWidth;
+
+    return result;
+}
+
+AEUpscaleConcat::~AEUpscaleConcat()
+{
+}
+
+OptixResult AEUpscaleConcat::destroy( ErrorDetails& errDetails )
+{
+    return AELayer::destroy( errDetails );
+}
+
+OptixResult AEUpscaleConcat::fwdEval( void* smem, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    beginTiming();
+
+    if( m_tensorFormat == TENSOR_NHWC )
+    {
+        // concatenate skip buffer to 2x upsampled decoder buffer. this has to be done before
+        // upsampling when reformat is fused with upsampling because the reformat buffer is
+        // already re-using the skip buffer (which must have been written before). without
+        // fusing the concatenation could also be done after the upsampling.
+        dim3 block;
+        block.x = m_skip->m_outChannels / 8;
+        block.y = 4;
+        block.z = 256 / block.x / block.y;
+
+        dim3 grid = dim3( 1, roundUp( m_outWidth, block.y ), roundUp( m_outHeight, block.z ) );
+
+        k_concatSkip_NHWC<<<grid, block, 0, stream>>>(
+            (uint16_t*)( (char*)smem + m_skip->m_outDataIndex ),
+            (uint16_t*)( (char*)smem + m_outDataIndex ), m_outWidth, m_outHeight, m_decoder->m_outChannels, m_skip->m_outChannels );
+
+        // 2x upsampling
+        block.x = m_decoder->m_outChannels / 8;
+        block.y = 4;
+        block.z = 256 / block.x / block.y;
+
+        if( m_bilinearScale )
+        {
+            dim3 grid = dim3( 1, roundUp( m_decoder->m_outWidth, block.y ), roundUp( m_decoder->m_outHeight, block.z ) );
+
+            k_bilScale2x_NHWC<<<grid, block, 0, stream>>>(
+                (const uint16_t*)( (char*)smem + m_decoder->m_outDataIndex ),
+                (uint16_t*)( (char*)smem + m_skip->m_outDataIndex ),
+                (uint16_t*)( (char*)smem + m_outDataIndex ), m_decoder->m_outWidth, m_decoder->m_outHeight, m_decoder->m_outChannels, m_skip->m_outChannels );
+        }
+        else
+        {
+            dim3 grid = dim3( 1, roundUp( m_outWidth, block.y ), roundUp( m_outHeight, block.z ) );
+
+            uint16_t* reformat = 0;
+            if( std::string( m_nextLayer->name() ).find( "reformat" ) != std::string::npos )
+            {
+                m_nextLayer->setFused( true );
+                reformat = (uint16_t*)( (char*)smem + m_nextLayer->m_outDataIndex );
+            }
+
+            k_Scale2x_NHWC<<<grid, block, 0, stream>>>(
+                (const uint16_t*)( (char*)smem + m_decoder->m_outDataIndex ),
+                (uint16_t*)( (char*)smem + m_outDataIndex ), m_outWidth, m_outHeight, m_decoder->m_outChannels, m_skip->m_outChannels,
+                reformat );
+        }
+    }
+    else
+    {
+        dim3 dimBlock( LWDA_BLOCK, LWDA_BLOCK );
+        dim3 blockGrid = dim3( roundUp( m_outWidth, dimBlock.x ), roundUp( m_outHeight, dimBlock.y ), 1 );
+        if( m_dtype == DATA_HALF )
+            k_Scale2xConcat_NCHW<__half><<<blockGrid, dimBlock, 0, stream>>>(
+                (__half*)( (char*)smem + m_decoder->m_outDataIndex ),
+                (__half*)( (char*)smem + m_skip->m_outDataIndex ),
+                (__half*)( (char*)smem + m_outDataIndex ),
+                m_outWidth, m_outHeight, m_decoder->m_outChannels, m_skip->m_outChannels );
+        else
+            k_Scale2xConcat_NCHW<float><<<blockGrid, dimBlock, 0, stream>>>(
+                (float*)( (char*)smem + m_decoder->m_outDataIndex ),
+                (float*)( (char*)smem + m_skip->m_outDataIndex ),
+                (float*)( (char*)smem + m_outDataIndex ),
+                m_outWidth, m_outHeight, m_decoder->m_outChannels, m_skip->m_outChannels );
+    }
+
+    endTiming();
+
+    return OPTIX_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+AEUpscale::AEUpscale( const char* name, const deviceInfo& info )
+    : AELayer( name, info )
+{
+}
+
+OptixResult AEUpscale::init( const AELayer* input, ErrorDetails& errDetails )
+{
+    OptixResult result = AELayer::init( errDetails );
+
+    if( result )
+        return result;
+
+    m_input       = input;
+    m_outWidth    = 2 * m_input->m_outWidth;
+    m_outHeight   = 2 * m_input->m_outHeight;
+    m_outChannels = m_input->m_outChannels;
+
+    m_outsize = getBufferTypeSize() * 1 * m_outChannels * m_outHeight * m_outWidth;
+
+    return result;
+}
+
+AEUpscale::~AEUpscale()
+{
+}
+
+OptixResult AEUpscale::destroy( ErrorDetails& errDetails )
+{
+    return AELayer::destroy( errDetails );
+}
+
+OptixResult AEUpscale::fwdEval( void* smem, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    beginTiming();
+
+    if( m_tensorFormat == TENSOR_NHWC )
+    {
+        dim3 dimBlock( 2, 2, 8 );
+        dim3 blockGrid = dim3( roundUp( m_outWidth, dimBlock.x ), roundUp( m_outHeight, dimBlock.y ), 1 );
+        k_Scale2x_NHWC_singleElement<<<blockGrid, dimBlock, 0, stream>>>( (__half*)( (char*)smem + m_input->m_outDataIndex ),
+                                                            (__half*)( (char*)smem + m_outDataIndex ),
+                                                            m_outWidth, m_outHeight, m_outChannels );
+    }
+    else
+    {
+        dim3 dimBlock( LWDA_BLOCK, LWDA_BLOCK );
+        dim3 blockGrid = dim3( roundUp( m_outWidth, dimBlock.x ), roundUp( m_outHeight, dimBlock.y ), 1 );
+        if( m_dtype == DATA_HALF )
+            k_Scale2xConcat_NCHW<__half><<<blockGrid, dimBlock, 0, stream>>>(
+                (__half*)( (char*)smem + m_input->m_outDataIndex ),
+                0,
+                (__half*)( (char*)smem + m_outDataIndex ),
+                m_outWidth, m_outHeight, m_outChannels, 0 );
+        else
+            k_Scale2xConcat_NCHW<float><<<blockGrid, dimBlock, 0, stream>>>(
+                (float*)( (char*)smem + m_input->m_outDataIndex ),
+                0,
+                (float*)( (char*)smem + m_outDataIndex ),
+                m_outWidth, m_outHeight, m_outChannels, 0 );
+    }
+
+    endTiming();
+
+    return OPTIX_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+
+AEUpscaleSum::AEUpscaleSum( const char* name, const deviceInfo& info )
+    : AELayer( name, info )
+{
+}
+
+OptixResult AEUpscaleSum::init( const AELayer* decoder, const AELayer* skip, ErrorDetails& errDetails )
+{
+    OptixResult result = AELayer::init( errDetails );
+
+    if( result )
+        return result;
+
+    m_input = m_decoder = decoder;
+    m_skip              = skip;
+
+    if( !( m_skip->m_outWidth / 2 == m_decoder->m_outWidth && m_skip->m_outHeight / 2 == m_decoder->m_outHeight
+           && m_skip->m_outChannels == m_decoder->m_outChannels ) )
+        return errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "wrong skip layer dimensions" );
+
+    m_outWidth    = m_skip->m_outWidth;
+    m_outHeight   = m_skip->m_outHeight;
+    m_outChannels = m_decoder->m_outChannels;
+
+    m_outsize = getBufferTypeSize() * 1 * m_outChannels * m_outHeight * m_outWidth;
+
+    return result;
+}
+
+AEUpscaleSum::~AEUpscaleSum()
+{
+}
+
+OptixResult AEUpscaleSum::destroy( ErrorDetails& errDetails )
+{
+    return AELayer::destroy( errDetails );
+}
+
+OptixResult AEUpscaleSum::fwdEval( void* smem, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    beginTiming();
+
+    if( m_tensorFormat == TENSOR_NHWC )
+    {
+        dim3 dimBlock( 2, 2, 8 );
+        dim3 blockGrid = dim3( roundUp( m_outWidth, dimBlock.x ), roundUp( m_outHeight, dimBlock.y ), 1 );
+        k_Scale2xSum_NHWC<<<blockGrid, dimBlock, 0, stream>>>( (__half*)( (char*)smem + m_decoder->m_outDataIndex ),
+                                                               (__half*)( (char*)smem + m_skip->m_outDataIndex ),
+                                                               (__half*)( (char*)smem + m_outDataIndex ), m_outWidth,
+                                                               m_outHeight, m_decoder->m_outChannels );
+    }
+    else
+    {
+        dim3 dimBlock( LWDA_BLOCK, LWDA_BLOCK );
+        dim3 blockGrid = dim3( roundUp( m_outWidth, dimBlock.x ), roundUp( m_outHeight, dimBlock.y ), 1 );
+        if( m_dtype == DATA_HALF )
+            k_Scale2xSum_NCHW<<<blockGrid, dimBlock, 0, stream>>>( (__half*)( (char*)smem + m_decoder->m_outDataIndex ),
+                                                                   (__half*)( (char*)smem + m_skip->m_outDataIndex ),
+                                                                   (__half*)( (char*)smem + m_outDataIndex ),
+                                                                   m_outWidth, m_outHeight, m_decoder->m_outChannels );
+        else
+            k_Scale2xSum_NCHW<<<blockGrid, dimBlock, 0, stream>>>( (float*)( (char*)smem + m_decoder->m_outDataIndex ),
+                                                                   (float*)( (char*)smem + m_skip->m_outDataIndex ),
+                                                                   (float*)( (char*)smem + m_outDataIndex ), m_outWidth,
+                                                                   m_outHeight, m_decoder->m_outChannels );
+    }
+
+    endTiming();
+
+    return OPTIX_SUCCESS;
+}
+
+};  // namespace optix_exp

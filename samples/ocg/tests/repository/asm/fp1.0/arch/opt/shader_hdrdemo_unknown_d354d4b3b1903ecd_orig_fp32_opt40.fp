@@ -1,0 +1,31 @@
+!!FP2.0
+TEX R0, f[TEX0], TEX0, 2D;
+MADR R0.w, R0, {1.987654, 1.788889, 1.610000, 1.449000}.x, {1.987654, 1.788889, 1.610000, 1.449000}.y;
+MULR R0.w, R0, {1.304100, 1.173690, 1.056321, 0.950689}.x;
+EX2R R0.w, R0.w;
+MULR R0.xyz, R0, R0.w;
+SGER R0.w, R0.x, R0.y;
+ADDR R1.w, R0.x, -R0.y;
+MULR R0.w, R0, R1;
+ADDR R0.w, R0.y, R0;
+SGER R1.w, R0, R0.z;
+ADDR R0.w, R0, -R0.z;
+MULR R0.w, R1, R0;
+ADDR R0.w, R0.z, R0;
+LG2R R0.w, |R0.w|;
+MULR R0.w, R0, {0.855620, 0.770058, 0.693052, 0.623747}.x;
+FLRR R0.w, R0;
+MULR R1.w, R0, {0.561372, 0.505235, 0.454712, 0.409240}.x;
+ADDR R0.w, R0, {0.368316, 0.331485, 0.298336, 0.268503}.x;
+MULR R0.w, R0, {0.241652, 0.217487, 0.195738, 0.176165}.x;
+EX2R R1.w, R1.w;
+RCPR R1.w, R1.w;
+MULR R0.xyz, R0, R1.w;
+MOVR R0.w, R0;
+END
+
+# Passes = -1 
+
+# Registers = -1 
+
+# Textures = -1 

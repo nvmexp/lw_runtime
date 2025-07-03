@@ -1,0 +1,55 @@
+# File should be included in a main dcgm/makefile.lwmk
+
+##############################################################################
+# define SOURCES
+##############################################################################
+
+LWRRENT_DIR := $(DCGM_DIR)/testing/stub
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += stub_library_test.c
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+##############################################################################
+# define LOCAL_CFLAGS
+##############################################################################
+
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+##############################################################################
+# define LOCAL_LDFLAGS
+##############################################################################
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += $(OUTPUTDIR)/libdcgm_stub.a
+
+##############################################################################
+# build
+##############################################################################
+
+DCGM_STUB_LIBRARY_TESTER := stub_library_test
+
+dcgm_stub_library_tester_TARGET  := $(OUTPUTDIR)/$(DCGM_STUB_LIBRARY_TESTER)
+dcgm_stub_library_tester_OBJECTS := $(LOCAL_OBJECTS)
+dcgm_stub_library_tester_CFLAGS := $(LOCAL_CFLAGS)
+dcgm_stub_library_tester_LDFLAGS := $(LOCAL_LDFLAGS)
+dcgm_stub_library_tester_DEPENDS := $(dcgm_TARGET)
+
+
+build: $(dcgm_stub_static_TARGET) $(dcgm_stub_library_tester_TARGET)
+dcgmbuildsyncpoint:: $(dcgm_stub_static_TARGET) $(dcgm_stub_library_tester_TARGET)
+$(eval $(call MAKE_EXELWTABLE,dcgm_stub_library_tester))
+
+clean:
+	rm -f $(DCGM_STUB_LIBRARY_TESTER)
+
+##############################################################################
+# Finish
+##############################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

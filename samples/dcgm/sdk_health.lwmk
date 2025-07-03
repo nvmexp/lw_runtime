@@ -1,0 +1,57 @@
+# File should be included in main lwcm/makefile.lwmk
+
+##############################################################################
+# define SOURCES
+##############################################################################
+SDK_DIR := sdk_samples
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += c_src/health_diag_sample/health_sample.cpp
+
+LOCAL_SOURCES := $(addprefix $(SDK_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+LWMLCOMMON_DIR = $(LW_SOURCE)/apps/lwml/common
+
+##############################################################################
+# define LOCAL_CFLAGS
+##############################################################################
+
+LOCAL_INCLUDES := $(SDK_DIR)
+LOCAL_INCLUDES += .
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/
+LOCAL_INCLUDES += $(LWML_DIR)
+
+# Do not modify CFLAGS because it will be global
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+##############################################################################
+# define LOCAL_LDFLAGS
+##############################################################################
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+LOCAL_LDFLAGS += -L$(OUTPUTDIR) -ldcgm -lstdc++ -lgcc_s
+
+##############################################################################
+# builds
+##############################################################################
+
+health_TARGET  := $(OUTPUTDIR)/health_sample
+health_OBJECTS := $(LOCAL_OBJECTS)
+health_CFLAGS  := $(LOCAL_CFLAGS)
+health_LDFLAGS := $(LOCAL_LDFLAGS)
+health_DEPENDS := $(dcgm_TARGET)
+
+build: $(health_TARGET)
+dcgmbuildsyncpoint:: $(health_TARGET)
+$(eval $(call MAKE_EXELWTABLE,health))
+build: $(health_TARGET).guardwords
+
+
+#################################################################################
+# End of nested lwmk
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

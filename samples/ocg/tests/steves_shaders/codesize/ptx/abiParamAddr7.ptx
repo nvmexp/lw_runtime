@@ -1,0 +1,50 @@
+.version 3.1
+.target sm_20
+
+.global .u32 x;
+
+.func (.param .u32 out) myadd (.param .align 1 .b8 l[9])
+{
+    .reg .u32 a, r, s, u, v, x, y, addr;
+    .local .u8 t, z;
+
+    mov.u32       addr, l;
+    ld.param.u8   a, [l+0];
+    ld.param.u8   v, [l+4];
+    ld.param.u8   x, [l+8];
+    st.local.u8   [z], v;
+    ld.local.u8   y, [z];
+    add.u32       r, r, a;
+    st.local.u8   [t], r;
+    ld.local.u8   s, [t];
+    add.u32       addr, addr, a;
+    ld.local.u8   u, [addr];
+    add.u32       r, s, u;
+    add.u32       r, r, y;
+    add.u32       r, r, x;
+    st.param.u32  [out], r;
+    ret;
+}
+
+.entry main(.param .u32 output, .param .u32 output1)
+{
+    .param .align 1 .b8 l[9];
+    .reg .u32 t, o;
+
+    st.param.u8   [l+0], 4;
+    st.param.u8   [l+4], 6;
+    st.param.u8   [l+8], 8;
+    call (t), myadd, (l);
+    ld.param.u32  o, [output];
+    st.b32        [o], t;
+
+    st.param.u8   [l+0], t;
+    st.param.u8   [l+4], t;
+    st.param.u8   [l+8], t;
+    call (t), myadd, (l);
+    ld.param.u32  o, [output1];
+    st.b32        [o], t;
+
+    exit;
+}
+ 

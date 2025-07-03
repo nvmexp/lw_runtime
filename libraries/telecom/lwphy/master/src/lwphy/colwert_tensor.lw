@@ -1,0 +1,423 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include "colwert_tensor.lwh"
+#include "type_colwert.hpp"
+
+// clang-format off
+template <unsigned int TIndex> struct dim3_accessor;
+template <> struct dim3_accessor<0> { static LWDA_INLINE unsigned int get(const dim3& d) { return d.x; } };
+template <> struct dim3_accessor<1> { static LWDA_INLINE unsigned int get(const dim3& d) { return d.y; } };
+template <> struct dim3_accessor<2> { static LWDA_INLINE unsigned int get(const dim3& d) { return d.z; } };
+// clang-format on
+
+template <unsigned int TIndex>
+struct grid_stride_index
+{
+    typedef dim3_accessor<TIndex> dim_accessor;
+    unsigned int                  value;
+    LWDA_INLINE
+    grid_stride_index() :
+        value(dim_accessor::get(blockDim) * dim_accessor::get(blockIdx) + dim_accessor::get(threadIdx))
+    {
+    }
+    LWDA_INLINE
+    grid_stride_index(unsigned int val) :
+        value(val) {}
+    LWDA_INLINE void next()
+    {
+        value += (dim_accessor::get(blockDim) * dim_accessor::get(gridDim));
+    }
+    LWDA_INLINE
+    bool operator<(unsigned int end) const { return (value < end); }
+};
+
+////////////////////////////////////////////////////////////////////////
+// colwert_kernel()
+template <typename Tdst, typename Tsrc>
+__global__ void colwert_kernel(tensor_layout_any layoutDst,
+                               Tdst*             dst,
+                               tensor_layout_any layoutSrc,
+                               const Tsrc*       src)
+{
+    static_assert(LWPHY_DIM_MAX == 4, "colwert_kernel only defined for 4D tensors");
+    for(int i3 = 0; i3 < layoutSrc.dimensions[3]; ++i3)
+    {
+        for(grid_stride_index<2> it2; it2 < layoutSrc.dimensions[2]; it2.next())
+        {
+            for(grid_stride_index<1> it1; it1 < layoutSrc.dimensions[1]; it1.next())
+            {
+                for(grid_stride_index<0> it0; it0 < layoutSrc.dimensions[0]; it0.next())
+                {
+                    int    n[4]    = {static_cast<int>(it0.value),
+                                      static_cast<int>(it1.value),
+                                      static_cast<int>(it2.value),
+                                      i3};
+                    size_t out_idx = layoutDst.offset(n);
+                    size_t in_idx  = layoutSrc.offset(n);
+                    // printf("(i0, i1, i2, i3) = (%u, %u, %u %u), src offset = %lu, dst
+                    // offset = %lu\n",
+                    //       it0.value,
+                    //       it1.value,
+                    //       it2.value,
+                    //       i3,
+                    //       in_idx,
+                    //       out_idx);
+                    dst[out_idx] = type_colwert<Tdst>(src[in_idx]);
+                } // it0
+            }     // it1
+        }         // it2
+    }             // it3
+}
+
+////////////////////////////////////////////////////////////////////////
+// launch_colwert()
+template <lwphyDataType_t Tdst, lwphyDataType_t Tsrc>
+void launch_colwert(const tensor_layout_any& kLayoutDst,
+                    void*                    dstAddr,
+                    const tensor_layout_any& kLayoutSrc,
+                    const void*              srcAddr,
+                    const dim3               gridDim,
+                    const dim3               blockDim,
+                    lwdaStream_t             strm)
+{
+    typedef typename data_type_traits<Tdst>::type dst_type_t;
+    typedef typename data_type_traits<Tsrc>::type src_type_t;
+    colwert_kernel<dst_type_t, src_type_t><<<gridDim, blockDim, 0, strm>>>(kLayoutDst,
+                                                                           static_cast<dst_type_t*>(dstAddr),
+                                                                           kLayoutSrc,
+                                                                           static_cast<const src_type_t*>(srcAddr));
+}
+
+////////////////////////////////////////////////////////////////////////
+// launch_colwert_bits_to_bits()
+void launch_colwert_bits_to_bits(const tensor_layout_any& kLayoutDst,
+                                 void*                    dstAddr,
+                                 const tensor_layout_any& kLayoutSrc,
+                                 const void*              srcAddr,
+                                 const dim3               gridDim,
+                                 const dim3               blockDim,
+                                 lwdaStream_t             strm)
+{
+    // Create modified tensor layouts that describe the uint32_t
+    // word tensor, and use the regular kernel. This will only
+    // work for colwerting tensors of type LWPHY_BIT to other tensors
+    // of type LWPHY_BIT.
+    tensor_layout_any kDstModified = word_layout_from_bit_layout(kLayoutDst);
+    tensor_layout_any kSrcModified = word_layout_from_bit_layout(kLayoutSrc);
+    colwert_kernel<uint32_t, uint32_t><<<gridDim, blockDim, 0, strm>>>(kDstModified,
+                                                                       static_cast<uint32_t*>(dstAddr),
+                                                                       kSrcModified,
+                                                                       static_cast<const uint32_t*>(srcAddr));
+}
+
+////////////////////////////////////////////////////////////////////////
+// colwert_from_bits_kernel()
+template <typename Tdst>
+__global__ void colwert_from_bits_kernel(tensor_layout_any layoutDst,
+                                         Tdst*             dst,
+                                         tensor_layout_any layoutSrcWords,
+                                         const uint32_t*   src)
+{
+    static_assert(LWPHY_DIM_MAX == 4, "colwert_from_bits_kernel only defined for 4D tensors");
+    for(int i3 = 0; i3 < layoutDst.dimensions[3]; ++i3)
+    {
+        for(grid_stride_index<2> it2; it2 < layoutDst.dimensions[2]; it2.next())
+        {
+            for(grid_stride_index<1> it1; it1 < layoutDst.dimensions[1]; it1.next())
+            {
+                for(grid_stride_index<0> it0; it0 < layoutDst.dimensions[0]; it0.next())
+                {
+                    int    nout[4]    = {static_cast<int>(it0.value),
+                                         static_cast<int>(it1.value),
+                                         static_cast<int>(it2.value),
+                                         i3};
+                    // Colwert the index associated with the output to an equivalent
+                    // index assuming a uint32_t word based input. We will retrieve
+                    // the entire 32-bit value and extract the individual bit.
+                    int    inputBit   = static_cast<int>(it0.value) % 32;
+                    int    nin[4]     = {static_cast<int>(it0.value) / 32,
+                                         static_cast<int>(it1.value),
+                                         static_cast<int>(it2.value),
+                                         i3};
+                    size_t out_idx    = layoutDst.offset(nout);
+                    size_t in_idx     = layoutSrcWords.offset(nin);
+                    // printf("(i0, i1, i2, i3) = (%u, %u, %u %u), src offset = %lu, dst offset = %lu\n",
+                    //        it0.value,
+                    //        it1.value,
+                    //        it2.value,
+                    //        i3,
+                    //        in_idx,
+                    //        out_idx);
+                    dst[out_idx] = static_cast<Tdst>((0 == (src[in_idx] & (1 << inputBit))) ? 0 : 1);
+                } // it0
+            }     // it1
+        }         // it2
+    }             // it3
+}
+
+////////////////////////////////////////////////////////////////////////
+// launch_colwert_from_bits()
+template <lwphyDataType_t Tdst>
+void launch_colwert_from_bits(const tensor_layout_any& kLayoutDst,
+                              void*                    dstAddr,
+                              const tensor_layout_any& kLayoutSrc,
+                              const void*              srcAddr,
+                              const dim3               gridDim,
+                              const dim3               blockDim,
+                              lwdaStream_t             strm)
+{
+    typedef typename data_type_traits<Tdst>::type dst_type_t;
+    // Create a modified tensor layout that describes the uint32_t
+    // input word tensor.
+    tensor_layout_any kSrcModified = word_layout_from_bit_layout(kLayoutSrc);
+    colwert_from_bits_kernel<dst_type_t><<<gridDim, blockDim, 0, strm>>>(kLayoutDst,
+                                                                         static_cast<dst_type_t*>(dstAddr),
+                                                                         kSrcModified,
+                                                                         static_cast<const uint32_t*>(srcAddr));
+}
+
+////////////////////////////////////////////////////////////////////////
+// colwert_tensor_layout()
+bool colwert_tensor_layout(const tensor_desc& dstTensorDesc,
+                           void*              dstAddr,
+                           const tensor_desc& srcTensorDesc,
+                           const void*        srcAddr,
+                           lwdaStream_t       strm)
+{
+    // printf("colwert_tensor_layout(): src[0] = %i, src[1] = %i, src[2] = %i\n",
+    //       srcTensorDesc.layout().dimensions[0],
+    //       srcTensorDesc.layout().dimensions[1],
+    //       srcTensorDesc.layout().dimensions[2]);
+    //------------------------------------------------------------------
+    // Create kernel structures representing the layout
+    const tensor_layout_any& kLayoutSrc = srcTensorDesc.layout();
+    const tensor_layout_any& kLayoutDst = dstTensorDesc.layout();
+    lwphyDataType_t          dstType    = dstTensorDesc.type();
+    lwphyDataType_t          srcType    = srcTensorDesc.type();
+    // TODO: Make the grid size larger, and verify correctness. Swapping
+    // dimensions might also provide performance benefits.
+    dim3 gridDim(1);
+    dim3 blockDim(32, 32);
+    // clang-format off
+    // Switch on destination and source types
+    switch(dstType)
+    {
+    //------------------------------------------------------------------
+    case LWPHY_BIT:
+        switch(srcType)
+        {
+        case LWPHY_BIT: launch_colwert_bits_to_bits(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_R_8I:
+        switch(srcType)
+        {
+        case LWPHY_BIT:  launch_colwert_from_bits<LWPHY_R_8I>  (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_8I: launch_colwert<LWPHY_R_8I, LWPHY_R_8I>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_C_8I:
+        switch(srcType)
+        {
+        case LWPHY_C_8I: launch_colwert<LWPHY_C_8I, LWPHY_C_8I>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm);
+            break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_R_8U:
+        switch(srcType)
+        {
+        case LWPHY_BIT:  launch_colwert_from_bits<LWPHY_R_8U>  (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_8U: launch_colwert<LWPHY_R_8U, LWPHY_R_8U>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_C_8U:
+        switch(srcType)
+        {
+        case LWPHY_C_8U: launch_colwert<LWPHY_C_8U, LWPHY_C_8U>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_R_16I:
+        switch(srcType)
+        {
+        case LWPHY_BIT:   launch_colwert_from_bits<LWPHY_R_16I>   (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_8I:  launch_colwert<LWPHY_R_16I, LWPHY_R_8I> (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_16I: launch_colwert<LWPHY_R_16I, LWPHY_R_16I>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_C_16I:
+        switch(srcType)
+        {
+        case LWPHY_C_8I:  launch_colwert<LWPHY_C_16I, LWPHY_C_8I> (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_C_16I: launch_colwert<LWPHY_C_16I, LWPHY_C_16I>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_R_16U:
+        switch(srcType)
+        {
+        case LWPHY_BIT:   launch_colwert_from_bits<LWPHY_R_16U>   (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_8U:  launch_colwert<LWPHY_R_16U, LWPHY_R_8U> (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_16U: launch_colwert<LWPHY_R_16U, LWPHY_R_16U>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_C_16U:
+        switch(srcType)
+        {
+        case LWPHY_C_8U:  launch_colwert<LWPHY_C_16U, LWPHY_C_8U> (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_C_16U: launch_colwert<LWPHY_C_16U, LWPHY_C_16U>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_R_32I:
+        switch(srcType)
+        {
+        case LWPHY_BIT:   launch_colwert_from_bits<LWPHY_R_32I>   (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_8I:  launch_colwert<LWPHY_R_32I, LWPHY_R_8I> (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_16I: launch_colwert<LWPHY_R_32I, LWPHY_R_16I>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_32I: launch_colwert<LWPHY_R_32I, LWPHY_R_32I>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_C_32I:
+        switch(srcType)
+        {
+        case LWPHY_C_8I:  launch_colwert<LWPHY_C_32I, LWPHY_C_8I> (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_C_16I: launch_colwert<LWPHY_C_32I, LWPHY_C_16I>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_C_32I: launch_colwert<LWPHY_C_32I, LWPHY_C_32I>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_R_32U:
+        switch(srcType)
+        {
+        case LWPHY_BIT:   launch_colwert_from_bits<LWPHY_R_32U>   (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_8U:  launch_colwert<LWPHY_R_32U, LWPHY_R_8U> (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_16U: launch_colwert<LWPHY_R_32U, LWPHY_R_16U>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_32U: launch_colwert<LWPHY_R_32U, LWPHY_R_32U>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_C_32U:
+        switch(srcType)
+        {
+        case LWPHY_C_8U:  launch_colwert<LWPHY_C_32U, LWPHY_C_8U> (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_C_16U: launch_colwert<LWPHY_C_32U, LWPHY_C_16U>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_C_32U: launch_colwert<LWPHY_C_32U, LWPHY_C_32U>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_R_16F:
+        switch(srcType)
+        {
+        case LWPHY_BIT:   launch_colwert_from_bits<LWPHY_R_16F>   (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_16F: launch_colwert<LWPHY_R_16F, LWPHY_R_16F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_32F: launch_colwert<LWPHY_R_16F, LWPHY_R_32F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_C_16F:
+        switch(srcType)
+        {
+        case LWPHY_C_16F: launch_colwert<LWPHY_C_16F, LWPHY_C_16F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_C_32F: launch_colwert<LWPHY_C_16F, LWPHY_C_32F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_R_32F:
+        switch(srcType)
+        {
+        case LWPHY_BIT:   launch_colwert_from_bits<LWPHY_R_32F>   (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_16F: launch_colwert<LWPHY_R_32F, LWPHY_R_16F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_32F: launch_colwert<LWPHY_R_32F, LWPHY_R_32F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_64F: launch_colwert<LWPHY_R_32F, LWPHY_R_64F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_C_32F:
+        switch(srcType)
+        {
+        case LWPHY_C_16F: launch_colwert<LWPHY_C_32F, LWPHY_C_16F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_C_32F: launch_colwert<LWPHY_C_32F, LWPHY_C_32F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_C_64F: launch_colwert<LWPHY_C_32F, LWPHY_C_64F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_R_64F:
+        switch(srcType)
+        {
+        case LWPHY_BIT:   launch_colwert_from_bits<LWPHY_R_64F>   (kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_16F: launch_colwert<LWPHY_R_64F, LWPHY_R_16F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_32F: launch_colwert<LWPHY_R_64F, LWPHY_R_32F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_R_64F: launch_colwert<LWPHY_R_64F, LWPHY_R_64F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    case LWPHY_C_64F:
+        switch(srcType)
+        {
+        case LWPHY_C_16F: launch_colwert<LWPHY_C_64F, LWPHY_C_16F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_C_32F: launch_colwert<LWPHY_C_64F, LWPHY_C_32F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        case LWPHY_C_64F: launch_colwert<LWPHY_C_64F, LWPHY_C_64F>(kLayoutDst, dstAddr, kLayoutSrc, srcAddr, gridDim, blockDim, strm); break;
+        default:
+            return false;
+        }
+        break;
+    //------------------------------------------------------------------
+    default:
+        // Unknown type
+        return false;
+    }
+    // clang-format on
+    return true;
+}

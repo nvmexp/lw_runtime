@@ -1,0 +1,205 @@
+# -*- mode: perl; -*-
+
+# LWDEC Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $lwdecHal = [
+
+    # per-GPU defaults for LWDEC engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, GM108 ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+        IS_VALID_ENGINE_ID => [
+
+            DESCRIPTION   => "Determine if LWDEC engine ID is valid on this GPU",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _v04_01        => [ TURING, ],
+            _v04_02        => [ GA100, ],
+            _v04_03        => [ GH100, ],
+            _v05_00        => [ GA10X, -GA100, ],
+            _v06_00        => [ ADA, ],
+            _STUB          => [ pre_dTURING, GA102F, GH100_and_later, -GH100, ],
+        ],
+
+        IS_SUPPORTED => [
+
+            DESCRIPTION   => "Determine if LWDEC is supported on this GPU",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _v01_00        => [ GM10X, -GM108 ],
+            _v01_01        => [ GM20X, -GM206, ],
+            _v02_00        => [ GM206, ],
+            _v03_00        => [ GP100, ],
+            _v03_01        => [ PASCAL, -GP100, ],
+            _v03_02        => [ VOLTA, ],
+            _v04_01        => [ TURING, ],
+            _v04_02        => [ GA100, ],
+            _v04_03        => [ GH100, ],
+            _v05_00        => [ GA10X, -GA100, ],
+            _v06_00        => [ ADA, ],
+            _STUB          => [ pre_dMAXWELL, GA102F, GH100_and_later, -GH100, ],
+        ],
+        
+        GET_CLASS_ID => [
+
+            DESCRIPTION   => "Retuns class ID",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _v03_01     => [ PASCAL, -GP100, ],
+            _v03_02     => [ VOLTA, ],
+            _v04_01     => [ TURING, ],
+            _v04_02     => [ GA100, ],
+            _v04_03     => [ GH100, ],
+            _v05_00     => [ GA10X, -GA100, ],
+            _v06_00     => [ ADA, ],
+            _STUB       => [ pre_GP102, GA102F, GH100_and_later, -GH100, ],
+        ],
+
+        DUMP_PRIV => [
+
+            DESCRIPTION   => "Dump LWDEC priv space",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v01_00        => [ GM10X_and_later, -TU10X_and_later, ],
+            _v04_01        => [ TU10X_and_later, ],
+            _STUB         => [ pre_dMAXWELL, ],
+        ],
+
+        DUMP_FUSE => [
+
+            DESCRIPTION   => "Dump LWDEC related fuse registers",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v04_03        => [ GH100_and_later, ],
+            _STUB         =>  [ pre_dHOPPER, ],
+        ],
+
+        IS_PRIV_BLOCKED => [
+
+            DESCRIPTION   => "Determine if LWDEC priv registers are accessible on this GPU",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => TRUE,
+
+            _v01_00        => [ GM10X_and_later, -TU10X_and_later, ],
+            _v04_01        => [ TURING, ],
+            _v04_02        => [ GA100, ],
+            _v04_03        => [ GH100, ],
+            _v05_00        => [ GA10X, -GA100, ],
+            _v06_00        => [ ADA, ],
+            _STUB          => [ pre_dMAXWELL, GA102F, GH100_and_later, -GH100, ],
+        ],
+
+        DUMP_IMEM => [
+
+            DESCRIPTION   => "Dump LWDEC instruction memory",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32, LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v01_00        => [ GM10X_thru_VOLTA, -GM108 ],
+            _v04_01        => [ TURING, ],
+            _v04_02        => [ GA10X_and_later, ],
+            _STUB          => [ pre_dMAXWELL, ],
+        ],
+
+        DUMP_DMEM => [
+
+            DESCRIPTION   => "Dump LWDEC data memory",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32, LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v01_00        => [ GM10X, -GM108 ],
+            _v01_01        => [ GM20X, -GM206, ],
+            _v02_00        => [ GM206, ],
+            _v03_00        => [ GP100, ],
+            _v03_01        => [ PASCAL_and_later, -GP100, -TU10X_and_later, ],
+            _v04_01        => [ TURING, ],
+            _v04_02        => [ GA10X_and_later, ],
+            _STUB          => [ pre_dMAXWELL, ],
+        ],
+
+        PRINT_PRIV => [
+
+            DESCRIPTION   => "Print LWDEC priv space",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LwU32, char*, LwU32",
+
+            LIKE_INTERFACE => DUMP_PRIV,
+        ],
+
+        TEST_STATE => [
+
+            DESCRIPTION   => "Test if LWDEC engine is in a valid state",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => DUMP_IMEM,
+        ],
+
+        DISPLAY_HWCFG => [
+
+            DESCRIPTION   => "Display LWDEC hardware configuration",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => DUMP_IMEM,
+        ],
+
+        DISPLAY_FLCN_SPR => [
+
+            DESCRIPTION   => "Dump LWDEC Special Purpose Registers",
+            INTERFACE_TAG => "lwdecDisplayFlcnSPR",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => DUMP_IMEM,
+        ],
+
+        MASTER_RESET  => [
+            DESCRIPTION   => "Resets LWDEC",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _STUB          => [ ALL, ],             # deprecated support 
+        ],
+
+        IS_DEBUG_MODE => [
+            DESCRIPTION   => "Check if LWDEC is in DEBUG mode or not",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_FALSE,
+
+            LIKE_INTERFACE => DUMP_IMEM,
+         ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $lwdecHal;

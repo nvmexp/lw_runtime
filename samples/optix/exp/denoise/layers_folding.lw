@@ -1,0 +1,353 @@
+//
+// Copyright 2020 LWPU Corporation. All rights reserved.
+//
+
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+#include "layers.h"
+#include "layers_inline.h"
+
+namespace optix_exp {
+
+// ----- space to depth -----
+
+template <typename dtype, int block_size>
+__global__ static void k_SpaceToDepth_NCHW( const int nthreads,
+                                            const dtype* __restrict__ input,
+                                            const int output_width,
+                                            const int input_width,
+                                            const int input_depth_by_output_area,
+                                            const int output_depth_by_output_area,
+                                            dtype* __restrict__ output )
+{
+    for( int thread_idx = blockIdx.x * blockDim.x + threadIdx.x; thread_idx < nthreads;
+         thread_idx += blockDim.x * gridDim.x )
+    {
+        // We will be colwerting the image from ordering:
+        // n, iC, oY, bY, oX, bX   (== input index) to
+        // n, bY, bX, iC, oY, oX   (== output index)
+
+        const int n_iC_oY  = thread_idx / output_width;
+        const int oX       = thread_idx - n_iC_oY * output_width;
+        const int n        = thread_idx / input_depth_by_output_area;
+        const int iC_oY_oX = thread_idx - n * input_depth_by_output_area;
+
+        // Recombine the components and apply to the input and output pointers.
+        const dtype* input_ptr  = input + ( n_iC_oY * input_width + oX ) * block_size;
+        dtype*       output_ptr = output + n * output_depth_by_output_area + iC_oY_oX;
+
+#pragma unroll
+        for( int bY = 0; bY < block_size; ++bY )
+        {
+#pragma unroll
+            for( int bX = 0; bX < block_size; ++bX )
+            {
+                output_ptr[( bY * block_size + bX ) * input_depth_by_output_area] = *( input_ptr + bY * input_width + bX );
+            }
+        }
+    }
+}
+
+template <typename dtype, int block_size>
+__global__ static void k_DepthToSpace_NCHW( const int nthreads,
+                                            const dtype* __restrict__ input,
+                                            const int input_width,
+                                            const int output_width,
+                                            const int output_depth_by_input_area,
+                                            const int input_depth_by_input_area,
+                                            dtype* __restrict__ output )
+{
+    for( int thread_idx = blockIdx.x * blockDim.x + threadIdx.x; thread_idx < nthreads;
+         thread_idx += blockDim.x * gridDim.x )
+    {
+
+        // We will be colwerting the image from ordering:
+        // n, bY, bX, oC, iY, iX   to
+        // n, oC, iY, bY, iX, bX
+
+        // We assume thread_idx encodes n_oC_iY_iX, and use an unrolled loop over
+        // bY and bX coordinates within the block.
+
+        const int n_oC_iY = thread_idx / input_width;
+        const int iX      = thread_idx - n_oC_iY * input_width;
+
+        const int n        = thread_idx / output_depth_by_input_area;
+        const int oC_iY_iX = thread_idx - n * output_depth_by_input_area;
+
+        // Recombine the components and apply to the input and output pointers.
+        const dtype* input_ptr  = input + n * input_depth_by_input_area + oC_iY_iX;
+        dtype*       output_ptr = output + ( n_oC_iY * output_width + iX ) * block_size;
+
+#pragma unroll
+        for( int bY = 0; bY < block_size; ++bY )
+        {
+#pragma unroll
+            for( int bX = 0; bX < block_size; ++bX )
+            {
+                output_ptr[bY * output_width + bX] = *( input_ptr + ( bY * block_size + bX ) * output_depth_by_input_area );
+            }
+        }
+    }
+}
+
+template <typename dtype>
+static __global__ void k_SpaceToDepth_NHWC( dtype* out, const dtype* in, int out_nchannel, int w, int h, int in_nchannel )
+{
+    const int hx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int hy = blockIdx.y * blockDim.y + threadIdx.y;
+    const int c  = blockIdx.z * blockDim.z + threadIdx.z;
+    const int x  = 2 * hx;
+    const int y  = 2 * hy;
+
+    if( x < w && y < h )
+    {
+        dtype*       p = &out[out_nchannel * ( hy * ( w / 2 ) + hx )];
+        const dtype* s = &in[in_nchannel * ( y * w + x )];
+
+        for( int cblock   = 0; cblock < blockDim.z * 2; cblock += blockDim.z )
+            p[cblock + c] = s[cblock + c];
+
+        s += in_nchannel * w;
+        p += blockDim.z * 2;
+
+        for( int cblock   = 0; cblock < blockDim.z * 2; cblock += blockDim.z )
+            p[cblock + c] = s[cblock + c];
+    }
+}
+
+AESpaceToDepth::AESpaceToDepth( const char* name, const deviceInfo& info )
+    : AELayer( name, info )
+{
+}
+
+OptixResult AESpaceToDepth::init( const AELayer* input, ErrorDetails& errDetails )
+{
+    OptixResult result = AELayer::init( errDetails );
+
+    if( result )
+        return result;
+
+    m_input = input;
+
+    m_outWidth    = input->m_outWidth / 2;
+    m_outHeight   = input->m_outHeight / 2;
+    m_outChannels = M8tc( input->m_outChannels * 4, m_tc );
+
+    m_outsize = getBufferTypeSize() * 1 * m_outChannels * m_outHeight * m_outWidth;
+
+    return result;
+}
+
+AESpaceToDepth::~AESpaceToDepth()
+{
+}
+
+OptixResult AESpaceToDepth::destroy( ErrorDetails& errDetails )
+{
+    return AELayer::destroy( errDetails );
+}
+
+OptixResult AESpaceToDepth::fwdEval( void* smem, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    beginTiming();
+
+    if( m_tensorFormat == TENSOR_NHWC )
+    {
+        dim3 dimBlock( 3, 3, m_input->m_outChannels );  // input channels: 3, 6, 8
+        dim3 blockGrid = dim3( roundUp( m_outWidth, dimBlock.x ), roundUp( m_outHeight, dimBlock.y ), 1 );
+
+        k_SpaceToDepth_NHWC<__half><<<blockGrid, dimBlock, 0, stream>>>( (__half*)( (char*)smem + m_outDataIndex ),
+                                                                         (__half*)( (char*)smem + m_input->m_outDataIndex ),
+                                                                         m_outChannels, m_input->m_outWidth,
+                                                                         m_input->m_outHeight, m_input->m_outChannels );
+    }
+    else
+    {
+        const int oa    = m_outWidth * m_outHeight;
+        const int od_oa = m_outChannels * oa;
+        const int id_oa = m_input->m_outChannels * oa;
+        const int thc   = 1 * id_oa;
+
+        int block_count, tpb;
+        getBlockCount( block_count, tpb, thc );
+
+        if( m_dtype == DATA_HALF )
+            k_SpaceToDepth_NCHW<__half, 2><<<block_count, tpb, 0, stream>>>( thc, (__half*)( (char*)smem + m_input->m_outDataIndex ),
+                                                                             m_outWidth, m_input->m_outWidth, id_oa, od_oa,
+                                                                             (__half*)( (char*)smem + m_outDataIndex ) );
+        else
+            k_SpaceToDepth_NCHW<float, 2><<<block_count, tpb, 0, stream>>>( thc, (float*)( (char*)smem + m_input->m_outDataIndex ),
+                                                                            m_outWidth, m_input->m_outWidth, id_oa, od_oa,
+                                                                            (float*)( (char*)smem + m_outDataIndex ) );
+    }
+
+    endTiming();
+
+    return OPTIX_SUCCESS;
+}
+
+// ----- depth to space -----
+
+static __global__ void k_DepthToSpace8_NHWC( uint16_t* out, const uint16_t* in, OptixImage2D hiddenOut, int out_nchannel, int w, int h, int in_nchannel, int ox, int oy )
+{
+    int y = ( blockIdx.z * blockDim.z + threadIdx.z );
+    int x = ( blockIdx.y * blockDim.y + threadIdx.y );
+    int c = ( blockIdx.x * blockDim.x + threadIdx.x ) * 8;
+
+    const int x2 = 2 * x;
+    const int y2 = 2 * y;
+
+    if( x2 < w && y2 < h )
+    {
+        const uint16_t* s = &in[in_nchannel * ( y * ( w / 2 ) + x ) + c];
+        uint16_t*       p = 0;
+        if( hiddenOut.data )
+        {
+            // write upper 8 channels of each tensor quarter to hidden output
+            if( c == out_nchannel )
+                p = (uint16_t*)( hiddenOut.data + ( y2 + oy ) * hiddenOut.rowStrideInBytes + hiddenOut.pixelStrideInBytes * ( x2 + ox ) );
+            else if( c == (out_nchannel+8)*2 - 8 )
+                p = (uint16_t*)( hiddenOut.data + ( y2 + oy ) * hiddenOut.rowStrideInBytes + hiddenOut.pixelStrideInBytes * (x2 + ox + 1 ) );
+            else if( c == (out_nchannel+8)*3 - 8 )
+                p = (uint16_t*)( hiddenOut.data + (y2 + oy + 1) * hiddenOut.rowStrideInBytes + hiddenOut.pixelStrideInBytes * ( x2 + ox ) );
+            else if( c == (out_nchannel+8)*4 - 8 )
+                p = (uint16_t*)( hiddenOut.data + (y2 + oy + 1) * hiddenOut.rowStrideInBytes + hiddenOut.pixelStrideInBytes * (x2 + ox + 1) );
+            else
+                c -= ( c / ( out_nchannel + 8 ) ) * 8;  // remap to tensor with out_nchannel channels (the upper 8 are moved to hiddenOut, not used for kpn)
+            if( p && !( x2 < hiddenOut.width && y2 < hiddenOut.height ) )
+                return;         // pad not stored in hidden output
+        }
+        if( !p )
+        {
+            p = &out[out_nchannel * ( y2 * w + x2 )];
+            if( c < 2 * out_nchannel )
+                p += c;
+            else
+                p += c - 2 * out_nchannel + out_nchannel * w;
+        }
+        *(int4*)p = *(int4*)s;
+    }
+}
+
+static __global__ void k_DepthToSpace_NHWC( uint16_t* out, const uint16_t* in, int out_nchannel, int w, int h, int in_nchannel )
+{
+    const int x  = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y  = blockIdx.y * blockDim.y + threadIdx.y;
+    const int c  = blockIdx.z * blockDim.z + threadIdx.z;
+    const int x2 = 2 * x;
+    const int y2 = 2 * y;
+
+    if( x2 < w && y2 < h && c < 2 * out_nchannel )
+    {
+        const uint16_t* s = &in[in_nchannel * ( y * ( w / 2 ) + x )];
+        uint16_t*       p = &out[out_nchannel * ( y2 * w + x2 )];
+
+        for (int cblock = 0; cblock < out_nchannel*2; cblock += blockDim.z )
+            p[cblock+c] = s[cblock+c];
+
+        p += out_nchannel * w;
+
+        const int so = 2 * out_nchannel + c;
+        for (int cblock = 0; cblock < out_nchannel*2; cblock += blockDim.z )
+            p[cblock+c] = s[cblock+so];
+    }
+}
+
+AEDepthToSpace::AEDepthToSpace( const char* name, const deviceInfo& info )
+    : AELayer( name, info )
+{
+}
+
+OptixResult AEDepthToSpace::init( const AELayer* input, unsigned int outChannels, unsigned int hiddenChannels, ErrorDetails& errDetails )
+{
+    OptixResult result = AELayer::init( errDetails );
+
+    if( result )
+        return result;
+
+    // hidden channels written to a separate image, i.e. subtract them if possible
+    if( m_tensorFormat == TENSOR_NHWC )
+        outChannels -= hiddenChannels;
+
+    m_input = input;
+    m_hiddenOut = {};
+
+    m_outWidth    = input->m_outWidth * 2;
+    m_outHeight   = input->m_outHeight * 2;
+    m_outChannels = outChannels;
+
+    m_outsize = getBufferTypeSize() * 1 * m_outChannels * m_outHeight * m_outWidth;
+
+    return result;
+}
+
+AEDepthToSpace::~AEDepthToSpace()
+{
+}
+
+OptixResult AEDepthToSpace::destroy( ErrorDetails& errDetails )
+{
+    return AELayer::destroy( errDetails );
+}
+
+OptixResult AEDepthToSpace::fwdEval( void* smem, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    beginTiming();
+
+    if( m_tensorFormat == TENSOR_NHWC )
+    {
+        // directprediction has a configuration where 3 output channels are written (input 16 channels),
+        // we cannot use the fast code below
+        if( m_outChannels >= 4 && m_input->m_outChannels % 8 == 0 )
+        {
+            dim3 block;
+            block.x = m_input->m_outChannels / 8;
+            block.y = 4;
+            block.z = 256 / block.x / block.y;
+
+            dim3 grid = dim3( 1, roundUp( m_input->m_outWidth, block.y ), roundUp( m_input->m_outHeight, block.z ) );
+
+            k_DepthToSpace8_NHWC<<<grid, block, 0, stream>>>( (uint16_t*)( (char*)smem + m_outDataIndex ),
+                                                              (uint16_t*)( (char*)smem + m_input->m_outDataIndex ),
+                                                              m_hiddenOut,
+                                                              m_outChannels, m_outWidth, m_outHeight,
+                                                              m_input->m_outChannels,
+                                                              m_inputOffsetX, m_inputOffsetY );
+        }
+        else
+        {
+            dim3 dimBlock = dim3( 4, 4, 6 );
+            dim3 blockGrid = dim3( roundUp( m_input->m_outWidth, dimBlock.x ), roundUp( m_input->m_outHeight, dimBlock.y ), 1 );
+            k_DepthToSpace_NHWC<<<blockGrid, dimBlock, 0, stream>>>( (uint16_t*)( (char*)smem + m_outDataIndex ),
+                                                                     (uint16_t*)( (char*)smem + m_input->m_outDataIndex ),
+                                                                     m_outChannels, m_outWidth, m_outHeight,
+                                                                     m_input->m_outChannels );
+        }
+    }
+    else
+    {
+        const int ia    = m_input->m_outWidth * m_input->m_outHeight;
+        const int id_ia = m_input->m_outChannels * ia;
+        const int od_ia = m_outChannels * ia;
+        const int thc   = 1 * od_ia;
+
+        int block_count, tpb;
+        getBlockCount( block_count, tpb, thc );
+
+        if( m_dtype == DATA_HALF )
+            k_DepthToSpace_NCHW<__half, 2><<<block_count, tpb, 0, stream>>>( thc, (__half*)( (char*)smem + m_input->m_outDataIndex ),
+                                                                             m_input->m_outWidth, m_outWidth, od_ia, id_ia,
+                                                                             (__half*)( (char*)smem + m_outDataIndex ) );
+        else
+            k_DepthToSpace_NCHW<float, 2><<<block_count, tpb, 0, stream>>>( thc, (float*)( (char*)smem + m_input->m_outDataIndex ),
+                                                                            m_input->m_outWidth, m_outWidth, od_ia, id_ia,
+                                                                            (float*)( (char*)smem + m_outDataIndex ) );
+    }
+
+    endTiming();
+
+    return OPTIX_SUCCESS;
+}
+
+};  // namespace optix_exp

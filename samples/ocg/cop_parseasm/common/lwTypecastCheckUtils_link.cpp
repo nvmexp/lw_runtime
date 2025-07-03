@@ -1,0 +1,2 @@
+
+#include "lwTypecastCheck.cpp"

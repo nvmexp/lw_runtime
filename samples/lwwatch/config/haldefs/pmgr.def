@@ -1,0 +1,45 @@
+# -*- mode: perl; -*-
+
+# PMGR Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $pmgrHal = [
+
+    # per-GPU defaults for PMGR engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+
+        MUTEX_ACQUIRE_BY_INDEX => [
+            DESCRIPTION    => "Acquire PMGR mutex by index",
+            RETURN_TYPE    => LW_STATUS,
+            ARGUMENTS      => "LwU32 physMutexId, LwU32 *pOwnerId",
+            STUB_RETURNS   => ERROR,
+
+            _GP100         => [ GP100_and_later, ],
+            _STUB          => [ pre_PASCAL, ],
+        ],
+
+        MUTEX_RELEASE_BY_INDEX => [
+            DESCRIPTION    => "Release PMGR mutex by index",
+            RETURN_TYPE    => void,
+            ARGUMENTS      => "LwU32 physMutexId, LwU32 ownerId",
+            STUB_RETURNS   => void,
+
+            LIKE_INTERFACE => MUTEX_ACQUIRE_BY_INDEX,
+        ],
+        
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $pmgrHal;

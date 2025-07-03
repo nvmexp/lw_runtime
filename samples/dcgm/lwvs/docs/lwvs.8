@@ -1,0 +1,204 @@
+.TH LWVS 8 2014-07-24 "LWPU" "GPU Deployment and Management Documentation"
+.sp
+
+.SH NAME
+
+.sp
+lwvs \- The LWPU Validation Suite
+.sp
+
+.SH SYNOPSIS
+
+.sp
+\fBlwvs\fR [-a] [-c \fIcfgfile\fR] [-d \fIdbglevel\fR] [-g] [-l
+\fIdbgfile\fR] [-s] [-t] [--version] [-h]
+.sp
+
+.SH DESCRIPTION
+
+.sp
+\fBlwvs\fR is the LWPU Validation Suite for Unix platforms.
+LWVS is the system administrator and cluster manager's tool for
+detecting and troubleshooting common problems affecting LWPU
+Tesla GPUs in a high performance computing elwironments. LWVS
+folwses on software and system configuration issues, diagnostics,
+topological concerns, and relative performance.
+.sp
+
+.SH OPTIONS
+
+.sp
+LWVS supports the following command line options.
+.sp
+
+.TP
+\fB-a, --appendLog\fR
+Append this run to the current debug log file.
+.TP
+\fB-c, --config \fIpath to config file\fB\fR
+Specify a path to the configuration file.
+.TP
+\fB--configless 
+\fRRun LWVS in a configless mode.  Exelwtes a "long" test on all supported GPUs.
+.TP
+\fB-d <debug level>, --debugLevel <debug level>\fR
+Debug level 0-5 with 5 being the most verbose.
+.TP
+\fB-g, --listGpus\fR
+List the GPUs available for testing.
+.TP
+\fB-l <debug file>, --debugLogFile <debug file>\fR
+Encrypted logfile for debug information.
+.TP
+\fB-p <path>, --pluginpath <path>\fR
+Custom path for LWVS plugins.
+.TP
+\fB--quiet\fR
+No console output given.  See logs and return code for errors.
+.TP
+\fB-s, --scriptable\fR
+Give output in colon-separated, more script-friendly format.
+.TP
+\fB--specifiedtest <specific test to run>\fR
+Run a specific test in a configless mode. Multiple word
+tests should be in quotes.
+.TP
+\fB--statsonfail\fR
+Output statistic logs only if a test failure is encountered.
+.TP
+\fB-t, --listTests\fR
+List the test suites and test groups available.
+.TP
+\fB-v, --verbose\fR
+Enable verbose reporting for some plugins.
+.TP
+\fB--version\fR
+Displays the version information and exits.
+.TP
+\fB-h, --help\fR
+Displays usage information and exits.
+.sp
+
+.SH CONFIGURATION FILE
+
+.sp
+Tests, GPUs, and global parameters are specified via a
+configuration file which is a standard YAML format, the most
+basic of which is:
+.sp
+
+%YAML 1.2
+.br
+---
+.br
+globals:
+  logfile: lwvs
+
+gpus:
+.br
+- gpuset: all K40c
+  properties:
+    name: Tesla K40c
+  tests: 
+    name: Long
+					
+.sp
+This configuration file will run the 'Long' test suite on all
+Tesla K40c GPUs found within the system. In addition to the name,
+indexes, UUIDs, and PCI bus IDs, a brand, such as 'Tesla', can be
+specified. The one caveat is that if multiple indexes are
+specified or a brand specification matches more than one GPU on
+the system, all GPUs must be of the same type (i.e. all must be
+Tesla K40c).
+.sp
+Please refer to the LWVS User Guide for a more detailed
+explanation of the LWVS config file and options.
+.sp
+
+.SH PROPERTIES
+
+.sp
+The full specification for the properties section is:
+.sp
+
+.TP
+\fBindex\fR
+-- A comma-separated list of indexes that the tests should run
+on.
+.TP
+\fBname\fR
+-- The canonical name for the device (i.e. Tesla K8).
+.TP
+\fBbrand\fR
+-- The brand name for the device being targeted (i.e. Tesla).
+.TP
+\fBuuid\fR
+-- The full uuid for the device wanting to be targeted.
+.TP
+\fBbusid\fR
+-- The full PCIe busid for the device wanting to be targeted in
+\fBxxxx:yy:zz.n\fR format.
+.sp
+In the above list, busid and uuid can only match a single unique
+device whereas index, name, and brand can match multiple devices.
+For the other three keywords, the resulting list of GPUs is the
+intersection of one or more of the {index, name, brand} set
+depending on which keywords the user specifies.
+.sp
+
+.SH TESTS
+
+.sp
+The test names are a package of pre-sequenced tests or test
+groups:
+.TP
+\fBQuick\fR
+Designed for a job prologue and with basic checks for sanity and
+configuration.
+.TP
+\fBMedium\fR
+Designed for a job epilogue on failure with more ilwolved
+software and hardware tests, system integration tests, and
+relative performance checks.
+.TP
+\fBLong\fR
+Designed for manual exelwtion on a job failure. Contains the
+components of the “medium” suite but run for a longer time in an
+effort to stress the system.
+.sp
+
+.SH FILES
+
+.sp
+
+The default installation directory is /usr/share/lwpu-validation-suite/
+.TP
+\fB/etc/lwpu-validation-suite/lwvs.conf\fR
+The default LWVS configuration file.
+.TP
+\fB$INSTALL_DIR/plugins/*.so\fR
+Pre-packaged plugins for LWVS.
+.TP
+\fB$INSTALL_DIR/configfile_examples/\fR
+Example config files for the various GPUs that LWVS supports.
+.sp
+
+.SH NOTES
+
+.sp
+For more information about LWVS, please see the online
+documentation at XXX.
+.sp
+
+.SH SEE ALSO
+
+.sp
+\fBlwidia-healthmon\fR(8), \fBLWML\fR(3)
+.sp
+\fBLWIDIA Validation Suite User Guide\fR at XXX.
+.sp
+
+.SH COPYRIGHT
+
+.sp
+©2015 LWPU Corporation. All rights reserved.

@@ -1,0 +1,127 @@
+#include <optix_world.h>
+
+rtDeclareVariable( bool, flag, , );
+rtDeclareVariable( float, attribute_var, attribute attribute_name, );
+
+
+RT_PROGRAM void empty()
+{
+}
+
+RT_PROGRAM void callOnlyPI()
+{
+    rtPotentialIntersection( 0.0 );
+}
+
+RT_PROGRAM void callOnlyRI()
+{
+    rtReportIntersection( 0 );
+}
+
+RT_PROGRAM void alwaysCallRI()
+{
+    rtPotentialIntersection( 0.0f );
+    rtReportIntersection( 0 );
+}
+
+// The volatile keyword is needed to disable optimizations and make sure the cfg looks as intended.
+RT_PROGRAM void avoidRIIfPITrue()
+{
+    volatile bool riFlag = flag;
+    if( rtPotentialIntersection( 0.0f ) )
+    {
+        if( riFlag )
+            rtReportIntersection( 0 );
+    }
+}
+
+RT_PROGRAM void controlRIWithFlag()
+{
+    volatile bool riFlag = false;
+    if( rtPotentialIntersection( 0.0f ) )
+    {
+        riFlag = true;
+    }
+    if( riFlag )
+    {
+        rtReportIntersection( 0 );
+    }
+}
+
+RT_PROGRAM void twoRIsWithSinglePI()
+{
+    volatile bool tmpFlag = flag;
+    if( rtPotentialIntersection( 0.0f ) )
+    {
+        if( tmpFlag )
+        {
+            rtReportIntersection( 0 );
+        }
+        else
+        {
+            rtReportIntersection( 1 );
+        }
+    }
+}
+
+RT_PROGRAM void writeAttributeBeforePI()
+{
+    attribute_var = 3.14f;
+    if( rtPotentialIntersection( 0.0f ) )
+    {
+        rtReportIntersection( 0 );
+    }
+}
+
+RT_PROGRAM void writeAttributeAfterRI()
+{
+    if( rtPotentialIntersection( 0.0f ) )
+    {
+        rtReportIntersection( 0 );
+    }
+    attribute_var = 3.14f;
+}
+
+RT_PROGRAM void endlessLoopAroundPI()
+{
+    while( true )
+    {
+        if( rtPotentialIntersection( 0.0f ) )
+        {
+            rtReportIntersection( 0 );
+        }
+    }
+}
+
+RT_PROGRAM void endlessLoopAfterPI()
+{
+    if( rtPotentialIntersection( 0.0f ) )
+    {
+        rtReportIntersection( 0 );
+    }
+    while( true )
+    {
+    }
+}
+
+RT_PROGRAM void endlessLoopAroundRI()
+{
+    if( rtPotentialIntersection( 0.0f ) )
+    {
+        while( true )
+        {
+            rtReportIntersection( 0 );
+        }
+    }
+}
+
+RT_PROGRAM void endlessLoopAfterRI()
+{
+    if( rtPotentialIntersection( 0.0f ) )
+    {
+        rtReportIntersection( 0 );
+        while( true )
+        {
+        }
+    }
+}

@@ -1,0 +1,72 @@
+ps_4_0
+dcl_input_ps v1.xy, linear
+dcl_input_ps v3.xyz, linear
+dcl_input_ps v4.xyz, linear
+dcl_input_ps v6.xyz, linear
+dcl_input_ps v7.xyz, linear
+dcl_input_ps v8.xyzw, linear
+dcl_output o0.xyzw
+dcl_constantbuffer cb1[20].xyzw, immediateindexed
+dcl_constantbuffer cb2[4].xyzw, immediateindexed
+dcl_constantbuffer cb11[1].xyzw, immediateindexed
+dcl_sampler s0, mode_default
+dcl_sampler s13, mode_default
+dcl_sampler s14, mode_default
+dcl_sampler s15, mode_default
+dcl_resource t0, texture2d, (float, float, float, float)
+dcl_resource t13, texture2d, (float, float, float, float)
+dcl_resource t14, texture2d, (float, float, float, float)
+dcl_resource t15, texture2d, (float, float, float, float)
+dcl_temps 5 
+sample r0.xyzw, v1.xyxx, t0.xyzw, s0
+add r1.x, r0.w, -cb11[0].x
+lt r1.x, r1.x, l(0.00000000)
+discard_sat r1.x
+dp3 r1.x, v4.xyzx, cb1[0].xyzx
+dp3 r1.y, v4.xyzx, cb1[1].xyzx
+dp3 r1.z, v4.xyzx, cb1[2].xyzx
+mov r2.xyz, v3.xyzx
+mov r2.w, l(0x3f800000)
+dp4 r3.x, r2.xyzw, cb1[0].xyzw
+dp4 r3.y, r2.xyzw, cb1[1].xyzw
+dp4 r3.z, r2.xyzw, cb1[2].xyzw
+max r1.w, |r3.x|, |r3.y|
+ge r2.xyzw, r1.wwww, cb1[8].xyzw
+and r2.xyzw, r2.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+ge r4.xyzw, cb1[7].xyzw, r1.wwww
+add r1.w, r1.w, cb1[17].x
+and r4.xyzw, r4.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+mul r2.xyzw, r2.xyzw, r4.xyzw
+dp4 r3.w, cb1[15].xyzw, r2.xyzw
+mad r3.xyz, r1.xyzx, r3.wwww, r3.xyzx
+mad r3.w, r3.z, cb1[18].x, cb1[18].y
+mov r1.xy, l(0, 0, 0, 0)
+dp4 r1.z, cb1[16].xyzw, r2.xyzw
+add r1.xyz, r3.xywx, r1.xyzx
+dp4 r3.x, r2.xyzw, cb1[9].xyzw
+dp4 r3.y, r2.xyzw, cb1[10].xyzw
+dp4 r3.z, r2.xyzw, cb1[5].xyzw
+dp4 r3.w, r2.xyzw, cb1[6].xyzw
+mad r1.xy, r1.xyxx, r3.xyxx, r3.zwzz
+div r2.xy, l(0.00000000, 0.00000000, 0.00000000, 0.00000000), cb1[19].xyxx
+add r1.xy, r1.xyxx, r2.xyxx
+sample r2.xyzw, r1.xyxx, t15.xyzw, s15
+lt r1.x, r2.x, r1.z
+movc r1.y, r1.x, l(0), l(0x3f800000)
+and r1.x, r1.x, l(0x3f800000)
+mul_sat r1.z, r1.w, cb1[17].y
+mad r1.x, r1.z, r1.x, r1.y
+add r1.yz, v3.xxyx, -cb2[3].zzwz
+mad r2.xy, r1.yzyy, cb2[3].xyxx, cb1[11].xyxx
+mul r1.yz, r1.yyzy, cb2[3].xxyx
+sample r2.xyzw, r2.xyxx, t14.xyzw, s14
+mul r2.xyz, r1.xxxx, r2.xyzx
+sample r1.xyzw, r1.yzyy, t13.xyzw, s13
+mul r1.xyz, r2.xyzx, r1.xyzx
+mad r1.xyz, v7.xyzx, r1.xyzx, v8.xyzx
+mul r1.xyz, r0.xyzx, r1.xyzx
+mad r0.xyz, r0.xyzx, v6.xyzx, r1.xyzx
+mov o0.w, r0.w
+add r1.xyz, -r0.xyzx, cb2[0].xyzx
+mad o0.xyz, v8.wwww, r1.xyzx, r0.xyzx
+ret 

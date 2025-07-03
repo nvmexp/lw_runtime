@@ -1,0 +1,202 @@
+DCGM_DIR := $(LW_SOURCE)/apps/dcgm/
+LWML_DIR := $(LW_SOURCE)/apps/lwml/
+LWVS_DIR := $(DCGM_DIR)/lwvs/
+
+LWRRENT_DIR := $(DCGM_DIR)
+OUTPUTDIR   := $(DCGM_DIR)/_out
+
+# Auxiliary target to synchronize parallel build before tar generation
+.PHONY: dcgmbuildsyncpoint
+
+# Those global flags are used by most included files as the base.
+# The only exception as of this time is
+# testing/TestLwcmUnitTests.lwmk
+DCGM_GLOBAL_CFLAGS :=
+DCGM_GLOBAL_LDFLAGS := '-Wl,-rpath,$$ORIGIN/'
+
+ifndef VULCAN
+    ifeq ($(LW_BUILD_TYPE), develop)
+        DCGM_GLOBAL_CFLAGS += --coverage -fprofile-arcs -ftest-coverage -g -ggdb
+        DCGM_GLOBAL_LDFLAGS += -lgcov -lc -lstdc++
+    endif
+endif
+
+# Enable LWSwitch/FM compilation for Linux based builds.
+# Use the LW_TARGET_OS variable if the target OS is explicitly mentioned (like DVS).
+# If not, fallback to host OS type and enable FM based on that.
+ifdef LW_TARGET_OS
+    ifeq ($(LW_TARGET_OS), Linux)
+        DCGM_BUILD_LWSWITCH_MODULE = TRUE
+    endif
+else
+    ifeq ($(LW_HOST_OS), Linux)
+        DCGM_BUILD_LWSWITCH_MODULE = TRUE
+    endif
+endif
+
+DCGM_BUILD_VGPU_MODULE := TRUE
+
+# override LWCFG_GLOBAL_LWSWITCH_IMPL_LR10 to set to disable
+# if elw variable ELW_DISABLE_LR10 is set to 1
+ifdef ELW_DISABLE_LR10
+    ifeq ($(ELW_DISABLE_LR10), 1)
+        LWCFG_OPTIONS += --override=LWCFG_GLOBAL_LWSWITCH_IMPL_LR10:disable
+    endif
+endif
+
+# override LWCFG_GLOBAL_FEATURE_RID72837_KT_MULTINODE to set to disable
+# if elw variable ELW_DISABLE_KT is set to 1
+ifdef ELW_DISABLE_KT
+    ifeq ($(ELW_DISABLE_KT), 1)
+        LWCFG_OPTIONS += --override=LWCFG_GLOBAL_FEATURE_RID72837_KT_MULTINODE:disable
+    endif
+endif
+
+LWML_BUILD_DIR := $(LWML_DIR)/build/
+include $(LWML_BUILD_DIR)/common.lwmk
+# disable -Wmissing-prototypes in lw-healthmon for now
+LWML_BUILD_MISSING_PROTOTYPES =
+
+# Override the toolchain to gcc-4.1.1 for VMware to maintain the status quo
+# although lwml has upgraded to gcc-7.3.0.
+ifeq ($(LW_TARGET_OS)_$(LW_TARGET_ARCH),VMware_amd64)
+  LW_TOOLCHAIN = gcc-4.1.1as2
+endif
+
+#LD_LIBRARY_PATH := $(DCGM_DIR)/libs/protobuf/lib
+#PROTOC := $(DCGM_DIR)/libs/protobuf/bin/protoc
+
+ifdef LWCFG_INITIALIZED
+
+DCGM_VERSION = 100
+
+##############################################################################
+# Versioning
+##############################################################################
+# todo: Update to appropriate version later
+DCGM_CLIENT_INT_H := $(DCGM_DIR)/dcgmlib/dcgm_client_internal.h
+DCGM_AGENT_H := $(DCGM_DIR)/dcgmlib/dcgm_agent.h
+DCGM_AGENT_INT_H := $(DCGM_DIR)/dcgmlib/dcgm_agent_internal.h
+DCGM_STRUCTS_H := $(DCGM_DIR)/dcgmlib/dcgm_structs.h
+DCGM_FIELDS_H := $(DCGM_DIR)/dcgmlib/dcgm_fields.h
+DCGM_ERRORS_H := $(DCGM_DIR)/dcgmlib/dcgm_errors.h
+SDK_SAMPLES_IN := $(DCGM_DIR)/sdk_samples
+DCGM_FM_API_INT_H := $(DCGM_DIR)/dcgmlib/dcgm_module_fm_internal.h
+DCGM_FM_API_STRUCTS_INT_H := $(DCGM_DIR)/dcgmlib/dcgm_module_fm_structs_internal.h
+DCGM_UUID_H := $(DCGM_DIR)/dcgmlib/dcgm_uuid.h
+
+DCGM_CLIENT_INT_H_OUT = $(OUTPUTDIR)/dcgm_client_internal.h
+DCGM_AGENT_H_OUT = $(OUTPUTDIR)/dcgm_agent.h
+DCGM_AGENT_INT_H_OUT = $(OUTPUTDIR)/dcgm_agent_internal.h
+DCGM_STRUCTS_H_OUT = $(OUTPUTDIR)/dcgm_structs.h
+DCGM_FIELDS_H_OUT = $(OUTPUTDIR)/dcgm_fields.h
+DCGM_ERRORS_H_OUT = $(OUTPUTDIR)/dcgm_errors.h
+SDK_SAMPLES_OUT := $(OUTPUTDIR)/sdk_samples
+DCGM_FM_API_INT_H_OUT := $(OUTPUTDIR)/dcgm_module_fm_internal.h
+DCGM_FM_API_STRUCTS_INT_H_OUT := $(OUTPUTDIR)/dcgm_module_fm_structs_internal.h
+DCGM_UUID_H_OUT := $(OUTPUTDIR)/dcgm_uuid.h
+
+$(DCGM_CLIENT_INT_H_OUT):
+	@$(ECHO) Copying $(DCGM_CLIENT_INT_H) to $(DCGM_CLIENT_INT_H_OUT)
+	$(COPY) $(DCGM_CLIENT_INT_H) $(DCGM_CLIENT_INT_H_OUT)
+
+$(DCGM_AGENT_H_OUT):
+	@$(ECHO) Copying $(DCGM_AGENT_H) to $(DCGM_AGENT_H_OUT)
+	$(COPY) $(DCGM_AGENT_H) $(DCGM_AGENT_H_OUT)
+
+$(DCGM_AGENT_INT_H_OUT):
+	@$(ECHO) Copying $(DCGM_AGENT_INT_H) to $(DCGM_AGENT_INT_H_OUT)
+	$(COPY) $(DCGM_AGENT_INT_H) $(DCGM_AGENT_INT_H_OUT)
+
+$(DCGM_STRUCTS_H_OUT):
+	@$(ECHO) Copying $(DCGM_STRUCTS_H) to $(DCGM_STRUCTS_H_OUT)
+	$(COPY) $(DCGM_STRUCTS_H) $(DCGM_STRUCTS_H_OUT)
+
+$(DCGM_FIELDS_H_OUT):
+	@$(ECHO) Copying $(DCGM_FIELDS_H) to $(DCGM_FIELDS_H_OUT)
+	$(COPY) $(DCGM_FIELDS_H) $(DCGM_FIELDS_H_OUT)
+
+$(DCGM_ERRORS_H_OUT):
+	@$(ECHO) Copying $(DCGM_ERRORS_H) to $(DCGM_ERRORS_H_OUT)
+	$(COPY) $(DCGM_ERRORS_H) $(DCGM_ERRORS_H_OUT)
+
+$(SDK_SAMPLES_OUT):
+	@$(ECHO) Copying $(SDK_SAMPLES_IN) to $(SDK_SAMPLES_OUT)
+	$(COPY) -r $(SDK_SAMPLES_IN) $(SDK_SAMPLES_OUT)
+
+$(DCGM_FM_API_INT_H_OUT):
+	@$(ECHO) Copying $(DCGM_FM_API_INT_H) to $(DCGM_FM_API_INT_H_OUT)
+	$(COPY) -r $(DCGM_FM_API_INT_H) $(DCGM_FM_API_INT_H_OUT)
+
+$(DCGM_FM_API_STRUCTS_INT_H_OUT):
+	@$(ECHO) Copying $(DCGM_FM_API_STRUCTS_INT_H) to $(DCGM_FM_API_STRUCTS_INT_H_OUT)
+	$(COPY) -r $(DCGM_FM_API_STRUCTS_INT_H) $(DCGM_FM_API_STRUCTS_INT_H_OUT)
+
+$(DCGM_UUID_H_OUT):
+	@$(ECHO) Copying $(DCGM_UUID_H) to $(DCGM_UUID_H_OUT)
+	$(COPY) -r $(DCGM_UUID_H) $(DCGM_UUID_H_OUT)
+
+LW_GENERATED_HEADERS += $(DCGM_CLIENT_INT_H_OUT)
+LW_GENERATED_HEADERS += $(DCGM_AGENT_H_OUT)
+LW_GENERATED_HEADERS += $(DCGM_AGENT_INT_H_OUT)
+LW_GENERATED_HEADERS += $(DCGM_STRUCTS_H_OUT)
+LW_GENERATED_HEADERS += $(DCGM_FIELDS_H_OUT)
+LW_GENERATED_HEADERS += $(DCGM_ERRORS_H_OUT)
+LW_GENERATED_HEADERS += $(SDK_SAMPLES_OUT)
+LW_GENERATED_HEADERS += $(DCGM_FM_API_INT_H_OUT)
+LW_GENERATED_HEADERS += $(DCGM_FM_API_STRUCTS_INT_H_OUT)
+LW_GENERATED_HEADERS += $(DCGM_UUID_H_OUT)
+
+include $(DCGM_DIR)/version.lwmk
+include $(DCGM_DIR)/libs/libs.lwmk
+include $(DCGM_DIR)/dcgmlib/protobuf.lwmk
+include $(DCGM_DIR)/dcgmlib/libdcgm.lwmk
+include $(DCGM_DIR)/dcgm_loader/dcgm_loader.lwmk
+include $(DCGM_DIR)/hostengine/hostengine.lwmk
+#include $(DCGM_DIR)/client/lwcmi_test.lwmk
+include $(DCGM_DIR)/dcgmi/dcgmi.lwmk
+include $(DCGM_DIR)/dcgmi/test_dcgmi.lwmk
+include $(DCGM_DIR)/modules/health/libdcgmmodulehealth.lwmk
+include $(DCGM_DIR)/modules/introspect/libdcgmmoduleintrospect.lwmk
+ifdef DCGM_BUILD_LWSWITCH_MODULE
+    include $(DCGM_DIR)/modules/lwswitch/libdcgmmodulelwswitch.lwmk
+    include $(DCGM_DIR)/modules/lwswitch/lwswitch_audit/lwswitch_audit.lwmk
+endif
+include $(DCGM_DIR)/modules/policy/libdcgmmodulepolicy.lwmk
+ifdef DCGM_BUILD_VGPU_MODULE
+    include $(DCGM_DIR)/modules/vgpu/libdcgmmodulevgpu.lwmk
+endif
+include $(DCGM_DIR)/modules/config/libdcgmmoduleconfig.lwmk
+include $(DCGM_DIR)/modules/diag/libdcgmmodulediag.lwmk
+include $(DCGM_DIR)/modules/profiling/libdcgmmoduleprofiling.lwmk
+include $(DCGM_DIR)/sdk_config.lwmk
+include $(DCGM_DIR)/sdk_health.lwmk
+include $(DCGM_DIR)/sdk_modules.lwmk
+include $(DCGM_DIR)/sdk_policy.lwmk
+include $(DCGM_DIR)/sdk_p_stats.lwmk
+include $(DCGM_DIR)/sdk_field_values.lwmk
+include $(DCGM_DIR)/testing/TestLwcmUnitTests.lwmk
+include $(DCGM_DIR)/dcgmproftester/DcgmProfTester.lwmk
+include $(DCGM_DIR)/dcgm_stub/dcgm_stub_static.lwmk
+include $(DCGM_DIR)/testing/stub/stub_library_test.lwmk
+include $(DCGM_DIR)/testing/buildtestdir.lwmk
+# Must include after $(SDK_SAMPLES_OUT) because it depends on that running first
+include $(DCGM_DIR)/testing/buildexportbindings.lwmk
+include $(DCGM_DIR)/dcgm_collectd/dcgm_collectd.lwmk #Must be after buildexportbindings.lwmk
+include $(DCGM_DIR)/testing/python_testing_pkg.lwmk #Must be after dcgm_collectd.lwmk and buildtestdir.lwmk
+include $(DCGM_DIR)/dcgm_wsgi/dcgm_wsgi.lwmk
+include $(DCGM_DIR)/scripts/initctl/copyinitctls.lwmk
+include $(DCGM_DIR)/scripts/systemd/copysystemd.lwmk
+include $(DCGM_DIR)/documentation.lwmk
+include $(DCGM_DIR)/modules/lwswitch/topology/copytopology.lwmk
+
+
+include $(DCGM_DIR)/lwvs/lwvs.lwmk
+
+build: dcgmbuildsyncpoint
+
+clean:
+	$(RM) $(DCGM_DIR)/$(OUTPUTDIR)
+
+endif # LWCFG_INITIALIZED
+include $(LWML_BUILD_DIR)/commonRules.lwmk

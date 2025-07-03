@@ -1,0 +1,151 @@
+pass_template:
+    samplerstates:
+        SamplerLinear:
+            filter: MIN_MAG_MIP_LINEAR
+            addressU: CLAMP
+            addressV: CLAMP
+    type: RGBA8_uint
+    constant-buffers:
+        globalParams: {screenSize: SCREEN_SIZE, captureState: CAPTURE_STATE, tileUV: TILE_UV_RANGE}
+        controlBuf: {g_sldAxis: axisSlider, g_sldBlur : blurSlider, g_sldLwrve : lwrveSlider} 
+
+typical_slider1:
+      type: float
+      minimum-value: -1.0
+      maximum-value: 1.0
+      default-value: 0.0
+      ui-sticky-region: 0.01
+      ui-value-unit: "%"
+      ui-value-min: -100
+      ui-value-max: 100
+      ui-value-step: 2.0
+
+typical_slider2:
+      type: float
+      minimum-value: 0.0
+      maximum-value: 1.0
+      default-value: 0.0
+      ui-sticky-region: 0.01
+      ui-value-unit: "%"
+      ui-value-min: 0
+      ui-value-max: 100
+      ui-value-step: 1.0
+
+user-constants:
+    - name: axisSlider 
+      ui-label: "Axis"
+      ui-label-localized:
+          cs-CZ: "Osa"
+          da-DK: "Akse"
+          de-DE: "Achse"
+          el-GR: "Άξονας"
+          en-UK: "Axis"
+          es-ES: "Eje"
+          es-MX: "Eje"
+          fi-FI: "Akseli"
+          fr-FR: "Axe"
+          hu: "Tengely"
+          it-IT: "Asse"
+          ja-JP: "軸"
+          ko-KR: "축"
+          nl-NL: "As"
+          nb-NO: "Akse"
+          pl: "Oś"
+          pt-PT: "Eixo"
+          pt-BR: "Eixo"
+          ru-RU: "Ось"
+          sk-SK: "Os"
+          sl-SI: "Os"
+          sv-SE: "Axel"
+          th-TH: "แกน"
+          tr-TR: "Eksen"
+          zh-CHS: "轴"
+          zh-CHT: "軸"
+      ui-value-min: 0
+      ui-value-max: 180.0
+      minimum-value: 0.0
+      maximum-value: 180.0
+      default-value: 0.0
+      ui-sticky-value: 0.0
+      import: [typical_slider1]
+    - name: blurSlider 
+      ui-label: "Blur Size"
+      ui-label-localized:
+          cs-CZ: "Velikost rozostření"
+          da-DK: "Sløringsstørrelse"
+          de-DE: "Unschärfegröße"
+          el-GR: "Μέγεθος θολώματος"
+          en-UK: "Blur Size"
+          es-ES: "Tamaño de desenfoque"
+          es-MX: "Tamaño de desenfoque"
+          fi-FI: "Sumennuksen koko"
+          fr-FR: "Taille du flou"
+          hu: "Homályosság mérete"
+          it-IT: "Dimensioni sfocatura"
+          ja-JP: "ぼかしサイズ"
+          ko-KR: "블러 크기"
+          nl-NL: "Vervagingsgrootte"
+          nb-NO: "Uskarphetstørrelse"
+          pl: "Rozmiar rozmycia"
+          pt-PT: "Tamanho da desfocagem"
+          pt-BR: "Tamanho do desfoque"
+          ru-RU: "Площадь размытия"
+          sk-SK: "Veľkosť rozostrenia"
+          sl-SI: "Obseg zameglitve"
+          sv-SE: "Storlek på oskärpa"
+          th-TH: "ขนาดความพร่ามัว"
+          tr-TR: "Bulanıklaştırma Boyutu"
+          zh-CHS: "模糊大小"
+          zh-CHT: "模糊尺寸"
+      default-value: 15.0
+      ui-sticky-value: 0.0
+      maximum-value: 30.0
+      import: [typical_slider2]      
+    - name: lwrveSlider 
+      ui-label: "Blur Lwrve"
+      ui-label-localized:
+          cs-CZ: "Křivka rozostření"
+          da-DK: "Sløringskurve"
+          de-DE: "Unschärfekurve"
+          el-GR: "Καμπύλη θολώματος"
+          en-UK: "Blur Lwrve"
+          es-ES: "Lwrva de desenfoque"
+          es-MX: "Lwrva de desenfoque"
+          fi-FI: "Sumennuskäyrä"
+          fr-FR: "Courbe de flou"
+          hu: "Homályossági görbe"
+          it-IT: "Lwrva sfocatura"
+          ja-JP: "ぼかしカーブ"
+          ko-KR: "블러 곡선"
+          nl-NL: "Vervagingsboog"
+          nb-NO: "Uskarphetskurve"
+          pl: "Krzywa rozmycia"
+          pt-PT: "Lwrva de desfocagem"
+          pt-BR: "Lwrva de desfoque"
+          ru-RU: "Кривая размытия"
+          sk-SK: "Krivka rozostrenia"
+          sl-SI: "Krivulja zameglitve"
+          sv-SE: "Kurva för oskärpa"
+          th-TH: "เส้นโค้งพร่ามัว"
+          tr-TR: "Bulanıklaştırma Eğrisi"
+          zh-CHS: "模糊曲线"
+          zh-CHT: "模糊曲線"
+      minimum-value: 0.0
+      default-value: 2.0
+      maximum-value: 10.0
+      ui-sticky-value: 0.0
+      import: [typical_slider2]   
+
+blur1:
+    import: [pass_template]
+    shader: PS_GaussianA@TiltShift.yfx
+    textures:
+        texOriginalColor:
+            channel: PIPE_INPUTS_COLOR
+
+main:
+    import: [pass_template]
+    shader: PS_GaussianB@TiltShift.yfx
+    textures:
+        texBlurred:
+            import: [blur1]

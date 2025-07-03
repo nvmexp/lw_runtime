@@ -1,0 +1,29 @@
+.version 3.1
+.target sm_20
+.shared .s32 s;
+.global .s32 g;
+
+.entry main {
+   .reg .s32 as, bs;
+
+   // gatom followed by satom
+   atom.shared.add.s32 as, [s], 3;
+   atom.global.add.s32 bs, [g], 44;
+
+   bar.sync 0;
+
+   // satom followed by gatom
+   atom.global.add.s32 bs, [g], 44;
+   atom.shared.add.s32 as, [s], 3;
+
+   bar.sync 0;
+
+   add.s32 as, as, 6; 
+   // satom at the end of a basic block
+   atom.shared.add.s32 as, [s], as;
+L1:  
+   st.shared.s32 [s], as;
+   st.global.u32 [g], bs;
+
+   exit;
+}

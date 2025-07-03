@@ -1,0 +1,182 @@
+##############################################################################
+#
+# lwmk for the lwvs utility
+#
+##############################################################################
+
+##############################################################################
+# define SOURCES
+##############################################################################
+
+LW_CXX_EXCEPTIONS := 0
+LW_CXX_RTTI := 0
+
+DCGM_DIR := $(LW_SOURCE)/apps/dcgm
+LWVS_DIR := $(DCGM_DIR)/lwvs
+LWML_DIR := $(LW_SOURCE)/apps/lwml/
+
+include $(DCGM_DIR)/lwda_loader/lwca-loader.lwmk
+include $(LWVS_DIR)/libs/libs.lwmk
+
+# We need to properly escape DCGM_GLOBAL_CFLAGS and DCGM_GLOBAL_LDFLAGS
+# in a way that neither submake nor shell break them due to substitution rules.
+#
+# Here is the example of what is going on:
+# This makefile:
+# 	DCGM_GLOBAL_LDFLAGS := '-Wl,-rpath,$$ORIGIN/'
+# 	DCGM_GLOBAL_LDFALGS += '-Wl,-static'
+#
+# To allow another make process to see this variable in exacly the same way, it should be quoted:
+# 	make DCGM_GLOBAL_LDFLAGS=$'\'-Wl,-rpath,\$\$ORIGIN/\' \'-Wl,-static\''
+#
+DCGM_GLOBAL_LDFLAGS_T := $(foreach v, $(DCGM_GLOBAL_LDFLAGS), $(subst $$,\$$\$$,$(v)))
+DCGM_GLOBAL_LDFLAGS_S := $$"$(foreach v, $(DCGM_GLOBAL_LDFLAGS_T), '$(shell echo $(v))' )"
+
+DCGM_GLOBAL_CFLAGS_T := $(foreach v, $(DCGM_GLOBAL_CFLAGS), $(subst $$,\$$\$$,$(v)))
+DCGM_GLOBAL_CFLAGS_S := $$"$(foreach v, $(DCGM_GLOBAL_CFLAGS_T), '$(shell echo $(v))' )"
+
+#The plugins need to be built as a separate make since they use a different toolchain for OMP.
+#We should really use the same toolchain across the product in the future but moving forward
+#To 4.7.3 caused libprotobuf and lwosLinux problems that were a lot worse than keeping this
+#build here for now.
+$(OUTPUTDIR)/plugins: $(dcgm_TARGET)
+	cd $(LWVS_DIR)/plugin_src && $(MAKE) DCGM_GLOBAL_CFLAGS=${DCGM_GLOBAL_CFLAGS_S} DCGM_GLOBAL_LDFLAGS=${DCGM_GLOBAL_LDFLAGS_S} -f makefile.lwmk build
+	@$(ECHO) Copying plugins/ to $(OUTPUTDIR)/plugins/
+	@$(MKDIR) -p $(OUTPUTDIR)/plugins
+	@$(MKDIR) -p $(OUTPUTDIR)/plugins/lwda9
+	@$(MKDIR) -p $(OUTPUTDIR)/plugins/lwda10
+	$(COPY) -ar $(LWVS_DIR)/plugin_src/$(OUTPUTDIR)/lwda9/lib*.so.1 $(OUTPUTDIR)/plugins/lwda9/
+	$(COPY) -ar $(LWVS_DIR)/plugin_src/$(OUTPUTDIR)/lwda9/lib*.so $(OUTPUTDIR)/plugins/lwda9/
+	$(COPY) -ar $(LWVS_DIR)/plugin_src/$(OUTPUTDIR)/lwda10/lib*.so.1 $(OUTPUTDIR)/plugins/lwda10/
+	$(COPY) -ar $(LWVS_DIR)/plugin_src/$(OUTPUTDIR)/lwda10/lib*.so $(OUTPUTDIR)/plugins/lwda10/
+ifeq ($(LW_BUILD_TYPE), develop)
+     # The .gcno files need to be present in order to to correctly generate coverage related files.
+	$(COPY) $(LWVS_DIR)/plugin_src/$(OUTPUTDIR)/*.gcno $(OUTPUTDIR)/
+endif
+	@$(ECHO) Copying plugins is DONE
+
+#include $(LWVS_DIR)/packaging.lwmk
+
+LW_MODULE_LOGGING_NAME = "lwvs"
+
+LWRRENT_DIR = $(LWVS_DIR)
+LWMLCOMMON_DIR = $(LW_SOURCE)/apps/lwml/common
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += src/LwvsMain.cpp
+LOCAL_SOURCES += src/LwidiaValidationSuite.cpp
+LOCAL_SOURCES += src/Gpu.cpp
+LOCAL_SOURCES += src/ConfigFileParser_v2.cpp
+LOCAL_SOURCES += src/TestFramework.cpp
+LOCAL_SOURCES += src/Test.cpp
+LOCAL_SOURCES += src/LwvsThread.cpp
+LOCAL_SOURCES += src/Output.cpp
+LOCAL_SOURCES += src/Whitelist.cpp
+LOCAL_SOURCES += src/TestParameters.cpp
+LOCAL_SOURCES += src/LwvsDeviceList.cpp
+LOCAL_SOURCES += src/JsonOutput.cpp
+LOCAL_SOURCES += src/DcgmHandle.cpp
+LOCAL_SOURCES += src/DcgmGroup.cpp
+LOCAL_SOURCES += src/DcgmGdFieldGroup.cpp
+LOCAL_SOURCES += src/LwvsCommon.cpp
+LOCAL_SOURCES += src/DcgmSystem.cpp
+LOCAL_SOURCES += src/GpuSet.cpp
+LOCAL_SOURCES += src/LwvsSystemChecker.cpp
+LOCAL_SOURCES += src/GoldelwalueCallwlator.cpp
+LOCAL_SOURCES += libs/jsoncpp-0.10.6/src/jsoncpp.cpp
+LOCAL_SOURCES += src/ParsingUtility.cpp
+LOCAL_SOURCES += src/Plugin.cpp
+LOCAL_SOURCES += src/ParameterValidator.cpp
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/timelib.c
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+LOCAL_OBJECTS += $(lwda_loader_TARGET)
+LOCAL_OBJECTS += $(lwml_loader_TARGET)
+
+##############################################################################
+## define LOCAL_CFLAGS
+###############################################################################
+LOCAL_INCLUDES :=
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(LWRRENT_DIR)/include
+LOCAL_INCLUDES += $(LWRRENT_DIR)/libs/yaml-0.3.0/include
+LOCAL_INCLUDES += $(LWRRENT_DIR)/libs/jsoncpp-0.10.6/include
+LOCAL_INCLUDES += $(LWRRENT_DIR)/ext_includes
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/lwda_loader
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(LWML_DIR)/$(OUTPUTDIR)/
+LOCAL_INCLUDES += $(LWML_DIR)/libs/zlib-1.2.8
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib
+LOCAL_INCLUDES += $(DCGM_DIR)/common
+LOCAL_INCLUDES += $(LWVS_DIR)/lwca/include
+
+ifdef DCGM_INC_DIR
+LOCAL_INCLUDES += $(DCGM_INC_DIR)
+endif
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+  LOCAL_CFLAGS += /EHsc -D_SCL_SELWRE_NO_WARNINGS
+endif
+
+LOCAL_CFLAGS += -Wno-write-strings
+LOCAL_CFLAGS += -DDRIVER_MAJOR_VERSION=\"$(DRIVER_VERSION)\"
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+##############################################################################
+## define LOCAL_LDFLAGS
+###############################################################################
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+
+
+LOCAL_LDFLAGS += -L $(LWML_DIR)/$(OUTPUTDIR) -rdynamic
+LOCAL_LDFLAGS += -L $(DCGM_DIR)/$(OUTPUTDIR) -ldcgm
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS) -lstdc++ -lgcc_s -lyaml-cpp -lrt
+
+
+lwpu-vs_TARGET  := $(OUTPUTDIR)/lwvs$(BINSUFFIX)
+lwpu-vs_OBJECTS := $(LOCAL_OBJECTS)
+lwpu-vs_CFLAGS  := $(LOCAL_CFLAGS)
+lwpu-vs_LDFLAGS := $(LOCAL_LDFLAGS)
+lwpu-vs_DEPENDS ?= $(dcgm_TARGET)
+
+$(OUTPUTDIR)/lwvs.conf:
+	$(COPY) $(LWVS_DIR)/lwvs.conf $(OUTPUTDIR)/
+
+$(OUTPUTDIR)/configfile_examples:
+	@$(MKDIR) -p $(OUTPUTDIR)/configfile_examples
+	$(COPY) $(LWVS_DIR)/configfile_examples/*.conf $(OUTPUTDIR)/configfile_examples/
+
+$(OUTPUTDIR)/docs:
+	@$(MKDIR) -p $(OUTPUTDIR)/docs/man/man8
+	$(COPY) $(LWVS_DIR)/docs/lwvs.8 $(OUTPUTDIR)/docs/man/man8/
+	$(COPY) $(LWVS_DIR)/docs/LWIDIA_Validation_Suite_User_Guide_Full.pdf $(OUTPUTDIR)/docs/LWIDIA_Validation_Suite_User_Guide.pdf
+	$(COPY) $(LWVS_DIR)/docs/lwvs.8.pdf $(OUTPUTDIR)/docs/
+
+$(OUTPUTDIR)/python_examples:
+	@$(MKDIR) -p $(OUTPUTDIR)/python_examples
+	$(COPY) $(LWVS_DIR)/python_examples/*.py $(OUTPUTDIR)/python_examples/
+
+$(OUTPUTDIR)/.verify_whitelist: $(LWVS_DIR)/verify_whitelist_parameter_range.py $(LWVS_DIR)/src/Whitelist.cpp
+	$(PYTHON) $(LWVS_DIR)/verify_whitelist_parameter_range.py $(LWVS_DIR)/src/Whitelist.cpp
+	$(TOUCH) $(OUTPUTDIR)/.verify_whitelist
+
+lwvstargets: $(lwpu-vs_TARGET) $(LW_VER_H) $(OUTPUTDIR)/lwvs.conf $(OUTPUTDIR)/configfile_examples $(OUTPUTDIR)/docs $(OUTPUTDIR)/python_examples $(OUTPUTDIR)/plugins $(OUTPUTDIR)/.verify_whitelist
+
+build: lwvstargets
+dcgmbuildsyncpoint:: lwvstargets
+
+$(eval $(call MAKE_EXELWTABLE,lwpu-vs))
+build: $(lwpu-vs_TARGET).guardwords
+clean:
+	-$(RM) $(lwpu-vs_TARGET) $(LOCAL_OBJECTS)
+
+#################################################################################
+## End of nested lwmk
+##################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

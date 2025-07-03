@@ -1,0 +1,50 @@
+# LWIDIA_COPYRIGHT_BEGIN
+#
+# Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+# LWIDIA_COPYRIGHT_END
+
+##############################################################################
+# apps/fabricmanager/mods/makefile.lwmk
+##############################################################################
+
+LW_MODS_MODULE := protobuf lib
+
+FM_DIR := $(LW_SOURCE)/apps/fabricmanager
+
+FM_GLOBAL_CFLAGS := -Wno-misleading-indentation
+FM_GLOBAL_CFLAGS += -Wno-cast-qual
+USE_LWSWITCHAPI := 0
+ALL_LWML_SOURCES :=
+
+ifeq ($(LW_MODS)_$(LW_BUILD_TYPE),sim_develop)
+  LW_GCC_OPTIMIZATION_LEVEL = 0
+endif
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+# disable -Wmissing-prototypes in lw-healthmon for now
+LWML_BUILD_MISSING_PROTOTYPES =
+
+define MAKE_MODS_FM_LIBRARY
+$(1)_OBJECTS ?= 
+$(1)_CFLAGS  ?= 
+$$($(1)_OBJECTS): CFLAGS += $$($(1)_CFLAGS)
+endef
+
+ifdef LWCFG_INITIALIZED 
+    include $(FM_DIR)/libs/protobuf-2.6.0/libprotobuf.lwmk
+    include $(FM_DIR)/infra/protobuf/protobuf.lwmk
+
+    SOURCES = $(sort $(ALL_LWML_SOURCES))
+endif
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

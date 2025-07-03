@@ -1,0 +1,132 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+/**
+ * @brief Update PerTbParams struct that tracks configuration information at per TB
+ *        granularity. Check that configuration values are valid. layer_map_array contents
+ *        should be set separately.
+ * @param[in] cfg_rv: redundancy version
+ * @param[in] cfg_Qm: modulation order
+ * @param[in] cfg_bg: base graph
+ * @param[in] cfg_Nl: number of layers per Tb (at most MAX_DL_LAYERS_PER_TB for downlink)
+ * @param[in] cfg_num_CBs: number of code blocks
+ * @param[in] cfg_Zc: lifting factor
+ * @param[in] cfg_G: number of rated matched bits available for TB transmission
+ * @param[in] cfg_F: number of filler bits
+ * @param[in] cfg_cinit: seed used for scrambling sequence
+ * @return LWPHY_STATUS_SUCCESS or LWPHY_STATUS_ILWALID_ARGUMENT.
+ */
+lwphyStatus_t lwphySetTBParams(PerTbParams * tb_params_struct, uint32_t cfg_rv, uint32_t cfg_Qm,
+		               uint32_t cfg_bg, uint32_t cfg_Nl, uint32_t cfg_num_CBs,
+		               uint32_t cfg_Zc, uint32_t cfg_G, uint32_t cfg_F, uint32_t cfg_cinit) {
+
+
+    if (cfg_rv > 3) {
+        fprintf(stderr, "cfg_rv %d has to be <= 3.\n", cfg_rv);
+        return LWPHY_STATUS_ILWALID_ARGUMENT;
+    }
+
+    if ((cfg_Qm != LWPHY_QAM_4) && (cfg_Qm != LWPHY_QAM_16) && (cfg_Qm != LWPHY_QAM_64) && (cfg_Qm != LWPHY_QAM_256)) {
+        fprintf(stderr, "cfg_Qm %d is invalid!\n", cfg_Qm);
+        return LWPHY_STATUS_ILWALID_ARGUMENT;
+    }
+
+    if ((cfg_bg != 1) && (cfg_bg != 2)) {
+        fprintf(stderr, "cfg_bg %d can either be 1 or 2.\n", cfg_bg);
+        return LWPHY_STATUS_ILWALID_ARGUMENT;
+    }
+
+    if ((cfg_Nl < 1) || (cfg_Nl > MAX_DL_LAYERS_PER_TB)) {
+        fprintf(stderr, "cfg_Nl %d has to be in [1, %d].\n", cfg_Nl, MAX_DL_LAYERS_PER_TB);
+        return LWPHY_STATUS_ILWALID_ARGUMENT;
+    }
+
+    tb_params_struct->rv = cfg_rv;
+    tb_params_struct->Qm = cfg_Qm;
+    tb_params_struct->bg = cfg_bg;
+    tb_params_struct->Nl = cfg_Nl;
+    tb_params_struct->num_CBs = cfg_num_CBs;
+    tb_params_struct->Zc = cfg_Zc;
+
+    const uint32_t NUM_UNPUNCTURED_VAR_NODES = (cfg_bg == 1)                            ?
+                                               LWPHY_LDPC_MAX_BG1_UNPUNCTURED_VAR_NODES :
+                                               LWPHY_LDPC_MAX_BG2_UNPUNCTURED_VAR_NODES;
+
+    tb_params_struct->N = NUM_UNPUNCTURED_VAR_NODES * cfg_Zc;
+    tb_params_struct->Ncb = tb_params_struct->N;
+    tb_params_struct->K = (cfg_bg == 1) ? LWPHY_LDPC_BG1_INFO_NODES * cfg_Zc : LWPHY_LDPC_MAX_BG2_INFO_NODES * cfg_Zc;
+
+    tb_params_struct->G = cfg_G;
+    tb_params_struct->F = cfg_F;
+    tb_params_struct->cinit = cfg_cinit;
+
+    for (int layer = 0; layer < cfg_Nl; layer++) {
+        tb_params_struct->layer_map_array[layer] = 0;
+	// Values lwrrently updated via call to set_uniform_layer_mapping
+	// TODO update as needed
+    }
+
+    return LWPHY_STATUS_SUCCESS;
+}
+
+
+/**
+ * @brief Compute starting position, ko, for redundancy version rv as per
+ *        Table 5.4.2.1-2 from the 3GPP reference.
+ * @param[in] rv: redundancy version; [0, 3] valid range
+ * @param[in] bg_num: base graph number; 1 or 2.
+ * @param[in] Ncb: cirlwlar buffer length for LDPC encoder's output
+ * @param[in] Zc: lifting size
+ * @return starting position k0
+ */
+int compute_k0(int rv, int bg_num, int Ncb, int Zc) {
+    if (rv == 0) return 0;
+    int denom = (bg_num == 1) ? LWPHY_LDPC_MAX_BG1_UNPUNCTURED_VAR_NODES : LWPHY_LDPC_MAX_BG2_UNPUNCTURED_VAR_NODES;
+    int enumerator[2][4] = {{0, 17, 33, 56}, {0, 13, 25, 43}};
+    return floorf(enumerator[bg_num - 1][rv] * Ncb * 1.0f / (denom * Zc)) * Zc;
+}
+
+
+/**
+ * @brief Compute rate matching sequence length, in bits, for all C code blocks in a TB.
+ * @param[in, out] Er[]: will hold the computed rate matching length, in bits, for all C code blocks.
+ * @param[in] C: number of code blocks
+ * @param[in] Qm: modulation order
+ * @param[in] Nl: number of transmission layers
+ * @param[in] G: number of coded bits available for TB's transmission.
+ * @param[in, out] Emax: maximum Er across all TBs processed in a kernel; divisible by word_size
+ * @param[in] word_size: element size, in bits, for rate matching's input and output;
+ *                       default = sizeof(uint32_t)*8 = 32
+ */
+void compute_rate_matching_length(uint32_t Er[], int C, int Qm, int Nl, int G, uint32_t & Emax, int word_size=32) {
+    // Assumption: C, Qm, Nl, G are the same same across all CBs in a TB.
+
+    int j = 0;
+    for (int code_block_id = 0; code_block_id < C; code_block_id++) {
+        /*if (false) {
+            //FIXME: Clarify the "r-th coded block not scheduled for transmission" case from the guide
+            //Either set appropriate condition or remove if statement.
+            Er[code_block_id] = 0;
+        } else {*/
+            if (j <= C - ((G / (Nl * Qm)) % C) - 1) {
+                Er[code_block_id] = Nl * Qm * floorf(G * 1.0f / (Nl * Qm * C));
+            } else {
+                Er[code_block_id] = Nl * Qm * ceilf(G * 1.0f / (Nl * Qm * C));
+            }
+	    //printf("Er[%d] = %d\n", code_block_id, Er[code_block_id]);
+            j += 1;
+            Emax = std::max(Emax, Er[code_block_id]);
+       //}
+    }
+
+    if (Emax % word_size != 0) {
+        Emax = (Emax / word_size + 1) * word_size;
+    }
+}

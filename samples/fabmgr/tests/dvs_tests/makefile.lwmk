@@ -1,0 +1,108 @@
+##############################################################################
+# makefile.lwmk
+##############################################################################
+
+#
+# This is a top level makefile used to build standalone RM test applications.
+#
+# To add a test to the build:
+# 1) Create a folder for your test application somewhere inside lwswitch/tests
+#
+# 2) Within that directory create a .lwmk file. This is will be included by
+#    this top level makefile. Application exelwtable will have the same name
+#    as its makefile.
+#    For more on application makefiles see lwswitch/tests/examples/gtestrmapi.
+#
+# 3) Add the test makefile to the list in lwswitch/tests/testslist.mk
+#
+# To build all the test applications just use lwmake.
+#
+# To build a specific test application you can use @<application_name>
+#
+# Other information can be found at:
+#     https://wiki.lwpu.com/engwiki/index.php/Resman/RM_Foundations/Lwrrent_Projects/Standalone_Test_Infrastructure
+#
+
+# Various useful paths
+FM_TEST_DIR ?= $(LW_SOURCE)/apps/fabricmanager/tests/dvs_tests
+APPS_ROOT_DIR := $(FM_TEST_DIR)
+LWMK_SOURCE = $(LW_SOURCE)/drivers/common/build
+
+include $(LWMK_SOURCE)/lwCommon.lwmk
+
+# Disable the cast-qual warning because Clang doesn't understand casting from
+# volatile to _Atomic()
+LW_CAST_QUAL_WARNING =
+
+include $(LWMK_SOURCE)/lwconfig.lwmk
+
+############# List of all tests ###############
+# This isn't a normal FM test, it's an exelwtable that will display various
+# info about the GPU.  It is meant to be used at runtime in conjunction with
+# scripts to report which tests are/aren't available on the current
+# platform.
+include $(FM_TEST_DIR)/testlist.mk
+include $(FM_TEST_DIR)/commons.mk
+COMMONS_MAKEFILE ?=
+LW_MODULE_LOGGING_NAME="fmtest"
+PACKAGE_NAME=fmtest
+
+ifdef LWCFG_INITIALIZED
+
+  # Different platforms use different filename suffix values. This string
+  # will get appended to the output test exelwtable names before EXESUFFIX
+  # part (ex. eheap.exe on desktop, eheap_srt on android).
+  # CheetAh binaries use _srt suffix, which is defined in OS specific makefile.
+  SRT_SUFFIX ?=
+
+  # Point to all header file locations
+  LW_INCLUDES += .
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc/ctrl
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc/class
+  LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc
+  LW_INCLUDES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/common/inc
+  LW_INCLUDES += $(LW_SOURCE)/drivers/unix/common/inc
+  LW_INCLUDES += $(LW_SOURCE)/drivers/resman/inc/libraries
+  LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc/hwref/lwswitch
+  LW_INCLUDES += $(FM_TEST_DIR)/common
+  LW_INCLUDES += $(FM_TEST_DIR)/common/rmtest
+  LW_INCLUDES += $(OUTPUTDIR)
+
+  # enable more aggressive warnings
+  LW_AGGRESSIVE_WARNINGS = 1
+
+  # make string literals have type const char* rather than just char*
+  LW_WRITE_STRINGS_WARNINGS = 1
+
+  # boost headers define unused local typedefs, so disable the warning.
+  LW_UNUSED_LOCAL_TYPEDEFS_WARNING =
+
+  # treat warnings as errors
+  LW_WARNINGS_AS_ERRORS = 1
+
+  # SRT build indicator (for pre-preprocessor compatability defines)
+  #CFLAGS += -DSRT_BUILD
+
+  ##############################################################################
+  # Include the core lwApps driving makefile
+  include $(FM_TEST_DIR)/build/lwAppsCommon.lwmk
+
+  # Include all files that need to be packaged in the output binary and output folder
+  ifneq ($(LW_TARGET_OS_FAMILY_LOWER_CASE),macosx)
+      $(eval $(call ADD_TO_PACKAGE,$(PACKAGE_NAME),scripts/fm_dvs_tests.py))
+      $(eval $(call ADD_TO_PACKAGE,$(PACKAGE_NAME),scripts/fm_dvs_config/dvs_per_cl_whitelist.json))
+      $(eval $(call ADD_TO_PACKAGE,$(PACKAGE_NAME),scripts/fm_dvs_config/dvs_debug_whitelist.json))
+      $(eval $(call ADD_TO_PACKAGE,$(PACKAGE_NAME),scripts/run_tests_fm.py))
+      $(eval $(call ADD_TO_PACKAGE,$(PACKAGE_NAME),scripts/3rdpartytools/devcon.exe))
+
+      SOURCES += $(sort $(foreach TARGET,$(TARGETS),$($(TARGET)_SOURCES)))
+  endif
+
+  .PHONY: $(foreach TARGET,$(TARGETS),$($(TARGET)_EXE))
+  build: $(foreach TARGET,$(TARGETS),$($(TARGET)_EXE))
+endif # LWCFG_INITIALIZED
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk
+
+##############################################################################

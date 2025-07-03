@@ -1,0 +1,162 @@
+# Component configuration template
+{
+  # Descriptive name for the component
+  "name"      : "DCGM",
+  # Component description
+  "desc"      : "Data Center GPU Manager",
+  # Component owner's email
+  "owner"     : "ailes-staff@exchange.lwpu.com",
+  # the module of the component. Usually the same as the corresponding lwbugs module
+  "module"    : "GPU Management SW",
+  # Build timeout for component, in seconds
+  "buildtimeout" : "600",
+  # Define variables for this component that are available as environment variables 
+  # when building and installing this component
+  "elw"       : [
+                  "DCGM_P4DIR=${VULCAN_DRIVER_P4BASE}/apps/dcgm",
+                  "DCGM_DIR=p4${DCGM_P4DIR}",
+                  "LWML_P4DIR=${VULCAN_DRIVER_P4BASE}/apps/lwml",
+                  "LWML_DIR=p4${LWML_P4DIR}",
+                  "LWHM_P4DIR=${VULCAN_DRIVER_P4BASE}/apps/lw-healthmon",
+                  "LWHM_DIR=p4${LWHM_P4DIR}",
+                  { "filter": { "os": "Linux", "arch": "x86_64" }},
+                  "OUTPUT_DIR=${DCGM_DIR}/_out/Linux_amd64_release",
+                  { "filter": { "os": "Linux", "arch": "ppc64le" }},
+                  "OUTPUT_DIR=${DCGM_DIR}/_out/Linux_ppc64le_release"
+                ],
+  # The files included in this component specified by a comma-separated list of paths 
+  "files"     : [
+                  { "filter": { "os": "Linux" , "arch": "x86_64, ppc64le"}},
+                  "${DCGM_P4DIR}/...",
+                  "${LWML_P4DIR}/...",
+                  "${LWHM_P4DIR}/lwca/...",                 
+                  "${VULCAN_DRIVER_P4BASE}/drivers/common/lwca/...",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/common/inc/lw*.h",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/resman/src/libraries/commandline/commandline.c",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/resman/inc/libraries/commandline/commandline.h",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/resman/arch/lwalloc/unix/include/...",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/resman/arch/lwalloc/unix/lib/...",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/lwlink/user/lwswitch/...",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/lwlink/interface/...",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/lwswitch/user/...",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/lwswitch/interface/...",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/lwswitch/kernel/...",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/unix/common/inc/...",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/common/build/...",
+                  "${VULCAN_DRIVER_P4BASE}/sdk/lwpu/inc/...",
+                  "${VULCAN_DEVREL_P4BASE}/SDK/inc/GL/...",
+                  "//sw/tools/unix/hosts/Linux-x86/...",
+                  
+                  { "filter": { "os": "Linux", "arch": "ppc64le" }},
+                  "//sw/tools/unix/targets/Linux-ppc64le/..."
+                ],
+  # Outputs produced by this component and the installation location for each output
+  "artifacts" : [
+                  { "filter": { "os": "Linux" , "arch": "x86_64, ppc64le"}},
+                  { "${OUTPUT_DIR}/dcgm_agent.h" : "gdk/dcgm/." },
+                  { "${OUTPUT_DIR}/dcgm_structs.h" : "gdk/dcgm/." },
+                  { "${OUTPUT_DIR}/dcgm_fields.h" : "gdk/dcgm/." },
+                  { "${OUTPUT_DIR}/dcgm_errors.h" : "gdk/dcgm/." },
+                  { "${OUTPUT_DIR}/dcgm_module_fm_internal.h" : "gdk/dcgm/." },
+                  { "${OUTPUT_DIR}/dcgm_module_fm_structs_internal.h" : "gdk/dcgm/." },
+                  { "${OUTPUT_DIR}/sdk_samples/*" : "gdk/dcgm/sdk_samples/." },
+                  { "${OUTPUT_DIR}/bindings/*" : "gdk/dcgm/bindings/." },
+                  { "${OUTPUT_DIR}/topology/*" : "gdk/dcgm/topology/." },
+                  { "${OUTPUT_DIR}/systemd/*" : "gdk/dcgm/systemd/." },
+                  { "${OUTPUT_DIR}/testing/*" : "gdk/dcgm/testing/." },
+                  { "${OUTPUT_DIR}/dcgm_collectd/*" : "gdk/dcgm/dcgm_collectd/." },
+                  { "${OUTPUT_DIR}/initctl/*" : "gdk/dcgm/initctl/." },
+                  { "${OUTPUT_DIR}/dcgm_wsgi/*" : "gdk/dcgm/dcgm_wsgi/." },
+                  { "${OUTPUT_DIR}/lwml.h" : "gdk/dcgm/." },
+                  { "${OUTPUT_DIR}/lwswitch-audit" : "gdk/dcgm/.", "kind" : "EXE"  },
+                  { "${OUTPUT_DIR}/lwvs" : "gdk/dcgm/.", "kind" : "EXE" },
+                  { "${OUTPUT_DIR}/plugins" : "gdk/dcgm/." },
+                  { "${OUTPUT_DIR}/lwvs.conf" : "gdk/dcgm/." },
+                  { "${OUTPUT_DIR}/configfile_examples" : "gdk/dcgm/." },
+                  { "${OUTPUT_DIR}/python_examples" : "gdk/dcgm/." },
+
+                  { "${OUTPUT_DIR}/dcgm_stub" : "gdk/dcgm/.",
+                    "kind" : "STATICLIB"
+                  },
+                  {
+                    "${OUTPUT_DIR}/dcgm" : "gdk/dcgm/.",
+                    "kind" : "SHAREDLIB",
+                    "exclude" : [ "${OUTPUT_DIR}/libdcgm.so.functionslist",
+                                  "${OUTPUT_DIR}/libdcgm.so.guardwords" ] 
+                  },
+                  {
+                    "${OUTPUT_DIR}/dcgmmodulelwswitch" : "gdk/dcgm/.",
+                    "kind" : "SHAREDLIB",
+                    "exclude" : [ "${OUTPUT_DIR}/libdcgmmodulelwswitch.so.functionslist",
+                                  "${OUTPUT_DIR}/libdcgmmodulelwswitch.so.guardwords" ] 
+                  },
+                  {
+                    "${OUTPUT_DIR}/dcgmmodulevgpu" : "gdk/dcgm/.",
+                    "kind" : "SHAREDLIB",
+                    "exclude" : [ "${OUTPUT_DIR}/libdcgmmodulevgpu.so.functionslist",
+                                  "${OUTPUT_DIR}/libdcgmmodulevgpu.so.guardwords" ] 
+                  },
+                  {
+                    "${OUTPUT_DIR}/dcgmmoduleintrospect" : "gdk/dcgm/.",
+                    "kind" : "SHAREDLIB",
+                    "exclude" : [ "${OUTPUT_DIR}/libdcgmmoduleintrospect.so.functionslist",
+                                  "${OUTPUT_DIR}/libdcgmmoduleintrospect.so.guardwords" ] 
+                  },
+                  {
+                    "${OUTPUT_DIR}/dcgmmodulehealth" : "gdk/dcgm/.",
+                    "kind" : "SHAREDLIB",
+                    "exclude" : [ "${OUTPUT_DIR}/libdcgmmodulehealth.so.functionslist",
+                                  "${OUTPUT_DIR}/libdcgmmodulehealth.so.guardwords" ] 
+                  },
+                  {
+                    "${OUTPUT_DIR}/dcgmmodulepolicy" : "gdk/dcgm/.",
+                    "kind" : "SHAREDLIB",
+                    "exclude" : [ "${OUTPUT_DIR}/libdcgmmodulepolicy.so.functionslist",
+                                  "${OUTPUT_DIR}/libdcgmmodulepolicy.so.guardwords" ] 
+                  },
+                  {
+                    "${OUTPUT_DIR}/dcgmmoduleconfig" : "gdk/dcgm/.",
+                    "kind" : "SHAREDLIB",
+                    "exclude" : [ "${OUTPUT_DIR}/libdcgmmoduleconfig.so.functionslist",
+                                  "${OUTPUT_DIR}/libdcgmmoduleconfig.so.guardwords" ] 
+                  },
+                  {
+                    "${OUTPUT_DIR}/dcgmmodulediag" : "gdk/dcgm/.",
+                    "kind" : "SHAREDLIB",
+                    "exclude" : [ "${OUTPUT_DIR}/libdcgmmodulediag.so.functionslist",
+                                  "${OUTPUT_DIR}/libdcgmmodulediag.so.guardwords" ] 
+                  },
+                  {
+                    "${OUTPUT_DIR}/dcgmmoduleprofiling" : "gdk/dcgm/.",
+                    "kind" : "SHAREDLIB",
+                    "exclude" : [ "${OUTPUT_DIR}/libdcgmmoduleprofiling.so.functionslist",
+                                  "${OUTPUT_DIR}/libdcgmmoduleprofiling.so.guardwords" ] 
+                  },
+                  {
+                    "${OUTPUT_DIR}/lwperf_host" : "gdk/dcgm/.",
+                    "kind" : "SHAREDLIB"
+                  },
+                  { "${OUTPUT_DIR}/dcgmi" : "gdk/dcgm/.", "kind" : "EXE" },
+                  { "${OUTPUT_DIR}/lw-hostengine" : "gdk/dcgm/.", "kind" : "EXE" },
+                  { "${OUTPUT_DIR}/stub_library_test" : "gdk/dcgm/.", "kind" : "EXE" }, 
+
+                  { "${DCGM_DIR}/doc/DCGM_User_Guide.pdf" : "gdk/dcgm/doc/." },
+                  { "${DCGM_DIR}/doc/EULA.pdf" : "gdk/dcgm/doc/." },
+                  { "${DCGM_DIR}/doc/THIRD-PARTY-NOTICES.txt" : "gdk/dcgm/doc/." },
+                  
+                  { "${OUTPUT_DIR}/lwvs" : "gdk/lwvs/.", "kind" : "EXE" },
+                  { "${OUTPUT_DIR}/plugins" : "gdk/lwvs/." },
+                  { "${OUTPUT_DIR}/plugins/lwda10" : "gdk/lwvs/plugins/lwda10/." },
+                  { "${OUTPUT_DIR}/plugins/lwda9" : "gdk/lwvs/plugins/lwda9/." },
+                  { "${OUTPUT_DIR}/testing/version.py" : "gdk/lwvs/." }
+                ],
+  # The dependencies for this component
+  "depends"   : [ ],
+  # The agent responsible for performing actions for the component
+  "agent"     : [
+                  { "NONE": "none" },
+                  { "filter": { "os": "Linux", "arch": "x86_64, ppc64le" }},
+                  { "LWDA_DRIVER_MAKE": "${DCGM_DIR}/Makefile", "build_target": "",
+                    "clean_target": "clobber"}
+                ]
+}

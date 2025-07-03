@@ -1,0 +1,625 @@
+# -*- mode: perl; -*-
+
+# FIFO Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $fifoHal = [
+
+    # per-GPU defaults for FIFO engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+
+        GET_INFO => [
+
+            DESCRIPTION   => "get fifo info",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GK104        => [ dMAXWELL_thru_dTURING, USED_BY_T124, ],
+            _GA100        => [ dAMPERE_and_later, T234, ],
+            _T124         => [ ],
+            _T194         => [ ],
+
+        ],
+
+        GET_GP_INFO_BY_CH_ID => [
+            DESCRIPTION   => "get Gp Info By Chid",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "ChannelId*",
+
+            _GK104        => [ MAXWELL_thru_HOPPER, IG000, -GH20X ],
+            _GB100        => [ BLACKWELL_and_later, GH20X , -IG000 ],
+        ],
+
+        GET_GP_BASE_BY_CH_ID => [
+            DESCRIPTION   => "get Gp Base By Chid",
+            RETURN_TYPE   =>  LwU64,
+            ARGUMENTS     => "ChannelId*",
+
+            _GK104        => [ MAXWELL_thru_HOPPER, IG000, -GH20X ],
+            _GB100        => [ BLACKWELL_and_later, GH20X , -IG000 ],
+        ],
+
+        GET_PB_INFO => [
+
+            DESCRIPTION   => "fifo get pb info",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _GK104       =>  [ MAXWELL_and_later, ],
+        ],
+
+
+
+        DUMP_PB => [
+
+            DESCRIPTION   => "fifo dump pb",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32, LwU32, LwU32, LwU32",
+
+            _GK104        => [ MAXWELL_thru_TURING, ],
+            _GA100        => [ AMPERE_thru_HOPPER, IG000, -GH20X ],
+            _GB100        => [ BLACKWELL_and_later, GH20X, -IG000 ],
+        ],
+
+        GET_PBDMA_STATE => [
+
+            DESCRIPTION   => "get pbdma state",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _GK104        => [ MAXWELL_thru_TURING, ],
+            _GA100        => [ AMPERE_thru_HOPPER, IG000, -GH20X ],
+            _GB100        => [ BLACKWELL_and_later, GH20X, -IG000 ],
+        ],
+
+        GET_PBDMA_CONFIG_SIZE => [
+            DESCRIPTION   => "get LW_RUNLIST_PBDMA_CONFIG__SIZE_1",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ MAXWELL, ],
+            _GP100        => [ PASCAL_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+        DUMP_CTX_REGISTERS  => [
+
+            DESCRIPTION   => "fifo_Dump_CtX_Registers",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32*",
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_RUNLIST => [
+
+            DESCRIPTION   => "fifo dump Run list",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        DUMP_ENG_RUNLIST_BY_ID => [
+
+            DESCRIPTION   => "Dump engine runlist",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GK104        => [ MAXWELL_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+        DUMP_ESCHED_CHANNEL_RAM_REGS_BY_ID => [
+
+            DESCRIPTION   => "fifo dump channel ram of specified engine scheduler",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _STUB         => [ pre_AMPERE, ],
+            _GA100        => [ AMPERE_thru_HOPPER, IG000, -GH20X ],
+            _GB100        => [ BLACKWELL_and_later, GH20X, -IG000 ],
+        ],
+
+        READ_RUNLIST_INFO => [
+
+            DESCRIPTION   => "read the runlist registers",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU64*, LwU32*, LwU32*, LwU32**",
+            STUB_RETURNS  => LW_OK,
+
+            _GK104        => [ pre_TURING, ],
+            _TU102        => [ TURING, ],
+            _GA100        => [ GA100, ],
+            _GA102        => [ AMPERE_thru_ADA, -GA100, GH202 ],
+            _GH100        => [ HOPPER_and_later, -GH202 ],
+        ],
+
+        ALLOCATE_AND_FETCH_RUNLIST => [
+
+            DESCRIPTION   => "Allocate and fetch run list",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU64, LwU32, LwU32, LwU32**",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        VALIDATE_RUNLIST_INFO_FOR_ALLOC => [
+
+            DESCRIPTION   => "validate fields in runlist register required for allocation",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32**, LwU64, LwU32, LwU32, readFn_t*",
+            STUB_RETURNS  => LW_OK,
+
+            _GK104        => [ pre_TURING, ],
+            _TU102        => [ TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+        DUMP_CHANNEL_RAM_REGS => [
+
+            DESCRIPTION   => "fifo dump channel ram regs ",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwS32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GK104        => [ MAXWELL_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+        DUMP_PBDMA_REGS => [
+
+            DESCRIPTION   => "dump pbdma regs",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32",
+
+            _GK104        => [ MAXWELL_thru_PASCAL, ],
+            _GV100        => [ VOLTA_and_later, ],
+        ],
+
+        DUMP_PBDMA_REGS_CACHE1 => [
+
+            DESCRIPTION   => "dump pbdma cache1 regs ",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32",
+
+            _GK104        => [ MAXWELL_thru_VOLTA, ],
+            _TU102        => [ TURING, ],
+            _GA100        => [ AMPERE_thru_HOPPER, IG000, -GH20X ],
+            _GB100        => [ BLACKWELL_and_later, GH20X, -IG000 ],
+        ],
+
+        DUMP_FIFO_INTR_INFO => [
+
+            DESCRIPTION   => "dump information about various pending interrupts",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 runlistId, LwU32 intr, LwU32 mask",
+            STUB_RETURNS  => void,
+
+            _GK104        => [ MAXWELL_thru_PASCAL, ],
+            _GV100        => [ VOLTA_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+        CHECK_ENG_STATES => [
+
+            DESCRIPTION   => "fifoCheckEngStates",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "gpu_state*",
+
+            _GK104        => [ ],
+            _GM107        => [ dMAXWELL_and_later, ],
+        ],
+
+        DUMP_ENG_STATES => [
+
+            DESCRIPTION   => "fifoDumpEngStates",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "ChannelId*, gpu_state*",
+
+            _GK104        => [ MAXWELL_thru_VOLTA, ],
+            _TU102        => [ TURING_thru_ADA, GH202 ],
+            _GH100        => [ HOPPER_and_later, -GH202 ],
+        ],
+
+       DUMP_ENGINE_STATUS => [
+
+            DESCRIPTION   => "fifoDumpEngineStatus",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _GK104        => [ MAXWELL_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+       TEST_HOST_STATE => [
+
+            DESCRIPTION   => "test if host is in valid state",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GK104        => [ MAXWELL_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+        GET_NUM_CHANNELS => [
+
+            DESCRIPTION   => "get the number of available channels",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "LwU32 runlistId",
+            STUB_RETURNS  => ZERO,
+
+            _STUB         => [ ],
+            _GK104        => [ ],
+            _GK208        => [ GK208, GK208S, ],
+            _GM107        => [ GM10X, ],
+            _GM200        => [ GM20X_thru_TURING, -TURING],
+            _TU102        => [ TURING, ],
+            _GA100        => [ dAMPERE_thru_dHOPPER, -GH20X],
+            _GB100        => [ dBLACKWELL_and_later, GH20X, ],
+            _T124         => [ tAMPERE_and_later, ],
+        ],
+
+        GET_NUM_PBDMA => [
+
+            DESCRIPTION   => "get the number of available PBDMAs",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _T210         => [ ],
+            _GK104        => [ ],
+            _GK208        => [ GM10X, ],
+            _GM200        => [ GM20X_thru_dMAXWELL, ],
+            _GP100        => [ dPASCAL_and_later, -GA100_and_later, ],
+            _GA100        => [ GA100_and_later, T234, ],
+        ],
+
+        GET_CHANNEL_INST_FOR_CHID => [
+
+            DESCRIPTION   => "get channel inst info for chid",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "ChannelId*, ChannelInst*",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL_thru_dTURING, ],
+            _GA100        => [ AMPERE_thru_HOPPER, IG000, -GH20X ],
+            _GB100        => [ BLACKWELL_and_later, GH20X, -IG000 ],
+        ],
+
+        GET_CHANNEL_OFFSET_MASK => [
+
+            DESCRIPTION   => "Get Channel Offset and Mask",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 runlistId, LwU32 *pOffset, LwU32 *pMask",
+            STUB_RETURNS  => void,
+
+            _STUB         => [ MAXWELL_thru_VOLTA, BLACKWELL_and_later, GH20X, -IG000],
+            _TU102        => [ TURING, ],
+            _GA100        => [ AMPERE_thru_HOPPER, IG000, -GH20X],
+        ],
+
+        GET_CHANNEL_BASE_COUNT => [
+
+            DESCRIPTION   => "Get Channel Base and Count",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 runlistId, LwU32 *pBase, LwU32 *pCount",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _STUB         => [ MAXWELL_thru_HOPPER, IG000, -GH20X],
+            _GB100        => [ BLACKWELL_and_later, GH20X, -IG000 ],
+        ],
+
+        GET_SCHID_FOR_VCHID => [
+
+            DESCRIPTION   => "fifo get the SRIOV System Channel ID for Virtual Channel ID",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+
+            _GK104        => [ MAXWELL_thru_VOLTA, ],
+            _TU102        => [ TURING_thru_HOPPER, IG000, -GH20X],
+            _GB100        => [ BLACKWELL_and_later, GH20X, -IG000],
+        ],
+
+
+        IS_CHANNEL_ON_RUNLIST => [
+
+            DESCRIPTION   => "fifoIsChannelOnRunlist",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, BOOL*",
+            STUB_RETURNS  => ERROR,
+
+            _STUB        => [ AMPERE_AND_later, ],
+            _GK104       => [ MAXWELL_thru_TURING, ],
+        ],
+
+        IS_RUNLIST_LENGTH_VALID => [
+
+            DESCRIPTION   => "Check if runlist length is non-zero and < MAX",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "LwU32 runlistLength",
+
+            _GK104       => [ MAXWELL_thru_VOLTA, ],
+            _TU102       => [ TURING, ],
+            _GA100       => [ AMPERE_and_later, ],
+        ],
+
+        GET_TSG_ID_FROM_RUNLIST_ENTRY => [
+            DESCRIPTION   => "Get TSGID From Runlist Entry header",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32*",
+            STUB_RETURNS  => ZERO,
+            
+            _STUB         => [ pre_VOLTA, ],
+            _GV100        => [ VOLTA_thru_HOPPER, IG000, -GH20X, ],
+            _GB100        => [ BLACKWELL_and_later, GH20X, -IG000, ],
+        ],
+        
+        PRINT_RUNLIST_ENTRY => [
+
+            DESCRIPTION   => "fifoPrintRunlistEntry",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LwU32, LwU32*",
+
+            _GK104       => [ MAXWELL, GP100, USED_BY_GP102, ],
+            _GP102       => [ PASCAL, -GP100, ],
+            _GV100       => [ VOLTA_thru_TURING, ],
+            _GA100       => [ AMPERE_and_later, ],
+        ],
+
+        PRINT_CHRAM_STATUS_HEADER => [
+            DESCRIPTION   => "Print chram status format header (mainly for runlist and channelram)",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LwU32, BOOL",
+            STUB_RETURNS  =>  void,
+
+            _STUB        => [ MAXWELL_thru_TURING, ],
+            _GA100       => [ AMPERE_and_later, ],
+
+        ],
+
+        PRINT_CHRAM_STATUS_DECODE => [
+            DESCRIPTION   => "Take in channelram value, print decoded channelram status",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LwU32, BOOL, BOOL",
+            STUB_RETURNS  =>  void,
+
+            _STUB        => [ MAXWELL_thru_TURING, ],
+            _GA100       => [ AMPERE_and_later, ],
+
+        ],
+
+        IS_CHID_IN_ENTRY => [
+
+            DESCRIPTION   => "fifoIsChidInEntry",
+            RETURN_TYPE   =>  LwBool,
+            ARGUMENTS     => "LwU32*, LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _GK104       => [ MAXWELL_thru_PASCAL, ],
+            _GV100       => [ VOLTA_and_later, ],
+        ],
+
+        GET_INTR_PBDMA_INFO => [
+
+            DESCRIPTION   => "fifoGetIntrPbdmaInfo",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => void,
+
+            _GK104        => [ MAXWELL_thru_TURING, ],
+            _STUB         => [ AMPERE_and_later, ],
+        ],
+
+        GET_PER_RUNLIST_INTR_PBDMA_INFO => [
+
+            DESCRIPTION   => "fifoGetPerRunlistIntrPbdmaInfo",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 runlistId",
+            STUB_RETURNS  => void,
+
+            _STUB         => [ MAXWELL_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+        DUMP_PER_PBDMA_INTR_INFO => [
+
+            DESCRIPTION   => "fifoDumpPerPbdmaIntrInfo",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 pbdmaId",
+
+            _GK104       => [ MAXWELL_thru_TURING, ],
+            _GA100       => [ AMPERE_and_later, ],
+        ],
+
+        GET_NUM_ENG => [
+
+            DESCRIPTION   => "Get Engine Status Size",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => ZERO,
+
+            _GK104       => [ ],
+            _GK208       => [ ],
+            _GM107       => [ GM10X, ],
+            _GM200       => [ GM20X, ],
+            _GP100       => [ GP100, ],
+            _GP102       => [ PASCAL, -GP100, ],
+            _GV100       => [ VOLTA, ],
+            _TU102       => [ TURING, ],
+            _GA100       => [ AMPERE_and_later, ],
+        ],
+
+        GET_ENG_NAMES => [
+            DESCRIPTION   => "Get engine names and device info type",
+            RETURN_TYPE   => "void*",
+            ARGUMENTS     => void,
+            STUB_RETURNS  => NULL,
+
+            _GK104       => [ ],
+            _GM107       => [ dMAXWELL, tMAXWELL, ],
+            _GP100       => [ dPASCAL, tPascal, ],
+            _GV100       => [ VOLTA_thru_TURING, ],
+            _GA100       => [ AMPERE_thru_ADA, ],
+            _GH100       => [ HOPPER_and_later, ],
+        ],
+
+        GET_CHANNEL_ADDRESS_LIMIT => [
+            DESCRIPTION  => "Returns the address limit for the address space used by a channel.",
+            RETURN_TYPE  => LwU64,
+            ARGUMENTS    => "ChannelId*",
+            STUB_RETURNS => ZERO,
+
+            _GK104       => [ MAXWELL, ],
+            _GP100       => [ PASCAL_thru_TURING, ],
+            _STUB        => [ AMPERE_and_later, ],
+        ],
+
+        GET_TABLE_ENTRY => [
+            DESCRIPTION   => "Get the table entry for engine from device info",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "EngineNameValue*, LwU32, LwU32, LwBool",
+            STUB_RETURNS  => NEG1,
+
+            _GK104        => [ MAXWELL, ],
+            _GP100        => [ PASCAL_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+        ],
+
+        XLATE_FROM_DEV_TYPE_AND_INST_ID => [
+            DESCRIPTION   => "Translate engine data from the dev_type_enum, inst_id combination",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32 devType, LwU32 instId, LwU32 outType, LwU32 *pOutVal",
+
+            _GK104        => [ ALL, ],
+        ],
+
+        XLATE_FROM_ENGINE_STRING => [
+            DESCRIPTION   => "Translate engine data from the engine name string",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "char *engName, LwU32 outType, LwU32 *pOutVal",
+
+            _GK104        => [ ALL, ],
+        ],
+
+        ENGINE_DATA_XLATE => [
+            DESCRIPTION   => "Xlate engine data from the specified input type to the specified output type",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "ENGINE_INFO_TYPE dataTypeIn, LwU32 searchedVal, ENGINE_INFO_TYPE dataTypeOut, LwU32 *pOutputVal",
+
+            _GK104        => [ ALL, ],
+        ],
+
+        GET_INSTANCE_ID_FROM_DEVICE_INFO_DATA => [
+            DESCRIPTION   => "Xlate the engine data",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32 deviceInfoData",
+            STUB_RETURNS  => ZERO,
+
+            _GP100        => [ PASCAL_thru_TURING, ],
+            _STUB         => [ pre_PASCAL, AMPERE_and_later, ],
+        ],
+
+        GET_DEVICE_INFO_NUM_ROWS => [
+            DESCRIPTION   => "Get the number of rows in device info",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => ZERO,
+
+            _GK104       => [ MAXWELL_thru_TURING, ],
+            _GA100       => [ AMPERE_and_later, ],
+        ],
+
+        GET_DEVICE_INFO_MAX_DEVICES => [
+            DESCRIPTION   => "Get the number of rows in device info",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => ZERO,
+
+            _GK104       => [ MAXWELL_thru_TURING, ],
+            _GA100       => [ AMPERE_and_later, ],
+        ],
+
+        PARSE_DEVICE_INFO_AND_GET_ENGINE => [
+            DESCRIPTION   => "Parses mutliple rows into information about one device",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "DeviceInfoEngine*, LwU32*, LwU32*",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GA100       => [ AMPERE_and_later, ],
+            _STUB        => [ pre_AMPERE, ],
+        ],
+
+        GET_DEVICE_INFO => [
+            DESCRIPTION   => "Get the device info entries",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => LW_OK,
+
+            _GK104       => [ MAXWELL_thru_TURING, ],
+            _GA100       => [ AMPERE_and_later, ],
+        ],
+
+        GET_RUNLIST_MAX_NUMBER => [
+            DESCRIPTION  => "Get the maximum possible number of runlists on a GPU",
+            RETURN_TYPE  => LwU32,
+            ARGUMENTS    => void,
+            STUB_RETURNS => ZERO,
+
+            _GK104       => [ MAXWELL_thru_TURING, ],
+            _GA100       => [ AMPERE_and_later, ],
+        ],
+
+        GET_RUNLISTS_ENGINES  => [
+            DESCRIPTION  => "Returns array of runlists with containing engines represented as bit masks",
+            RETURN_TYPE  => "LwU32*",
+            ARGUMENTS    => void,
+            STUB_RETURNS => NULL,
+
+            _GK104       => [ MAXWELL_and_later, ],
+        ],
+
+        RUNLIST_GET_ENTRY_SIZE_LWW => [
+            DESCRIPTION     => "Get the runlist entry size. lww tag added at the end to avoid symbol conflict with RM",
+            RETURN_TYPE     => LwU32,
+            ARGUMENTS       => void,
+            STUB_RETURNS    => ZERO,
+
+            _GK104       => [ MAXWELL_thru_PASCAL, ],
+            _GV100       => [ VOLTA_and_later, ],
+        ],
+
+        DUMP_SUBCTX_INFO => [
+            DESCRIPTION   => "Dump the SCG/subctx info",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "ChannelId*",
+
+            _GM200       => [ MAXWELL_thru_PASCAL, -GM10X, ],
+            _GV100       => [ VOLTA_thru_HOPPER, IG000, -GH20X ],
+            _GB100       => [ BLACKWELL_and_later, GH20X, -IG000 ],
+            _STUB        => [ pre_MAXWELL, GM10X, ],
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $fifoHal;

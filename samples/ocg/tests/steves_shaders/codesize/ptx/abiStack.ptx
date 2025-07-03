@@ -1,0 +1,46 @@
+.version 3.1
+.target sm_20
+
+.global .u32 x;
+
+.func (.param .u32 out) myadd (.reg .u32 a, .reg .u32 b, .reg .u32 c,
+                               .param .align 16 .b8 d[1000],
+                               .reg .u32 e, .reg .u32 f, .reg .u32 g, .reg .u32 h,
+                               .reg .u32 i, .reg .u32 j, .reg .u32 k, .reg .u32 l)
+{
+    .reg .u32 cc, r, temp;
+
+    add.u32       r, a, b;
+    add.u32       r, r, c;
+    ld.param.u32  temp, [d+16];
+    add.u32       r, r, temp;
+    add.u32       r, r, e;
+    add.u32       r, r, f;
+    add.u32       r, r, g;
+    add.u32       r, r, h;
+    add.u32       r, r, i;
+    add.u32       r, r, j;
+    add.u32       r, r, k;
+    add.u32       r, r, l;
+    st.param.u32  [out], r;
+    ret;
+}
+
+.entry main(.param .u32 output, .param .u32 output1)
+{
+    .param .align 16 .b8 d[1000];
+    .reg .u32 a, o;
+
+    st.param.u32   [d+16], 12;
+    call (a), myadd, (4, 6, 8, d, 14, 16, 18, 20, 22, 24, 26, 28);
+    ld.param.u32  o, [output];
+    st.b32        [o], a;
+
+    st.param.u32   [d+16], 100;
+    call (a), myadd, (a, a, a, d, 14, 16, 18, 20, 22, 24, 26, 28);
+    ld.param.u32  o, [output1];
+    st.b32        [o], a;
+
+    exit;
+}
+ 

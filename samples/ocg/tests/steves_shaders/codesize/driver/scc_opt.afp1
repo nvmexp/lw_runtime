@@ -1,0 +1,29 @@
+!!ARBfp1.0
+PARAM       zero  = { 0.0, 0.0, 0.0, 0.0 };
+PARAM       neg1  = { -1.0, -1.0, -1.0, -1.0 };
+TEMP tmp, res, tex0, tex;
+
+# Compare texture0 against texture1, aclwmulating either 0
+# if they match, or a positive number if they don't.
+TEX tex0, fragment.texcoord[0], texture[0], 2D;
+TEX tex, fragment.texcoord[1], texture[1], 2D;
+SUB tmp, tex0, tex;
+ABS res, tmp;
+
+TEX tex, fragment.texcoord[2], texture[2], 2D;
+SUB tmp, tex0, tex;
+ABS tmp, tmp;
+ADD res, res, tmp;
+
+TEX tex, fragment.texcoord[3], texture[3], 2D;
+SUB tmp, tex0, tex;
+ABS tmp, tmp;
+ADD res, res, tmp;
+
+# Make any aclwmulated error negative
+SUB res, zero, res;
+
+# Show the primary color (green) if the fragment doesn't get killed.
+MOV result.color, fragment.color.primary;
+KIL res;
+END

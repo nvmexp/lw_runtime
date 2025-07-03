@@ -1,0 +1,86 @@
+#pragma once
+
+#define IPC_ENABLED                 1
+
+#define CAPTURE_NOT_STARTED         0
+#define CAPTURE_STARTED             1
+#define CAPTURE_ABORT               2
+#define CAPTURE_REGULAR             3
+#define CAPTURE_REGULARSTEREO       4
+#define CAPTURE_HIGHRES             5
+#define CAPTURE_360                 6
+#define CAPTURE_360STEREO           7
+
+#define UI_GAMEPAD_MAX_BUTTONS      32
+#define UI_GAMEPAD_XB360            1
+#define UI_GAMEPAD_XB1              2
+#define UI_GAMEPAD_TYPE             UI_GAMEPAD_XB360
+#define UI_GAMEPAD_DPAD_FILTERTIME  100
+#define UI_GAMEPAD_DPAD_FIRST_TIME_FILTERTIME   1000
+#define UI_INPUT_BLOCKING           1
+
+#if 0
+#define UI_MOUSEMODE_CAMERA         0
+#define UI_MOUSEMODE_GUI            1
+#define UI_MOUSEMODE_NUM_MODES      2
+#else
+#define UI_MOUSEMODE_COMBINED       0
+#endif
+
+#define UI_STRINGBUFSIZE_FXNAME     64
+
+#define UI_MOUSELWRSOR_DONTCARE     0
+#define UI_MOUSELWRSOR_ARROW        1
+#define UI_MOUSELWRSOR_HAND         2
+
+#define UI_ENABLE_TEXT 1
+
+#define UI_SLIDER_CONTINUOUS        0
+#define UI_SLIDER_CONTINUOUS_MINMAX 1
+#define UI_SLIDER_DISCRETE          2
+#define UI_CONTROL_ORDINARY         0
+#define UI_CONTROL_HIGHLIGHT        1
+#define UI_CONTROL_PRESSED          1024
+
+#define ENABLE_STEREO_SHOTS         1
+
+#define UI_DIRCETORSTATE_NONE       0
+#define UI_DIRCETORSTATE_HIGHRES    1
+#define UI_DIRCETORSTATE_360        2
+#if (ENABLE_STEREO_SHOTS == 1)
+#   define UI_DIRCETORSTATE_STEREO      3
+#   define UI_DIRCETORSTATE_STEREO_360  4
+#   define UI_DIRCETORSTATE_TOTAL       5
+#else
+#   define UI_DIRCETORSTATE_TOTAL       3
+#endif
+
+#define IR_DEMOHACKS 1
+#define DBG_HARDCODED_EFFECT_BW_ENABLED 0
+
+#define ENABLE_SEPIA_FOR_BW         1
+
+#define TELEMETRY_TIMEOUT 500
+#define TELEMETRY_INIT_RETRY_COUNT 3
+#define TELEMETRY_USER_ID "undefined"
+
+#define FILTER_NAMES_CONFIG_FILENAME L"filternames.cfg"
+
+#define WELCOME_NOTIFICATION_DEFAULT 3u
+
+#define ENABLE_CONTROL_SDK          1
+#define ANSEL_CONTROL_SDK_MILLISECONDS_PER_DETECT_AND_INTIALIZE 100
+#define ANSEL_CONTROL_SDK_MILLISECONDS_UNTIL_LAST_DETECT_AND_INITIALIZE 30000
+
+// Style Transfer disabled starting r455+ (See http://lwbugs/3113356)
+//#define ENABLE_STYLETRANSFER
+
+#define ENABLE_NETWORK_HOOKS 1
+#define NETWORK_DETECTION_WINDOW_FRAMES 30
+#define NETWORK_DETECTION_FRAMES_WITH_TRAFFIC_THRESHOLD 10
+
+#define UI_MODSENABLED_QUERY_TIMEOUT_SECONDS 3
+
+#define DEBUG_LEAKS 0
+
+#define ANSEL_SIDE_PRESETS      1

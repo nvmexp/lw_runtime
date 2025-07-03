@@ -1,0 +1,73 @@
+[
+  {
+    "Type": "Control",
+    "OutputDirectory": "Initialization",
+    "TestDefinitions": [
+      {
+        "Command": "[bin]\\ModeSet.exe",
+        "Arguments": "-d 0 -w 1920 -h 1080 -b 32"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:head;q -o:[OutputDirectory]\\swak-display.txt"
+      },
+      {
+        "Command": "Verify",
+        "Arguments": "[OutputDirectory]\\swak-display.txt:1920x1080x32"
+      },
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-l"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:gpuclk;pstate;q -o:[OutputDirectory]\\swak-clocks.txt"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VSYNCMODE=FORCEOFF"
+      }
+    ]
+  },
+  {
+    "Type": "GFXBench",
+    "SessionName": "GFXBench",
+    "TestCase": "GFXBench",
+    "OutputDirectory": "GFXBench",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryLookup": {
+      "GFXBench": "[Netapp]\\GFXBench\\gfxbench_vulkan"
+    },
+    "ApplicationPath": "[Netapp]\\GFXBench\\gfxbench_vulkan\\bin\\testfw_app.exe",
+    "Server": "hqlwoglsql01:8211",
+    "TestDefinitions": [
+      {
+        "Name": "gl_5_high",
+        "Arguments": "testfw_app -h 1080 -w 1920 --gfx glfw -t gl_5_high"
+      },
+      {
+        "Name": "vulkan_5_high",
+        "Arguments": "testfw_app -h 1080 -w 1920 --gfx vulkan -t vulkan_5_high"
+      },
+      {
+        "Name": "vulkan_5_high_off",
+        "Arguments": "testfw_app -h 1080 -w 1920 --gfx vulkan -t vulkan_5_high_off"
+      }
+    ]
+  },
+  {
+    "Type": "Control",
+    "OutputDirectory": "Restore",
+    "TestDefinitions": [
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-u"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVSYNCMODE"
+      }
+    ]
+  }
+]
+

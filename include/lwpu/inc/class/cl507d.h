@@ -1,0 +1,939 @@
+// WARNING!!! THIS HEADER INCLUDES SOFTWARE METHODS!!!
+// ********** DO NOT USE IN HW TREE.  ********** 
+/* 
+* _LWRM_COPYRIGHT_BEGIN_
+*
+* Copyright 1993-2004 by LWPU Corporation.  All rights reserved.  All
+* information contained herein is proprietary and confidential to LWPU
+* Corporation.  Any use, reproduction, or disclosure without the written
+* permission of LWPU Corporation is prohibited.
+*
+* _LWRM_COPYRIGHT_END_
+*/
+
+
+#ifndef _cl507d_h_
+#define _cl507d_h_
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define LW507D_CORE_CHANNEL_DMA                                                 (0x0000507D)
+
+typedef volatile struct _cl507d_tag0 {
+    LwV32 Put;                                                                  // 0x00000000 - 0x00000003
+    LwV32 Get;                                                                  // 0x00000004 - 0x00000007
+    LwV32 Reserved00[0x1E];
+    LwV32 Update;                                                               // 0x00000080 - 0x00000083
+    LwV32 SetNotifierControl;                                                   // 0x00000084 - 0x00000087
+    LwV32 SetContextDmaNotifier;                                                // 0x00000088 - 0x0000008B
+    LwV32 GetCapabilities;                                                      // 0x0000008C - 0x0000008F
+    LwV32 Reserved01[0xCB];
+    LwV32 SetSpare;                                                             // 0x000003BC - 0x000003BF
+    LwV32 SetSpareNoop[16];                                                     // 0x000003C0 - 0x000003FF
+    struct {
+        LwV32 SetControl;                                                       // 0x00000400 - 0x00000403
+        LwV32 SetPolarity;                                                      // 0x00000404 - 0x00000407
+        LwV32 Reserved02[0x6];
+        LwV32 SetEncodeQuality;                                                 // 0x00000420 - 0x00000423
+        LwV32 Reserved03[0x16];
+        LwV32 UpdateEncoderPreset;                                              // 0x0000047C - 0x0000047F
+    } Dac[3];
+    LwV32 Reserved04[0x20];
+    struct {
+        LwV32 SetControl;                                                       // 0x00000600 - 0x00000603
+        LwV32 Reserved05[0xF];
+    } Sor[2];
+    LwV32 Reserved06[0x20];
+    struct {
+        LwV32 SetControl;                                                       // 0x00000700 - 0x00000703
+        LwV32 Reserved07[0xF];
+    } Pior[3];
+    LwV32 Reserved08[0x10];
+    struct {
+        LwV32 SetPresentControl;                                                // 0x00000800 - 0x00000803
+        LwV32 SetPixelClock;                                                    // 0x00000804 - 0x00000807
+        LwV32 SetControl;                                                       // 0x00000808 - 0x0000080B
+        LwV32 SetLockOffset;                                                    // 0x0000080C - 0x0000080F
+        LwV32 SetOverscanColor;                                                 // 0x00000810 - 0x00000813
+        LwV32 SetRasterSize;                                                    // 0x00000814 - 0x00000817
+        LwV32 SetRasterSyncEnd;                                                 // 0x00000818 - 0x0000081B
+        LwV32 SetRasterBlankEnd;                                                // 0x0000081C - 0x0000081F
+        LwV32 SetRasterBlankStart;                                              // 0x00000820 - 0x00000823
+        LwV32 SetRasterVertBlank2;                                              // 0x00000824 - 0x00000827
+        LwV32 SetRasterVertBlankDmi;                                            // 0x00000828 - 0x0000082B
+        LwV32 SetDefaultBaseColor;                                              // 0x0000082C - 0x0000082F
+        LwV32 SetCrcControl;                                                    // 0x00000830 - 0x00000833
+        LwV32 SetLegacyCrcControl;                                              // 0x00000834 - 0x00000837
+        LwV32 SetContextDmaCrc;                                                 // 0x00000838 - 0x0000083B
+        LwV32 Reserved09[0x1];
+        LwV32 SetBaseLutLo;                                                     // 0x00000840 - 0x00000843
+        LwV32 SetBaseLutHi;                                                     // 0x00000844 - 0x00000847
+        LwV32 SetOutputLutLo;                                                   // 0x00000848 - 0x0000084B
+        LwV32 SetOutputLutHi;                                                   // 0x0000084C - 0x0000084F
+        LwV32 Reserved10[0x4];
+        LwV32 SetOffset[2];                                                     // 0x00000860 - 0x00000867
+        LwV32 SetSize;                                                          // 0x00000868 - 0x0000086B
+        LwV32 SetStorage;                                                       // 0x0000086C - 0x0000086F
+        LwV32 SetParams;                                                        // 0x00000870 - 0x00000873
+        LwV32 SetContextDmaIso;                                                 // 0x00000874 - 0x00000877
+        LwV32 Reserved11[0x2];
+        LwV32 SetControlLwrsor;                                                 // 0x00000880 - 0x00000883
+        LwV32 SetOffsetLwrsor;                                                  // 0x00000884 - 0x00000887
+        LwV32 Reserved12[0x6];
+        LwV32 SetDitherControl;                                                 // 0x000008A0 - 0x000008A3
+        LwV32 SetControlOutputScaler;                                           // 0x000008A4 - 0x000008A7
+        LwV32 SetProcamp;                                                       // 0x000008A8 - 0x000008AB
+        LwV32 Reserved13[0x5];
+        LwV32 SetViewportPointIn[2];                                            // 0x000008C0 - 0x000008C7
+        LwV32 SetViewportSizeIn;                                                // 0x000008C8 - 0x000008CB
+        LwV32 Reserved14[0x2];
+        LwV32 SetViewportPointOutAdjust;                                        // 0x000008D4 - 0x000008D7
+        LwV32 SetViewportSizeOut;                                               // 0x000008D8 - 0x000008DB
+        LwV32 SetViewportSizeOutMin;                                            // 0x000008DC - 0x000008DF
+        LwV32 Reserved15[0x8];
+        LwV32 SetBaseChannelUsageBounds;                                        // 0x00000900 - 0x00000903
+        LwV32 SetOverlayUsageBounds;                                            // 0x00000904 - 0x00000907
+        LwV32 Reserved16[0xAD];
+        LwV32 SetSpare;                                                         // 0x00000BBC - 0x00000BBF
+        LwV32 SetSpareNoop[16];                                                 // 0x00000BC0 - 0x00000BFF
+    } Head[2];
+} Lw50DispCoreControlDma;
+
+
+#define LW_DISP_CORE_NOTIFIER_1                                                      0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_SIZEOF                                               0x00000054
+#define LW_DISP_CORE_NOTIFIER_1_COMPLETION_0                                         0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_COMPLETION_0_DONE                                    0:0
+#define LW_DISP_CORE_NOTIFIER_1_COMPLETION_0_DONE_FALSE                              0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_COMPLETION_0_DONE_TRUE                               0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_COMPLETION_0_R0                                      15:1
+#define LW_DISP_CORE_NOTIFIER_1_COMPLETION_0_TIMESTAMP                               29:16
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1                                       0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_DONE                                  0:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_DONE_FALSE                            0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_DONE_TRUE                             0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_VM_USABLE4ISO                         1:1
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_VM_USABLE4ISO_FALSE                   0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_VM_USABLE4ISO_TRUE                    0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LWM_USABLE4ISO                        2:2
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LWM_USABLE4ISO_FALSE                  0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LWM_USABLE4ISO_TRUE                   0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_R0                                    3:3
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN0USAGE                        7:4
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN0USAGE_UNAVAILABLE            0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN0USAGE_SCAN_LOCK              0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN0USAGE_FLIP_LOCK              0x00000002
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN0USAGE_STEREO                 0x00000004
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN1USAGE                        11:8
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN1USAGE_UNAVAILABLE            0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN1USAGE_SCAN_LOCK              0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN1USAGE_FLIP_LOCK              0x00000002
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN1USAGE_STEREO                 0x00000004
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN2USAGE                        15:12
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN2USAGE_UNAVAILABLE            0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN2USAGE_SCAN_LOCK              0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN2USAGE_FLIP_LOCK              0x00000002
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN2USAGE_STEREO                 0x00000004
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN3USAGE                        19:16
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN3USAGE_UNAVAILABLE            0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN3USAGE_SCAN_LOCK              0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN3USAGE_FLIP_LOCK              0x00000002
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_LOCK_PIN3USAGE_STEREO                 0x00000004
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_FOS_FETCH_X4AA                        20:20
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_FOS_FETCH_X4AA_FALSE                  0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_FOS_FETCH_X4AA_TRUE                   0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_FP16COLWERSION_GAIN_OFS               21:21
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_FP16COLWERSION_GAIN_OFS_FALSE         0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_FP16COLWERSION_GAIN_OFS_TRUE          0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_1_R1                                    31:22
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_2                                       0x00000002
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_2_R2                                    31:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_3                                       0x00000003
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_3_R3                                    31:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_4                                       0x00000004
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_4_R4                                    31:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5                              0x00000005
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5_RGB_USABLE                   0:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5_RGB_USABLE_FALSE             0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5_RGB_USABLE_TRUE              0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5_TV_USABLE                    1:1
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5_TV_USABLE_FALSE              0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5_TV_USABLE_TRUE               0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5_TV_MACROVISION_USABLE        2:2
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5_TV_MACROVISION_USABLE_FALSE  0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5_TV_MACROVISION_USABLE_TRUE   0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5_SCART_USABLE                 3:3
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5_SCART_USABLE_FALSE           0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC0_5_SCART_USABLE_TRUE            0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6                              0x00000006
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6_RGB_USABLE                   0:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6_RGB_USABLE_FALSE             0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6_RGB_USABLE_TRUE              0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6_TV_USABLE                    1:1
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6_TV_USABLE_FALSE              0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6_TV_USABLE_TRUE               0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6_TV_MACROVISION_USABLE        2:2
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6_TV_MACROVISION_USABLE_FALSE  0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6_TV_MACROVISION_USABLE_TRUE   0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6_SCART_USABLE                 3:3
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6_SCART_USABLE_FALSE           0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC1_6_SCART_USABLE_TRUE            0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7                              0x00000007
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7_RGB_USABLE                   0:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7_RGB_USABLE_FALSE             0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7_RGB_USABLE_TRUE              0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7_TV_USABLE                    1:1
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7_TV_USABLE_FALSE              0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7_TV_USABLE_TRUE               0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7_TV_MACROVISION_USABLE        2:2
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7_TV_MACROVISION_USABLE_FALSE  0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7_TV_MACROVISION_USABLE_TRUE   0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7_SCART_USABLE                 3:3
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7_SCART_USABLE_FALSE           0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_DAC2_7_SCART_USABLE_TRUE            0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8                              0x00000008
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SINGLE_LVDS18                0:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SINGLE_LVDS18_FALSE          0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SINGLE_LVDS18_TRUE           0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SINGLE_LVDS24                1:1
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SINGLE_LVDS24_FALSE          0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SINGLE_LVDS24_TRUE           0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DUAL_LVDS18                  2:2
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DUAL_LVDS18_FALSE            0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DUAL_LVDS18_TRUE             0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DUAL_LVDS24                  3:3
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DUAL_LVDS24_FALSE            0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DUAL_LVDS24_TRUE             0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SINGLE_TMDS_A                4:4
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SINGLE_TMDS_A_FALSE          0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SINGLE_TMDS_A_TRUE           0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SINGLE_TMDS_B                5:5
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SINGLE_TMDS_B_FALSE          0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SINGLE_TMDS_B_TRUE           0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DUAL_SINGLE_TMDS             6:6
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DUAL_SINGLE_TMDS_FALSE       0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DUAL_SINGLE_TMDS_TRUE        0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DUAL_TMDS                    7:7
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DUAL_TMDS_FALSE              0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DUAL_TMDS_TRUE               0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SDI                          8:8
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SDI_FALSE                    0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_SDI_TRUE                     0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DDI                          9:9
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DDI_FALSE                    0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR0_8_DDI_TRUE                     0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9                              0x00000009
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SINGLE_LVDS18                0:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SINGLE_LVDS18_FALSE          0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SINGLE_LVDS18_TRUE           0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SINGLE_LVDS24                1:1
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SINGLE_LVDS24_FALSE          0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SINGLE_LVDS24_TRUE           0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DUAL_LVDS18                  2:2
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DUAL_LVDS18_FALSE            0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DUAL_LVDS18_TRUE             0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DUAL_LVDS24                  3:3
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DUAL_LVDS24_FALSE            0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DUAL_LVDS24_TRUE             0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SINGLE_TMDS_A                4:4
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SINGLE_TMDS_A_FALSE          0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SINGLE_TMDS_A_TRUE           0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SINGLE_TMDS_B                5:5
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SINGLE_TMDS_B_FALSE          0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SINGLE_TMDS_B_TRUE           0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DUAL_SINGLE_TMDS             6:6
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DUAL_SINGLE_TMDS_FALSE       0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DUAL_SINGLE_TMDS_TRUE        0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DUAL_TMDS                    7:7
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DUAL_TMDS_FALSE              0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DUAL_TMDS_TRUE               0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SDI                          8:8
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SDI_FALSE                    0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_SDI_TRUE                     0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DDI                          9:9
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DDI_FALSE                    0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_SOR1_9_DDI_TRUE                     0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10                            0x0000000A
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_EXT_TMDS_ENC               0:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_EXT_TMDS_ENC_FALSE         0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_EXT_TMDS_ENC_TRUE          0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_EXT_TV_ENC                 1:1
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_EXT_TV_ENC_FALSE           0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_EXT_TV_ENC_TRUE            0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_EXT_SDI_ENC                2:2
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_EXT_SDI_ENC_FALSE          0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_EXT_SDI_ENC_TRUE           0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_DIST_RENDER_OUT            3:3
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_DIST_RENDER_OUT_FALSE      0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_DIST_RENDER_OUT_TRUE       0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_DIST_RENDER_IN             4:4
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_DIST_RENDER_IN_FALSE       0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_DIST_RENDER_IN_TRUE        0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_DIST_RENDER_IN_OUT         5:5
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_DIST_RENDER_IN_OUT_FALSE   0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR0_10_DIST_RENDER_IN_OUT_TRUE    0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11                            0x0000000B
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_EXT_TMDS_ENC               0:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_EXT_TMDS_ENC_FALSE         0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_EXT_TMDS_ENC_TRUE          0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_EXT_TV_ENC                 1:1
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_EXT_TV_ENC_FALSE           0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_EXT_TV_ENC_TRUE            0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_EXT_SDI_ENC                2:2
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_EXT_SDI_ENC_FALSE          0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_EXT_SDI_ENC_TRUE           0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_DIST_RENDER_OUT            3:3
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_DIST_RENDER_OUT_FALSE      0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_DIST_RENDER_OUT_TRUE       0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_DIST_RENDER_IN             4:4
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_DIST_RENDER_IN_FALSE       0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_DIST_RENDER_IN_TRUE        0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_DIST_RENDER_IN_OUT         5:5
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_DIST_RENDER_IN_OUT_FALSE   0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR1_11_DIST_RENDER_IN_OUT_TRUE    0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12                            0x0000000C
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_EXT_TMDS_ENC               0:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_EXT_TMDS_ENC_FALSE         0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_EXT_TMDS_ENC_TRUE          0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_EXT_TV_ENC                 1:1
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_EXT_TV_ENC_FALSE           0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_EXT_TV_ENC_TRUE            0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_EXT_SDI_ENC                2:2
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_EXT_SDI_ENC_FALSE          0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_EXT_SDI_ENC_TRUE           0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_DIST_RENDER_OUT            3:3
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_DIST_RENDER_OUT_FALSE      0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_DIST_RENDER_OUT_TRUE       0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_DIST_RENDER_IN             4:4
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_DIST_RENDER_IN_FALSE       0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_DIST_RENDER_IN_TRUE        0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_DIST_RENDER_IN_OUT         5:5
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_DIST_RENDER_IN_OUT_FALSE   0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_PIOR2_12_DIST_RENDER_IN_OUT_TRUE    0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_13                            0x0000000D
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_13_USABLE                     0:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_13_USABLE_FALSE               0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_13_USABLE_TRUE                0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_13_RG_SUPPORTS_DIST_RENDER    1:1
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_13_RG_SUPPORTS_DIST_RENDER_FALSE 0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_13_RG_SUPPORTS_DIST_RENDER_TRUE 0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_13_R0                         31:2
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_14                            0x0000000E
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_14_MAX_PIXELS5TAP444          14:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_14_R1                         15:15
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_14_MAX_PIXELS5TAP422          30:16
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_14_R2                         31:31
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_15                            0x0000000F
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_15_MAX_PIXELS3TAP444          14:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_15_R3                         15:15
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_15_MAX_PIXELS3TAP422          30:16
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_15_R4                         31:31
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_16                            0x00000010
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_16_MAX_PIXELS2TAP444          14:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_16_R5                         15:15
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_16_MAX_PIXELS2TAP422          30:16
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD0_16_R6                         31:31
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_17                            0x00000011
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_17_USABLE                     0:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_17_USABLE_FALSE               0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_17_USABLE_TRUE                0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_17_RG_SUPPORTS_DIST_RENDER    1:1
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_17_RG_SUPPORTS_DIST_RENDER_FALSE 0x00000000
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_17_RG_SUPPORTS_DIST_RENDER_TRUE 0x00000001
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_17_R0                         31:2
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_18                            0x00000012
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_18_MAX_PIXELS5TAP444          14:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_18_R1                         15:15
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_18_MAX_PIXELS5TAP422          30:16
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_18_R2                         31:31
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_19                            0x00000013
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_19_MAX_PIXELS3TAP444          14:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_19_R3                         15:15
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_19_MAX_PIXELS3TAP422          30:16
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_19_R4                         31:31
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_20                            0x00000014
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_20_MAX_PIXELS2TAP444          14:0
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_20_R5                         15:15
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_20_MAX_PIXELS2TAP422          30:16
+#define LW_DISP_CORE_NOTIFIER_1_CAPABILITIES_CAP_HEAD1_20_R6                         31:31
+
+
+// dma opcode instructions
+#define LW507D_DMA                                     0x00000000 
+#define LW507D_DMA_OPCODE                                   31:29 
+#define LW507D_DMA_OPCODE_METHOD                       0x00000000 
+#define LW507D_DMA_OPCODE_JUMP                         0x00000001 
+#define LW507D_DMA_OPCODE_NONINC_METHOD                0x00000002 
+#define LW507D_DMA_OPCODE_SET_SUBDEVICE_MASK           0x00000003 
+#define LW507D_DMA_OPCODE                                   31:29 
+#define LW507D_DMA_OPCODE_METHOD                       0x00000000 
+#define LW507D_DMA_OPCODE_NONINC_METHOD                0x00000002 
+#define LW507D_DMA_METHOD_COUNT                             27:18 
+#define LW507D_DMA_METHOD_OFFSET                             11:2 
+#define LW507D_DMA_DATA                                      31:0 
+#define LW507D_DMA_NOP                                 0x00000000 
+#define LW507D_DMA_OPCODE                                   31:29 
+#define LW507D_DMA_OPCODE_JUMP                         0x00000001 
+#define LW507D_DMA_JUMP_OFFSET                               11:2 
+#define LW507D_DMA_OPCODE                                   31:29 
+#define LW507D_DMA_OPCODE_SET_SUBDEVICE_MASK           0x00000003 
+#define LW507D_DMA_SET_SUBDEVICE_MASK_VALUE                  11:0 
+
+// class methods
+#define LW507D_PUT                                                              (0x00000000)
+#define LW507D_PUT_PTR                                                          11:2
+#define LW507D_GET                                                              (0x00000004)
+#define LW507D_GET_PTR                                                          11:2
+#define LW507D_UPDATE                                                           (0x00000080)
+#define LW507D_UPDATE_INTERLOCK_WITH_LWRSOR0                                    0:0
+#define LW507D_UPDATE_INTERLOCK_WITH_LWRSOR0_DISABLE                            (0x00000000)
+#define LW507D_UPDATE_INTERLOCK_WITH_LWRSOR0_ENABLE                             (0x00000001)
+#define LW507D_UPDATE_INTERLOCK_WITH_LWRSOR1                                    8:8
+#define LW507D_UPDATE_INTERLOCK_WITH_LWRSOR1_DISABLE                            (0x00000000)
+#define LW507D_UPDATE_INTERLOCK_WITH_LWRSOR1_ENABLE                             (0x00000001)
+#define LW507D_UPDATE_INTERLOCK_WITH_BASE0                                      1:1
+#define LW507D_UPDATE_INTERLOCK_WITH_BASE0_DISABLE                              (0x00000000)
+#define LW507D_UPDATE_INTERLOCK_WITH_BASE0_ENABLE                               (0x00000001)
+#define LW507D_UPDATE_INTERLOCK_WITH_BASE1                                      9:9
+#define LW507D_UPDATE_INTERLOCK_WITH_BASE1_DISABLE                              (0x00000000)
+#define LW507D_UPDATE_INTERLOCK_WITH_BASE1_ENABLE                               (0x00000001)
+#define LW507D_UPDATE_INTERLOCK_WITH_OVERLAY0                                   2:2
+#define LW507D_UPDATE_INTERLOCK_WITH_OVERLAY0_DISABLE                           (0x00000000)
+#define LW507D_UPDATE_INTERLOCK_WITH_OVERLAY0_ENABLE                            (0x00000001)
+#define LW507D_UPDATE_INTERLOCK_WITH_OVERLAY1                                   10:10
+#define LW507D_UPDATE_INTERLOCK_WITH_OVERLAY1_DISABLE                           (0x00000000)
+#define LW507D_UPDATE_INTERLOCK_WITH_OVERLAY1_ENABLE                            (0x00000001)
+#define LW507D_UPDATE_INTERLOCK_WITH_OVERLAY_IMM0                               3:3
+#define LW507D_UPDATE_INTERLOCK_WITH_OVERLAY_IMM0_DISABLE                       (0x00000000)
+#define LW507D_UPDATE_INTERLOCK_WITH_OVERLAY_IMM0_ENABLE                        (0x00000001)
+#define LW507D_UPDATE_INTERLOCK_WITH_OVERLAY_IMM1                               11:11
+#define LW507D_UPDATE_INTERLOCK_WITH_OVERLAY_IMM1_DISABLE                       (0x00000000)
+#define LW507D_UPDATE_INTERLOCK_WITH_OVERLAY_IMM1_ENABLE                        (0x00000001)
+#define LW507D_UPDATE_NOT_DRIVER_FRIENDLY                                       31:31
+#define LW507D_UPDATE_NOT_DRIVER_FRIENDLY_FALSE                                 (0x00000000)
+#define LW507D_UPDATE_NOT_DRIVER_FRIENDLY_TRUE                                  (0x00000001)
+#define LW507D_UPDATE_NOT_DRIVER_UNFRIENDLY                                     30:30
+#define LW507D_UPDATE_NOT_DRIVER_UNFRIENDLY_FALSE                               (0x00000000)
+#define LW507D_UPDATE_NOT_DRIVER_UNFRIENDLY_TRUE                                (0x00000001)
+#define LW507D_UPDATE_INHIBIT_INTERRUPTS                                        29:29
+#define LW507D_UPDATE_INHIBIT_INTERRUPTS_FALSE                                  (0x00000000)
+#define LW507D_UPDATE_INHIBIT_INTERRUPTS_TRUE                                   (0x00000001)
+#define LW507D_SET_NOTIFIER_CONTROL                                             (0x00000084)
+#define LW507D_SET_NOTIFIER_CONTROL_MODE                                        30:30
+#define LW507D_SET_NOTIFIER_CONTROL_MODE_WRITE                                  (0x00000000)
+#define LW507D_SET_NOTIFIER_CONTROL_MODE_WRITE_AWAKEN                           (0x00000001)
+#define LW507D_SET_NOTIFIER_CONTROL_OFFSET                                      11:2
+#define LW507D_SET_NOTIFIER_CONTROL_NOTIFY                                      31:31
+#define LW507D_SET_NOTIFIER_CONTROL_NOTIFY_DISABLE                              (0x00000000)
+#define LW507D_SET_NOTIFIER_CONTROL_NOTIFY_ENABLE                               (0x00000001)
+#define LW507D_SET_CONTEXT_DMA_NOTIFIER                                         (0x00000088)
+#define LW507D_SET_CONTEXT_DMA_NOTIFIER_HANDLE                                  31:0
+#define LW507D_GET_CAPABILITIES                                                 (0x0000008C)
+#define LW507D_GET_CAPABILITIES_DUMMY                                           31:0
+#define LW507D_SET_SPARE                                                        (0x000003BC)
+#define LW507D_SET_SPARE_UNUSED                                                 31:0
+#define LW507D_SET_SPARE_NOOP(b)                                                (0x000003C0 + (b)*0x00000004)
+#define LW507D_SET_SPARE_NOOP_UNUSED                                            31:0
+
+#define LW507D_DAC_SET_CONTROL(a)                                               (0x00000400 + (a)*0x00000080)
+#define LW507D_DAC_SET_CONTROL_OWNER                                            3:0
+#define LW507D_DAC_SET_CONTROL_OWNER_NONE                                       (0x00000000)
+#define LW507D_DAC_SET_CONTROL_OWNER_HEAD0                                      (0x00000001)
+#define LW507D_DAC_SET_CONTROL_OWNER_HEAD1                                      (0x00000002)
+#define LW507D_DAC_SET_CONTROL_SUB_OWNER                                        5:4
+#define LW507D_DAC_SET_CONTROL_SUB_OWNER_NONE                                   (0x00000000)
+#define LW507D_DAC_SET_CONTROL_SUB_OWNER_SUBHEAD0                               (0x00000001)
+#define LW507D_DAC_SET_CONTROL_SUB_OWNER_SUBHEAD1                               (0x00000002)
+#define LW507D_DAC_SET_CONTROL_SUB_OWNER_BOTH                                   (0x00000003)
+#define LW507D_DAC_SET_CONTROL_CRC_MODE                                         7:6
+#define LW507D_DAC_SET_CONTROL_CRC_MODE_ACTIVE_RASTER                           (0x00000000)
+#define LW507D_DAC_SET_CONTROL_CRC_MODE_COMPLETE_RASTER                         (0x00000001)
+#define LW507D_DAC_SET_CONTROL_CRC_MODE_NON_ACTIVE_RASTER                       (0x00000002)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL                                         13:8
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_RGB_CRT                                 (0x00000000)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_CPST_NTSC_M                             (0x00000001)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_CPST_NTSC_J                             (0x00000002)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_CPST_PAL_BDGHI                          (0x00000003)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_CPST_PAL_M                              (0x00000004)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_CPST_PAL_N                              (0x00000005)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_CPST_PAL_CN                             (0x00000006)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_COMP_NTSC_M                             (0x00000007)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_COMP_NTSC_J                             (0x00000008)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_COMP_PAL_BDGHI                          (0x00000009)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_COMP_PAL_M                              (0x0000000A)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_COMP_PAL_N                              (0x0000000B)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_COMP_PAL_CN                             (0x0000000C)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_COMP_480P_60                            (0x0000000D)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_COMP_576P_50                            (0x0000000E)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_COMP_720P_50                            (0x0000000F)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_COMP_720P_60                            (0x00000010)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_COMP_1080I_50                           (0x00000011)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_COMP_1080I_60                           (0x00000012)
+#define LW507D_DAC_SET_CONTROL_PROTOCOL_LWSTOM                                  (0x0000003F)
+#define LW507D_DAC_SET_CONTROL_MACROVISION                                      19:16
+#define LW507D_DAC_SET_CONTROL_MACROVISION_DISABLE                              (0x00000000)
+#define LW507D_DAC_SET_CONTROL_MACROVISION_LEVEL_1                              (0x00000001)
+#define LW507D_DAC_SET_CONTROL_MACROVISION_LEVEL_2                              (0x00000002)
+#define LW507D_DAC_SET_CONTROL_MACROVISION_LEVEL_3                              (0x00000003)
+#define LW507D_DAC_SET_CONTROL_ILWALIDATE_FIRST_FIELD                           14:14
+#define LW507D_DAC_SET_CONTROL_ILWALIDATE_FIRST_FIELD_FALSE                     (0x00000000)
+#define LW507D_DAC_SET_CONTROL_ILWALIDATE_FIRST_FIELD_TRUE                      (0x00000001)
+#define LW507D_DAC_SET_POLARITY(a)                                              (0x00000404 + (a)*0x00000080)
+#define LW507D_DAC_SET_POLARITY_HSYNC                                           0:0
+#define LW507D_DAC_SET_POLARITY_HSYNC_POSITIVE_TRUE                             (0x00000000)
+#define LW507D_DAC_SET_POLARITY_HSYNC_NEGATIVE_TRUE                             (0x00000001)
+#define LW507D_DAC_SET_POLARITY_VSYNC                                           1:1
+#define LW507D_DAC_SET_POLARITY_VSYNC_POSITIVE_TRUE                             (0x00000000)
+#define LW507D_DAC_SET_POLARITY_VSYNC_NEGATIVE_TRUE                             (0x00000001)
+#define LW507D_DAC_SET_POLARITY_RESERVED                                        31:2
+#define LW507D_DAC_SET_ENCODE_QUALITY(a)                                        (0x00000420 + (a)*0x00000080)
+#define LW507D_DAC_SET_ENCODE_QUALITY_NOISE_FILTER_BANDPASS                     7:7
+#define LW507D_DAC_SET_ENCODE_QUALITY_NOISE_FILTER_BANDPASS_BW_3_375            (0x00000000)
+#define LW507D_DAC_SET_ENCODE_QUALITY_NOISE_FILTER_BANDPASS_BW_6_75             (0x00000001)
+#define LW507D_DAC_SET_ENCODE_QUALITY_NOISE_GAIN                                2:0
+#define LW507D_DAC_SET_ENCODE_QUALITY_NOISE_GAIN_GN_0                           (0x00000000)
+#define LW507D_DAC_SET_ENCODE_QUALITY_NOISE_GAIN_GN_0_0625                      (0x00000001)
+#define LW507D_DAC_SET_ENCODE_QUALITY_NOISE_GAIN_GN_0_125                       (0x00000002)
+#define LW507D_DAC_SET_ENCODE_QUALITY_NOISE_GAIN_GN_0_25                        (0x00000003)
+#define LW507D_DAC_SET_ENCODE_QUALITY_NOISE_GAIN_GN_0_5                         (0x00000004)
+#define LW507D_DAC_SET_ENCODE_QUALITY_NOISE_GAIN_GN_1_0                         (0x00000005)
+#define LW507D_DAC_SET_ENCODE_QUALITY_SHARPEN_GAIN                              6:4
+#define LW507D_DAC_SET_ENCODE_QUALITY_SHARPEN_GAIN_GN_0                         (0x00000000)
+#define LW507D_DAC_SET_ENCODE_QUALITY_SHARPEN_GAIN_GN_0_0625                    (0x00000001)
+#define LW507D_DAC_SET_ENCODE_QUALITY_SHARPEN_GAIN_GN_0_125                     (0x00000002)
+#define LW507D_DAC_SET_ENCODE_QUALITY_SHARPEN_GAIN_GN_0_25                      (0x00000003)
+#define LW507D_DAC_SET_ENCODE_QUALITY_SHARPEN_GAIN_GN_0_5                       (0x00000004)
+#define LW507D_DAC_SET_ENCODE_QUALITY_SHARPEN_GAIN_GN_1_0                       (0x00000005)
+#define LW507D_DAC_SET_ENCODE_QUALITY_NOISE_THRSH                               15:8
+#define LW507D_DAC_SET_ENCODE_QUALITY_SHARPEN_THRSH                             23:16
+#define LW507D_DAC_SET_ENCODE_QUALITY_TINT                                      31:24
+#define LW507D_DAC_UPDATE_ENCODER_PRESET(a)                                     (0x0000047C + (a)*0x00000080)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL                               5:0
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_RGB_CRT                       (0x00000000)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_CPST_NTSC_M                   (0x00000001)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_CPST_NTSC_J                   (0x00000002)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_CPST_PAL_BDGHI                (0x00000003)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_CPST_PAL_M                    (0x00000004)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_CPST_PAL_N                    (0x00000005)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_CPST_PAL_CN                   (0x00000006)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_COMP_NTSC_M                   (0x00000007)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_COMP_NTSC_J                   (0x00000008)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_COMP_PAL_BDGHI                (0x00000009)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_COMP_PAL_M                    (0x0000000A)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_COMP_PAL_N                    (0x0000000B)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_COMP_PAL_CN                   (0x0000000C)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_COMP_480P_60                  (0x0000000D)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_COMP_576P_50                  (0x0000000E)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_COMP_720P_50                  (0x0000000F)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_COMP_720P_60                  (0x00000010)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_COMP_1080I_50                 (0x00000011)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_COMP_1080I_60                 (0x00000012)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_PROTOCOL_LWSTOM                        (0x0000003F)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_COMP_FORMAT                            6:6
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_COMP_FORMAT_RGB                        (0x00000000)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_COMP_FORMAT_YUV                        (0x00000001)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_ENABLE_SYNC_ON_R                       7:7
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_ENABLE_SYNC_ON_R_DISABLE               (0x00000000)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_ENABLE_SYNC_ON_R_ENABLE                (0x00000001)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_ENABLE_SYNC_ON_G                       8:8
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_ENABLE_SYNC_ON_G_DISABLE               (0x00000000)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_ENABLE_SYNC_ON_G_ENABLE                (0x00000001)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_ENABLE_SYNC_ON_B                       9:9
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_ENABLE_SYNC_ON_B_DISABLE               (0x00000000)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_ENABLE_SYNC_ON_B_ENABLE                (0x00000001)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_LUMA_NOTCH                             12:10
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_LUMA_NOTCH_NONE                        (0x00000000)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_LUMA_NOTCH_NARROW_358                  (0x00000001)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_LUMA_NOTCH_WIDE_358                    (0x00000002)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_LUMA_NOTCH_NARROW_443                  (0x00000003)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_LUMA_NOTCH_WIDE_443                    (0x00000004)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_CHROMA_BW_NARROW                       13:13
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_CHROMA_BW_NARROW_BW_0_6                (0x00000000)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_CHROMA_BW_NARROW_BW_1_4                (0x00000001)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_CPST_FILTER                            15:15
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_CPST_FILTER_NARROW                     (0x00000000)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_CPST_FILTER_WIDE                       (0x00000001)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_COMP_FILTER                            16:16
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_COMP_FILTER_NARROW                     (0x00000000)
+#define LW507D_DAC_UPDATE_ENCODER_PRESET_COMP_FILTER_WIDE                       (0x00000001)
+
+#define LW507D_SOR_SET_CONTROL(a)                                               (0x00000600 + (a)*0x00000040)
+#define LW507D_SOR_SET_CONTROL_OWNER                                            3:0
+#define LW507D_SOR_SET_CONTROL_OWNER_NONE                                       (0x00000000)
+#define LW507D_SOR_SET_CONTROL_OWNER_HEAD0                                      (0x00000001)
+#define LW507D_SOR_SET_CONTROL_OWNER_HEAD1                                      (0x00000002)
+#define LW507D_SOR_SET_CONTROL_SUB_OWNER                                        5:4
+#define LW507D_SOR_SET_CONTROL_SUB_OWNER_NONE                                   (0x00000000)
+#define LW507D_SOR_SET_CONTROL_SUB_OWNER_SUBHEAD0                               (0x00000001)
+#define LW507D_SOR_SET_CONTROL_SUB_OWNER_SUBHEAD1                               (0x00000002)
+#define LW507D_SOR_SET_CONTROL_SUB_OWNER_BOTH                                   (0x00000003)
+#define LW507D_SOR_SET_CONTROL_CRC_MODE                                         7:6
+#define LW507D_SOR_SET_CONTROL_CRC_MODE_ACTIVE_RASTER                           (0x00000000)
+#define LW507D_SOR_SET_CONTROL_CRC_MODE_COMPLETE_RASTER                         (0x00000001)
+#define LW507D_SOR_SET_CONTROL_CRC_MODE_NON_ACTIVE_RASTER                       (0x00000002)
+#define LW507D_SOR_SET_CONTROL_PROTOCOL                                         11:8
+#define LW507D_SOR_SET_CONTROL_PROTOCOL_LVDS_LWSTOM                             (0x00000000)
+#define LW507D_SOR_SET_CONTROL_PROTOCOL_SINGLE_TMDS_A                           (0x00000001)
+#define LW507D_SOR_SET_CONTROL_PROTOCOL_SINGLE_TMDS_B                           (0x00000002)
+#define LW507D_SOR_SET_CONTROL_PROTOCOL_SINGLE_TMDS_AB                          (0x00000003)
+#define LW507D_SOR_SET_CONTROL_PROTOCOL_DUAL_SINGLE_TMDS                        (0x00000004)
+#define LW507D_SOR_SET_CONTROL_PROTOCOL_DUAL_TMDS                               (0x00000005)
+#define LW507D_SOR_SET_CONTROL_PROTOCOL_SDI_OUT                                 (0x00000006)
+#define LW507D_SOR_SET_CONTROL_PROTOCOL_DDI_OUT                                 (0x00000007)
+#define LW507D_SOR_SET_CONTROL_PROTOCOL_LWSTOM                                  (0x0000000F)
+#define LW507D_SOR_SET_CONTROL_HSYNC_POLARITY                                   12:12
+#define LW507D_SOR_SET_CONTROL_HSYNC_POLARITY_POSITIVE_TRUE                     (0x00000000)
+#define LW507D_SOR_SET_CONTROL_HSYNC_POLARITY_NEGATIVE_TRUE                     (0x00000001)
+#define LW507D_SOR_SET_CONTROL_VSYNC_POLARITY                                   13:13
+#define LW507D_SOR_SET_CONTROL_VSYNC_POLARITY_POSITIVE_TRUE                     (0x00000000)
+#define LW507D_SOR_SET_CONTROL_VSYNC_POLARITY_NEGATIVE_TRUE                     (0x00000001)
+#define LW507D_SOR_SET_CONTROL_DE_SYNC_POLARITY                                 14:14
+#define LW507D_SOR_SET_CONTROL_DE_SYNC_POLARITY_POSITIVE_TRUE                   (0x00000000)
+#define LW507D_SOR_SET_CONTROL_DE_SYNC_POLARITY_NEGATIVE_TRUE                   (0x00000001)
+
+#define LW507D_PIOR_SET_CONTROL(a)                                              (0x00000700 + (a)*0x00000040)
+#define LW507D_PIOR_SET_CONTROL_OWNER                                           3:0
+#define LW507D_PIOR_SET_CONTROL_OWNER_NONE                                      (0x00000000)
+#define LW507D_PIOR_SET_CONTROL_OWNER_HEAD0                                     (0x00000001)
+#define LW507D_PIOR_SET_CONTROL_OWNER_HEAD1                                     (0x00000002)
+#define LW507D_PIOR_SET_CONTROL_SUB_OWNER                                       5:4
+#define LW507D_PIOR_SET_CONTROL_SUB_OWNER_NONE                                  (0x00000000)
+#define LW507D_PIOR_SET_CONTROL_SUB_OWNER_SUBHEAD0                              (0x00000001)
+#define LW507D_PIOR_SET_CONTROL_SUB_OWNER_SUBHEAD1                              (0x00000002)
+#define LW507D_PIOR_SET_CONTROL_SUB_OWNER_BOTH                                  (0x00000003)
+#define LW507D_PIOR_SET_CONTROL_CRC_MODE                                        7:6
+#define LW507D_PIOR_SET_CONTROL_CRC_MODE_ACTIVE_RASTER                          (0x00000000)
+#define LW507D_PIOR_SET_CONTROL_CRC_MODE_COMPLETE_RASTER                        (0x00000001)
+#define LW507D_PIOR_SET_CONTROL_CRC_MODE_NON_ACTIVE_RASTER                      (0x00000002)
+#define LW507D_PIOR_SET_CONTROL_PROTOCOL                                        11:8
+#define LW507D_PIOR_SET_CONTROL_PROTOCOL_EXT_TMDS_ENC                           (0x00000000)
+#define LW507D_PIOR_SET_CONTROL_PROTOCOL_EXT_TV_ENC                             (0x00000001)
+#define LW507D_PIOR_SET_CONTROL_PROTOCOL_EXT_SDI_SD_ENC                         (0x00000002)
+#define LW507D_PIOR_SET_CONTROL_PROTOCOL_EXT_SDI_HD_ENC                         (0x00000003)
+#define LW507D_PIOR_SET_CONTROL_PROTOCOL_DIST_RENDER_OUT                        (0x00000004)
+#define LW507D_PIOR_SET_CONTROL_PROTOCOL_DIST_RENDER_IN                         (0x00000005)
+#define LW507D_PIOR_SET_CONTROL_PROTOCOL_DIST_RENDER_INOUT                      (0x00000006)
+#define LW507D_PIOR_SET_CONTROL_HSYNC_POLARITY                                  12:12
+#define LW507D_PIOR_SET_CONTROL_HSYNC_POLARITY_POSITIVE_TRUE                    (0x00000000)
+#define LW507D_PIOR_SET_CONTROL_HSYNC_POLARITY_NEGATIVE_TRUE                    (0x00000001)
+#define LW507D_PIOR_SET_CONTROL_VSYNC_POLARITY                                  13:13
+#define LW507D_PIOR_SET_CONTROL_VSYNC_POLARITY_POSITIVE_TRUE                    (0x00000000)
+#define LW507D_PIOR_SET_CONTROL_VSYNC_POLARITY_NEGATIVE_TRUE                    (0x00000001)
+#define LW507D_PIOR_SET_CONTROL_DE_SYNC_POLARITY                                14:14
+#define LW507D_PIOR_SET_CONTROL_DE_SYNC_POLARITY_POSITIVE_TRUE                  (0x00000000)
+#define LW507D_PIOR_SET_CONTROL_DE_SYNC_POLARITY_NEGATIVE_TRUE                  (0x00000001)
+
+#define LW507D_HEAD_SET_PRESENT_CONTROL(a)                                      (0x00000800 + (a)*0x00000400)
+#define LW507D_HEAD_SET_PRESENT_CONTROL_MIN_PRESENT_INTERVAL                    3:0
+#define LW507D_HEAD_SET_PRESENT_CONTROL_USE_BEGIN_FIELD                         8:8
+#define LW507D_HEAD_SET_PRESENT_CONTROL_USE_BEGIN_FIELD_DISABLE                 (0x00000000)
+#define LW507D_HEAD_SET_PRESENT_CONTROL_USE_BEGIN_FIELD_ENABLE                  (0x00000001)
+#define LW507D_HEAD_SET_PRESENT_CONTROL_BEGIN_FIELD                             6:4
+#define LW507D_HEAD_SET_PIXEL_CLOCK(a)                                          (0x00000804 + (a)*0x00000400)
+#define LW507D_HEAD_SET_PIXEL_CLOCK_FREQUENCY                                   21:0
+#define LW507D_HEAD_SET_PIXEL_CLOCK_MODE                                        23:22
+#define LW507D_HEAD_SET_PIXEL_CLOCK_MODE_CLK_25                                 (0x00000000)
+#define LW507D_HEAD_SET_PIXEL_CLOCK_MODE_CLK_28                                 (0x00000001)
+#define LW507D_HEAD_SET_PIXEL_CLOCK_MODE_CLK_LWSTOM                             (0x00000002)
+#define LW507D_HEAD_SET_PIXEL_CLOCK_ADJ1000DIV1001                              24:24
+#define LW507D_HEAD_SET_PIXEL_CLOCK_ADJ1000DIV1001_FALSE                        (0x00000000)
+#define LW507D_HEAD_SET_PIXEL_CLOCK_ADJ1000DIV1001_TRUE                         (0x00000001)
+#define LW507D_HEAD_SET_PIXEL_CLOCK_NOT_DRIVER                                  25:25
+#define LW507D_HEAD_SET_PIXEL_CLOCK_NOT_DRIVER_FALSE                            (0x00000000)
+#define LW507D_HEAD_SET_PIXEL_CLOCK_NOT_DRIVER_TRUE                             (0x00000001)
+#define LW507D_HEAD_SET_CONTROL(a)                                              (0x00000808 + (a)*0x00000400)
+#define LW507D_HEAD_SET_CONTROL_ZAPHOD                                          0:0
+#define LW507D_HEAD_SET_CONTROL_ZAPHOD_DISABLE                                  (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_ZAPHOD_ENABLE                                   (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_STRUCTURE                                       2:1
+#define LW507D_HEAD_SET_CONTROL_STRUCTURE_PROGRESSIVE                           (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_STRUCTURE_INTERLACED                            (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_SLAVE_LOCK_MODE                                 7:6
+#define LW507D_HEAD_SET_CONTROL_SLAVE_LOCK_MODE_NO_LOCK                         (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_SLAVE_LOCK_MODE_FRAME_LOCK                      (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_SLAVE_LOCK_MODE_RASTER_LOCK                     (0x00000003)
+#define LW507D_HEAD_SET_CONTROL_SLAVE_LOCK_PIN                                  10:8
+#define LW507D_HEAD_SET_CONTROL_SLAVE_LOCK_PIN_INTERNAL                         (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_SLAVE_LOCK_PIN_LOCK_PIN_0                       (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_SLAVE_LOCK_PIN_LOCK_PIN_1                       (0x00000002)
+#define LW507D_HEAD_SET_CONTROL_SLAVE_LOCK_PIN_LOCK_PIN_2                       (0x00000003)
+#define LW507D_HEAD_SET_CONTROL_SLAVE_LOCK_PIN_LOCK_PIN_3                       (0x00000004)
+#define LW507D_HEAD_SET_CONTROL_SLAVE_LOCKOUT_WINDOW                            14:11
+#define LW507D_HEAD_SET_CONTROL_MASTER_LOCK_MODE                                19:18
+#define LW507D_HEAD_SET_CONTROL_MASTER_LOCK_MODE_NO_LOCK                        (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_MASTER_LOCK_MODE_FRAME_LOCK                     (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_MASTER_LOCK_MODE_RASTER_LOCK                    (0x00000003)
+#define LW507D_HEAD_SET_CONTROL_MASTER_LOCK_PIN                                 22:20
+#define LW507D_HEAD_SET_CONTROL_MASTER_LOCK_PIN_INTERNAL                        (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_MASTER_LOCK_PIN_LOCK_PIN_0                      (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_MASTER_LOCK_PIN_LOCK_PIN_1                      (0x00000002)
+#define LW507D_HEAD_SET_CONTROL_MASTER_LOCK_PIN_LOCK_PIN_2                      (0x00000003)
+#define LW507D_HEAD_SET_CONTROL_MASTER_LOCK_PIN_LOCK_PIN_3                      (0x00000004)
+#define LW507D_HEAD_SET_CONTROL_FLIP_LOCK                                       23:23
+#define LW507D_HEAD_SET_CONTROL_FLIP_LOCK_DISABLE                               (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_FLIP_LOCK_ENABLE                                (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_FLIP_LOCK_PIN                                   26:24
+#define LW507D_HEAD_SET_CONTROL_FLIP_LOCK_PIN_INTERNAL                          (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_FLIP_LOCK_PIN_LOCK_PIN_0                        (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_FLIP_LOCK_PIN_LOCK_PIN_1                        (0x00000002)
+#define LW507D_HEAD_SET_CONTROL_FLIP_LOCK_PIN_LOCK_PIN_2                        (0x00000003)
+#define LW507D_HEAD_SET_CONTROL_FLIP_LOCK_PIN_LOCK_PIN_3                        (0x00000004)
+#define LW507D_HEAD_SET_CONTROL_STEREO_SIGNAL                                   28:27
+#define LW507D_HEAD_SET_CONTROL_STEREO_SIGNAL_STEREO_PIN                        (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_STEREO_SIGNAL_BLUE_LINE                         (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_STEREO_PIN                                      31:29
+#define LW507D_HEAD_SET_CONTROL_STEREO_PIN_INTERNAL                             (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_STEREO_PIN_LOCK_PIN_0                           (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_STEREO_PIN_LOCK_PIN_1                           (0x00000002)
+#define LW507D_HEAD_SET_CONTROL_STEREO_PIN_LOCK_PIN_2                           (0x00000003)
+#define LW507D_HEAD_SET_CONTROL_STEREO_PIN_LOCK_PIN_3                           (0x00000004)
+#define LW507D_HEAD_SET_LOCK_OFFSET(a)                                          (0x0000080C + (a)*0x00000400)
+#define LW507D_HEAD_SET_LOCK_OFFSET_X                                           14:0
+#define LW507D_HEAD_SET_LOCK_OFFSET_Y                                           30:16
+#define LW507D_HEAD_SET_OVERSCAN_COLOR(a)                                       (0x00000810 + (a)*0x00000400)
+#define LW507D_HEAD_SET_OVERSCAN_COLOR_RED                                      9:0
+#define LW507D_HEAD_SET_OVERSCAN_COLOR_GRN                                      19:10
+#define LW507D_HEAD_SET_OVERSCAN_COLOR_BLU                                      29:20
+#define LW507D_HEAD_SET_RASTER_SIZE(a)                                          (0x00000814 + (a)*0x00000400)
+#define LW507D_HEAD_SET_RASTER_SIZE_WIDTH                                       14:0
+#define LW507D_HEAD_SET_RASTER_SIZE_HEIGHT                                      30:16
+#define LW507D_HEAD_SET_RASTER_SYNC_END(a)                                      (0x00000818 + (a)*0x00000400)
+#define LW507D_HEAD_SET_RASTER_SYNC_END_X                                       14:0
+#define LW507D_HEAD_SET_RASTER_SYNC_END_Y                                       30:16
+#define LW507D_HEAD_SET_RASTER_BLANK_END(a)                                     (0x0000081C + (a)*0x00000400)
+#define LW507D_HEAD_SET_RASTER_BLANK_END_X                                      14:0
+#define LW507D_HEAD_SET_RASTER_BLANK_END_Y                                      30:16
+#define LW507D_HEAD_SET_RASTER_BLANK_START(a)                                   (0x00000820 + (a)*0x00000400)
+#define LW507D_HEAD_SET_RASTER_BLANK_START_X                                    14:0
+#define LW507D_HEAD_SET_RASTER_BLANK_START_Y                                    30:16
+#define LW507D_HEAD_SET_RASTER_VERT_BLANK2(a)                                   (0x00000824 + (a)*0x00000400)
+#define LW507D_HEAD_SET_RASTER_VERT_BLANK2_YSTART                               14:0
+#define LW507D_HEAD_SET_RASTER_VERT_BLANK2_YEND                                 30:16
+#define LW507D_HEAD_SET_RASTER_VERT_BLANK_DMI(a)                                (0x00000828 + (a)*0x00000400)
+#define LW507D_HEAD_SET_RASTER_VERT_BLANK_DMI_DURATION                          11:0
+#define LW507D_HEAD_SET_DEFAULT_BASE_COLOR(a)                                   (0x0000082C + (a)*0x00000400)
+#define LW507D_HEAD_SET_DEFAULT_BASE_COLOR_RED                                  9:0
+#define LW507D_HEAD_SET_DEFAULT_BASE_COLOR_GREEN                                19:10
+#define LW507D_HEAD_SET_DEFAULT_BASE_COLOR_BLUE                                 29:20
+#define LW507D_HEAD_SET_CRC_CONTROL(a)                                          (0x00000830 + (a)*0x00000400)
+#define LW507D_HEAD_SET_CRC_CONTROL_CONTROLLING_CHANNEL                         7:4
+#define LW507D_HEAD_SET_CRC_CONTROL_CONTROLLING_CHANNEL_CORE                    (0x00000000)
+#define LW507D_HEAD_SET_CRC_CONTROL_CONTROLLING_CHANNEL_BASE                    (0x00000001)
+#define LW507D_HEAD_SET_CRC_CONTROL_CONTROLLING_CHANNEL_OVERLAY                 (0x00000002)
+#define LW507D_HEAD_SET_CRC_CONTROL_EXPECT_BUFFER_COLLAPSE                      12:12
+#define LW507D_HEAD_SET_CRC_CONTROL_EXPECT_BUFFER_COLLAPSE_FALSE                (0x00000000)
+#define LW507D_HEAD_SET_CRC_CONTROL_EXPECT_BUFFER_COLLAPSE_TRUE                 (0x00000001)
+#define LW507D_HEAD_SET_CRC_CONTROL_TIMESTAMP_MODE                              13:13
+#define LW507D_HEAD_SET_CRC_CONTROL_TIMESTAMP_MODE_FALSE                        (0x00000000)
+#define LW507D_HEAD_SET_CRC_CONTROL_TIMESTAMP_MODE_TRUE                         (0x00000001)
+#define LW507D_HEAD_SET_CRC_CONTROL_FLIPLOCK_MODE                               14:14
+#define LW507D_HEAD_SET_CRC_CONTROL_FLIPLOCK_MODE_FALSE                         (0x00000000)
+#define LW507D_HEAD_SET_CRC_CONTROL_FLIPLOCK_MODE_TRUE                          (0x00000001)
+#define LW507D_HEAD_SET_CRC_CONTROL_PRIMARY_OUTPUT                              19:16
+#define LW507D_HEAD_SET_CRC_CONTROL_PRIMARY_OUTPUT_NONE                         (0x00000000)
+#define LW507D_HEAD_SET_CRC_CONTROL_PRIMARY_OUTPUT_DAC0                         (0x00000001)
+#define LW507D_HEAD_SET_CRC_CONTROL_PRIMARY_OUTPUT_DAC1                         (0x00000002)
+#define LW507D_HEAD_SET_CRC_CONTROL_PRIMARY_OUTPUT_DAC2                         (0x00000003)
+#define LW507D_HEAD_SET_CRC_CONTROL_PRIMARY_OUTPUT_SOR0                         (0x00000004)
+#define LW507D_HEAD_SET_CRC_CONTROL_PRIMARY_OUTPUT_SOR1                         (0x00000005)
+#define LW507D_HEAD_SET_CRC_CONTROL_PRIMARY_OUTPUT_PIOR0                        (0x00000006)
+#define LW507D_HEAD_SET_CRC_CONTROL_PRIMARY_OUTPUT_PIOR1                        (0x00000007)
+#define LW507D_HEAD_SET_CRC_CONTROL_PRIMARY_OUTPUT_PIOR2                        (0x00000008)
+#define LW507D_HEAD_SET_CRC_CONTROL_SECONDARY_OUTPUT                            27:24
+#define LW507D_HEAD_SET_CRC_CONTROL_SECONDARY_OUTPUT_NONE                       (0x00000000)
+#define LW507D_HEAD_SET_CRC_CONTROL_SECONDARY_OUTPUT_DAC0                       (0x00000001)
+#define LW507D_HEAD_SET_CRC_CONTROL_SECONDARY_OUTPUT_DAC1                       (0x00000002)
+#define LW507D_HEAD_SET_CRC_CONTROL_SECONDARY_OUTPUT_DAC2                       (0x00000003)
+#define LW507D_HEAD_SET_CRC_CONTROL_SECONDARY_OUTPUT_SOR0                       (0x00000004)
+#define LW507D_HEAD_SET_CRC_CONTROL_SECONDARY_OUTPUT_SOR1                       (0x00000005)
+#define LW507D_HEAD_SET_CRC_CONTROL_SECONDARY_OUTPUT_PIOR0                      (0x00000006)
+#define LW507D_HEAD_SET_CRC_CONTROL_SECONDARY_OUTPUT_PIOR1                      (0x00000007)
+#define LW507D_HEAD_SET_CRC_CONTROL_SECONDARY_OUTPUT_PIOR2                      (0x00000008)
+#define LW507D_HEAD_SET_CRC_CONTROL_CRC_DURING_SNOOZE                           15:15
+#define LW507D_HEAD_SET_CRC_CONTROL_CRC_DURING_SNOOZE_DISABLE                   (0x00000000)
+#define LW507D_HEAD_SET_CRC_CONTROL_CRC_DURING_SNOOZE_ENABLE                    (0x00000001)
+#define LW507D_HEAD_SET_LEGACY_CRC_CONTROL(a)                                   (0x00000834 + (a)*0x00000400)
+#define LW507D_HEAD_SET_LEGACY_CRC_CONTROL_COMPUTE                              0:0
+#define LW507D_HEAD_SET_LEGACY_CRC_CONTROL_COMPUTE_DISABLE                      (0x00000000)
+#define LW507D_HEAD_SET_LEGACY_CRC_CONTROL_COMPUTE_ENABLE                       (0x00000001)
+#define LW507D_HEAD_SET_CONTEXT_DMA_CRC(a)                                      (0x00000838 + (a)*0x00000400)
+#define LW507D_HEAD_SET_CONTEXT_DMA_CRC_HANDLE                                  31:0
+#define LW507D_HEAD_SET_BASE_LUT_LO(a)                                          (0x00000840 + (a)*0x00000400)
+#define LW507D_HEAD_SET_BASE_LUT_LO_ENABLE                                      31:31
+#define LW507D_HEAD_SET_BASE_LUT_LO_ENABLE_DISABLE                              (0x00000000)
+#define LW507D_HEAD_SET_BASE_LUT_LO_ENABLE_ENABLE                               (0x00000001)
+#define LW507D_HEAD_SET_BASE_LUT_LO_MODE                                        30:30
+#define LW507D_HEAD_SET_BASE_LUT_LO_MODE_LORES                                  (0x00000000)
+#define LW507D_HEAD_SET_BASE_LUT_LO_MODE_HIRES                                  (0x00000001)
+#define LW507D_HEAD_SET_BASE_LUT_LO_ORIGIN                                      7:2
+#define LW507D_HEAD_SET_BASE_LUT_HI(a)                                          (0x00000844 + (a)*0x00000400)
+#define LW507D_HEAD_SET_BASE_LUT_HI_ORIGIN                                      31:0
+#define LW507D_HEAD_SET_OUTPUT_LUT_LO(a)                                        (0x00000848 + (a)*0x00000400)
+#define LW507D_HEAD_SET_OUTPUT_LUT_LO_ENABLE                                    31:31
+#define LW507D_HEAD_SET_OUTPUT_LUT_LO_ENABLE_DISABLE                            (0x00000000)
+#define LW507D_HEAD_SET_OUTPUT_LUT_LO_ENABLE_ENABLE                             (0x00000001)
+#define LW507D_HEAD_SET_OUTPUT_LUT_LO_MODE                                      30:30
+#define LW507D_HEAD_SET_OUTPUT_LUT_LO_MODE_LORES                                (0x00000000)
+#define LW507D_HEAD_SET_OUTPUT_LUT_LO_MODE_HIRES                                (0x00000001)
+#define LW507D_HEAD_SET_OUTPUT_LUT_LO_ORIGIN                                    7:2
+#define LW507D_HEAD_SET_OUTPUT_LUT_HI(a)                                        (0x0000084C + (a)*0x00000400)
+#define LW507D_HEAD_SET_OUTPUT_LUT_HI_ORIGIN                                    31:0
+#define LW507D_HEAD_SET_OFFSET(a,b)                                             (0x00000860 + (a)*0x00000400 + (b)*0x00000004)
+#define LW507D_HEAD_SET_OFFSET_ORIGIN                                           31:0
+#define LW507D_HEAD_SET_SIZE(a)                                                 (0x00000868 + (a)*0x00000400)
+#define LW507D_HEAD_SET_SIZE_WIDTH                                              14:0
+#define LW507D_HEAD_SET_SIZE_HEIGHT                                             30:16
+#define LW507D_HEAD_SET_STORAGE(a)                                              (0x0000086C + (a)*0x00000400)
+#define LW507D_HEAD_SET_STORAGE_BLOCK_HEIGHT                                    3:0
+#define LW507D_HEAD_SET_STORAGE_BLOCK_HEIGHT_ONE_GOB                            (0x00000000)
+#define LW507D_HEAD_SET_STORAGE_BLOCK_HEIGHT_TWO_GOBS                           (0x00000001)
+#define LW507D_HEAD_SET_STORAGE_BLOCK_HEIGHT_FOUR_GOBS                          (0x00000002)
+#define LW507D_HEAD_SET_STORAGE_BLOCK_HEIGHT_EIGHT_GOBS                         (0x00000003)
+#define LW507D_HEAD_SET_STORAGE_BLOCK_HEIGHT_SIXTEEN_GOBS                       (0x00000004)
+#define LW507D_HEAD_SET_STORAGE_BLOCK_HEIGHT_THIRTYTWO_GOBS                     (0x00000005)
+#define LW507D_HEAD_SET_STORAGE_PITCH                                           17:8
+#define LW507D_HEAD_SET_STORAGE_MEMORY_LAYOUT                                   20:20
+#define LW507D_HEAD_SET_STORAGE_MEMORY_LAYOUT_BLOCKLINEAR                       (0x00000000)
+#define LW507D_HEAD_SET_STORAGE_MEMORY_LAYOUT_PITCH                             (0x00000001)
+#define LW507D_HEAD_SET_PARAMS(a)                                               (0x00000870 + (a)*0x00000400)
+#define LW507D_HEAD_SET_PARAMS_FORMAT                                           15:8
+#define LW507D_HEAD_SET_PARAMS_FORMAT_I8                                        (0x0000001E)
+#define LW507D_HEAD_SET_PARAMS_FORMAT_VOID16                                    (0x0000001F)
+#define LW507D_HEAD_SET_PARAMS_FORMAT_VOID32                                    (0x0000002E)
+#define LW507D_HEAD_SET_PARAMS_FORMAT_RF16_GF16_BF16_AF16                       (0x000000CA)
+#define LW507D_HEAD_SET_PARAMS_FORMAT_A8R8G8B8                                  (0x000000CF)
+#define LW507D_HEAD_SET_PARAMS_FORMAT_A2B10G10R10                               (0x000000D1)
+#define LW507D_HEAD_SET_PARAMS_FORMAT_A8B8G8R8                                  (0x000000D5)
+#define LW507D_HEAD_SET_PARAMS_FORMAT_R5G6B5                                    (0x000000E8)
+#define LW507D_HEAD_SET_PARAMS_FORMAT_A1R5G5B5                                  (0x000000E9)
+#define LW507D_HEAD_SET_PARAMS_KIND                                             22:16
+#define LW507D_HEAD_SET_PARAMS_KIND_KIND_PITCH                                  (0x00000000)
+#define LW507D_HEAD_SET_PARAMS_KIND_KIND_GENERIC_8BX2                           (0x00000070)
+#define LW507D_HEAD_SET_PARAMS_KIND_KIND_GENERIC_8BX2_BANKSWIZ                  (0x00000072)
+#define LW507D_HEAD_SET_PARAMS_KIND_KIND_GENERIC_16BX1                          (0x00000074)
+#define LW507D_HEAD_SET_PARAMS_KIND_KIND_GENERIC_16BX1_BANKSWIZ                 (0x00000076)
+#define LW507D_HEAD_SET_PARAMS_KIND_KIND_C32_MS4                                (0x00000078)
+#define LW507D_HEAD_SET_PARAMS_KIND_KIND_C32_MS8                                (0x00000079)
+#define LW507D_HEAD_SET_PARAMS_KIND_KIND_C32_MS4_BANKSWIZ                       (0x0000007A)
+#define LW507D_HEAD_SET_PARAMS_KIND_KIND_C32_MS8_BANKSWIZ                       (0x0000007B)
+#define LW507D_HEAD_SET_PARAMS_KIND_KIND_C64_MS4                                (0x0000007C)
+#define LW507D_HEAD_SET_PARAMS_KIND_KIND_C64_MS8                                (0x0000007D)
+#define LW507D_HEAD_SET_PARAMS_KIND_KIND_C128_MS4                               (0x0000007E)
+#define LW507D_HEAD_SET_PARAMS_KIND_FROM_PTE                                    (0x0000007F)
+#define LW507D_HEAD_SET_PARAMS_PART_STRIDE                                      24:24
+#define LW507D_HEAD_SET_PARAMS_PART_STRIDE_PARTSTRIDE_256                       (0x00000000)
+#define LW507D_HEAD_SET_PARAMS_PART_STRIDE_PARTSTRIDE_1024                      (0x00000001)
+#define LW507D_HEAD_SET_CONTEXT_DMA_ISO(a)                                      (0x00000874 + (a)*0x00000400)
+#define LW507D_HEAD_SET_CONTEXT_DMA_ISO_HANDLE                                  31:0
+#define LW507D_HEAD_SET_CONTROL_LWRSOR(a)                                       (0x00000880 + (a)*0x00000400)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_ENABLE                                   31:31
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_ENABLE_DISABLE                           (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_ENABLE_ENABLE                            (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_FORMAT                                   25:24
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_FORMAT_A1R5G5B5                          (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_FORMAT_A8R8G8B8                          (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_SIZE                                     26:26
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_SIZE_W32_H32                             (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_SIZE_W64_H64                             (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_HOT_SPOT_X                               13:8
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_HOT_SPOT_Y                               21:16
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_COMPOSITION                              29:28
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_COMPOSITION_ALPHA_BLEND                  (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_COMPOSITION_PREMULT_ALPHA_BLEND          (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_COMPOSITION_XOR                          (0x00000002)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_SUB_OWNER                                5:4
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_SUB_OWNER_NONE                           (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_SUB_OWNER_SUBHEAD0                       (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_SUB_OWNER_SUBHEAD1                       (0x00000002)
+#define LW507D_HEAD_SET_CONTROL_LWRSOR_SUB_OWNER_BOTH                           (0x00000003)
+#define LW507D_HEAD_SET_OFFSET_LWRSOR(a)                                        (0x00000884 + (a)*0x00000400)
+#define LW507D_HEAD_SET_OFFSET_LWRSOR_ORIGIN                                    31:0
+#define LW507D_HEAD_SET_DITHER_CONTROL(a)                                       (0x000008A0 + (a)*0x00000400)
+#define LW507D_HEAD_SET_DITHER_CONTROL_ENABLE                                   0:0
+#define LW507D_HEAD_SET_DITHER_CONTROL_ENABLE_DISABLE                           (0x00000000)
+#define LW507D_HEAD_SET_DITHER_CONTROL_ENABLE_ENABLE                            (0x00000001)
+#define LW507D_HEAD_SET_DITHER_CONTROL_BITS                                     2:1
+#define LW507D_HEAD_SET_DITHER_CONTROL_BITS_DITHER_TO_6_BITS                    (0x00000000)
+#define LW507D_HEAD_SET_DITHER_CONTROL_BITS_DITHER_TO_8_BITS                    (0x00000001)
+#define LW507D_HEAD_SET_DITHER_CONTROL_MODE                                     6:3
+#define LW507D_HEAD_SET_DITHER_CONTROL_MODE_DYNAMIC_ERR_ACC                     (0x00000000)
+#define LW507D_HEAD_SET_DITHER_CONTROL_MODE_STATIC_ERR_ACC                      (0x00000001)
+#define LW507D_HEAD_SET_DITHER_CONTROL_MODE_DYNAMIC_2X2                         (0x00000002)
+#define LW507D_HEAD_SET_DITHER_CONTROL_MODE_STATIC_2X2                          (0x00000003)
+#define LW507D_HEAD_SET_DITHER_CONTROL_PHASE                                    8:7
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER(a)                                (0x000008A4 + (a)*0x00000400)
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER_VERTICAL_TAPS                     2:0
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER_VERTICAL_TAPS_TAPS_1              (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER_VERTICAL_TAPS_TAPS_2              (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER_VERTICAL_TAPS_TAPS_3              (0x00000002)
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER_VERTICAL_TAPS_TAPS_3_ADAPTIVE     (0x00000003)
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER_VERTICAL_TAPS_TAPS_5              (0x00000004)
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER_HORIZONTAL_TAPS                   4:3
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER_HORIZONTAL_TAPS_TAPS_1            (0x00000000)
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER_HORIZONTAL_TAPS_TAPS_2            (0x00000001)
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER_HORIZONTAL_TAPS_TAPS_8            (0x00000002)
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER_HRESPONSE_BIAS                    23:16
+#define LW507D_HEAD_SET_CONTROL_OUTPUT_SCALER_VRESPONSE_BIAS                    31:24
+#define LW507D_HEAD_SET_PROCAMP(a)                                              (0x000008A8 + (a)*0x00000400)
+#define LW507D_HEAD_SET_PROCAMP_COLOR_SPACE                                     1:0
+#define LW507D_HEAD_SET_PROCAMP_COLOR_SPACE_RGB                                 (0x00000000)
+#define LW507D_HEAD_SET_PROCAMP_COLOR_SPACE_YUV_601                             (0x00000001)
+#define LW507D_HEAD_SET_PROCAMP_COLOR_SPACE_YUV_709                             (0x00000002)
+#define LW507D_HEAD_SET_PROCAMP_CHROMA_LPF                                      2:2
+#define LW507D_HEAD_SET_PROCAMP_CHROMA_LPF_AUTO                                 (0x00000000)
+#define LW507D_HEAD_SET_PROCAMP_CHROMA_LPF_ON                                   (0x00000001)
+#define LW507D_HEAD_SET_PROCAMP_SAT_COS                                         19:8
+#define LW507D_HEAD_SET_PROCAMP_SAT_SINE                                        31:20
+#define LW507D_HEAD_SET_PROCAMP_TRANSITION                                      4:3
+#define LW507D_HEAD_SET_PROCAMP_TRANSITION_HARD                                 (0x00000000)
+#define LW507D_HEAD_SET_PROCAMP_TRANSITION_NTSC                                 (0x00000001)
+#define LW507D_HEAD_SET_PROCAMP_TRANSITION_PAL                                  (0x00000002)
+#define LW507D_HEAD_SET_VIEWPORT_POINT_IN(a,b)                                  (0x000008C0 + (a)*0x00000400 + (b)*0x00000004)
+#define LW507D_HEAD_SET_VIEWPORT_POINT_IN_X                                     14:0
+#define LW507D_HEAD_SET_VIEWPORT_POINT_IN_Y                                     30:16
+#define LW507D_HEAD_SET_VIEWPORT_SIZE_IN(a)                                     (0x000008C8 + (a)*0x00000400)
+#define LW507D_HEAD_SET_VIEWPORT_SIZE_IN_WIDTH                                  14:0
+#define LW507D_HEAD_SET_VIEWPORT_SIZE_IN_HEIGHT                                 30:16
+#define LW507D_HEAD_SET_VIEWPORT_POINT_OUT_ADJUST(a)                            (0x000008D4 + (a)*0x00000400)
+#define LW507D_HEAD_SET_VIEWPORT_POINT_OUT_ADJUST_X                             15:0
+#define LW507D_HEAD_SET_VIEWPORT_POINT_OUT_ADJUST_Y                             31:16
+#define LW507D_HEAD_SET_VIEWPORT_SIZE_OUT(a)                                    (0x000008D8 + (a)*0x00000400)
+#define LW507D_HEAD_SET_VIEWPORT_SIZE_OUT_WIDTH                                 14:0
+#define LW507D_HEAD_SET_VIEWPORT_SIZE_OUT_HEIGHT                                30:16
+#define LW507D_HEAD_SET_VIEWPORT_SIZE_OUT_MIN(a)                                (0x000008DC + (a)*0x00000400)
+#define LW507D_HEAD_SET_VIEWPORT_SIZE_OUT_MIN_WIDTH                             14:0
+#define LW507D_HEAD_SET_VIEWPORT_SIZE_OUT_MIN_HEIGHT                            30:16
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS(a)                            (0x00000900 + (a)*0x00000400)
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_USABLE                        0:0
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_USABLE_FALSE                  (0x00000000)
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_USABLE_TRUE                   (0x00000001)
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_DIST_RENDER_USABLE            4:4
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_DIST_RENDER_USABLE_FALSE      (0x00000000)
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_DIST_RENDER_USABLE_TRUE       (0x00000001)
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_PIXEL_DEPTH                   11:8
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_PIXEL_DEPTH_BPP_8             (0x00000000)
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_PIXEL_DEPTH_BPP_16            (0x00000001)
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_PIXEL_DEPTH_BPP_32            (0x00000003)
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_PIXEL_DEPTH_BPP_64            (0x00000005)
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_SUPER_SAMPLE                  13:12
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_SUPER_SAMPLE_X1_AA            (0x00000000)
+#define LW507D_HEAD_SET_BASE_CHANNEL_USAGE_BOUNDS_SUPER_SAMPLE_X4_AA            (0x00000002)
+#define LW507D_HEAD_SET_OVERLAY_USAGE_BOUNDS(a)                                 (0x00000904 + (a)*0x00000400)
+#define LW507D_HEAD_SET_OVERLAY_USAGE_BOUNDS_USABLE                             0:0
+#define LW507D_HEAD_SET_OVERLAY_USAGE_BOUNDS_USABLE_FALSE                       (0x00000000)
+#define LW507D_HEAD_SET_OVERLAY_USAGE_BOUNDS_USABLE_TRUE                        (0x00000001)
+#define LW507D_HEAD_SET_OVERLAY_USAGE_BOUNDS_PIXEL_DEPTH                        11:8
+#define LW507D_HEAD_SET_OVERLAY_USAGE_BOUNDS_PIXEL_DEPTH_BPP_16                 (0x00000001)
+#define LW507D_HEAD_SET_OVERLAY_USAGE_BOUNDS_PIXEL_DEPTH_BPP_32                 (0x00000003)
+#define LW507D_HEAD_SET_SPARE(a)                                                (0x00000BBC + (a)*0x00000400)
+#define LW507D_HEAD_SET_SPARE_UNUSED                                            31:0
+#define LW507D_HEAD_SET_SPARE_NOOP(a,b)                                         (0x00000BC0 + (a)*0x00000400 + (b)*0x00000004)
+#define LW507D_HEAD_SET_SPARE_NOOP_UNUSED                                       31:0
+
+#ifdef __cplusplus
+};     /* extern "C" */
+#endif
+#endif // _cl507d_h
+

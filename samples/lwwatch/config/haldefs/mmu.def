@@ -1,0 +1,128 @@
+# -*- mode: perl; -*-
+
+# MMU Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $mmuHal = [
+
+    # per-GPU defaults for MMU engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+
+        GET_PDE_TABLE_START_ADDRESS  => [
+
+            DESCRIPTION   => "mmu Get PDE Table Start Address",
+            INTERFACE_TAG => "mmuGetPDETableStartAddress",
+            RETURN_TYPE   =>  LwU64,
+            ARGUMENTS     => "LwU64 instMemAddr, readFn_t instMemReadFn",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ MAXWELL_and_later, -GP10X_and_later, -T234_and_later, ],
+            _GP100        => [ GP10X_and_later, T234_and_later, ],
+            _STUB         => [ pre_T12X, ],
+        ],
+
+        PDE_CHECK => [
+
+            DESCRIPTION   => "check all pte entries for given <chid,pde>",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32 chId, LwU32 pdeIndex",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ MAXWELL, ],
+            _STUB         => [ PASCAL_and_later, ],
+        ],
+
+        PTE_VALIDATE => [
+
+            DESCRIPTION   => " validate PT entries for all channels/PDEs",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL_and_later, ],
+        ],
+
+        IS_GPU_IOMMU_MAPPED => [
+
+            DESCRIPTION   => "indicates that GPU physical is mapped through SMMU",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU64 gmmuPa, LwU64 *smmuVa",
+            STUB_RETURNS  => FALSE,
+
+            _T124         => [ T234_and_later, ],
+            _STUB         => [ ALL, -CHEETAH, ],
+        ],
+
+        GET_IOMMU_PDB => [
+            DESCRIPTION   => "vmem get pde base address",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LwU32 asId, LwU64 *pBase",
+
+            _T124         => [ T234_and_later, ],
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        FMT_INIT_PDE_APERTURES => [
+            DESCRIPTION => "mmu fmt init pde apertures",
+            RETURN_TYPE => "void",
+            ARGUMENTS   => "LW_FIELD_ENUM_ENTRY *",
+
+            _GK104      => [ MAXWELL, ],
+            _GP100      => [ PASCAL_and_later, ]
+        ],
+
+        FMT_INIT_PTE_APERTURES => [
+            DESCRIPTION => "mmu fmt init pte apertures",
+            RETURN_TYPE => "void",
+            ARGUMENTS   => "LW_FIELD_ENUM_ENTRY *",
+
+            LIKE_INTERFACE => FMT_INIT_PDE_APERTURES,
+        ],
+
+        DISABLE_BAR1_ACTIVE_REMAPPERS => [
+
+            DESCRIPTION   => "disables active remappers",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "void *",
+
+            _GK104        => [ dMAXWELL, T234_and_later, ],
+            _STUB         => [ dPASCAL_and_later, ],
+        ],
+
+        REENABLE_BAR1_ACTIVE_REMAPPERS => [
+
+            DESCRIPTION   => "reenables active remappers",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LwU64",
+
+            _GK104        => [ dMAXWELL, T234_and_later, ],
+            _STUB         => [ dPASCAL_and_later, ],
+        ],
+
+        GET_SEGMENT_SIZE => [
+
+            DESCRIPTION   => "Get vmmu segment size",
+            RETURN_TYPE   =>  LwU64,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GA100        => [ AMPERE_and_later, ],
+            _STUB         => [ pre_AMPERE, ],
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $mmuHal;

@@ -1,0 +1,404 @@
+//
+// Copyright 2021 LWPU Corporation. All rights reserved.
+//
+
+#include "fp16_emu.h"
+#include "colw_fused.h"
+
+namespace optix_exp {
+
+extern __global__ void colw_ampere_64_32_64_kernel( Colw_params params );
+extern __global__ void colw_ampere_128_64_64_kernel( Colw_params params );
+extern __global__ void colw_ampere_128_128_32_kernel( Colw_params params );
+extern __global__ void colw_ampere_128_128_64_kernel( Colw_params params );
+extern __global__ void colw_ampere_256_64_32_kernel( Colw_params params );
+extern __global__ void colw_ampere_256_64_64_kernel( Colw_params params );
+extern __global__ void colw_ampere_256_128_32_kernel( Colw_params params );
+extern __global__ void colw_ampere_fpool_128_128_32_kernel( Colw_params params );
+extern __global__ void colw_ampere_fpool_256_64_32_kernel( Colw_params params );
+
+extern __global__ void colw_turing_64_32_64_kernel( Colw_params params );
+extern __global__ void colw_turing_128_64_64_kernel( Colw_params params );
+extern __global__ void colw_turing_128_128_32_kernel( Colw_params params );
+extern __global__ void colw_turing_128_128_64_kernel( Colw_params params );
+extern __global__ void colw_turing_256_64_32_kernel( Colw_params params );
+extern __global__ void colw_turing_256_64_64_kernel( Colw_params params );
+extern __global__ void colw_turing_256_128_32_kernel( Colw_params params );
+extern __global__ void colw_turing_fpool_128_128_32_kernel( Colw_params params );
+extern __global__ void colw_turing_fpool_256_64_32_kernel( Colw_params params );
+
+extern __global__ void colw_volta_64_32_64_kernel( Colw_params params );
+extern __global__ void colw_volta_128_64_64_kernel( Colw_params params );
+extern __global__ void colw_volta_128_128_32_kernel( Colw_params params );
+extern __global__ void colw_volta_128_128_64_kernel( Colw_params params );
+extern __global__ void colw_volta_256_64_32_kernel( Colw_params params );
+extern __global__ void colw_volta_256_64_64_kernel( Colw_params params );
+extern __global__ void colw_volta_256_128_32_kernel( Colw_params params );
+extern __global__ void colw_volta_fpool_128_128_32_kernel( Colw_params params );
+extern __global__ void colw_volta_fpool_256_64_32_kernel( Colw_params params );
+
+OptixResult Xmma_colw::run( void* img_gmem, void* out_gmem, void* flt_gmem, void* bias, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    m_params.img_gmem = img_gmem;
+    m_params.out_gmem = out_gmem;
+    m_params.flt_gmem = flt_gmem;
+    m_params.fusion0.bias = bias;
+
+    void (*kernel)( Colw_params params ) = 0;
+
+    switch( m_arch )
+    {
+        case 75:
+        {
+            if( m_fusedPooling )
+            {
+                if( m_M == 128 && m_N == 128 && m_K == 32 )
+                    kernel = colw_turing_fpool_128_128_32_kernel;
+                else if( m_M == 256 && m_N == 64 && m_K == 32 )
+                    kernel = colw_turing_fpool_256_64_32_kernel;
+            }
+            else if( m_M == 64 && m_N == 32 && m_K == 64 )
+                kernel = colw_turing_64_32_64_kernel;
+            else if( m_M == 128 && m_N == 64  && m_K == 64 )
+                kernel = colw_turing_128_64_64_kernel;
+            else if( m_M == 128 && m_N == 128 && m_K == 32 )
+                kernel = colw_turing_128_128_32_kernel;
+            else if( m_M == 128 && m_N == 128 && m_K == 64 )
+                kernel = colw_turing_128_128_64_kernel;
+            else if( m_M == 256 && m_N == 64  && m_K == 32 )
+                kernel = colw_turing_256_64_32_kernel;
+            else if( m_M == 256 && m_N == 64  && m_K == 64 )
+                kernel = colw_turing_256_64_64_kernel;
+            else if( m_M == 256 && m_N == 128 && m_K == 32 )
+                kernel = colw_turing_256_128_32_kernel;
+        } break;
+        case 80:
+        {
+            if( m_fusedPooling )
+            {
+                if( m_M == 128 && m_N == 128 && m_K == 32 )
+                    kernel = colw_ampere_fpool_128_128_32_kernel;
+                else if( m_M == 256 && m_N == 64 && m_K == 32 )
+                    kernel = colw_ampere_fpool_256_64_32_kernel;
+            }
+            else if( m_M == 64 && m_N == 32 && m_K == 64 )
+                kernel = colw_ampere_64_32_64_kernel;
+            else if( m_M == 128 && m_N == 64  && m_K == 64 )
+                kernel = colw_ampere_128_64_64_kernel;
+            else if( m_M == 128 && m_N == 128 && m_K == 32 )
+                kernel = colw_ampere_128_128_32_kernel;
+            else if( m_M == 128 && m_N == 128 && m_K == 64 )
+                kernel = colw_ampere_128_128_64_kernel;
+            else if( m_M == 256 && m_N == 64  && m_K == 32 )
+                kernel = colw_ampere_256_64_32_kernel;
+            else if( m_M == 256 && m_N == 64  && m_K == 64 )
+                kernel = colw_ampere_256_64_64_kernel;
+            else if( m_M == 256 && m_N == 128 && m_K == 32 )
+                kernel = colw_ampere_256_128_32_kernel;
+
+        } break;
+        case 70:
+        {
+            if( m_fusedPooling )
+            {
+                if( m_M == 128 && m_N == 128 && m_K == 32 )
+                    kernel = colw_volta_fpool_128_128_32_kernel;
+                else if( m_M == 256 && m_N == 64 && m_K == 32 )
+                    kernel = colw_volta_fpool_256_64_32_kernel;
+            }
+            else if( m_M == 64 && m_N == 32 && m_K == 64 )
+                kernel = colw_volta_64_32_64_kernel;
+            else if( m_M == 128 && m_N == 64  && m_K == 64 )
+                kernel = colw_volta_128_64_64_kernel;
+            else if( m_M == 128 && m_N == 128 && m_K == 32 )
+                kernel = colw_volta_128_128_32_kernel;
+            else if( m_M == 128 && m_N == 128 && m_K == 64 )
+                kernel = colw_volta_128_128_64_kernel;
+            else if( m_M == 256 && m_N == 64  && m_K == 32 )
+                kernel = colw_volta_256_64_32_kernel;
+            else if( m_M == 256 && m_N == 64  && m_K == 64 )
+                kernel = colw_volta_256_64_64_kernel;
+            else if( m_M == 256 && m_N == 128 && m_K == 32 )
+                kernel = colw_volta_256_128_32_kernel;
+        } break;
+    }
+
+    if( kernel )
+    {
+        if( lwdaFuncSetAttribute(kernel, lwdaFuncAttributeMaxDynamicSharedMemorySize, m_smemSize ) != lwdaSuccess )
+            return errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "setting kernel attributes failed" );
+            
+        if( lwdaFuncSetAttribute(kernel, lwdaFuncAttributePreferredSharedMemoryCarveout, 100) != lwdaSuccess )
+            return errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "setting kernel attributes failed" );
+
+        kernel <<< dim3( m_grid[0], m_grid[1], m_grid[2] ), m_ctaThreads, m_smemSize, stream  >>> ( m_params );
+
+        return OPTIX_SUCCESS;
+    }
+
+    return errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "kernel not found" );
+}
+
+void Xmma_colw::setup( int arch, bool fusedPooling, int M, int N, int K, int c, int k, int w, int h, unsigned int act, float actAlpha )
+{
+    const int stages = 1;
+
+    int pdiv = ( M == 256 ) ? 16 : 8;   // two tile configs for fused colw+pool: 16*16 and 8*16
+
+    int kdiv = (arch == 70 || arch >= 80 ) ? 64 : 32;
+
+    int warps_m = xmma::div_up( M, 64 );
+    int warps_n = xmma::div_up( N, 64 );
+    int warps_k = xmma::div_up( K, kdiv );
+    unsigned int cta_threads = warps_m * warps_n * warps_k * 32;
+
+    const unsigned int kernelSize = 3;
+
+    m_params = {};
+
+    m_params.n = 1;
+    m_params.d = 1;
+    m_params.h = h;
+    m_params.w = w;
+    m_params.g = 1;
+    m_params.c = c;
+    m_params.k = k;
+    m_params.t = 1;
+    m_params.r = kernelSize;
+    m_params.s = kernelSize;
+
+    m_params.pad[0][0]   = 0;
+    m_params.pad[0][1]   = 0;
+    m_params.pad[1][0]   =
+    m_params.pad[1][1]   = 
+    m_params.pad[2][0]   = 
+    m_params.pad[2][1]   = kernelSize / 2;
+    m_params.stride[0]   = 1;
+    m_params.stride[1]   = 1;
+    m_params.stride[2]   = 1;
+    m_params.dilation[0] = 1;
+    m_params.dilation[1] = 1;
+    m_params.dilation[2] = 1;
+
+    if( act == AEColwolutionLayer::ACTIVATION_NONE )
+        m_params.fusion1.leak_minus_one = ~0u;     // disabled
+    else if( act == AEColwolutionLayer::ACTIVATION_LEAKY_RELU )
+    {
+        __half h = cpu_float2half_rn( actAlpha - 1.f );
+        m_params.fusion1.leak_minus_one = ( (unsigned int)*(unsigned short*)&h ) << 16 | ( (unsigned int)*(unsigned short*)&h );
+    }
+    else
+        m_params.fusion1.leak_minus_one = 0xbc00bc00;   // -1, standard relu
+
+    m_params.o = ( m_params.d + m_params.pad[0][0] + m_params.pad[0][1] - ( m_params.t - 1 ) * m_params.dilation[0] - 1 ) / m_params.stride[0] + 1;
+    m_params.p = ( m_params.h + m_params.pad[1][0] + m_params.pad[1][1] - ( m_params.r - 1 ) * m_params.dilation[1] - 1 ) / m_params.stride[1] + 1;
+    m_params.q = ( m_params.w + m_params.pad[2][0] + m_params.pad[2][1] - ( m_params.s - 1 ) * m_params.dilation[2] - 1 ) / m_params.stride[2] + 1;
+    if( fusedPooling )
+    {
+        m_params.p /= 2;
+        m_params.q /= 2;
+    }
+    m_params.cross_correlation = 1;
+    m_params.img_stride_n = (uint32_t) m_params.d * m_params.h * m_params.w * m_params.c;
+    m_params.img_stride_d = (uint32_t) m_params.h * m_params.w * m_params.c;
+    m_params.img_stride_h = (uint32_t) m_params.w * m_params.c;
+    m_params.img_stride_w = (uint32_t) m_params.c;
+    m_params.img_stride_c = (uint32_t) 1;
+    m_params.out_stride_n = (uint32_t) m_params.o * m_params.p * m_params.q * m_params.k;
+    m_params.out_stride_d = (uint32_t) m_params.p * m_params.q * m_params.k;
+    m_params.out_stride_h = (uint32_t) m_params.q * m_params.k;
+    m_params.out_stride_w = (uint32_t) m_params.k;
+    m_params.out_stride_c = (uint32_t) 1;
+    m_params.filter_t_per_cta = m_params.t;
+    m_params.filter_r_per_cta = m_params.r;
+    m_params.filter_s_per_cta = m_params.s;
+    m_params.filter_trs_per_cta = m_params.t * m_params.r * m_params.s;
+    m_params.filter_rs_per_cta =  m_params.r * m_params.s;
+    m_params.mask_t = (1u << m_params.filter_rs_per_cta) - 1u;
+
+    for( int ii = 0; ii < m_params.filter_t_per_cta; ++ii ) 
+        m_params.mask_r = ( m_params.mask_r << m_params.filter_rs_per_cta ) | ( ( 1u << m_params.filter_r_per_cta ) - 1u );
+    for( int ii = 0; ii < m_params.filter_t_per_cta * m_params.filter_r_per_cta; ++ii ) 
+        m_params.mask_s = ( m_params.mask_s << m_params.filter_s_per_cta ) | 1u;
+
+    int const c_per_iteration = K;
+
+    // Set only the 1st delta value for the pooling kernel.
+    if( fusedPooling )
+        m_params.a_delta[0] = c_per_iteration * 2;
+    else
+    {
+        // The offsets in the different dimensions.
+        int64_t delta_fwd_t = (int64_t) m_params.img_stride_d * m_params.dilation[0];
+        int64_t delta_fwd_r = (int64_t) m_params.img_stride_h * m_params.dilation[1];
+        int64_t delta_fwd_s = (int64_t) m_params.img_stride_w * m_params.dilation[2];
+        int64_t delta_fwd_c = (int64_t) c_per_iteration;
+
+        // The delta to rewind to the beginning of a dimension.
+        int64_t delta_bwd_t = (int64_t) ( m_params.filter_t_per_cta - 1 ) * delta_fwd_t;
+        int64_t delta_bwd_r = (int64_t) ( m_params.filter_r_per_cta - 1 ) * delta_fwd_r;
+        int64_t delta_bwd_s = (int64_t) ( m_params.filter_s_per_cta - 1 ) * delta_fwd_s;
+
+        // Compute the delta table for the image (A).
+        for( int ti = 0; ti < m_params.filter_t_per_cta; ++ti )
+        {
+            for( int ri = 0; ri < m_params.filter_r_per_cta; ++ri )
+            {
+                for( int si = 0; si < m_params.filter_s_per_cta; ++si )
+                {
+                    // Is it the last position in the T/R/S dimension.
+                    bool is_last_t = ti == m_params.filter_t_per_cta - 1;
+                    bool is_last_r = ri == m_params.filter_r_per_cta - 1;
+                    bool is_last_s = si == m_params.filter_s_per_cta - 1;
+
+                    // Compute delta to move to one position to the next.
+                    int64_t delta = 0;
+                    if( is_last_t && is_last_r && is_last_s )
+                      delta = delta_fwd_c - delta_bwd_t - delta_bwd_r - delta_bwd_s;
+                    else if( is_last_r && is_last_s )
+                      delta = delta_fwd_t - delta_bwd_r - delta_bwd_s;
+                    else if( is_last_s )
+                      delta = delta_fwd_r - delta_bwd_s;
+                    else
+                      delta = delta_fwd_s;
+
+                    // The linear index.
+                    int ii = ti * m_params.filter_r_per_cta * m_params.filter_s_per_cta + ri * m_params.filter_s_per_cta + si;
+
+                    // Update the delta table.
+                    delta = delta * 2;
+                    m_params.a_delta[ii] = delta;
+                }
+            }
+        }
+    }
+
+    // The delta table for B. Move by C elements at each iteration.
+    int64_t delta = (int64_t) m_params.c * (int64_t) sizeof(uint16_t);
+    if( !m_params.cross_correlation )
+        delta = -delta;
+    for( int ii = 0; ii < m_params.filter_trs_per_cta-1; ++ii )
+        m_params.b_delta[ii] = delta;
+
+    // Except for the last filter position where we rewind to the 1st position.
+    delta = (int64_t) ( m_params.filter_trs_per_cta - 1 ) * m_params.c;
+    if( m_params.cross_correlation )
+        delta = (int64_t) c_per_iteration - delta;
+    else
+        delta = (int64_t) c_per_iteration + delta;
+    m_params.b_delta[m_params.filter_trs_per_cta-1] = delta * (int64_t) sizeof(uint16_t);
+
+    // The number of iterations of the loop.
+    int loop_count_k = xmma::div_up( m_params.c, c_per_iteration );
+
+    // The first iteration of the loop.
+    int loop_start = 0;
+    if( fusedPooling )
+        loop_start = loop_count_k - 1;
+    else
+        loop_start = loop_count_k * m_params.filter_trs_per_cta - 1;
+    m_params.loop_start = loop_start;
+
+    // The iteration where we trigger the residue.
+    m_params.loop_residue = m_params.filter_trs_per_cta + std::max( 1, stages - 1 );
+
+    // The number of elements read when we enter the residue.
+    m_params.loop_residue_k = ( loop_count_k - 1 ) * c_per_iteration;
+
+    // Precomputed values.
+    m_params.wc = m_params.w * m_params.c;
+    m_params.nopq = m_params.n * m_params.o * m_params.p * m_params.q;
+    m_params.opq = m_params.o * m_params.p * m_params.q;
+    m_params.pq = m_params.p * m_params.q;
+    m_params.trsc = m_params.t * m_params.r * m_params.s * m_params.c;
+    m_params.trs = m_params.t * m_params.r * m_params.s;
+
+    // Faster divmods for O*P*Q.
+    xmma::find_divisor( m_params.mul_opq, m_params.shr_opq, m_params.opq );
+
+    // Faster divmods for P*Q.
+    xmma::find_divisor( m_params.mul_pq, m_params.shr_pq, m_params.pq );
+
+    // Faster divmods for Q.
+    xmma::find_divisor( m_params.mul_q, m_params.shr_q, m_params.q );
+
+    // Compute the number of CTAs.
+    if( fusedPooling )
+    {
+        unsigned int tile_w = M / pdiv;
+        unsigned int tile_h = pdiv;
+        m_params.ctas_p = xmma::div_up( m_params.p, tile_h / 2 );
+        m_params.ctas_q = xmma::div_up( m_params.q, tile_w / 2 );
+
+        xmma::find_divisor( m_params.mul_ctas_q, m_params.shr_ctas_q, m_params.ctas_q );
+    }
+
+    // Set alpha/beta.
+    m_params.alpha = 0x3c00;
+    m_params.beta  = 0x0000;
+
+    // Set the residual indicator.
+    m_params.with_residual = 0; /* beta_value_ != 0.0 */
+
+    // Set the memory descriptors.
+    m_params.mem_descriptors.descriptor_a =
+    m_params.mem_descriptors.descriptor_b =
+    m_params.mem_descriptors.descriptor_c =
+    m_params.mem_descriptors.descriptor_d = 0x1000000000000000ULL;
+
+    if( fusedPooling )
+        m_grid[0] = m_params.ctas_p * m_params.ctas_q;
+    else
+        m_grid[0] = xmma::div_up( m_params.n * m_params.o * m_params.p * m_params.q, M );
+    m_grid[1] = xmma::div_up( m_params.k, N );
+    m_grid[2] = 1;
+    m_ctaThreads = cta_threads;
+
+    // callwlate smem size
+    if( fusedPooling )
+    {
+        // The dimensions of the colwolution tile with padding.
+        unsigned int tile_w = M / pdiv;
+        unsigned int tile_h = pdiv;
+        unsigned int h = tile_h + m_params.r - 1;
+        unsigned int w = tile_w + m_params.s - 1;
+
+        // The number of bytes per LDG.
+        int bytes_per_ldg = 16;
+        // The number of "rows" in shared memory. How to split k*2B into 16B loads?
+        unsigned int rows = K * 2 / bytes_per_ldg;
+        // The number of LDGs.
+        int ldgs = xmma::div_up( h * w, cta_threads / rows );
+        // The skew.
+        int skew = 128 / rows;
+        // The size of A. 64 is the maximum skew.
+        int smem_size_a = ldgs * cta_threads * bytes_per_ldg + rows * skew;
+
+        // The amount of shared memory. TODO: Make it more robust.
+        int smem_size_b = N * K * 2;
+
+        // The size in bytes required by the tile.
+        m_smemSize = smem_size_a + smem_size_b;
+    }
+    else
+    {
+        const int epilogue_steps = N / ( 16 * warps_n );
+        const int skew = 2 * sizeof(float) * 4;
+
+        int num_buffer_a = arch >= 80 ? std::max( 2, stages ) : stages;
+        int num_buffer_b = arch >= 80 ? std::max( 2, stages ) : stages;
+
+        int smem_size_a = M * K * 2 * num_buffer_a;
+        int smem_size_b = N * K * 2 * num_buffer_b;
+        int smem_size_c = M * ( N * 2 + skew ) / epilogue_steps;
+        m_smemSize = std::max( smem_size_a + smem_size_b, smem_size_c );
+    }
+
+    m_arch = arch;
+    m_M    = M;
+    m_N    = N;
+    m_K    = K;
+    m_fusedPooling = fusedPooling;
+}
+
+};

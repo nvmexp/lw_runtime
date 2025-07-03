@@ -1,0 +1,58 @@
+Contents
+========
+
+	This directory contains the scripts and the packaging instructions required to create .dcgm-mgmt-agent.deb'.
+	URL: https://drive.google.com/open?id=0B4Cllz5KmBADQkRBS0JsVVd4WUU
+
+
+Docker Install Instructions
+===========================
+
+    This package depends on the presence of docker infrastructure and so install dockers if you have not done so already.
+    URL: http://www.liquidweb.com/kb/how-to-install-docker-on-ubuntu-14-04-lts/
+		$ sudo apt-get update
+		$ sudo apt-get -y install docker.io
+
+		### The following might not be required depending upon your platform		
+		$ sudo ln -sf /usr/bin/docker.io /usr/local/bin/docker
+		$ sudo sed -i '$acomplete -F _docker docker' /etc/bash_completion.d/docker.io
+		$ sudo update-rc.d docker.io defaults
+
+
+How to Build
+============
+
+	Build the base docker image if you have not already done so (ONCE only)
+		$ make init
+
+	Create the debian package
+	-------------------------
+		$ make deb
+		$ ll build/dcgm-mgmt-agent_1.0.deb     [ debian package is placed in build dir]
+
+	Test the debian package & the sqlite
+	------------------------------------
+		$ make install
+		==> you will not enter the docker container
+		$ sudo dpkg -i dcgm-mgmt-agent_1.0.deb   [ password: dcgm ]
+		$ tree /opt
+			/opt
+			`-- dcgm-mgmt-agent
+				|-- cosmosdb.py
+				`-- db
+					`-- cosmos.db
+		$ sqlite3 /opt/dcgm-mgmt-agent/db/cosmos.db "select * from config" [ Values might differ ]
+			1|serial_number|12345
+			2|cloud_managed|yes
+			3|cloud_group|na
+			4|sw_version|1.0.1
+			5|cloud_status|disconnected
+			6|gpu_configuration|4
+			7|model_name|db2
+			8|eula_accepted|no
+
+		$ exit
+
+	Test the cron job
+	-----------------
+		$ make cron

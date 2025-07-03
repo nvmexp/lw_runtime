@@ -1,0 +1,200 @@
+##############################################################################
+# Copyright (c) 2021, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+##############################################################################
+
+##############################################################################
+# test_lwscistream_kpi makefile
+##############################################################################
+
+##############################################################################
+# Identify this module to lwCommon.lwmk so it can decide the build type
+##############################################################################
+LW_MODULE_BUILD_TYPE_ALIASES = test_lwscistream_kpi
+LW_MODULE_LOGGING_NAME = "test_lwscistream_kpi"
+
+include $(LW_SOURCE)/drivers/lwsci/lwsci.lwmk
+
+CFLAGS += -w
+
+include $(LW_SOURCE)/drivers/lwsci/tests/common/ipc_wrapper/ipcwrapper.lwmk
+
+##############################################################################
+# Path shorthands
+##############################################################################
+LWSCI_PATH              := $(LW_SOURCE)/drivers/lwsci
+LWSCISTREAM_PATH          := $(LWSCI_PATH)/lwscistream
+LWSCI_TESTS_PATH        := $(LWSCI_PATH)/tests
+LWSCISTREAM_TESTS_PATH  := $(LWSCI_TESTS_PATH)/lwscistream/kpi_tests
+
+##############################################################################
+# build the appropriate LwSciStream stub libraries
+##############################################################################
+include $(LWSCISTREAM_PATH)/lwscistream-dso-stub.lwmk
+STUB_DSO_DEPENDS += $(LWSCISTREAM_DSO_STUB)
+STUB_LDFLAGS += -llwscistream-stub
+
+##############################################################################
+# build the appropriate LwSciSync stub libraries
+##############################################################################
+include $(LWSCI_PATH)/lwscisync/lwscisync-dso-stub.lwmk
+STUB_DSO_DEPENDS += $(LWSCISYNC_DSO_STUB)
+STUB_LDFLAGS += -llwscisync-stub
+
+##############################################################################
+# build the appropriate LwSciBuf stub libraries
+##############################################################################
+include $(LWSCI_PATH)/lwscibuf/lwscibuf-dso-stub.lwmk
+STUB_DSO_DEPENDS += $(LWSCIBUF_DSO_STUB)
+STUB_LDFLAGS += -llwscibuf-stub
+##############################################################################
+# build the appropriate LwSciIpc stub libraries
+##############################################################################
+
+include $(LWSCI_PATH)/lwsciipc/lwsciipc-dso-stub.lwmk
+STUB_DSO_DEPENDS += $(LWSCIIPC_DSO_STUB)
+STUB_LDFLAGS += -llwsciipc-stub
+
+##############################################################################
+# define SOURCES
+##############################################################################
+LWSCISTREAM_TEST_SOURCES := lwscistream/kpi_tests/main.cpp
+
+# OS specific variants
+#ifneq ($(LW_TARGET_OS), QNX)
+#LWSCISTREAM_TEST_SOURCES += common/kpi/linux/ipc.cpp
+#else
+#LWSCISTREAM_TEST_SOURCES += common/kpi/qnx/ipc.cpp
+#endif
+
+SOURCES += $(addprefix $(LWSCI_TESTS_PATH)/,$(LWSCISTREAM_TEST_SOURCES))
+
+##############################################################################
+# define LW_INCLUDES
+##############################################################################
+
+LW_INCLUDES += $(LWSCI_PATH)/inc/public
+LW_INCLUDES += $(LWSCI_PATH)/inc/internal
+LW_INCLUDES += $(LWSCI_TESTS_PATH)/common/kpi
+LW_INCLUDES += $(LWSCISTREAM_TESTS_PATH)
+
+#include cheetah headers
+ifeq ($(LW_TEGRA_MIRROR_INCLUDES), 1)
+#get lwrm headers from sdk/inc and RMAPI_TEGRA_MIRROR if we are building
+#perforce tree.
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+else
+ifeq ($(LW_TEGRA_DIRECT_INCLUDES), 1)
+#get lwrm headers directly from core/include
+  LW_INCLUDES += $(TEGRA_TOP)/core/include
+  LW_INCLUDES += $(TEGRA_TOP)/core-private/include
+endif
+endif
+
+#include x86 headers
+ifeq ($(LW_BACKEND_RESMAN), 1)
+  include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+endif
+
+ifeq ($(LW_BACKEND_RESMAN), 0)
+  ifeq ($(LW_TARGET_OS),QNX)
+    include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwos_s3_safety.lwmk
+  else ifeq ($(LW_TARGET_OS),Linux)
+    include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwos.lwmk
+  endif
+endif
+
+ifeq ($(LW_BACKEND_RESMAN), 0)
+  ifeq ($(LW_TARGET_OS),QNX)
+    STUB_DSO_DEPENDS += $(LWOS_S3_SAFETY_DSO_STUB)
+  else ifeq ($(LW_TARGET_OS),Linux)
+    STUB_DSO_DEPENDS += $(LWOS_DSO_STUB)
+  endif
+endif
+
+ifeq ($(LW_BACKEND_RESMAN), 0)
+  STUB_LDFLAGS += \
+
+ifeq ($(LW_TARGET_OS),QNX)
+  STUB_LDFLAGS += \
+       -llwos_s3_safety-stub
+else ifeq ($(LW_TARGET_OS),Linux)
+  STUB_LDFLAGS += \
+       -llwos-stub
+endif
+endif
+
+
+# OS specific variants
+ifneq ($(LW_TARGET_OS), QNX)
+LW_INCLUDES += $(LWSCI_TESTS_PATH)/common/kpi/linux
+else
+LW_INCLUDES += $(LWSCI_TESTS_PATH)/common/kpi/qnx
+endif
+
+LW_INCLUDES += $(OUTPUTDIR)
+
+##############################################################################
+# define LW_DEFINES
+##############################################################################
+# For lwmake builds, lwcfg feature flags are available to LWSCI.
+ifdef LWCFG_INITIALIZED
+  LW_DEFINES += LWCFG_ENABLED
+endif
+
+# Embedded defines this on the command line for their builds.
+LW_BUILD_EMBEDDED ?= 0
+
+ifeq ($(LW_BUILD_EMBEDDED),1)
+    LW_DEFINES += LW_BUILD_EMBEDDED=1
+endif
+
+LW_NEEDS_UNSTRIPPED = 1
+LW_SUPPORTS_SEPARATE_DEBUG_INFO = 1
+
+##############################################################################
+# library flags
+##############################################################################
+LDFLAGS += $(PTHREAD_LDFLAGS)
+LDFLAGS += -lm
+
+ifneq ($(LW_TARGET_OS), QNX)
+  LDFLAGS += -lrt
+  LDFLAGS += -lstdc++
+else
+  LDFLAGS += -lc++
+endif
+LDFLAGS += -g
+LDFLAGS += -L $(OUTPUTDIR) $(STUB_LDFLAGS)
+LDFLAGS += $(BIN_LDFLAGS)
+
+##############################################################################
+# link the binary
+##############################################################################
+TESTAPP := $(OUTPUTDIR)/test_lwscistream_kpi
+
+TESTAPP_LD_TARGET = $(TESTAPP).unstripped
+TESTAPP_DEBUG_INFO = $(TESTAPP).debug
+$(eval $(call LW_DEBUG_INFO_CMD, \
+  $(TESTAPP_LD_TARGET), \
+  $(TESTAPP), \
+  $(TESTAPP_DEBUG_INFO)))
+
+build: $(TESTAPP)
+
+$(TESTAPP_LD_TARGET): $(OBJECTS) $(STUB_DSO_DEPENDS)
+	$(call quiet_cmd,LINK) $(OBJECTS) -o $(TESTAPP_LD_TARGET) $(LDFLAGS)
+
+##############################################################################
+# include definitions of tools and build rules
+##############################################################################
+
+include $(LW_COMMON)/build/lwCommonRules.lwmk

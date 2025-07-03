@@ -1,0 +1,43 @@
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+	float4 tileUV;
+}
+
+cbuffer controlBuf
+{
+	float g_sldIntensity;
+	bool g_sldEnableDepth;
+	float g_sldDistance;
+	bool g_sldIlwert;
+}
+
+Texture2D texColor;
+Texture2D texDepth;
+SamplerState samLinear;
+SamplerState samLinearWrap;
+
+float GetLinearDepth(float2 uv)
+{
+	#define DepthParameters         float4(1.0,1000.0,-999.0f,0.0) 
+	float depth = 1.0 - texDepth.SampleLevel(samLinear, uv, 0).x;
+	depth *= rcp(DepthParameters.y + depth * DepthParameters.z);
+	return saturate(depth);
+}
+
+void PSMain(in float4 vpos : SV_Position, in float2 uv : TexCoord, out float4 color : SV_Target)
+{	
+	color = texColor.Sample(samLinear, uv);
+	float linear_depth = GetLinearDepth(uv);
+
+	float desat_mask = linear_depth > (g_sldDistance * g_sldDistance) * (g_sldDistance * g_sldDistance);
+
+	color.rgb = lerp(color.rgb, 
+	                 dot(color.rgb, float3(0.2126, 0.7152, 0.0722)), 
+			 g_sldIntensity * lerp(1, lerp(desat_mask, 1 - desat_mask, g_sldIlwert), g_sldEnableDepth));
+             
+    color.rgb.y = 0.0;
+    color.rgb.z = 0.0;
+}

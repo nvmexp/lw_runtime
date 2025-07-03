@@ -1,0 +1,139 @@
+
+//
+//  Copyright (c) 2020 LWPU Corporation.  All rights reserved.
+//
+//  LWPU Corporation and its licensors retain all intellectual property and proprietary
+//  rights in and to this software, related documentation and any modifications thereto.
+//  Any use, reproduction, disclosure or distribution of this software and related
+//  documentation without an express license agreement from LWPU Corporation is strictly
+//  prohibited.
+//
+//  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+//  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+//  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+//  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+//  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+//  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+//  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+//  SUCH DAMAGES
+//
+
+#ifdef OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+#define OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE_HAS_PARAMS
+#endif  // OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+
+#include "test_DeviceAPI_transform.h"
+
+extern "C" {
+__constant__ Params params;
+}
+
+#include <optix.h>
+
+static __forceinline__ __device__ void performTransformations()
+{
+    if( isTransformationCall( params.transformType ) )
+    {
+        float3*      inputs        = params.testValues;
+        float3*      outputs       = params.outputValues;
+        unsigned int numTestValues = params.numTestValues;
+
+        for( unsigned int v = 0; v < numTestValues; v++ )
+        {
+            switch( params.transformType )
+            {
+                case TRANSFORM_TYPE_POINT_FROM_OBJECT_TO_WORLD:
+                    outputs[v] = optixTransformPointFromObjectToWorldSpace( inputs[v] );
+                    break;
+                case TRANSFORM_TYPE_POINT_FROM_WORLD_TO_OBJECT:
+                    outputs[v] = optixTransformPointFromWorldToObjectSpace( inputs[v] );
+                    break;
+                case TRANSFORM_TYPE_VECTOR_FROM_OBJECT_TO_WORLD:
+                    outputs[v] = optixTransformVectorFromObjectToWorldSpace( inputs[v] );
+                    break;
+                case TRANSFORM_TYPE_VECTOR_FROM_WORLD_TO_OBJECT:
+                    outputs[v] = optixTransformVectorFromWorldToObjectSpace( inputs[v] );
+                    break;
+                case TRANSFORM_TYPE_NORMAL_FROM_OBJECT_TO_WORLD:
+                    outputs[v] = optixTransformNormalFromObjectToWorldSpace( inputs[v] );
+                    break;
+                case TRANSFORM_TYPE_NORMAL_FROM_WORLD_TO_OBJECT:
+                    outputs[v] = optixTransformNormalFromWorldToObjectSpace( inputs[v] );
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+    else
+    {
+        float outputs[12];
+        switch( params.transformType )
+        {
+            case TRANSFORM_TYPE_MATRIX_FROM_OBJECT_TO_WORLD:
+                optixGetObjectToWorldTransformMatrix( outputs );
+                break;
+            case TRANSFORM_TYPE_MATRIX_FROM_WORLD_TO_OBJECT:
+                optixGetWorldToObjectTransformMatrix( outputs );
+                break;
+            default:
+                break;
+        }
+        for( unsigned int v = 0; v < 3; v++ )
+        {
+            unsigned int offset = v * 4;
+            params.outputMatrixValues[v] =
+                float4{ outputs[offset], outputs[offset + 1], outputs[offset + 2], outputs[offset + 3] };
+        }
+    }
+}
+
+__device__ void traceRay()
+{
+    float3              origin         = make_float3( 0.0f, 0.0f, 1.0f );
+    float3              direction      = make_float3( 0.0f, 0.0f, 1.0f );
+    float               tmin           = 0.0f;
+    float               tmax           = 100.0f;
+    float               rayTime        = 0.0f;
+    OptixVisibilityMask visibilityMask = 1;
+    OptixRayFlags       rayFlags       = OPTIX_RAY_FLAG_NONE;
+    unsigned int        SBToffset      = 0;
+    unsigned int        SBTstride      = 1;
+    unsigned int        missSBTIndex   = 0;
+
+    optixTrace( params.handle, origin, direction, tmin, tmax, rayTime, visibilityMask, rayFlags, SBToffset, SBTstride, missSBTIndex );
+}
+
+extern "C" __global__ void __raygen__()
+{
+    traceRay();
+}
+
+extern "C" __global__ void __exception__() {}
+
+extern "C" __global__ void __intersection__()
+{
+    if( params.programType == OPTIX_PROGRAM_TYPE_INTERSECTION )
+    {
+        performTransformations();
+    }
+
+    optixReportIntersection( 1.0f, 0 );
+}
+
+extern "C" __global__ void __anyhit__()
+{
+    if( params.programType == OPTIX_PROGRAM_TYPE_ANY_HIT )
+    {
+        performTransformations();
+    }
+}
+
+extern "C" __global__ void __closesthit__()
+{
+    if( params.programType == OPTIX_PROGRAM_TYPE_CLOSEST_HIT )
+    {
+        performTransformations();
+    }
+}

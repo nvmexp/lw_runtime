@@ -1,0 +1,27 @@
+.version 3.1
+.target sm_20
+.global .texref texFloat;
+
+.entry main (
+    .param .f32 paramx,
+    .param .f32 paramy,
+    .param .s32 param_gaddr)
+{
+    .reg   .s32 addr;
+    .reg   .f32  sx, sy, tx, ty, tz, tw;
+    .reg   .u32  x, y, z, w;
+   
+    ld.param.s32  addr, [param_gaddr];
+    ld.param.f32  sx, [paramx];
+    ld.param.f32  sy, [paramy];
+    tex.2d.v4.f32.f32  {tx, ty, tz, tw}, [texFloat, {sx, sy, sy, sy}];
+    st.global.v4.f32  [addr], {tx, ty, tz, tw};
+
+    ld.global.u32 x, [addr];
+    ld.global.u32 y, [addr + 4];
+    tex.2d.v4.u32.s32  {x, y, z, w}, [texFloat, { x, y, z, w}];
+    st.global.v2.u32 [addr], {x, y};
+    
+    exit;
+}
+

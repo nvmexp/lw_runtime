@@ -1,0 +1,39 @@
+# DCGM Testsuite configuration
+{
+  # Descriptive name for the testsuite
+  "name"        : "DCGM Testsuite",
+  # Testsuite owner's email
+  "owner"       : "dcgm-dev@exchange.lwpu.com",
+  # Define variables for this testsuite that are available as environment variables
+  # when running tests
+  "elw"         : [ "USER=erisuser" ],
+  # Define paths containing shared libraries required by the tests. Use elwvar VULCAN_SHAREDLIB_DIR to refer 
+  # to the platform specific portion of the path (e.g. bin/ for windows, lib64/ for 64-bit
+  # Linux, etc.)
+  "dllpath"     : [],
+  # Default working directory for test runs
+  "cwd"         : "${VULCAN_TESTSUITE_DIR}",
+  # Timeout for entire testsuite, in seconds
+  "timeout"     : "3600",
+  # Default timeout for individual tests, in seconds
+  "testtimeout" : "3600",
+  # Generage the all_result.zip to lwca-fs0
+  "stash"       : [ { "${VULCAN_INSTALL_DIR}/gdk/dcgm/testing/all_results.zip" : "dcgm_${VULCAN_ARCH}_${VULCAN_OS}${VULCAN_ABI}_${VULCAN_BUILD}_${VULCAN_GPU}/." } ],
+  # The tests in the testsuite
+  "tests" : [
+              { "attributes": [
+                  "result=multi"
+                ]
+              },
+              {
+                # LD_LIBRARY_PATH will be automatically unset when exelwting a privileged program due to security reason.
+                # So pass the elw variable explicitly in the command
+                "exe": "/usr/bin/sudo LD_LIBRARY_PATH=${VULCAN_INSTALL_DIR}/gdk/dcgm:${VULCAN_INSTALL_DIR}/lwca/${INSTALL_TARGET_DIR}/${SHAREDLIB_DIR} python main.py --eris -u ${USER} --no-lint",
+                "attributes": [ { "filter": { "os": "Windows" }}, "result=skip" ]
+              },
+              {
+                "exe": "${PYTHON} main.py --eris",
+                "attributes": [ { "filter": { "os": "Linux" }}, "result=skip" ]
+              }
+  ]
+}

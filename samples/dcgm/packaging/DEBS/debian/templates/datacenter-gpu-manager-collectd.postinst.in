@@ -1,0 +1,32 @@
+#!/bin/bash
+
+set -e
+
+PROXY=""
+
+if [[ -f /usr/sbin/cosmos/cosmos-mgmt-agent/cosmosdb.py ]] ; then
+    PROXY=$(/usr/sbin/cosmos/cosmos-mgmt-agent/cosmosdb.py -k https_proxy)
+fi
+
+
+case "$1" in
+    configure)
+        # EXECUTE MY BASH COMMAND
+        if [[ "$PROXY" == "" || "$PROXY" == "na" ]]; then
+            /usr/bin/pip install --extra-index-url=https://packages.lwpu.com/ngcc/pycloud/pypi/simple monotime==1.0 influxdb==4.1.1 collectd==1.0 || true
+        else
+            /usr/bin/pip --proxy "$PROXY" install --extra-index-url=https://packages.lwpu.com/ngcc/pycloud/pypi/simple monotime==1.0 influxdb==4.1.1 collectd==1.0 || true
+        fi
+    ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        exit 0
+    ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+exit 0

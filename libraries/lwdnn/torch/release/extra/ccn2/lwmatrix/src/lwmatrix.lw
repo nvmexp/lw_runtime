@@ -1,0 +1,1641 @@
+/*
+ * Copyright 2014 Google Inc. All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include <set>
+#include <vector>
+#include <assert.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <fstream>
+#include <iostream>
+#include <algorithm>
+#include <typeinfo>
+#include <map>
+#include <lwca.h>
+#include <signal.h>
+#include "../include/lwmatrix.lwh"
+#include "../include/lwmatrix_operators.lwh"
+
+using namespace std;
+
+/*
+ * Device random number generator pointers.
+ */
+//map<int,lwrandGenerator_t> LWMatrix::rndGen;
+map<int,MemorySegment*> LWMatrix::_rndDevStates;
+map<int,int> LWMatrix::_rndDevThreads;
+pthread_mutex_t* LWMatrix::_rndMutex = makeMutex();
+pthread_mutex_t* LWMatrix::_lwblasMutex = makeMutex();
+pthread_mutex_t* LWMatrix::_streamMutex = makeMutex();
+std::map<int,lwblasHandle_t> LWMatrix::_lwblasHandles;
+std::map<int,lwdaStream_t> LWMatrix::_defaultStreams;
+
+pthread_mutex_t* LWMatrix::makeMutex() {
+    pthread_mutex_t* m = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init(m, NULL);
+    return m;
+}
+/*
+   Do not call resize in _init because resize is a virtual function
+   which is overridden in base class. Since C++ is retarded and unable
+   to call overridden functions from constructors, we shall call resize
+   separately from every constructor after calling _init.
+*/
+void LWMatrix::_init(bool isTrans) {
+    _numRows = 0;
+    _numCols = 0;
+    _numElements = 0;
+    _ownsData = true;
+
+    _isTrans = isTrans;
+    _memSegment = NULL;
+
+    _stride = 0;
+    _texObj = 0;
+}
+
+LWMatrix::LWMatrix() : _deleted(false) {
+    _init(false);
+}
+
+LWMatrix::LWMatrix(bool isTrans) : _deleted(false) {
+    _init(isTrans);
+}
+
+LWMatrix::LWMatrix(int numRows, int numCols, bool isTrans) : _deleted(false) {
+    _init(isTrans);
+    resize(numRows, numCols);
+}
+
+LWMatrix::LWMatrix(const Matrix& like, bool copy) : _deleted(false) {
+    _init(like.isTrans());
+    resize(like.getNumRows(), like.getNumCols());
+    if (copy) {
+        copyFromHost(like);
+    }
+}
+
+LWMatrix::LWMatrix(const LWMatrix& like, bool copy) : _deleted(false) {
+    _init(like.isTrans());
+    resize(like.getNumRows(), like.getNumCols());
+    if (copy) {
+        like.copy(*this);
+    }
+}
+
+/*
+ * Initializes LWMatrix with same dimensions as given matrix but
+ * does not copy any data.
+ */
+LWMatrix::LWMatrix(const LWMatrix& like) : _deleted(false) {
+    _init(like.isTrans());
+    resize(like.getNumRows(), like.getNumCols());
+}
+
+/*
+ * Initializes LWMatrix with same dimensions as given matrix but
+ * does not copy any data.
+ */
+LWMatrix::LWMatrix(const Matrix& like) : _deleted(false) {
+    _init(false);
+    resize(like.getNumRows(), like.getNumCols());
+}
+
+LWMatrix::LWMatrix(MemorySegment* mem, int numRows, int numCols, int stride, bool isTrans) :
+    _numRows(numRows),
+    _numCols(numCols),
+    _numElements(numRows*numCols),
+    _ownsData(false),
+    _memSegment(mem),
+    _isTrans(isTrans),
+    _deleted(false),
+    _texObj(0) {
+    _stride = stride < 0 ? getLeadingDim() : stride;
+}
+
+LWMatrix::~LWMatrix() {
+    if (!_deleted) {
+        deallocTexture();
+        if(_ownsData && _numElements > 0) {
+            dealloc();
+        } else {
+            // dealloc deletes the mem segment. But if this is a view,
+            // then we still need to delete the mem segment object.
+//            assert(_memSegment == NULL || _memSegment->getSize() == 0);
+            delete _memSegment;
+        }
+    }
+}
+
+void LWMatrix::copyFromHost(const Matrix& hostMatrix) {
+    copyFromHost(hostMatrix, false, getDefaultStream());
+}
+
+void LWMatrix::copyFromHost(const Matrix& hostMatrix, bool resizeTarget) {
+    copyFromHost(hostMatrix, resizeTarget, getDefaultStream());
+}
+
+void LWMatrix::copyFromHost(const Matrix& hostMatrix, bool resizeTarget, lwdaStream_t stream) {
+    if (resizeTarget) {
+        resize(hostMatrix);
+    } else {
+        assert(isSameDims(hostMatrix));
+    }
+    setTrans(hostMatrix.isTrans());
+
+    if (getNumElements() > 0) {
+        LWBLAS_CALL(lwblasSetMatrixAsync(hostMatrix.getLeadingDim(), hostMatrix.getFollowingDim(), sizeof(float),
+                                    hostMatrix.getData(), hostMatrix.getLeadingDim(), getDevData(), _stride, stream));
+        syncStream(stream);
+    }
+}
+
+void LWMatrix::copyToHost(Matrix& hostMatrix) const {
+    copyToHost(hostMatrix, false, getDefaultStream());
+}
+
+void LWMatrix::copyToHost(Matrix& hostMatrix, bool resizeTarget) const {
+    copyToHost(hostMatrix, resizeTarget, getDefaultStream());
+}
+
+void LWMatrix::copyToHost(Matrix& hostMatrix, bool resizeTarget, lwdaStream_t stream) const {
+    if (resizeTarget) {
+        hostMatrix.resize(_numRows, _numCols);
+    } else {
+        assert(isSameDims(hostMatrix));
+    }
+    hostMatrix.setTrans(_isTrans);
+    if (getNumElements() > 0) {
+//        printf("gpu.stride: %d, host.stride: %d\n", getStride(), hostMatrix.getLeadingDim());
+        LWBLAS_CALL(lwblasGetMatrixAsync(getLeadingDim(),getFollowingDim(), sizeof(float),
+                                     getDevData(), getStride(), hostMatrix.getData(), hostMatrix.getLeadingDim(), stream));
+        syncStream(stream);
+    }
+}
+
+void LWMatrix::copy(LWMatrix& dest) const {
+    copy(dest, getDefaultStream());
+}
+
+void LWMatrix::copy(LWMatrix& dest, lwdaStream_t stream) const {
+    if (&dest != this) {
+        if (!isSameDims(dest)) {
+            dest.resize(*this);
+        }
+        copy(dest, 0, -1, 0, -1, 0, 0, stream);
+    }
+}
+
+LWMatrix& LWMatrix::copy() const {
+    LWMatrix& c = construct();
+    copy(c);
+    return c;
+}
+
+void LWMatrix::rightMult(LWMatrix &b, float scaleAB, LWMatrix &target) {
+    rightMult(b, scaleAB, target, getDefaultStream());
+}
+
+void LWMatrix::rightMult(LWMatrix &b, float scaleAB, LWMatrix &target, lwdaStream_t stream) {
+//    if(&target != this && &target != &b) {
+//        target.resize(_numRows, b.getNumCols());
+//        target.setTrans(true);
+//    }
+    target.addProduct(*this, b, 0, scaleAB, stream);
+}
+
+void LWMatrix::rightMult(LWMatrix &b, float scaleAB) {
+    rightMult(b, scaleAB, *this);
+}
+
+void LWMatrix::rightMult(LWMatrix &b, LWMatrix& target) {
+    rightMult(b, 1, target);
+}
+
+void LWMatrix::addProduct(LWMatrix& a, LWMatrix &b, float scaleThis, float scaleAB) {
+    addProduct(a, b, scaleThis, scaleAB, getDefaultStream());
+}
+
+/*
+ * This will only work if this matrix is in column-major order! In other words,
+ * if isTrans() returns true.
+ */
+void LWMatrix::addProduct(LWMatrix& a, LWMatrix &b, float scaleThis, float scaleAB, lwdaStream_t stream) {
+    assert(a.getNumCols() == b.getNumRows());
+
+    if (scaleThis == 0) {
+        resize(a.getNumRows(), b.getNumCols());
+        setTrans(true);
+    }
+
+    assert(this->getNumRows() == a.getNumRows());
+    assert(this->getNumCols() == b.getNumCols());
+    assert(_isTrans);
+    LWBLAS_CALL(lwblasSetStream_v2(getLwblasHandle(), stream));
+    LWBLAS_CALL(lwblasSgemm_v2(getLwblasHandle(), a.getTransChar(), b.getTransChar(), a.getNumRows(), b.getNumCols(), a.getNumCols(),
+                               &scaleAB, a.getDevData(), a.getStride(), b.getDevData(), b.getStride(),
+                               &scaleThis, getDevData(), getStride()));
+}
+
+void LWMatrix::addProduct(LWMatrix& a, LWMatrix &b) {
+    addProduct(a, b, 1, 1);
+}
+
+void LWMatrix::assertSame(LWMatrixV& a) {
+    for (int i = 1; i < a.size(); ++i) {
+        assert(a[i]->isSameDims(*a[0]));
+        assert(a[i]->isTrans() == a[0]->isTrans());
+        assert(a[i]->getStride() == a[0]->getStride());
+        assert(a[i]->getDataDeviceID() == a[0]->getDataDeviceID());
+    }
+}
+
+void LWMatrix::batchedMatrixMultiply(LWMatrixV& a, LWMatrixV& b, LWMatrixV& target, float scaleTarget, float scaleAB,
+                                     const float** aPtrsDev, const float** bPtrsDev, float** tgtPtrsDev) {
+    batchedMatrixMultiply(a, b, target, scaleTarget, scaleAB, getDefaultStream(), aPtrsDev, bPtrsDev, tgtPtrsDev);
+}
+
+void LWMatrix::batchedMatrixMultiply(LWMatrixV& a, LWMatrixV& b, LWMatrixV& target, float scaleTarget, float scaleAB) {
+    batchedMatrixMultiply(a, b, target, scaleTarget, scaleAB, getDefaultStream());
+}
+
+void LWMatrix::batchedMatrixMultiply(LWMatrixV& a, LWMatrixV& b, LWMatrixV& target, float scaleTarget, float scaleAB, lwdaStream_t stream,
+                                     const float** aPtrsDev, const float** bPtrsDev, float** tgtPtrsDev) {
+    assert(a.size() == b.size());
+    assert(a.size() == target.size());
+    assertSame(a);
+    assertSame(b);
+    assertSame(target);
+
+    const int batch = a.size();
+    if (batch > 0) {
+        const int rows = a[0]->getNumRows(), inner = a[0]->getNumCols(), cols = b[0]->getNumCols();
+
+        assert(inner == b[0]->getNumRows());
+        assert(target[0]->getNumRows() == rows);
+        assert(target[0]->getNumCols() == cols);
+
+        const int lda = a[0]->getStride(), ldb = b[0]->getStride(), ldc = target[0]->getStride();
+        lwblasOperation_t atrans = a[0]->getTransChar(), btrans = b[0]->getTransChar();
+
+        LWBLAS_CALL(lwblasSetStream_v2(getLwblasHandle(), stream));
+        LWBLAS_CALL(lwblasSgemmBatched(getLwblasHandle(), atrans, btrans, rows, cols, inner, &scaleAB, aPtrsDev, lda, bPtrsDev, ldb, &scaleTarget, tgtPtrsDev, ldc, batch));
+    }
+}
+
+void LWMatrix::batchedMatrixMultiply(LWMatrixV& a, LWMatrixV& b, LWMatrixV& target, float scaleTarget, float scaleAB, lwdaStream_t stream) {
+    assert(a.size() == b.size());
+    assert(a.size() == target.size() || target.size() == 0);
+
+    const int batch = a.size();
+    if (batch > 0) {
+        const int rows = a[0]->getNumRows(), cols = b[0]->getNumCols();
+
+        const float* aPtrs[batch], *bPtrs[batch], *tgtPtrs[batch];
+        for (int i = 0; i < batch; ++i) {
+            if (target.size() <= i) {
+                target.push_back(new LWMatrix(rows, cols, true));
+            }
+            aPtrs[i] = a[i]->getDevData();
+            bPtrs[i] = b[i]->getDevData();
+            tgtPtrs[i] = target[i]->getDevData();
+        }
+
+//        const float** aPtrsDev, **bPtrsDev;
+//        float **tgtPtrsDev;
+//        checkLwdaErrors(lwdaMalloc(&aPtrsDev, batch * sizeof(float*)));
+//        checkLwdaErrors(lwdaMalloc(&bPtrsDev, batch * sizeof(float*)));
+//        checkLwdaErrors(lwdaMalloc(&tgtPtrsDev, batch * sizeof(float*)));
+        MemorySegment* aPtrsDev = DEVICE_MEMORY_MANAGER::getInstance(getDeviceID()).malloc(batch * sizeof(float*));
+        MemorySegment* bPtrsDev = DEVICE_MEMORY_MANAGER::getInstance(getDeviceID()).malloc(batch * sizeof(float*));
+        MemorySegment* tgtPtrsDev = DEVICE_MEMORY_MANAGER::getInstance(getDeviceID()).malloc(batch * sizeof(float*));
+
+        checkLwdaErrors(lwdaMemcpyAsync(aPtrsDev, aPtrs, batch * sizeof(float*), lwdaMemcpyHostToDevice, stream));
+        checkLwdaErrors(lwdaMemcpyAsync(bPtrsDev, bPtrs, batch * sizeof(float*), lwdaMemcpyHostToDevice, stream));
+        checkLwdaErrors(lwdaMemcpyAsync(tgtPtrsDev, tgtPtrs, batch * sizeof(float*), lwdaMemcpyHostToDevice, stream));
+
+        batchedMatrixMultiply(a, b, target, scaleTarget, scaleAB, stream, const_cast<const float**>(aPtrsDev->getData<float*>()),
+                                                                          const_cast<const float**>(bPtrsDev->getData<float*>()),
+                                                                          tgtPtrsDev->getData<float*>());
+
+//        checkLwdaErrors(lwdaFree(aPtrsDev));
+//        checkLwdaErrors(lwdaFree(bPtrsDev));
+//        checkLwdaErrors(lwdaFree(tgtPtrsDev));
+        DEVICE_MEMORY_MANAGER::getInstance(getDeviceID()).free(aPtrsDev);
+        DEVICE_MEMORY_MANAGER::getInstance(getDeviceID()).free(bPtrsDev);
+        DEVICE_MEMORY_MANAGER::getInstance(getDeviceID()).free(tgtPtrsDev);
+    }
+}
+
+template <class Randomizer>
+void LWMatrix::_unaryRandomize(LWMatrix& target, Randomizer rnd) {
+    _unaryRandomize(target, rnd, getDefaultStream());
+}
+
+template <class Randomizer>
+void LWMatrix::_unaryRandomize(LWMatrix& target, Randomizer rnd, lwdaStream_t stream) {
+    assert(isRndInitialized());
+    assert(isContiguous() && target.isContiguous());
+    if (!isSameDims(target)) {
+        target.resize(*this);
+    }
+    assert(isTrans() == target.isTrans());
+    kUnaryRandomize<<<NUM_RND_BLOCKS,NUM_RND_THREADS_PER_BLOCK, 0, stream>>>(getDevData(), target.getDevData(), getLwrandState(), getNumElements(), rnd);
+    getLastLwdaError("kUnaryRandomize: Kernel exelwtion failed");
+}
+
+template <class Randomizer>
+void LWMatrix::_binaryRandomize(LWMatrix& data2, LWMatrix& target, Randomizer rnd) {
+    _binaryRandomize(data2, target, rnd, getDefaultStream());
+}
+
+template <class Randomizer>
+void LWMatrix::_binaryRandomize(LWMatrix& data2, LWMatrix& target, Randomizer rnd, lwdaStream_t stream) {
+    assert(isRndInitialized());
+    assert(isContiguous() && data2.isContiguous() && target.isContiguous());
+    assert(isSameDims(data2));
+    assert(isTrans() == data2.isTrans());
+    if (!isSameDims(target)) {
+        target.resize(*this);
+    }
+    assert(isTrans() == target.isTrans());
+    kBinaryRandomize<<<NUM_RND_BLOCKS,NUM_RND_THREADS_PER_BLOCK, 0, stream>>>(getDevData(), data2.getDevData(), target.getDevData(), getLwrandState(), getNumElements(), rnd);
+    getLastLwdaError("kBinaryRandomize: Kernel exelwtion failed");
+}
+
+void LWMatrix::initRandom(unsigned long long seed, int numStreams) {
+    LWMatrix::initRandom(seed, numStreams, LWMatrix::getDefaultStream());
+}
+
+void LWMatrix::initRandom(unsigned long long seed, int numStreams, lwdaStream_t stream) {
+//    printf("init random on device %d\n", getDeviceID());
+    pthread_mutex_lock(_rndMutex);
+    assert(!isRndInitialized(true));
+    int d = getDeviceID();
+//    _rndDevStates[d] = NULL;
+    _rndDevThreads[d] = numStreams;
+    _rndDevStates[d] = DEVICE_MEMORY_MANAGER::getInstance(d).malloc(numStreams * sizeof(lwrandState));
+//    checkLwdaErrors(lwdaMalloc((void **)&_rndDevStates[d], numStreams * sizeof(lwrandState)));
+    pthread_mutex_unlock(_rndMutex);
+    kSetupLwrand<<<NUM_RND_BLOCKS, NUM_RND_THREADS_PER_BLOCK, 0, stream>>>(getLwrandState(), 1 + seed*2); // so there's no chance it'll be correlated with the other one
+    getLastLwdaError("kSetupLwrand: Kernel exelwtion failed");
+}
+
+void LWMatrix::initRandom(unsigned long long seed) {
+    initRandom(seed, NUM_RND_STREAMS);
+}
+
+void LWMatrix::initRandom() {
+    LWMatrix::initRandom(time(0));
+}
+
+void LWMatrix::initLwblas() {
+    int d = getDeviceID();
+    pthread_mutex_lock(_lwblasMutex);
+    assert(_lwblasHandles.count(d) == 0);
+    LWBLAS_CALL(lwblasCreate(&_lwblasHandles[d]));
+    // It appears that lwblasCreate causes a host -> device copy on stream 0,
+    // so we synchronize with it because we run everything else on other
+    // streams.
+    syncDevice();
+    pthread_mutex_unlock(_lwblasMutex);
+}
+
+void LWMatrix::destroyLwblas() {
+    int d = getDeviceID();
+    pthread_mutex_lock(_lwblasMutex);
+    assert(_lwblasHandles.count(d) > 0);
+    LWBLAS_CALL(lwblasDestroy(_lwblasHandles[d]));
+    _lwblasHandles.erase(d);
+    pthread_mutex_unlock(_lwblasMutex);
+}
+
+lwblasHandle_t LWMatrix::getLwblasHandle() {
+    return getLwblasHandle(getDeviceID());
+}
+
+lwblasHandle_t LWMatrix::getLwblasHandle(int deviceID) {
+    pthread_mutex_lock(_lwblasMutex);
+    assert(_lwblasHandles.count(deviceID) > 0);
+    lwblasHandle_t h = _lwblasHandles[deviceID];
+    pthread_mutex_unlock(_lwblasMutex);
+    return h;
+}
+
+lwdaStream_t LWMatrix::getDefaultStream() {
+    return getDefaultStream(LWMatrix::getDeviceID());
+}
+
+lwdaStream_t LWMatrix::getDefaultStream(int deviceID) {
+    if (deviceID >= 0) {
+        pthread_mutex_lock(_streamMutex);
+        if (_defaultStreams.count(deviceID) == 0) {
+            int oldDeviceID = getDeviceID();
+            LWMatrix::setDeviceID(deviceID);
+            checkLwdaErrors(lwdaStreamCreateWithFlags(&_defaultStreams[deviceID], lwdaStreamNonBlocking));
+            LWMatrix::setDeviceID(oldDeviceID);
+        }
+        lwdaStream_t s = _defaultStreams[deviceID];
+        pthread_mutex_unlock(_streamMutex);
+        return s;
+    }
+    return 0;
+}
+
+void LWMatrix::syncDevice() {
+    checkLwdaErrors(lwdaDeviceSynchronize());
+}
+
+void LWMatrix::syncStream(lwdaStream_t stream) {
+    checkLwdaErrors(lwdaStreamSynchronize(stream));
+}
+
+void LWMatrix::syncStream() {
+    syncStream(getDefaultStream());
+}
+
+lwrandState* LWMatrix::getLwrandState() {
+    /*
+     * Even though we're only reading from the map here, it's important to grab
+     * the mutex because another thread may be writing to it.
+     */
+    pthread_mutex_lock(_rndMutex);
+    int d = getDeviceID();
+    assert(isRndInitialized(true));
+    lwrandState* r = _rndDevStates[d]->getData<lwrandState>();
+    pthread_mutex_unlock(_rndMutex);
+    return r;
+}
+
+lwrandState* LWMatrix::getLwrandState(int numStreams) {
+    int d = getDeviceID();
+    pthread_mutex_lock(_rndMutex);
+    assert(isRndInitialized(true));
+    bool realloc = numStreams >  _rndDevThreads[d];
+    pthread_mutex_unlock(_rndMutex);
+
+    if (realloc) {
+        destroyRandom();
+        initRandom(time(0), numStreams);
+    }
+    return getLwrandState();
+}
+
+int LWMatrix::getDataDeviceID() const {
+    if (getDevData() == NULL) {
+        return DEVICE_NULL;
+    }
+    struct lwdaPointerAttributes atts;
+    checkLwdaErrors(lwdaPointerGetAttributes(&atts, getDevData()));
+    return atts.memoryType == lwdaMemoryTypeDevice ? atts.device : DEVICE_HOST;
+}
+
+
+int LWMatrix::getDeviceID() {
+    int d;
+    checkLwdaErrors(lwdaGetDevice(&d));
+//    if (d == 0) {
+//        raise(SIGABRT);
+//    }
+    return d;
+}
+
+void LWMatrix::setDeviceID(int d) {
+    assert(d >= 0);
+//    printf("Setting device to %d\n", d);
+//    if (d == 0) {
+//        raise(SIGABRT);
+//    }
+    checkLwdaErrors(lwdaSetDevice(d));
+}
+
+bool LWMatrix::canAccessPeer(int srcDevice, int tgtDevice) {
+    if (srcDevice == tgtDevice) {
+        return true;
+    }
+    int canAccess;
+    checkLwdaErrors(lwdaDeviceCanAccessPeer(&canAccess, srcDevice, tgtDevice));
+    return canAccess;
+}
+
+bool LWMatrix::isRndInitialized(bool haveLock) {
+    if (!haveLock) {
+        pthread_mutex_lock(_rndMutex);
+    }
+    bool b = _rndDevStates.count(getDeviceID()) != 0;
+    if (!haveLock) {
+        pthread_mutex_unlock(_rndMutex);
+    }
+    return b;
+}
+
+bool LWMatrix::isRndInitialized() {
+    return isRndInitialized(false);
+}
+
+void LWMatrix::destroyRandom() {
+    int d = getDeviceID();
+    pthread_mutex_lock(_rndMutex);
+    assert(isRndInitialized(true));
+//    checkLwdaErrors(lwdaFree(_rndDevStates[d]));
+    DEVICE_MEMORY_MANAGER::getInstance(d).free(_rndDevStates[d]);
+    _rndDevStates.erase(d);
+    _rndDevThreads.erase(d);
+    pthread_mutex_unlock(_rndMutex);
+}
+
+void LWMatrix::binarizeProbs() {
+    binarizeProbs(*this);
+}
+
+void LWMatrix::binarizeProbs(LWMatrix& target) {
+    _unaryRandomize(target, BinarizeUnaryRandomizer());
+}
+
+void LWMatrix::randomizeUniform() {
+    assert(isContiguous());
+    assert(isRndInitialized());
+//    LWRAND_CALL(lwrandGenerateUniform(rndGen, _devData, getNumElements()));
+    _unaryRandomize(*this, UniformUnaryRandomizer());
+}
+
+void LWMatrix::randomizeGaussian() {
+    randomizeGaussian(1);
+}
+
+void LWMatrix::randomizeGaussian(float stdev) {
+    randomizeGaussian(0, stdev);
+}
+
+void LWMatrix::randomizeGaussian(float mean, float stdev) {
+    assert(isContiguous());
+    assert(isRndInitialized());
+//    LWRAND_CALL(lwrandGenerateNormal(rndGen, _devData, getNumElements(), mean, stdev));
+    _unaryRandomize(*this, GaussianUnaryRandomizer(mean, stdev));
+}
+
+/*
+ * Kind of a hack since we don't actually need the contents of this matrix for it,
+ * so we don't really need a binary randomizer.
+ */
+void LWMatrix::randomizeGaussian(LWMatrix& stdevs) {
+    randomizeGaussian(0, stdevs);
+}
+
+void LWMatrix::randomizeGaussian(float mean, LWMatrix& stdevs) {
+    _binaryRandomize(stdevs, *this, GaussianBinaryRandomizer(mean));
+}
+
+void LWMatrix::randomizeGaussian(float mean, float stdevMult, LWMatrix& stdevs) {
+    _binaryRandomize(stdevs, *this, ScaledGaussianBinaryRandomizer(mean, stdevMult));
+}
+
+void LWMatrix::addGaussianNoise() {
+    addGaussianNoise(1);
+}
+
+void LWMatrix::addGaussianNoise(float stdev) {
+    addGaussianNoise(stdev, *this);
+}
+
+void LWMatrix::addGaussianNoise(float stdev, LWMatrix& target) {
+    _unaryRandomize(target, AddGaussianUnaryRandomizer(stdev));
+}
+
+void LWMatrix::addGaussianNoise(LWMatrix& stdevs, bool var) {
+    addGaussianNoise(stdevs, var, *this);
+}
+
+void LWMatrix::addGaussianNoise(LWMatrix& stdevs) {
+    addGaussianNoise(stdevs, false, *this);
+}
+
+void LWMatrix::addGaussianNoise(LWMatrix& stdevs, bool var, LWMatrix& target) {
+    if (var) {
+        _binaryRandomize(stdevs, target, AddGaussianBinaryRandomizer<true>());
+    } else {
+        _binaryRandomize(stdevs, target, AddGaussianBinaryRandomizer<false>());
+    }
+}
+
+void LWMatrix::biggerThan(LWMatrix& b, LWMatrix& target) {
+    applyBinary(LWMatrixBinaryOps::BiggerThan(), b, target);
+}
+
+void LWMatrix::biggerThan(LWMatrix& b) {
+    biggerThan(b, *this);
+}
+
+void LWMatrix::equals(LWMatrix& b, LWMatrix& target) {
+    applyBinary(LWMatrixBinaryOps::Equals(), b, target);
+}
+
+void LWMatrix::equals(LWMatrix& m) {
+    equals(m, *this);
+}
+
+void LWMatrix::biggerThalwector(LWMatrix& vec, LWMatrix& target) {
+    applyBinaryV(LWMatrixBinaryOps::BiggerThan(), vec, target);
+}
+
+void LWMatrix::biggerThalwector(LWMatrix& vec) {
+    biggerThalwector(vec, *this);
+}
+
+void LWMatrix::_checkBounds(int startRow, int endRow, int startCol, int endCol) const {
+    assert(startRow >= 0 && startRow <= _numRows);
+    assert(endRow >= startRow && endRow <= _numRows);
+
+    assert(startCol >= 0 && startCol <= _numCols);
+    assert(endCol >= startCol && endCol <= _numCols);
+}
+
+/*
+ * The only place where stride is supported for now!
+ * Will ALWAYS return a view of the original data, sometimes non-contiguous.
+ */
+LWMatrix& LWMatrix::slice(int startRow, int endRow, int startCol, int endCol) const {
+    endRow = endRow < 0 ? this->_numRows : endRow;
+    endCol = endCol < 0 ? this->_numCols : endCol;
+    _checkBounds(startRow, endRow, startCol, endCol);
+
+    if (!isTrans()) {
+        return construct(new MemorySegment(this->getDevData() + startRow * _stride + startCol), endRow - startRow, endCol - startCol, _stride, false);
+    } 
+    return construct(new MemorySegment(this->getDevData() + startCol * _stride + startRow), endRow - startRow, endCol - startCol, _stride, true);
+}
+
+/* this will NEVER return a view */
+void LWMatrix::slice(int startRow, int endRow, int startCol, int endCol, LWMatrix& target) const {
+    endRow = endRow < 0 ? this->_numRows : endRow;
+    endCol = endCol < 0 ? this->_numCols : endCol;
+    _checkBounds(startRow, endRow, startCol, endCol);
+
+    int sliceRows = endRow - startRow, sliceCols = endCol - startCol;
+    if (target.getNumRows() != sliceRows || target.getNumCols() != sliceCols) {
+        target.resize(sliceRows, sliceCols);
+    }
+    this->copy(target, startRow, endRow, startCol, endCol, 0, 0);
+}
+
+LWMatrix& LWMatrix::sliceRows(int startRow, int endRow) const {
+    return slice(startRow, endRow, 0, -1);
+}
+
+void LWMatrix::sliceRows(int startRow, int endRow, LWMatrix& target) const {
+    slice(startRow, endRow, 0, -1, target);
+}
+
+LWMatrix& LWMatrix::sliceCols(int startCol, int endCol) const {
+    return slice(0, -1, startCol, endCol);
+}
+
+void LWMatrix::sliceCols(int startCol, int endCol, LWMatrix& target) const {
+    slice(0, -1, startCol, endCol, target);
+}
+
+LWMatrixV& LWMatrix::splitRows(int numParts) {
+    assert(getNumRows() % numParts == 0);
+    LWMatrixV& v = *new LWMatrixV();
+    int partSize = getNumRows() / numParts;
+    for (int p = 0; p < numParts; ++p) {
+        v.push_back(&sliceRows(p * partSize, (p+1) * partSize));
+    }
+    return v;
+}
+
+LWMatrixV& LWMatrix::splitCols(int numParts) {
+    assert(getNumCols() % numParts == 0);
+    LWMatrixV& v = *new LWMatrixV();
+    int partSize = getNumCols() / numParts;
+    for (int p = 0; p < numParts; ++p) {
+        v.push_back(&sliceCols(p * partSize, (p+1) * partSize));
+    }
+    return v;
+}
+
+/*
+ * Guaranteed to not change the data if the number of elements doesn't change.
+ * So you can use this to "reshape" a matrix.
+ */
+bool LWMatrix::resize(int numRows, int numCols, bool trans) {
+    setTrans(trans);
+    bool reallocated = false;
+    if (numRows != _numRows || numCols != _numCols) {
+        assert(_ownsData || (_numElements == numRows * numCols && isContiguous()));
+        if (_numElements != numRows * numCols) {
+            if (_numElements > 0) { // free old memory
+                dealloc();
+            }
+            if (numRows * numCols > 0) { // allocate new memory
+                alloc(numCols * numRows);
+            } else {
+                _memSegment = NULL;
+            }
+            reallocated = true;
+        }
+        _numRows = numRows;
+        _numCols = numCols;
+        _numElements = numRows * numCols;
+        _stride = getLeadingDim();
+    }
+    return reallocated;
+}
+
+bool LWMatrix::resize(int numRows, int numCols) {
+    return resize(numRows, numCols, isTrans());
+}
+
+bool LWMatrix::resize(const LWMatrix& like) {
+    setTrans(like.isTrans());
+    return resize(like.getNumRows(), like.getNumCols());
+}
+
+bool LWMatrix::resize(const Matrix& like) {
+    setTrans(like.isTrans());
+    return resize(like.getNumRows(), like.getNumCols());
+}
+
+void LWMatrix::reshape(int numRows, int numCols) {
+    assert(isContiguous());
+    assert(_numElements == numRows*numCols);
+    _numRows = numRows;
+    _numCols = numCols;
+    _stride = getLeadingDim();
+}
+
+LWMatrix& LWMatrix::reshaped(int numRows, int numCols) const {
+    assert(isContiguous());
+    assert(_numElements == numRows*numCols);
+    return construct(new MemorySegment(*_memSegment), numRows, numCols, -1, _isTrans);
+}
+
+void LWMatrix::copy(LWMatrix &dest, int srcStartRow, int srcEndRow,
+                    int srcStartCol, int srcEndCol,
+                    int destStartRow, int destStartCol) const {
+    copy(dest, srcStartRow, srcEndRow, srcStartCol, srcEndCol, destStartRow, destStartCol, getDefaultStream());
+}
+
+void LWMatrix::copy(LWMatrix &dest, int srcStartRow, int srcEndRow,
+                    int srcStartCol, int srcEndCol,
+                    int destStartRow, int destStartCol, lwdaStream_t stream) const {
+    srcEndRow = srcEndRow < 0 ? _numRows : srcEndRow;
+    srcEndCol = srcEndCol < 0 ? _numCols : srcEndCol;
+    LWMatrix* srcSlice = &slice(srcStartRow, srcEndRow, srcStartCol, srcEndCol);
+    LWMatrix* destSlice = &dest.slice(destStartRow, destStartRow + srcEndRow - srcStartRow, destStartCol, destStartCol + srcEndCol - srcStartCol);
+    if (srcSlice->isContiguous() && destSlice->isContiguous() && srcSlice->isSameDims(*destSlice) && srcSlice->isTrans() == destSlice->isTrans()) {
+        // The commonest case.
+        checkLwdaErrors(lwdaMemcpyAsync(destSlice->getDevData(), srcSlice->getDevData(), srcSlice->getNumDataBytes(), lwdaMemcpyDefault, stream));
+    } else {
+        srcSlice->apply(LWMatrixOps::Identity(), *destSlice, stream);
+    }
+    delete srcSlice;
+    delete destSlice;
+}
+
+
+LWMatrix& LWMatrix::getTranspose() {
+    return construct(new MemorySegment(*_memSegment), _numCols, _numRows, _stride, !_isTrans);
+}
+
+LWMatrix& LWMatrix::getClone() {
+    return construct(new MemorySegment(*_memSegment), _numRows, _numCols, _stride, _isTrans);
+}
+
+void LWMatrix::transpose(LWMatrix& target) {
+    flipTrans(target);
+    target.setTrans(!target.isTrans());
+    target.reshape(target.getNumCols(), target.getNumRows());
+}
+
+void LWMatrix::transpose() {
+    int tmp = _numCols;
+    _numCols = _numRows;
+    _numRows = tmp;
+    _isTrans = !_isTrans;
+}
+
+bool LWMatrix::transpose(bool trans) {
+    bool oldTrans = _isTrans;
+    if (oldTrans != trans) {
+        transpose();
+    }
+    return oldTrans;
+}
+
+/*
+ * Flips the ordering of the matrix from row-major to column-major and vice versa.
+ * This creates temporary storage -- not a cheap operation.
+ *
+ * This is not equivalent to a "hard transpose". The resultant matrix still has
+ * the same dimensions, its layout in memory just changes.
+ */
+LWMatrix& LWMatrix::flipTrans() {
+    LWMatrix& meTrans = construct(*this);
+    flipTrans(meTrans);
+    return meTrans;
+}
+
+void LWMatrix::flipTrans(LWMatrix& target) {
+    flipTrans(target, getDefaultStream());
+}
+
+void LWMatrix::flipTrans(LWMatrix& target, lwdaStream_t stream) {
+    assert(&target != this);
+    target.resize(_numRows, _numCols);
+    target.setTrans(!isTrans());
+//    target.printShape("target");
+//    this->printShape("this");
+    apply(LWMatrixOps::Identity(), target, stream);
+}
+
+void LWMatrix::squaredDiff(LWMatrix& b) {
+    squaredDiff(b, *this);
+}
+
+void LWMatrix::squaredDiff(LWMatrix& b, LWMatrix& target) {
+    applyBinary(LWMatrixBinaryOps::SquaredDiff(), b, target);
+}
+
+void LWMatrix::add(LWMatrix& b, float scaleA, float scaleB, LWMatrix& target) {
+    add(b, scaleA, scaleB, target, LWMatrix::getDefaultStream());
+}
+
+void LWMatrix::add(LWMatrix& b, float scaleA, float scaleB, LWMatrix& target, lwdaStream_t stream) {
+    if (scaleA == 0) {
+        b.scale(scaleB, target, stream);
+    } else if (scaleB == 0) {
+        scale(scaleA, target, stream);
+    } else if (scaleA == 1 && scaleB == 1) { // slight optimization
+        applyBinary(LWMatrixBinaryOps::Add(), b, target, stream);
+    } else if (scaleA == 1) {
+        applyBinary(LWMatrixBinaryOps::WeightedAdd1(scaleB), b, target, stream);
+    } else {
+        applyBinary(LWMatrixBinaryOps::WeightedAdd(scaleA, scaleB), b, target, stream);
+    }
+}
+
+void LWMatrix::add(LWMatrix& b, float scaleB, LWMatrix& target) {
+    add(b, 1, scaleB, target);
+}
+
+void LWMatrix::add(LWMatrix& b, LWMatrix& target) {
+    add(b, 1, target);
+}
+
+void LWMatrix::add(LWMatrix& b, float scaleB) {
+    add(b, scaleB, *this);
+}
+
+void LWMatrix::add(LWMatrix& b, float scaleA, float scaleB) {
+    add(b, scaleA, scaleB, *this);
+}
+
+void LWMatrix::add(LWMatrix& b) {
+    add(b, 1, *this);
+}
+
+void LWMatrix::subtract(LWMatrix& b, LWMatrix& target) {
+    add(b, -1, target);
+}
+
+void LWMatrix::subtract(LWMatrix& b) {
+    add(b, -1);
+}
+
+void LWMatrix::eltwiseMult(LWMatrix& b, LWMatrix& target) {
+    applyBinary(LWMatrixBinaryOps::Multiply(), b, target);
+}
+
+void LWMatrix::eltwiseMult(LWMatrix& b) {
+    eltwiseMult(b, *this);
+}
+
+void LWMatrix::eltwiseDivide(LWMatrix& b, LWMatrix& target) {
+    applyBinary(LWMatrixBinaryOps::Divide(), b, target);
+}
+
+void LWMatrix::eltwiseDivide(LWMatrix& b) {
+    eltwiseDivide(b, *this);
+}
+
+void LWMatrix::tile(int timesY, int timesX, LWMatrix& target) {
+    tile(timesY, timesX, target, getDefaultStream());
+}
+
+void LWMatrix::tile(int timesY, int timesX, LWMatrix& target, lwdaStream_t stream) {
+    assert(isContiguous() && target.isContiguous());
+    assert(timesX > 0 && timesY > 0);
+    target.resize(_numRows*timesY, _numCols*timesX);
+    target.setTrans(_isTrans);
+    if(!isTrans()) {
+        kTile<<<NUM_TILE_BLOCKS,NUM_TILE_THREADS_PER_BLOCK, 0, stream>>>(getDevData(), target.getDevData(), _numCols, _numRows, target._numCols, target._numRows);
+    } else {
+        kTile<<<NUM_TILE_BLOCKS,NUM_TILE_THREADS_PER_BLOCK, 0, stream>>>(getDevData(), target.getDevData(), _numRows, _numCols, target._numRows, target._numCols);
+    }
+    getLastLwdaError("Kernel exelwtion failed");
+}
+
+void LWMatrix::addVector(LWMatrix& vec, float scaleVec, LWMatrix& target) {
+    addVector(vec, scaleVec, target, getDefaultStream());
+}
+
+void LWMatrix::addVector(LWMatrix& vec, float scaleVec, LWMatrix& target, lwdaStream_t stream) {
+    applyBinaryV(LWMatrixBinaryOps::ScaledAdd(scaleVec), vec, target, stream);
+}
+
+void LWMatrix::addVector(LWMatrix& vec) {
+    addVector(vec, 1);
+}
+
+void LWMatrix::addVector(LWMatrix& vec, float scaleVec) {
+    addVector(vec, scaleVec, *this);
+}
+
+void LWMatrix::addVector(LWMatrix& vec, LWMatrix& target) {
+    addVector(vec, 1, target);
+}
+
+void LWMatrix::equalsVector(LWMatrix& vec, LWMatrix& target) {
+    applyBinaryV(LWMatrixBinaryOps::Equals(), vec, target);
+}
+
+void LWMatrix::equalsVector(LWMatrix& vec) {
+    equalsVector(vec, *this);
+}
+
+void LWMatrix::eltwiseMultByVector(LWMatrix& vec, LWMatrix& target) {
+    eltwiseMultByVector(vec, target, getDefaultStream());
+}
+
+void LWMatrix::eltwiseMultByVector(LWMatrix& vec, LWMatrix& target, lwdaStream_t stream) {
+    applyBinaryV(LWMatrixBinaryOps::Multiply(), vec, target, stream);
+}
+
+void LWMatrix::eltwiseMultByVector(LWMatrix& vec, lwdaStream_t stream) {
+    eltwiseMultByVector(vec, *this, stream);
+}
+
+void LWMatrix::eltwiseMultByVector(LWMatrix& vec) {
+    eltwiseMultByVector(vec, *this);
+}
+
+void LWMatrix::eltwiseDivideByVector(LWMatrix& vec) {
+    eltwiseDivideByVector(vec,  *this);
+}
+
+void LWMatrix::eltwiseDivideByVector(LWMatrix& vec, LWMatrix& target) {
+    applyBinaryV(LWMatrixBinaryOps::Divide(), vec, target);
+}
+
+/*
+ * TODO: this is a mess, fix it. it works pretty fast but it's too ugly.
+ * TODO: this function is _really_ bad for very long aggregations of few columns.
+ */
+template<class Agg, class UnaryOp, class BinaryOp>
+void LWMatrix::_aggregate(int axis, LWMatrix& target, Agg agg, UnaryOp uop, BinaryOp bop, lwdaStream_t stream) {
+    assert(axis == 0 || axis == 1);
+    assert(isContiguous()  && target.isContiguous());
+    assert(&target != this);
+    int width = _isTrans ? _numRows : _numCols;
+    int height = _isTrans ? _numCols : _numRows;
+
+    target.setTrans(_isTrans);
+    assert(width > 0);
+    assert(height > 0);
+    if((axis == 0 && !_isTrans) || (axis == 1 && _isTrans)) { //col sum
+        target.resize(!_isTrans ? 1 : _numRows, !_isTrans ? _numCols : 1);
+//        int height = getFollowingDim();
+        if ((height <= 2048 || width >= 4096)) {
+            int numBlocks = DIVUP(width, NUM_SUM_COLS_THREADS_PER_BLOCK);
+            assert(numBlocks * NUM_SUM_COLS_THREADS_PER_BLOCK >= width);
+            assert(numBlocks < NUM_BLOCKS_MAX);
+            kDumbAggCols<Agg, UnaryOp, BinaryOp><<<numBlocks,NUM_SUM_COLS_THREADS_PER_BLOCK, 0, stream>>>(getTextureObject(), target.getDevData(), width, height, agg, uop, bop);
+            getLastLwdaError("kDumbAggCols: Kernel exelwtion failed");
+        } else { // Specialize the case when we have very long columns and few of them
+            const int sumLength = 128;
+            LWMatrix tmp(DIVUP(height, sumLength), width);
+            int numBlocksX = DIVUP(width, NUM_SUM_COLS_THREADS_PER_BLOCK);
+            int numBlocksY = DIVUP(height, sumLength);
+            dim3 blocks(numBlocksX, numBlocksY);
+            dim3 threads(NUM_SUM_COLS_THREADS_PER_BLOCK);
+            kAggCols<Agg, UnaryOp><<<blocks,threads, 0, stream>>>(getTextureObject(), tmp.getDevData(), width, height, sumLength, agg, uop);
+            getLastLwdaError("kAggCols: Kernel exelwtion failed");
+
+            int numBlocks = DIVUP(width, NUM_SUM_COLS_THREADS_PER_BLOCK);
+            kDumbAggCols<Agg, LWMatrixOps::Identity, BinaryOp><<<numBlocks,NUM_SUM_COLS_THREADS_PER_BLOCK, 0, stream>>>(tmp.getTextureObject(), target.getDevData(), width, height, agg, LWMatrixOps::Identity(), bop);
+            getLastLwdaError("kDumbAggCols: Kernel exelwtion failed");
+        }
+    } else { // row sum
+        target.resize(_isTrans ? 1 : _numRows, _isTrans ? _numCols : 1);
+        if (width > 1) {
+            if (height >= 16384) { // linear aggregation
+                int numBlocksX = 1;
+                int numBlocksY = DIVUP(height, AGG_SHORT_ROWS_THREADS_Y*AGG_SHORT_ROWS_LOOPS_Y);
+                int numThreadsX = width <= 4 ? 4 : width <= 8 ? 8 : width <= 12 ? 12 : width <= 16 ? 16 : AGG_SHORT_ROWS_THREADS_X;
+                int numThreadsY = AGG_SHORT_ROWS_THREADS_Y;
+                while (numBlocksY > NUM_BLOCKS_MAX) {
+                    numBlocksY = DIVUP(numBlocksY,2);
+                    numBlocksX *= 2;
+                }
+                dim3 grid(numBlocksX, numBlocksY), threads(numThreadsX, numThreadsY);
+                if(width <= 16) {
+                    if(width <= 4) {
+                        kAggShortRows<Agg, UnaryOp, BinaryOp, 1, 4><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),width, height, agg, uop, bop);
+                    } else if(width <= 8) {
+                        kAggShortRows<Agg, UnaryOp, BinaryOp, 1, 8><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),width, height, agg, uop, bop);
+                    } else if(width <= 12) {
+                        kAggShortRows<Agg, UnaryOp, BinaryOp, 1, 12><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),width, height, agg, uop, bop);
+                    } else {
+                        kAggShortRows<Agg, UnaryOp, BinaryOp, 1, 16><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),width, height, agg, uop, bop);
+                    }
+                } else if(width <= 32) {
+                    kAggShortRows<Agg, UnaryOp, BinaryOp, 2, AGG_SHORT_ROWS_THREADS_X><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),width, height, agg, uop, bop);
+                } else if(width <= 48){
+                    kAggShortRows<Agg, UnaryOp, BinaryOp, 3, AGG_SHORT_ROWS_THREADS_X><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),width, height, agg, uop, bop);
+                } else if(width <= 64){
+                    kAggShortRows<Agg, UnaryOp, BinaryOp, 4, AGG_SHORT_ROWS_THREADS_X><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),width, height, agg, uop, bop);
+                } else {
+                    kAggShortRows2<Agg, UnaryOp, BinaryOp><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),width, height, agg, uop, bop);
+                }
+            } else {
+                if (width >= 512) {
+                    // NOTE: this is the only case which I bothered to try to optimize for Kepler
+                    dim3 threads(AWR_NUM_THREADS);
+                    dim3 blocks(1, height);
+                    kAggRows_wholerow_nosync<<<blocks, threads, 0, stream>>>(getDevData(), target.getDevData(), width, height, agg, uop, bop);
+                } else {
+
+                    int numThreadsX = width <= 64 ? 32 : (width <= 128 ? 64 : (width <= 256 ? 128 : (width <= 512 ? 256 : 512)));
+                    int numThreadsY = 1;
+                    int numBlocksX = DIVUP(width, 2*numThreadsX);
+                    int numBlocksY = std::min(height, NUM_BLOCKS_MAX);
+
+                    dim3 grid(numBlocksX, numBlocksY), threads(numThreadsX, numThreadsY);
+                    assert(numBlocksX <= NUM_BLOCKS_MAX);
+                    assert(numBlocksY <= NUM_BLOCKS_MAX);
+
+                    if(width <= 64) {
+                        kAggRows<Agg, UnaryOp, BinaryOp, 32><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),
+                                                   width, height, target.getLeadingDim(), agg, uop, bop);
+                    } else if(width <= 128) {
+                        kAggRows<Agg, UnaryOp, BinaryOp, 64><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),
+                                                   width, height, target.getLeadingDim(), agg, uop, bop);
+                    } else if(width <= 256) {
+                        kAggRows<Agg, UnaryOp, BinaryOp, 128><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),
+                                                   width, height, target.getLeadingDim(), agg, uop, bop);
+                    } else if(width <= 512) {
+                        kAggRows<Agg, UnaryOp, BinaryOp, 256><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),
+                                                   width, height, target.getLeadingDim(), agg, uop, bop);
+                    } else {
+                        kAggRows<Agg, UnaryOp, BinaryOp, 512><<<grid, threads, 0, stream>>>(getDevData(), target.getDevData(),
+                                                   width, height, target.getLeadingDim(), agg, uop, bop);
+                    }
+
+                    getLastLwdaError("agg rows: Kernel exelwtion failed");
+                }
+            }
+        } else {
+            target.applyBinary(LWMatrixBinaryOps::CompositeSecond<UnaryOp, BinaryOp>(uop, bop), *this, target, stream);
+//            copy(target, stream);
+        }
+    }
+}
+
+template<class Agg, class UnaryOp, class BinaryOp>
+void LWMatrix::_aggregate(int axis, LWMatrix& target, Agg agg, UnaryOp uop, BinaryOp bop) {
+    _aggregate(axis, target, agg, uop, bop, getDefaultStream());
+}
+
+template<class Agg, class BinaryOp>
+void LWMatrix::_aggregate(int axis, LWMatrix& target, Agg agg, BinaryOp bop) {
+    _aggregate(axis, target, agg, LWMatrixOps::Identity(), bop, getDefaultStream());
+}
+
+template<class Agg, class BinaryOp>
+void LWMatrix::_aggregate(int axis, LWMatrix& target, Agg agg, BinaryOp bop, lwdaStream_t stream) {
+    _aggregate(axis, target, agg, LWMatrixOps::Identity(), bop, stream);
+}
+
+template<class Agg, class UnaryOp, class BinaryOp>
+LWMatrix& LWMatrix::_aggregate(int axis, Agg agg, UnaryOp uop, BinaryOp bop) {
+    LWMatrix &sumVec = construct();
+    _aggregate(axis, sumVec, agg, uop, bop);
+    return sumVec;
+}
+
+template<class Agg, class UnaryOp, class BinaryOp>
+LWMatrix& LWMatrix::_aggregate(int axis, Agg agg, UnaryOp uop, BinaryOp bop, lwdaStream_t stream) {
+    LWMatrix &sumVec = construct();
+    _aggregate(axis, sumVec, agg, uop, bop, stream);
+    return sumVec;
+}
+
+template<class Agg, class BinaryOp>
+LWMatrix& LWMatrix::_aggregate(int axis, Agg agg, BinaryOp bop) {
+    return _aggregate(axis, agg, LWMatrixOps::Identity(), bop);
+}
+
+template<class Agg, class BinaryOp>
+LWMatrix& LWMatrix::_aggregate(int axis, Agg agg, BinaryOp bop, lwdaStream_t stream) {
+    return _aggregate(axis, agg, LWMatrixOps::Identity(), bop, stream);
+}
+
+void LWMatrix::inRangeInc(float lower, float upper) {
+    inRangeInc(lower, upper, *this);
+}
+void LWMatrix::inRangeInc(float lower, float upper, LWMatrix& target) {
+    apply(LWMatrixOps::InRange<false>(lower, upper), target);
+}
+
+void LWMatrix::inRangeExc(float lower, float upper) {
+    inRangeExc(lower, upper, *this);
+}
+
+void LWMatrix::inRangeExc(float lower, float upper, LWMatrix& target) {
+    apply(LWMatrixOps::InRange<true>(lower, upper), target);
+}
+
+void LWMatrix::biggerThanScalar(float scalar) {
+    biggerThanScalar(scalar, *this);
+}
+
+void LWMatrix::biggerThanScalar(float scalar, LWMatrix& target) {
+    apply(LWMatrixOps::BiggerThanScalar(scalar), target);
+}
+
+void LWMatrix::smallerThanScalar(float scalar) {
+    smallerThanScalar(scalar, *this);
+}
+
+void LWMatrix::smallerThanScalar(float scalar, LWMatrix& target) {
+    apply(LWMatrixOps::SmallerThanScalar(scalar), target);
+}
+
+void LWMatrix::addScalar(float scaleThis, float scalar, LWMatrix& target) {
+    apply(LWMatrixOps::WeightedAddScalar(scaleThis, scalar), target);
+}
+
+void LWMatrix::addScalar(float scalar, LWMatrix& target) {
+    apply(LWMatrixOps::AddScalar(scalar), target);
+}
+
+void LWMatrix::addScalar(float scalar) {
+    addScalar(scalar, *this);
+}
+
+void LWMatrix::minWithScalar(float scalar, LWMatrix& target) {
+    apply(LWMatrixOps::MinWithScalar(scalar), target);
+}
+
+void LWMatrix::minWithScalar(float scalar) {
+    minWithScalar(scalar, *this);
+}
+
+void LWMatrix::maxWithScalar(float scalar, LWMatrix& target) {
+    apply(LWMatrixOps::MaxWithScalar(scalar), target);
+}
+
+void LWMatrix::maxWithScalar(float scalar) {
+    maxWithScalar(scalar, *this);
+}
+
+void LWMatrix::pow(float p, LWMatrix& target) {
+    apply(LWMatrixOps::Pow(p), target);
+}
+
+void LWMatrix::pow(float p) {
+    pow(p, *this);
+}
+
+void LWMatrix::scale(float _scale) {
+    scale(_scale, *this);
+}
+
+void LWMatrix::scale(float _scale, lwdaStream_t stream) {
+    scale(_scale, *this, stream);
+}
+
+void LWMatrix::scale(float _scale, LWMatrix& target) {
+    scale(_scale, target, LWMatrix::getDefaultStream());
+}
+
+void LWMatrix::scale(float _scale, LWMatrix& target, lwdaStream_t stream) {
+    if (_scale != 1 || &target != this) { // optimize away scale by 1
+        if (_scale == 1) {
+            copy(target, stream);
+        } else {
+            apply(LWMatrixOps::MultByScalar(_scale), target, stream);
+        }
+    }
+}
+
+void LWMatrix::zero() {
+    apply(LWMatrixOps::Zero());
+}
+
+void LWMatrix::zero(LWMatrix& like) {
+    resize(like);
+    zero();
+}
+
+
+
+
+void LWMatrix::max(int axis, LWMatrix& target) {
+    _aggregate(axis, target, LWMatrixAggs::Max(), LWMatrixBinaryOps::Second());
+}
+
+void LWMatrix::addSum(LWMatrix& a, int axis, float scaleThis, float scaleSum) {
+    addSum(a, axis, scaleThis, scaleSum, getDefaultStream());
+}
+
+void LWMatrix::addSum(LWMatrix& a, int axis, float scaleThis, float scaleSum, lwdaStream_t stream) {
+    if (scaleThis != 0) {
+        a._aggregate(axis, *this, LWMatrixAggs::Sum(), LWMatrixBinaryOps::WeightedAdd(scaleThis, scaleSum), stream);
+    } else {
+        a._aggregate(axis, *this, LWMatrixAggs::Sum(), LWMatrixBinaryOps::SecondScaled(scaleSum), stream);
+    }
+}
+void LWMatrix::sum(int axis, LWMatrix& target) {
+    sum(axis, target, getDefaultStream());
+}
+
+void LWMatrix::sum(int axis, LWMatrix& target, lwdaStream_t stream) {
+    _aggregate(axis, target, LWMatrixAggs::Sum(), LWMatrixBinaryOps::Second(), stream);
+}
+
+void LWMatrix::sumOfSquares(int axis, LWMatrix& target) {
+    sumOfSquares(axis, target, getDefaultStream());
+}
+
+void LWMatrix::sumOfSquares(int axis, LWMatrix& target, lwdaStream_t stream) {
+    _aggregate(axis, target, LWMatrixAggs::Sum(), LWMatrixOps::Square(), LWMatrixBinaryOps::Second(), stream);
+}
+
+void LWMatrix::min(int axis, LWMatrix& target) {
+    _aggregate(axis, target, LWMatrixAggs::Min(), LWMatrixBinaryOps::Second());
+}
+
+LWMatrix& LWMatrix::max(int axis) {
+    return _aggregate(axis, LWMatrixAggs::Max(), LWMatrixBinaryOps::Second());
+}
+
+LWMatrix& LWMatrix::sum(int axis) {
+    return _aggregate(axis, LWMatrixAggs::Sum(), LWMatrixBinaryOps::Second());
+}
+
+LWMatrix& LWMatrix::min(int axis) {
+    return _aggregate(axis, LWMatrixAggs::Min(), LWMatrixBinaryOps::Second());
+}
+
+LWMatrix& LWMatrix::sumOfSquares(int axis) {
+    return _aggregate(axis, LWMatrixAggs::Sum(), LWMatrixOps::Square(), LWMatrixBinaryOps::Second());
+}
+
+void LWMatrix::_sum_setParams(int n, dim3* blocks, dim3* threads) {
+    *threads = dim3(DP_BLOCKSIZE);
+    *blocks = dim3(std::min(CPUSUM_MAX, DIVUP(n, DP_BLOCKSIZE)));
+}
+
+float LWMatrix::mean() {
+    return sum() / getNumElements();
+}
+
+float LWMatrix::sum() {
+    return _totalAgg(LWMatrixAggs::Sum());
+}
+
+float LWMatrix::sum(LWMatrix& tmpbuf) {
+    return _totalAgg(LWMatrixAggs::Sum(), tmpbuf, getDefaultStream());
+}
+
+float LWMatrix::max() {
+    return _totalAgg(LWMatrixAggs::Max());
+}
+
+float LWMatrix::min() {
+    return _totalAgg(LWMatrixAggs::Min());
+}
+
+float LWMatrix::countNan() {
+    return _totalAgg(LWMatrixAggs::CountNan());
+}
+
+float LWMatrix::countInf() {
+    return _totalAgg(LWMatrixAggs::CountInf());
+}
+
+template<class Agg>
+float LWMatrix::_totalAgg(Agg agg) {
+    return _totalAgg(agg, getDefaultStream());
+}
+
+template<class Agg>
+float LWMatrix::_totalAgg(Agg agg, lwdaStream_t stream) {
+    LWMatrix tmp;
+    return _totalAgg(agg, tmp, stream);
+}
+
+template<class Agg>
+float LWMatrix::_totalAgg(Agg agg, LWMatrix& tmpbuf, lwdaStream_t stream) {
+    assert(isContiguous());
+    dim3 blocks, threads;
+    // Sum most of it on GPU
+
+    _sum_setParams(getNumElements(), &blocks, &threads);
+    tmpbuf.resize(1, blocks.x);
+    kTotalAgg<<<blocks, threads, 0, stream>>>(getDevData(), tmpbuf.getDevData(), getNumElements(), agg);
+    getLastLwdaError("kTotalAgg: Kernel exelwtion failed");
+    // Don't need to sync because we copyToHost in the same stream, so it's serialized
+//    LWMatrix::syncStream(stream);
+    return tmpbuf.cpuAgg(agg, stream);
+}
+template<class Agg>
+float LWMatrix::cpuAgg(Agg agg, lwdaStream_t stream) {
+    Matrix bufCPU(getNumRows(), getNumCols());
+    copyToHost(bufCPU, false, stream);
+    if (getNumElements() > 1) { // Sum remainder on CPU
+        if (typeid(Agg) == typeid(LWMatrixAggs::Sum)) {
+            return bufCPU.sum();
+        } else if (typeid(Agg) == typeid(LWMatrixAggs::Max)) {
+            return bufCPU.max();
+        } else if (typeid(Agg) == typeid(LWMatrixAggs::Min)) {
+            return bufCPU.min();
+        } else if (typeid(Agg) == typeid(LWMatrixAggs::CountNan)) {
+            return bufCPU.hasNan(); //yea, it's not the same, who cares
+        } else if (typeid(Agg) == typeid(LWMatrixAggs::CountInf)) {
+            return bufCPU.hasInf();
+        } else {
+            assert(false);
+        }
+    }
+    return bufCPU(0,0);
+}
+
+float LWMatrix::dotProduct(LWMatrix& b) {
+    return dotProduct(b, getDefaultStream());
+}
+
+float LWMatrix::dotProduct(LWMatrix& b, lwdaStream_t stream) {
+    LWMatrix tmp;
+    return dotProduct(b, tmp, stream);
+}
+
+/*
+ * Fast dot product only for matrices with same transposedness.
+ */
+float LWMatrix::dotProduct(LWMatrix& b, LWMatrix& tmp, lwdaStream_t stream) {
+    assert(isContiguous() && b.isContiguous());
+    assert(isSameDims(b));
+    assert(isTrans() == b.isTrans()); // see?
+    dim3 blocks, threads;
+    _sum_setParams(getNumElements(), &blocks, &threads);
+//    LWMatrix target(1, blocks.x);
+    tmp.resize(1, blocks.x);
+    kDotProduct_r<<<blocks, threads, 0, stream>>>(getDevData(), b.getDevData(), tmp.getDevData(), getNumElements());
+    getLastLwdaError("kDotProduct_r: Kernel exelwtion failed");
+//    lwdaThreadSynchronize();
+//    syncStream(stream);
+//    return tmp._totalAgg(LWMatrixAggs::Sum(), stream);
+    return tmp.cpuAgg(LWMatrixAggs::Sum(), stream);
+}
+
+float LWMatrix::norm2() {
+    return dotProduct(*this);
+}
+
+float LWMatrix::norm() {
+    return sqrt(norm2());
+}
+
+void LWMatrix::print(int startRow, int rows, int startCol, int cols) const {
+//    lwdaThreadSynchronize();
+    syncDevice();
+    Matrix hm = Matrix(_numRows, _numCols);
+    copyToHost(hm);
+    hm.print(startRow, rows, startCol, cols);
+}
+
+void LWMatrix::print(int rows, int cols) const {
+    print(0, rows, 0, cols);
+}
+
+void LWMatrix::printShape(const char* name) const {
+    printf("%s: %dx%d\n", name, _numRows, _numCols);
+}
+
+void LWMatrix::alloc(int numElements) {
+    _memSegment = DEVICE_MEMORY_MANAGER::getInstance(getDeviceID()).malloc(numElements * sizeof(float));
+}
+
+void LWMatrix::dealloc() {
+    DEVICE_MEMORY_MANAGER::getInstance(_memSegment->getDeviceID()).free(_memSegment);
+    _memSegment = NULL;
+    deallocTexture();
+}
+
+void LWMatrix::deallocTexture() {
+    if (_texObj != 0) {
+        checkLwdaErrors(lwdaDestroyTextureObject(_texObj));
+        _texObj = 0;
+    }
+}
+
+lwdaTextureObject_t LWMatrix::getTextureObject() {
+   if (_texObj == 0) {
+       assert(isContiguous());
+       //size_t memFree, memTotal;
+
+       struct lwdaResourceDesc resDesc;
+       memset(&resDesc, 0, sizeof(resDesc));
+       resDesc.resType = lwdaResourceTypeLinear;
+       resDesc.res.linear.devPtr = getDevData();
+       resDesc.res.linear.sizeInBytes = getNumDataBytes();
+       resDesc.res.linear.desc = lwdaCreateChannelDesc(32, 0, 0, 0, lwdaChannelFormatKindFloat);
+       struct lwdaTextureDesc texDesc;
+       memset(&texDesc, 0, sizeof(texDesc));
+       checkLwdaErrors(lwdaCreateTextureObject(&_texObj, &resDesc, &texDesc, NULL));
+   }
+   assert(_texObj != 0);
+   return _texObj;
+}
+
+LWMatrix& LWMatrix::construct() const {
+    return *new LWMatrix();
+}
+LWMatrix& LWMatrix::construct(bool isTrans) const {
+    return *new LWMatrix(isTrans);
+}
+LWMatrix& LWMatrix::construct(int numRows, int numCols, bool isTrans) const {
+    return *new LWMatrix(numRows, numCols, isTrans);
+}
+LWMatrix& LWMatrix::construct(const Matrix& like, bool copy) const {
+    return *new LWMatrix(like, copy);
+}
+LWMatrix& LWMatrix::construct(const LWMatrix& like, bool copy) const {
+    return *new LWMatrix(like, copy);
+}
+LWMatrix& LWMatrix::construct(const LWMatrix& like) const {
+    return *new LWMatrix(like);
+}
+LWMatrix& LWMatrix::construct(const Matrix& like) const {
+    return *new LWMatrix(like);
+}
+LWMatrix& LWMatrix::construct(MemorySegment* mem, int numRows, int numCols, int stride, bool isTrans) const {
+    return *new LWMatrix(mem, numRows, numCols, stride, isTrans);
+}
+
+
+/* ================
+ * HostLWMatrix
+ * ================
+ */
+HostLWMatrix::~HostLWMatrix() {
+    if (_ownsData && _numElements > 0) {
+        dealloc();
+    } else {
+        // dealloc frees the mem segment. But if this is a view,
+        // then we need to delete the mem segment object.
+//        assert(_memSegment == NULL || _memSegment->getSize() == 0);
+        delete _memSegment;
+    }
+    _deleted = true;
+}
+HostLWMatrix::HostLWMatrix() : LWMatrix() {
+    _init(false);
+}
+HostLWMatrix::HostLWMatrix(bool isTrans) {
+    _init(isTrans);
+}
+HostLWMatrix::HostLWMatrix(int numRows, int numCols, bool isTrans)  {
+    _init(isTrans);
+    resize(numRows, numCols);
+}
+HostLWMatrix::HostLWMatrix(const Matrix& like, bool copy)  {
+    _init(like.isTrans());
+    resize(like.getNumRows(), like.getNumCols());
+    if (copy) {
+        copyFromHost(like);
+    }
+}
+HostLWMatrix::HostLWMatrix(const LWMatrix& like, bool copy)  {
+    _init(like.isTrans());
+    resize(like.getNumRows(), like.getNumCols());
+    if (copy) {
+        like.copy(*this);
+    }
+}
+HostLWMatrix::HostLWMatrix(const LWMatrix& like)  {
+    _init(like.isTrans());
+    resize(like.getNumRows(), like.getNumCols());
+}
+HostLWMatrix::HostLWMatrix(const Matrix& like) {
+    _init(false);
+    resize(like.getNumRows(), like.getNumCols());
+}
+HostLWMatrix::HostLWMatrix(MemorySegment* mem, int numRows, int numCols, int stride, bool isTrans)
+    : LWMatrix(mem, numRows, numCols, stride, isTrans) {
+}
+
+LWMatrix& HostLWMatrix::construct() const {
+    return *new HostLWMatrix();
+}
+LWMatrix& HostLWMatrix::construct(bool isTrans) const {
+    return *new HostLWMatrix(isTrans);
+}
+LWMatrix& HostLWMatrix::construct(int numRows, int numCols, bool isTrans) const {
+    return *new HostLWMatrix(numRows, numCols, isTrans);
+}
+LWMatrix& HostLWMatrix::construct(const Matrix& like, bool copy) const {
+    return *new HostLWMatrix(like, copy);
+}
+LWMatrix& HostLWMatrix::construct(const LWMatrix& like, bool copy) const {
+    return *new HostLWMatrix(like, copy);
+}
+LWMatrix& HostLWMatrix::construct(const LWMatrix& like) const {
+    return *new HostLWMatrix(like);
+}
+LWMatrix& HostLWMatrix::construct(const Matrix& like) const {
+    return *new HostLWMatrix(like);
+}
+LWMatrix& HostLWMatrix::construct(MemorySegment* mem, int numRows, int numCols, int stride, bool isTrans) const {
+    return *new HostLWMatrix(mem, numRows, numCols, stride, isTrans);
+}
+
+void HostLWMatrix::copyFromHost(const Matrix& hostMatrix, bool resizeTarget, lwdaStream_t stream) {
+    if (resizeTarget) {
+        resize(hostMatrix);
+    } else {
+        assert(isSameDims(hostMatrix));
+    }
+    setTrans(hostMatrix.isTrans());
+    if (getNumElements() > 0) {
+        checkLwdaErrors(lwdaMemcpy2D(getDevData(), _stride * sizeof(float), hostMatrix.getData(),
+                                     hostMatrix.getLeadingDim() * sizeof(float), getLeadingDim() * sizeof(float),
+                                     getFollowingDim(), lwdaMemcpyHostToHost));
+//        syncStream(stream);
+    }
+}
+
+void HostLWMatrix::copyFromHost(const Matrix& hostMatrix, bool resizeTarget) {
+    copyFromHost(hostMatrix, resizeTarget, 0);
+}
+
+void HostLWMatrix::copyFromHost(const Matrix& hostMatrix) {
+    copyFromHost(hostMatrix, false, 0);
+}
+
+void HostLWMatrix::copyToHost(Matrix& hostMatrix, bool resizeTarget, lwdaStream_t stream) const {
+    if (resizeTarget) {
+        hostMatrix.resize(getNumRows(), getNumCols());
+    } else {
+        assert(isSameDims(hostMatrix));
+    }
+    hostMatrix.setTrans(_isTrans);
+    if (getNumElements() > 0) {
+        checkLwdaErrors(lwdaMemcpy2D(hostMatrix.getData(), hostMatrix.getLeadingDim() * sizeof(float),
+                                     getDevData(), _stride * sizeof(float), getLeadingDim() * sizeof(float),
+                                     getFollowingDim(), lwdaMemcpyHostToHost));
+//        syncStream(stream);
+    }
+}
+
+void HostLWMatrix::copyToHost(Matrix& hostMatrix, bool resizeTarget) const {
+    copyToHost(hostMatrix, resizeTarget, 0);
+}
+
+void HostLWMatrix::copyToHost(Matrix& hostMatrix) const {
+    copyToHost(hostMatrix, false, 0);
+}
+
+void HostLWMatrix::alloc(int numElements) { 
+//    checkLwdaErrors(lwdaHostAlloc(&_devData, numElements * sizeof(float), lwdaHostAllocPortable));
+    _memSegment = HOST_MEMORY_MANAGER::getInstance().malloc(numElements * sizeof(float));
+//    _memSegment = FastHostMemoryManager::getInstance().malloc(numElements * sizeof(float));
+}
+
+void HostLWMatrix::dealloc() {
+//    FastHostMemoryManager::getInstance().free(_memSegment);
+    HOST_MEMORY_MANAGER::getInstance().free(_memSegment);
+    _memSegment = NULL;
+//    checkLwdaErrors(lwdaFreeHost(_devData));
+}
+
+lwdaTextureObject_t HostLWMatrix::getTextureObject() {
+    assert(false);
+    return 0;
+}

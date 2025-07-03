@@ -1,0 +1,81 @@
+/* 
+ * Tests unary Maxwell POPC
+ *
+ */
+
+.version 3.1
+.target sm_20
+
+.entry main (
+    .param .s32 param_addr,
+    .param .b32 param_as1,
+    .param .b32 param_bs1,
+    .param .b32 param_bs2,
+    .param .b32 param_cs1,
+    .param .b32 param_cs2,
+    .param .b32 param_ds1,
+    .param .b32 param_ds2,
+    .param .b32 param_es1,
+    .param .b32 param_es2,    
+    .param .b32 param_fs1,
+    .param .b32 param_fs2)
+{
+    .reg   .s32 addr;
+    .reg   .b32	 bd1, bd2, bd3, bd4, as1, bs1, bs2, cs1, cs2, ds1, ds2, es1, es2, fs1, fs2;
+   
+    ld.param.s32  addr, [param_addr];
+    ld.param.b32  as1, [param_as1];
+    ld.param.b32  bs1, [param_bs1];
+    ld.param.b32  bs2, [param_bs2];
+    ld.param.b32  cs1, [param_cs1];
+    ld.param.b32  cs2, [param_cs2];
+    ld.param.b32  ds1, [param_ds1];
+    ld.param.b32  ds2, [param_ds2];
+    ld.param.b32  es1, [param_es1];
+    ld.param.b32  es2, [param_es2];
+    ld.param.b32  fs1, [param_fs1];
+    ld.param.b32  fs2, [param_fs2];
+
+    /* popc with same constant operands */
+    popc.b32 bd1, as1;
+    st.global.b32 [addr], bd1;
+    bar.sync 0;
+
+    /* popc with same register operands */
+    add.u32 bd1, bs1, bs2;
+    popc.b32 bd2, bd1;
+    st.global.b32 [addr], bd2;
+    bar.sync 0;
+
+    /*  popc with different constant operands */
+    and.b32 bd1, cs1, cs2;
+    popc.b32 bd2, bd1;
+    st.global.b32 [addr], bd2;
+    bar.sync 0;
+
+    /* popc with same register operands, where right source has ~ */
+    add.u32 bd1, ds1, ds2;
+    not.b32 bd2, bd1;
+    and.b32 bd3, bd1, bd2;
+    popc.b32 bd4, bd3;
+    st.global.b32 [addr], bd4;
+    bar.sync 0;
+
+    /* popc with same register operands, where both sources have ~ */
+    add.u32 bd1, es1, es2;
+    and.b32 bd3, bd1, bd1;
+    not.b32 bd2, bd3;
+    popc.b32 bd4, bd2;
+    st.global.b32 [addr], bd4;
+    bar.sync 0;
+
+    /* popc with different operands, where right source has ~ */
+    add.u32 bd1, fs1, fs2;
+    not.b32 bd2, bd1;
+    and.b32 bd3, fs1, bd2;
+    popc.b32 bd4, bd3;
+    st.global.b32 [addr], bd4;
+    bar.sync 0;
+
+    exit;
+}

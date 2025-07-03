@@ -1,0 +1,385 @@
+#
+#  Copyright (c) 2017 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *Device IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HDevice BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+# TODO: The PTXStitch code has odd compilation requirements and was a separate library
+# in CMake to isolate those requirements.  Now our code is mixed in with their code and
+# their compilation requirements are leaking over onto our source files.  Separate out
+# the PTXStitch stuff into it's own module and isolate it's compilation requirements
+# as it was in CMake.
+
+FrontEnd_PTX_CFLAGS ?=
+
+ifeq ($(LW_HOST_OS_FAMILY),Windows)
+  # Suppress some warnings.
+  # PTXStitch is copied from another team, so we don't want to change
+  # that code.  Therefore, suppress some warnings here that we don't
+  # suppress elsewhere.
+
+  # 4003: not enough actual parameters for macro 'identifier'
+  FrontEnd_PTX_CFLAGS += /wd4003
+
+  # 4018: 'expression' : signed/unsigned mismatch
+  FrontEnd_PTX_CFLAGS += /wd4018
+
+  # 4101: 'identifier' : unreferenced local variable
+  FrontEnd_PTX_CFLAGS += /wd4101
+
+  # 4146: unary minus operator applied to unsigned type, result still unsigned
+  FrontEnd_PTX_CFLAGS += /wd4146
+
+  # 4996: strncpy and other functions are unsafe
+  FrontEnd_PTX_CFLAGS += /wd4996
+endif # Windows
+
+FrontEnd_PTX_DEFINES ?=
+FrontEnd_PTX_DEFINES += LW_CONTRIB=1
+FrontEnd_PTX_DEFINES += _LWISA
+FrontEnd_PTX_DEFINES += LWVM_ADDRESS_SPACE_0_GENERIC
+FrontEnd_PTX_DEFINES += __STDC_LIMIT_MACROS
+FrontEnd_PTX_DEFINES += __STDC_CONSTANT_MACROS
+FrontEnd_PTX_DEFINES += _VARIADIC_MAX=10
+FrontEnd_PTX_DEFINES += LWDA_64_BIT_DEVICE_CODE
+FrontEnd_PTX_DEFINES += INSTRUCTIONMACROS_KEY=0x5389a4f8
+FrontEnd_PTX_DEFINES += LWALGRIND
+FrontEnd_PTX_DEFINES += PTX_ISA_VERSION=PTX_ISA_20
+FrontEnd_PTX_DEFINES += YY_NO_UNISTD_H
+FrontEnd_PTX_DEFINES += RELEASE
+ifeq ($(LW_HOST_OS_FAMILY),Windows)
+  FrontEnd_PTX_DEFINES += _SELWRE_SCL=0
+  FrontEnd_PTX_DEFINES += STD_NOWINSOCK2=1
+  FrontEnd_PTX_DEFINES += _CRT_SELWRE_NO_WARNINGS
+  FrontEnd_PTX_DEFINES += _MBCS
+endif
+FrontEnd_PTX_DEFINES += INSTRUCTIONMACROS_KEY=0x5389a4f8
+FrontEnd_PTX_DEFINES += GPGPUCOMP_DRV_BUILD
+
+FrontEnd_PTX_NEEDS_LWVM_HEADERS = 1
+
+FrontEnd_PTX_NON_GENERATED_SOURCES = \
+  $(LW_SOURCE)/drivers/compiler/gpgpucomp/lib/utilities/zlib/adler32.c \
+  $(LW_SOURCE)/drivers/common/dwarf/code/dwarf_interface.cpp \
+  $(addprefix $(LW_OPTIX)/src/FrontEnd/PTX/, \
+    CorrectVprintfTypePass.cpp \
+    FrontEndDebugInfo.cpp \
+    DataLayout.cpp \
+    LinkPTXFrontEndIntrinsics.cpp \
+    LowerCarryInstructionsPass.cpp \
+    printPTX.cpp \
+    PTXFrontEnd.cpp \
+    PTXHeader.cpp \
+    PTXNamespaceMangle.cpp \
+    PTXtoLLVM.cpp \
+    Canonical/C14n.cpp \
+    Canonical/C14nPrintf.cpp \
+    Canonical/UberPointer.cpp \
+    PTXStitch/dwarf/lwdwarf.c \
+    PTXStitch/ptxaslib/ptxPragmaUtils.c \
+    PTXStitch/ptxparse/AtomTable.cpp\
+    PTXStitch/ptxparse/compilerToolsMessageDefs.c \
+    PTXStitch/ptxparse/ctArch.c \
+    PTXStitch/ptxparse/ctLog.c \
+    PTXStitch/ptxparse/ctMessages.c \
+    PTXStitch/ptxparse/DebugInfo.c \
+    PTXStitch/ptxparse/interfaceUtils.cpp \
+    PTXStitch/ptxparse/ptxDescriptorReaderEnabled.c \
+    PTXStitch/ptxparse/ptxInstructionTemplates.c \
+    PTXStitch/ptxparse/ptxIR.c \
+    PTXStitch/ptxparse/ptxMacroUtils.c \
+    PTXStitch/ptxparse/ptxparseMessageDefs.c \
+    PTXStitch/cmdopt/cmdoptMessageDefs.c \
+    PTXStitch/cmdopt/stdCmdOpt.c \
+    PTXStitch/gpuInfo/gpuInfo.c \
+    PTXStitch/gpuInfo/gpuInfoMessageDefs.c \
+    PTXStitch/std/stdAssertBind.c \
+    PTXStitch/std/stdBitSet.c \
+    PTXStitch/std/stdElwBind.c \
+    PTXStitch/std/stdFileNames.c \
+    PTXStitch/std/stdList.c \
+    PTXStitch/std/stdLocal.c \
+    PTXStitch/std/stdMap.c \
+    PTXStitch/std/stdMemBind.c \
+    PTXStitch/std/stdMemSpace.c \
+    PTXStitch/std/stdMessageDefs.c \
+    PTXStitch/std/stdMessages.c \
+    PTXStitch/std/stdObfuscate.c \
+    PTXStitch/std/stdProcess.c \
+    PTXStitch/std/stdRangeMap.c \
+    PTXStitch/std/stdSet.c \
+    PTXStitch/std/stdStdFun.c \
+    PTXStitch/std/stdString.c \
+    PTXStitch/std/stdUtils.c \
+    PTXStitch/std/stdVector.c \
+    PTXStitch/std/stdWriter.c \
+    PTXStitch/threads/stdThreads.cpp \
+    PTXStitch/threads/threadsMessageDefs.c \
+  )
+
+############################################################
+############################################################
+#
+# Generate parser files
+#
+# As explained below I wanted to keep the copied makefile code for the parser generation
+# as close as possible including using the OUTPUTDIR variable. I'm caching it here to
+# allow me to modify it without affecting things outside of this block of code.
+OLD_OUTPUTDIR := $(OUTPUTDIR)
+OUTPUTDIR := $(OUTPUTDIR)/apps/optix/src/FrontEnd/PTX
+OPTIX_PTXPARSE_GENERATED_DIR := $(OUTPUTDIR)
+PTXPARSE_SOURCE_DIR := $(LW_OPTIX)/src/FrontEnd/PTX/PTXStitch/ptxparse
+
+# To generate locally both files without #line directive, add -l to the parser and -L to the lexer call.
+ptx_parser_c := $(OUTPUTDIR)/ptx_parser.c
+$(ptx_parser_c): $(PTXPARSE_SOURCE_DIR)/ptx.y $(lastword $(MAKEFILE_LIST))
+ifeq ($(LW_VERBOSE),0)
+	$(ECHO) "Generating $(notdir $@) from $(notdir $<)"
+endif
+	$(YACC) -d -p ptx -o $@ $<
+
+ptx_lexer_c := $(OUTPUTDIR)/ptx_lexer.c
+$(ptx_lexer_c): $(PTXPARSE_SOURCE_DIR)/ptx.l $(lastword $(MAKEFILE_LIST))
+ifeq ($(LW_VERBOSE),0)
+	$(ECHO) "Generating $(notdir $@) from $(notdir $<)"
+endif
+	$(LEX) -Pptx -o$@ $<
+
+# Yeah, I know this says NON_GENERATED_SOURCES and we just generated it, but whatever.
+FrontEnd_PTX_NON_GENERATED_SOURCES += $(ptx_parser_c)
+FrontEnd_PTX_NON_GENERATED_SOURCES += $(ptx_lexer_c)
+
+################################################################
+# This bit of code I took from drivers/compiler/gpgpucomp/gpgpucomp.lwmk
+#
+# I tried to keep it as unmodified as possible, including the order of the various blocks
+# of code and variable definitions. The main differences is that I had to add the adapted
+# version of the ptxInstructionDefs.incl file (see the .adapted versions below). This is
+# so we can have a version of ptxInstructionDefs.incl that can be used by our intrinsic
+# generator scripts that need explicit types unlike the parser that can infer types. I
+# edited ptxInstrDefs.table with OPTIX_HAND_EDIT to use the preprocessor to express the
+# changes.
+#
+# The original code included explicit dependencies on the generated files, but we have
+# taken care of that by either using:
+#
+# 1. Explicit dependencies in the case of ptxInstructionDefs.adapted.incl
+# 2. Generated include dependencies
+# 3. Order only dependencies between object files and the parser target. This makes sure
+#    the parser files are generated before any of the object files are created without
+#    creating an explicit dependency that would cause rebuilding. The rebuilding
+#    dependency is handled by the generated include dependencies.
+
+PTXASLIB_SOURCE_DIR     := $(LW_OPTIX)/src/FrontEnd/PTX/PTXStitch/ptxaslib
+PTX_OBFUSCATE_SCRIPT    := $(PTXPARSE_SOURCE_DIR)/obfuscateSensitiveStrings.pl
+
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+  GPGPUCOMP_GREP=$(FGREP)
+else
+  GPGPUCOMP_GREP=$(GREP)
+endif
+
+# TODO Move this to drivers/common/build/
+define MY_PREPROCESSED_OUTPUT_FROM_SOURCE_RULE
+  $(2)_: LW_COMPILE_AS_C := 1
+  $(call LW_OBJECT_FROM_SOURCE_RULE,$(1),$(2)_)
+  ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+    $(2)_: CFLAGS += -P -Fi$$@
+  else
+    $(2)_: CFLAGS += -E
+  endif
+
+# We don't want any lines starting with # in the ptx:
+$(2): $(2)_
+	"$(GPGPUCOMP_GREP)" -v ^\# $$^ | "$(GPGPUCOMP_GREP)" -v "\#line" > $$@
+endef
+
+PTX_GENINSTR_SCRIPT     := $(PTXPARSE_SOURCE_DIR)/geninstr.pl
+PTX_GENTOKEN_SCRIPT     := $(PTXPARSE_SOURCE_DIR)/gentoken.pl
+ptxInstructionDefsTable := $(PTXPARSE_SOURCE_DIR)/ptxInstructionDefs.table
+
+ptxInstrDefs    := $(OUTPUTDIR)/ptxInstrDefs.table
+$(ptxInstrDefs) : LW_INCLUDES += $(LWCFG_OUTPUTDIR)
+$(ptxInstrDefs)_: $(lastword $(MAKEFILE_LIST))
+
+$(ptxInstrDefs).adapted : LW_INCLUDES += $(LWCFG_OUTPUTDIR)
+$(ptxInstrDefs).adapted_: $(lastword $(MAKEFILE_LIST))
+$(ptxInstrDefs).adapted_: CFLAGS += -DOPTIX_HAND_EDIT
+
+$(eval $(call MY_PREPROCESSED_OUTPUT_FROM_SOURCE_RULE, $(ptxInstructionDefsTable), $(ptxInstrDefs)))
+$(eval $(call MY_PREPROCESSED_OUTPUT_FROM_SOURCE_RULE, $(ptxInstructionDefsTable), $(ptxInstrDefs).adapted))
+
+ptxInstrDefsToken_   := $(OUTPUTDIR)/ptxInstrDefsToken.table_
+ptxInstrDefsToken    := $(OUTPUTDIR)/ptxInstrDefsToken.table
+
+# $(COPY_IT) acts on only the first pre-requisite
+$(ptxInstrDefsToken_) : $(ptxInstrDefs)
+	$(COPY) $< $@
+$(ptxInstrDefsToken_).adapted : $(ptxInstrDefs).adapted
+	$(COPY) $< $@
+
+# Generate token for descriptor file.
+$(ptxInstrDefsToken) : $(ptxInstrDefsToken_) $(PTX_GENTOKEN_SCRIPT)
+	$(PERL) $(PTX_GENTOKEN_SCRIPT) -i $< > $@
+$(ptxInstrDefsToken).adapted : $(ptxInstrDefsToken_).adapted $(PTX_GENTOKEN_SCRIPT)
+	$(PERL) $(PTX_GENTOKEN_SCRIPT) -i $< > $@
+
+$(OUTPUTDIR)/ptxInstructions.h: $(PTX_GENINSTR_SCRIPT) $(ptxInstrDefsToken)
+	$(PERL) $(PTX_GENINSTR_SCRIPT) --enums < $(ptxInstrDefsToken) > $@
+
+$(OUTPUTDIR)/ptxInstructionDefs.incl: $(PTX_GENINSTR_SCRIPT) $(ptxInstrDefsToken)
+	$(PERL) $(PTX_GENINSTR_SCRIPT) --inits < $(ptxInstrDefsToken) > $@
+
+$(OUTPUTDIR)/ptxInstructionDefs.adapted.incl: $(PTX_GENINSTR_SCRIPT) $(ptxInstrDefsToken).adapted
+	$(PERL) $(PTX_GENINSTR_SCRIPT) --inits < $(ptxInstrDefsToken).adapted > $@
+
+$(OUTPUTDIR)/ptxExtInstrFeatures.incl: $(PTX_GENINSTR_SCRIPT) $(ptxInstrDefsToken)
+	$(PERL) $(PTX_GENINSTR_SCRIPT) --ext-incl < $(ptxInstrDefsToken) > $@
+
+$(OUTPUTDIR)/ptxObfuscatedIRdefs.h : $(PTXPARSE_SOURCE_DIR)/ptxIRdefs.inc $(PTX_OBFUSCATE_SCRIPT)
+	$(PERL) $(PTX_OBFUSCATE_SCRIPT) -i $< -o $@
+
+$(OUTPUTDIR)/ptxObfuscatedPragmaDefs.h : $(PTXASLIB_SOURCE_DIR)/ptxPragmaDefs.inc $(PTX_OBFUSCATE_SCRIPT)
+	$(PERL) $(PTX_OBFUSCATE_SCRIPT) -i $< -o $@
+
+# End copied code
+############################################################
+
+OPTIX_PTX_PARSER_OUTPUT := \
+  $(ptx_parser_c) \
+  $(ptx_lexer_c) \
+  $(OUTPUTDIR)/ptxInstructions.h \
+  $(OUTPUTDIR)/ptxInstructionDefs.incl \
+  $(OUTPUTDIR)/ptxInstructionDefs.adapted.incl \
+  $(OUTPUTDIR)/ptxExtInstrFeatures.incl \
+  $(OUTPUTDIR)/ptxObfuscatedIRdefs.h \
+  $(OUTPUTDIR)/ptxObfuscatedPragmaDefs.h
+
+LW_DIRS_TO_CREATE += $(OUTPUTDIR)
+# Make sure the output directory is created before the parser output
+$(OPTIX_PTX_PARSER_OUTPUT) : | $(OUTPUTDIR)
+
+.PHONY: optix-ptxparser
+optix-ptxparser: $(OPTIX_PTX_PARSER_OUTPUT)
+
+.PHONY: optix-clean-ptxparser
+optix-clean-ptxparser:
+	$(RM) $(OPTIX_PTX_PARSER_OUTPUT)
+
+optix-clean-FrontEnd_PTX: optix-clean-ptxparser
+
+# restore the OUTPUTDIR variable
+OUTPUTDIR := $(OLD_OUTPUTDIR)
+############################################################
+############################################################
+
+ifeq ($(LW_HOST_OS_FAMILY),Windows)
+  FORCE_INCLUDE_FLAG := /FI
+else
+  FORCE_INCLUDE_FLAG := -include
+endif
+
+ifeq ($(LW_HOST_OS_FAMILY),Windows)
+  THREAD_SOURCE = stdThreadsWin32.cpp
+else
+  THREAD_SOURCE = stdThreadsPOSIX.cpp
+endif
+
+ifeq ($(LW_TARGET_ARCH),amd64)
+  PTXPARSE_ARCH = x86_64
+else ifeq ($(LW_TARGET_ARCH),aarch64)
+  PTXPARSE_ARCH = aarch64
+else ifeq ($(LW_TARGET_ARCH),ppc64le)
+  PTXPARSE_ARCH = ppc64le
+else
+  PTXPARSE_ARCH = i686
+endif
+
+ifeq ($(LW_HOST_OS_FAMILY),Windows)
+  os = win32
+else
+  os = Linux
+endif
+
+FrontEnd_PTX_LLVM_IR_FILES = $(addprefix $(LW_OPTIX)/src/FrontEnd/PTX/, \
+  libActivemaskEmulate.ll \
+  libDevice.ll \
+  libDirect2IR.ll \
+  libLWPTX.ll \
+  libPTXFrontEnd.ll \
+)
+
+# Copied from post-mod
+# Special dependency, since we use a custom variable name
+$(call BUILD_OPTIX_OBJECT_LIST,FrontEnd_PTX,$(FrontEnd_PTX_NON_GENERATED_SOURCES)): $(OUTPUTDIR)/optix-include/stdPlatformDefs.h
+
+FrontEnd_PTX_SOURCES = $(FrontEnd_PTX_NON_GENERATED_SOURCES)
+
+$(call optix_module,FrontEnd_PTX)
+
+$(foreach lldep, \
+    $(LW_OPTIX)/src/FrontEnd/PTX/libActivemaskEmulate.ll \
+    $(LW_OPTIX)/src/FrontEnd/PTX/libDevice.ll \
+    $(LW_OPTIX)/src/FrontEnd/PTX/libDirect2IR.ll \
+    $(LW_OPTIX)/src/FrontEnd/PTX/libLWPTX.ll \
+    $(LW_OPTIX_OUTPUTDIR)/src/FrontEnd/PTX/PTXInstructions.ll, \
+  $(call optix_declare_binary_llvm_ir_header_dependency,\
+    $(LW_OPTIX)/src/FrontEnd/PTX/LinkPTXFrontEndIntrinsics.cpp,\
+    $(lldep)))
+
+ifneq ($(LW_BUILD_TYPE),release)
+  # only add this dependency in non-release builds
+  $(call optix_declare_binary_llvm_ir_header_dependency,\
+    $(LW_OPTIX)/src/FrontEnd/PTX/LinkPTXFrontEndIntrinsics.cpp,\
+    $(LW_OPTIX_OUTPUTDIR)/src/FrontEnd/PTX/D2IRPTXInstructions.ll )
+endif
+
+$(call optix_declare_binary_llvm_ir_header_dependency,\
+  $(LW_OPTIX)/src/FrontEnd/PTX/PTXtoLLVM.cpp,\
+  $(LW_OPTIX)/src/FrontEnd/PTX/libPTXFrontEnd.ll)
+
+# Make sure the ptxparser files are generated before building files that could include them
+$(FrontEnd_PTX_ALL_OBJECTS): | optix-ptxparser
+
+# OUTPUTDIR/apps/optix/src        FrontEnd/PTX/*Bitcode.h
+
+# We add the "private" keyword here to keep these includes from affecting
+# PTXStitch's prerequisites (the rest of the compiler). That way, its forked
+# includes, like stdLocal.h, don't override the compiler's versions.
+$(FrontEnd_PTX_OBJECTS): private LW_INCLUDES += \
+  $(OPTIX_INCLUDES) \
+  $(addprefix $(LW_OPTIX)/src/FrontEnd/PTX/PTXStitch/, \
+    cmdopt \
+    dwarf \
+    gpuInfo \
+    ptxopt \
+    ptxdci \
+    ptxaslib \
+    ptxparse \
+    std \
+    threads) \
+  $(OPTIX_PTXPARSE_GENERATED_DIR) \
+  $(LW_SOURCE)/drivers/compiler/gpgpucomp/lib/utilities/zlib \
+  $(LW_SOURCE)/drivers/common/cop/interface \
+  $(LW_OPTIX_OUTPUTDIR)/src
+
+include $(LW_OPTIX)/src/FrontEnd/PTX/test/test.lwmk
+include $(LW_OPTIX)/src/FrontEnd/PTX/Canonical/tests/tests.lwmk

@@ -1,0 +1,204 @@
+// Copyright LWPU Corporation 2013
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "OptixColwerterKernels.hpp"
+#include <support/lwb/lwb/device/device_scan.lwh>
+#include <prodlib/exceptions/Assert.h>
+#include <prodlib/exceptions/LwdaError.h>
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(COLWERTER_WARPS_PER_BLOCK * 32, COLWERTER_BLOCKS_PER_SM)
+void GatherLeafSizesKernel(GatherLeafSizesKernelParams p)
+{
+  int i = threadIdx.x + 32 * (threadIdx.y + COLWERTER_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+  if( i >= *p.numNodes )
+    return;
+
+  int c0num, c1num;
+  getChildLeafSizes( p.nodes[i], &c0num, &c1num );    
+  p.outLeafSize[2*i+0] = c0num;
+  p.outLeafSize[2*i+1] = c1num;
+}
+
+//------------------------------------------------------------------------------
+
+static __device__ inline bool isLastBlock( int* blockCounter, int numBlocks )
+{
+  __shared__ volatile int lastBlock;
+  __threadfence();
+  if( threadIdx.x+threadIdx.y == 0 )
+  {
+    lastBlock = 0;
+    if( atomicAdd( blockCounter, 1 ) == numBlocks-1 )
+      lastBlock = 1;
+  }
+  __syncthreads();
+  return lastBlock != 0;
+}
+
+//------------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(COLWERTER_WARPS_PER_BLOCK * 32, COLWERTER_BLOCKS_PER_SM)
+void OptixColwerterKernel(OptixColwerterKernelParams p)
+{
+  int numNodes = *p.numNodes;
+  
+  int t = threadIdx.x, T=32,   w=threadIdx.y, W=blockDim.y,  b=blockIdx.x, B=gridDim.x;
+  int globalWarpIdx = (b*W + w);
+  int warpBegin = globalWarpIdx*p.segmentSize;
+  int warpEnd = min( warpBegin+p.segmentSize, numNodes );
+
+  __shared__ BvhNode spill[COLWERTER_WARPS_PER_BLOCK];
+
+  // shift all the p.nodes down in this warp's segment
+  for( int pos = warpEnd-T + t; pos >= warpBegin; pos -= T )
+  {
+    BvhNode node = p.ioNodes[pos];
+    colwertNode( node, p.outRemap, p.inRemap, p.inLeafPos+2*pos, p.scale, 1 );
+
+    if( pos+1 < warpEnd )
+      p.ioNodes[pos+1] = node;
+    else
+      spill[w] = node;
+  }
+
+  __syncthreads();
+
+  // The first thread of each warp puts the spilled node temporarily in the hole that now
+  // exists at the beginning of the segment
+  if( t == 0 && warpBegin < numNodes )
+    p.ioNodes[warpBegin] = spill[w];
+
+  // Let all blocks return except for the last one
+  if( !isLastBlock( p.ioBlockCounter, B ) )
+    return;
+
+  // shift holes down to the next segment
+  int threadIdxInBlock = (w*T+t);
+  int threadsInBlock = W*T;
+  int end = p.segmentCount*p.segmentSize;
+  int inc = threadsInBlock*p.segmentSize;
+  int pos = end - inc + threadIdxInBlock*p.segmentSize;
+  while( end >= 0 )
+  {
+    // Read node into registers
+    BvhNode node;
+    if( pos >= 0 ) node = p.ioNodes[pos];
+    __syncthreads();
+
+    // Write
+    int outPos = min(pos+p.segmentSize,numNodes);
+    if( 0 <= pos && pos < numNodes ) 
+        p.ioNodes[outPos] = node;
+    __syncthreads();
+
+    pos -= inc;
+    end -= inc;
+  }
+
+  if( t+w == 0 )
+    writeDummyRoot( p.ioNodes[0], p.inApexPointMap, p.scale );
+}
+
+//------------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(COLWERTER_WARPS_PER_BLOCK * 32, COLWERTER_BLOCKS_PER_SM)
+void OptixColwerterKernelNoShift(OptixColwerterKernelParams p)
+{
+  int i = threadIdx.x + 32 * (threadIdx.y + COLWERTER_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+
+  if( i + 1 >= p.maxNodes )
+    return;
+
+  BvhNode& node = p.ioNodes[i+1];
+  if( i + 1 < *p.numNodes )
+  {
+    colwertNode( node, p.outRemap, p.inRemap, p.inLeafPos+2*i, p.scale, 0 );
+    if( i == 0 )
+      writeDummyRoot( p.ioNodes[0], p.inApexPointMap, p.scale );
+  }
+  else
+  {
+    // Zero out the unused part of the buffer for easy detection of non-nodes
+    node.c0idx = 0;
+    node.c0num = 0;
+    node.c1idx = 0;
+    node.c1num = 0;
+  }
+}
+
+//------------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchGatherLeafSizesKernel(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const GatherLeafSizesKernelParams& p)
+{
+    if (lwdaFuncSetCacheConfig(GatherLeafSizesKernel, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    GatherLeafSizesKernel<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchOptixColwerterKernel(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const OptixColwerterKernelParams& p, bool shiftNodes)
+{
+    void (*kernel)(OptixColwerterKernelParams p) = (shiftNodes) ? OptixColwerterKernel : OptixColwerterKernelNoShift;
+    if (lwdaFuncSetCacheConfig(kernel, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    kernel<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------------
+
+size_t prodlib::bvhtools::exclusiveScanTempSize(unsigned int num_elements)
+{
+	void* d_temp_storage(nullptr);
+	size_t temp_storage_bytes(0);
+	unsigned int* d_in(nullptr);
+	unsigned int* d_out(nullptr);
+
+	lwdaError_t err = lwb::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_elements);
+	if (err != lwdaSuccess)
+	{
+	  throw prodlib::LwdaRuntimeError(RT_EXCEPTION_INFO, "lwb::DeviceScan::ExclusiveSum", err);
+	}
+
+	return temp_storage_bytes;
+}
+
+//------------------------------------------------------------------------------
+
+void prodlib::bvhtools::exclusiveScan(void* d_temp_storage, size_t temp_storage_bytes, unsigned int * d_in, unsigned int * d_out, unsigned int num_elements, void* stream)
+{
+#ifdef BVHTOOLS_USE_CPU
+	unsigned int *h_out = (unsigned int*)malloc(num_elements*sizeof(unsigned int));
+	lwdaMemcpy(h_out, d_in, num_elements*sizeof(unsigned int), lwdaMemcpyDeviceToHost);
+
+	unsigned int sum = 0;
+	for (size_t i=0; i<num_elements; i++) {
+	  unsigned int temp = h_out[i];
+	  h_out[i] = sum;
+	  sum += temp;
+	}
+
+	lwdaMemcpy(d_in,  h_out, num_elements*sizeof(unsigned int), lwdaMemcpyHostToDevice);
+	lwdaMemcpy(d_out, h_out, num_elements*sizeof(unsigned int), lwdaMemcpyHostToDevice);
+	free(h_out);
+	#else
+	lwdaError_t err = lwb::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_elements, (lwdaStream_t)stream);
+	if (err != lwdaSuccess)
+	{
+	  throw prodlib::LwdaRuntimeError(RT_EXCEPTION_INFO, "lwb::DeviceScan::ExclusiveSum", err);
+	}
+#endif
+}
+//------------------------------------------------------------------------------

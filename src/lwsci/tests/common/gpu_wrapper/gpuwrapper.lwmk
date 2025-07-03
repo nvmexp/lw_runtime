@@ -1,0 +1,52 @@
+###############################################################################
+#
+# Copyright (c) 2022 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+#
+###############################################################################
+
+#
+# This file should be included in order to use GPU wrapper code.
+#
+
+LW_BACKEND_RESMAN := 0
+ifeq ($(LW_TARGET_ARCH), amd64)
+  ifeq ($(LW_TARGET_OS), Linux)
+    LW_BACKEND_RESMAN = 1
+  endif
+endif
+
+# Path shorthands
+LWSCI_PATH = $(LW_SOURCE)/drivers/lwsci
+LWSCI_GPU_WRAPPER_DIR = $(LW_SOURCE)/drivers/lwsci/tests/common/gpu_wrapper
+
+# Includes
+LW_INCLUDES += $(LWSCI_GPU_WRAPPER_DIR)/inc/
+ifeq ($(LW_BACKEND_RESMAN), 0)
+    LW_INCLUDES += $(LWSCI_GPU_WRAPPER_DIR)/inc/cheetah
+else
+    LW_INCLUDES += $(LWSCI_GPU_WRAPPER_DIR)/inc/x86
+    LW_INCLUDES += $(LW_SOURCE)/drivers/unix/allocator/include
+endif
+
+# Sources
+SOURCES += $(LWSCI_GPU_WRAPPER_DIR)/src/lwsci_gpu_test.cpp
+ifeq ($(LW_BACKEND_RESMAN), 0)
+    SOURCES += $(LWSCI_GPU_WRAPPER_DIR)/src/cheetah/lwsci_test_gpu_platform.cpp
+else
+    SOURCES += $(LWSCI_GPU_WRAPPER_DIR)/src/x86/lwsci_test_gpu_platform.cpp
+endif
+
+ifneq ($(LW_BACKEND_RESMAN), 0)
+    include $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi.lwmk
+endif
+
+ifeq ($(LW_BACKEND_RESMAN), 1)
+    LDFLAGS += -ldl
+endif

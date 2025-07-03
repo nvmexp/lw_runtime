@@ -1,0 +1,155 @@
+################################### tell Emacs this is a -*- makefile-gmake -*-
+#
+# Copyright (c) 2012-2021 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+# tmake for SW Mobile component makefile
+#
+# lwntest test exelwtable makefile fragment
+#
+###############################################################################
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_HOS),1)
+include $(LW_COMPONENT_DIR)/../common/nngll.tmk
+endif
+
+ifdef LW_COMPONENT_FLAG_DYNAMIC_EXELWTABLE_SECTION
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME                    := lwntest
+
+LW_COMPONENT_FLAG_IS_TEST            := 1
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_HOS),1)
+LWNTEST_PLATFORM                     := hos
+# liblwda.a gets only built for external build configurations
+# therefore only external HOS builds of lwntest can enable the
+# LWN-LWCA interop test.
+ifeq ($(LW_BUILD_CONFIGURATION_IS_EXTERNAL),1)
+  LWNTEST_LWDA_ENABLED := 1
+  LW_COMPONENT_CFLAGS += -DLWNTEST_LWDA_ENABLED
+else
+  LWNTEST_LWDA_ENABLED := 0
+endif
+else
+LWNTEST_PLATFORM                     := linux
+endif
+
+include $(LW_COMPONENT_DIR)/SrcList.inc
+LW_COMPONENT_SOURCES                 += \
+	$(LWNTEST_CFILES) \
+	$(LWNTEST_CPPFILES) \
+	$(LWNTEST_CCFILES)
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_HOS),1)
+LW_COMPONENT_CFLAGS                  += \
+	-DLW_HOS \
+	-DHAS_DEVTOOLS
+else
+LW_COMPONENT_CFLAGS                  += \
+	-DLW_LINUX
+_LW_TOOLCHAIN_CFLAGS                 += \
+	-Wno-maybe-uninitialized
+endif
+
+LW_COMPONENT_CFLAGS                  += \
+	-DLW_TEGRA
+
+ifeq ($(LW_LWN_ENABLE_SPIRV),1)
+LW_COMPONENT_CFLAGS                  += \
+	-DENABLE_HLSL \
+	-DSPIRV_ENABLED
+endif
+
+LW_LWN_FORCE_FASTPATH ?= 0
+ifeq ($(LW_LWN_FORCE_FASTPATH),1)
+LW_COMPONENT_CFLAGS                  += \
+	-DLWN_FORCE_FASTPATH
+endif
+
+LW_COMPONENT_INCLUDES                += \
+	include \
+	../samples/common \
+	../common \
+	$(SHADERC_INCLUDE) \
+	$(LW_SOURCE)/gpu/drv/drivers/lwn/devtools \
+	$(LW_SOURCE)/gpu/drv/drivers/lwn/liblwn-etc1 \
+	$(LW_NN_GLL_INCLUDES)
+
+LW_COMPONENT_NEEDED_INTERFACE_DIRS   += \
+	$(LW_INTERFACE_CORE_LWRM_MEMORY) \
+	$(LW_INTERFACE_CORE_LWRM_SYNC) \
+	$(LW_INTERFACE_GPU_GRAPHICS_EGL) \
+	$(LW_INTERFACE_GPU_GRAPHICS_LWN) \
+	$(LW_INTERFACE_GPU_GRAPHICS_LWWINSYS_PRIVATE) \
+	$(LW_SOURCE)/core/utils/lwos \
+	$(LW_SOURCE)/gpu/drv/drivers/lwn/glslc \
+	$(LW_SOURCE)/gpu/drv/drivers/lwn/liblwn-etc1
+
+# HOS specific settings
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_HOS),1)
+    # LWN36: Used by lwn_vic_interop test, but apparently missing on some L4T variants.
+    LW_COMPONENT_NEEDED_INTERFACE_DIRS   += \
+        $(LW_INTERFACE_GRAPHICS_DDKVIC)
+
+    ifeq ($(LW_BUILD_CONFIGURATION_IS_EXTERNAL),0)
+        ifneq ($(LW_LWSTOMER_HOS_DDK_ROOT),)
+          _toolchain_ddk_root := $(LW_LWSTOMER_HOS_DDK_ROOT)
+        else
+          _toolchain_ddk_root := $(LW_SOURCE)/3rdparty/hos-ddk-minimal/ddk
+        endif
+
+        # needs modified Application.desc with more permissions for internal devtools
+        LW_COMPONENT_POST_PROCESS_INPUT += lwntest.desc.partial.xml \
+          $(_toolchain_ddk_root)/Common/Build/SpecFiles/SvcBase.desc.partial.xml \
+          $(_toolchain_ddk_root)/Common/Build/SpecFiles/SvcDd.desc.partial.xml
+    endif
+
+    LW_COMPONENT_OBJECTS_PREBUILT        := \
+        $(LW_NN_GLL_PREBUILTS)
+endif
+
+ifeq ($(LWNTEST_LWDA_ENABLED),1)
+  LW_COMPONENT_NEEDED_INTERFACE_DIRS += $(LW_SOURCE)/gpu/drv_lwda-9.0_odin/drivers/gpgpu/build
+
+  LW_COMPONENT_INCLUDES += $(LW_SOURCE)/gpu/drv_lwda-9.0_odin/drivers/gpgpu/lwca/inc
+endif
+
+# Our utility code has extra declarations of some LWN API functions, but we never
+# got around to figuring out where they should be owned.
+LW_COMPONENT_HAS_BROKEN_CODE := \
+	redundant-decls
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_LINUX),1)
+  LW_COMPONENT_NEEDED_INTERFACE_DIRS += \
+    $(LW_SOURCE)/gpu/drv/drivers/unix/dso-stubs/wayland/libwayland-dso-stubs/wayland-client \
+    $(LW_SOURCE)/gpu/drv/drivers/unix/dso-stubs/wayland/libwayland-dso-stubs/wayland-egl
+
+  LW_COMPONENT_INCLUDES += \
+    $(LW_TOOLS)/embedded/external-prebuilt/wayland-1.14.0/Linux-aarch64/include \
+    $(LW_TOOLS)/embedded/external-prebuilt/wayland-protocols-1.17/include \
+    $(LW_TOOLS)/embedded/external-prebuilt/wayland-protocols-1.17/src
+
+  LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += stdc++ dl pthread
+endif
+
+include $(LW_BUILD_DYNAMIC_EXELWTABLE)
+endif
+
+# variable cleanup
+LWNTEST_CFILES   :=
+LWNTEST_CPPFILES :=
+LWNTEST_CCFILES  :=
+LWNTEST_PLATFORM :=
+LWNTEST_SUFFIX   :=
+
+# Local Variables:
+# indent-tabs-mode: t
+# tab-width: 8
+# End:
+# vi: set tabstop=8 noexpandtab:

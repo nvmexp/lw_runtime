@@ -1,0 +1,152 @@
+pass_template: 
+    samplerstates:
+        colorLinearSampler:
+            filter: MIN_MAG_LINEAR_MIP_POINT
+            addressU: CLAMP
+            addressV: CLAMP
+        colorLinearSamplerWrap:
+            filter: MIN_MAG_LINEAR_MIP_POINT
+            addressU: WRAP
+            addressV: WRAP
+    type: match-color-input
+    constant-buffers: 
+        globalParams: {screenSize: SCREEN_SIZE, elapsedTime: ELAPSED_TIME, captureState: CAPTURE_STATE}
+        ControlBuf: {g_sldFilmGrain: filmGrainSlider, g_sldVignette: vignetteSlider, g_sldLUT: LUTSlider, g_DisableAnamflare: enableAnamflareCheck, g_sldGamma: gammaSlider, g_sldContrast: contrastSlider, g_sldBrightness: brightnessSlider} 
+
+typical_slider:
+      type: float
+      minimum-value: 0.0
+      maximum-value: 1.0
+      default-value: 0.5
+      ui-value-step: 0.1
+    
+user-constants:
+    - name: LUTSlider
+      ui-hint: "Use this to scale LUT effect: 0 is 0%, 1 is 100%"
+      import: [typical_slider]
+    - name: filmGrainSlider
+      ui-hint: "Use this to scale Grain effect: 0 is 0%, 1 is 100%"
+      import: [typical_slider]
+    - name: vignetteSlider 
+      ui-hint: "Use this to scale Vignette effect: 0 is 0%, 1 is 100%"
+      ui-label: "Vignette slider"
+      import: [typical_slider]
+    - name: enableAnamflareCheck
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "Enable Gaussian Anamflare"
+      default-value: true  
+    - name: gammaSlider 
+      ui-hint: "Use this to scale Gamma effect: 0 is 0%, 1 is 100%"
+      ui-label: "Gamma slider"
+      import: [typical_slider]
+    - name: brightnessSlider 
+      ui-hint: "Use this to set brightness offset: 0 is -100%, 1 is +100%"
+      ui-label: "Brightness slider"
+      import: [typical_slider]
+    - name: contrastSlider 
+      ui-hint: "Use this to scale contrast of all channels: 0 is 20%, 1 is 500%"
+      ui-label: "Contrast slider"
+      default-value: 0.5
+      import: [typical_slider]
+
+
+# Tonemapping pass
+main:
+    import: [pass_template]
+    shader: PS_ME_Colors@me.yfx
+    textures:
+        SamplerLDR:
+            import: [overlay]
+        SamplerLUT:
+            filename: MasterEffect/mclut.bmp
+        SamplerLUT3D:
+            filename: MasterEffect/mclut3d.bmp
+
+# Overlay pass
+overlay:
+    import: [pass_template]
+    shader: PS_ME_Overlay@me.yfx
+    textures:
+        SamplerLDR:
+            import: [light_combine]
+        SamplerNoise:
+            filename: MasterEffect/internal/mcnoise.tga
+            
+# Combining pass
+light_combine:
+    import: [pass_template]
+    shader: PS_ME_LightingCombine@me.yfx
+    textures:
+        SamplerBloom5:
+            import: [pass_meBloom4]
+        SamplerBloom3:
+            import: [pass_meBloom2]
+        SamplerLDR:
+            channel: PIPE_INPUTS_COLOR
+        SamplerLens1:
+            import: [pass_lensPass2]
+        SamplerDirt:
+            filename: MasterEffect/mcdirt.bmp
+        SamplerSprite:
+            filename: MasterEffect/mcsprite.bmp
+
+# Lens Flare passes
+pass_lensPrepass:
+    import: [pass_template]
+    shader: PS_ME_LensPrepass@me.yfx
+    textures:
+        SamplerLDR:
+            channel: PIPE_INPUTS_COLOR
+pass_lensPass1:
+    import: [pass_template]
+    shader: PS_ME_LensPass1@me.yfx
+    textures:
+        SamplerLens1:
+            import: [pass_lensPrepass]
+pass_lensPass2:
+    import: [pass_template]
+    shader: PS_ME_LensPass2@me.yfx
+    textures:
+        SamplerLens2:
+            import: [pass_lensPass1]
+    
+# Bloom passes
+pass_meBloom4:
+    import: [pass_template]
+    shader: PS_ME_BloomPass4@me.yfx
+    scale-width: 0.125
+    scale-height: 0.125
+    textures:
+        SamplerBloom4:
+            import: [pass_meBloom3]
+pass_meBloom3:
+    import: [pass_template]
+    shader: PS_ME_BloomPass3@me.yfx
+    scale-width: 0.25
+    scale-height: 0.25
+    textures:
+        SamplerBloom3:
+            import: [pass_meBloom2]
+pass_meBloom2:
+    import: [pass_template]
+    shader: PS_ME_BloomPass2@me.yfx
+    scale-width: 0.5
+    scale-height: 0.5
+    textures:
+        SamplerBloom2:
+            import: [pass_meBloom1]
+pass_meBloom1:
+    import: [pass_template]
+    shader: PS_ME_BloomPass1@me.yfx
+    textures:
+        SamplerBloom1:
+            import: [pass_meBloom_prepass]
+pass_meBloom_prepass:
+    import: [pass_template]
+    shader: PS_ME_BloomPrePass@me.yfx
+    textures:
+        SamplerLDR:
+            channel: PIPE_INPUTS_COLOR
+        #$t<N>:
+        #    source: HUDmask.mbp		    

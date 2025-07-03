@@ -1,0 +1,662 @@
+/* Copyright (c) 2022, LWPU CORPORATION. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *  * Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  * Neither the name of LWPU CORPORATION nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/**
+**************************************************************************
+* \file dct8x8.lw
+* \brief Contains entry point, wrappers to host and device code and benchmark.
+*
+* This sample implements forward and ilwerse Discrete Cosine Transform to blocks
+* of image pixels (of 8x8 size), as in JPEG standard. The typical work flow is
+*as
+* follows:
+* 1. Run CPU version (Host code) and measure exelwtion time;
+* 2. Run LWCA version (Device code) and measure exelwtion time;
+* 3. Output exelwtion timings and callwlate LWCA speedup.
+*/
+
+#include "Common.h"
+#include "DCT8x8_Gold.h"
+#include "BmpUtil.h"
+
+/**
+*  The number of DCT kernel calls
+*/
+#define BENCHMARK_SIZE 10
+
+/**
+*  The PSNR values over this threshold indicate images equality
+*/
+#define PSNR_THRESHOLD_EQUAL 40
+
+// includes kernels
+#include "dct8x8_kernel1.lwh"
+#include "dct8x8_kernel2.lwh"
+#include "dct8x8_kernel_short.lwh"
+#include "dct8x8_kernel_quantization.lwh"
+
+/**
+**************************************************************************
+*  Wrapper function for 1st gold version of DCT, quantization and IDCT
+*implementations
+*
+* \param ImgSrc         [IN] - Source byte image plane
+* \param ImgDst         [IN] - Quantized result byte image plane
+* \param Stride         [IN] - Stride for both source and result planes
+* \param Size           [IN] - Size of both planes
+*
+* \return Exelwtion time in milliseconds
+*/
+float WrapperGold1(byte *ImgSrc, byte *ImgDst, int Stride, ROI Size) {
+  // allocate float buffers for DCT and other data
+  int StrideF;
+  float *ImgF1 = MallocPlaneFloat(Size.width, Size.height, &StrideF);
+  float *ImgF2 = MallocPlaneFloat(Size.width, Size.height, &StrideF);
+
+  // colwert source image to float representation
+  CopyByte2Float(ImgSrc, Stride, ImgF1, StrideF, Size);
+  AddFloatPlane(-128.0f, ImgF1, StrideF, Size);
+
+  // create and start LWCA timer
+  StopWatchInterface *timerGold = 0;
+  sdkCreateTimer(&timerGold);
+  sdkResetTimer(&timerGold);
+
+  // perform block-wise DCT processing and benchmarking
+  for (int i = 0; i < BENCHMARK_SIZE; i++) {
+    sdkStartTimer(&timerGold);
+    computeDCT8x8Gold1(ImgF1, ImgF2, StrideF, Size);
+    sdkStopTimer(&timerGold);
+  }
+
+  // stop and destroy LWCA timer
+  float TimerGoldSpan = sdkGetAverageTimerValue(&timerGold);
+  sdkDeleteTimer(&timerGold);
+
+  // perform quantization
+  quantizeGoldFloat(ImgF2, StrideF, Size);
+
+  // perform block-wise IDCT processing
+  computeIDCT8x8Gold1(ImgF2, ImgF1, StrideF, Size);
+
+  // colwert image back to byte representation
+  AddFloatPlane(128.0f, ImgF1, StrideF, Size);
+  CopyFloat2Byte(ImgF1, StrideF, ImgDst, Stride, Size);
+
+  // free float buffers
+  FreePlane(ImgF1);
+  FreePlane(ImgF2);
+
+  // return time taken by the operation
+  return TimerGoldSpan;
+}
+
+/**
+**************************************************************************
+*  Wrapper function for 2nd gold version of DCT, quantization and IDCT
+*implementations
+*
+* \param ImgSrc         [IN] - Source byte image plane
+* \param ImgDst         [IN] - Quantized result byte image plane
+* \param Stride         [IN] - Stride for both source and result planes
+* \param Size           [IN] - Size of both planes
+*
+* \return Exelwtion time in milliseconds
+*/
+float WrapperGold2(byte *ImgSrc, byte *ImgDst, int Stride, ROI Size) {
+  // allocate float buffers for DCT and other data
+  int StrideF;
+  float *ImgF1 = MallocPlaneFloat(Size.width, Size.height, &StrideF);
+  float *ImgF2 = MallocPlaneFloat(Size.width, Size.height, &StrideF);
+
+  // colwert source image to float representation
+  CopyByte2Float(ImgSrc, Stride, ImgF1, StrideF, Size);
+  AddFloatPlane(-128.0f, ImgF1, StrideF, Size);
+
+  // create and start LWCA timer
+  StopWatchInterface *timerGold = 0;
+  sdkCreateTimer(&timerGold);
+  sdkResetTimer(&timerGold);
+
+  // perform block-wise DCT processing and benchmarking
+  for (int i = 0; i < BENCHMARK_SIZE; i++) {
+    sdkStartTimer(&timerGold);
+    computeDCT8x8Gold2(ImgF1, ImgF2, StrideF, Size);
+    sdkStopTimer(&timerGold);
+  }
+
+  // stop and destroy LWCA timer
+  float TimerGoldSpan = sdkGetAverageTimerValue(&timerGold);
+  sdkDeleteTimer(&timerGold);
+
+  // perform quantization
+  quantizeGoldFloat(ImgF2, StrideF, Size);
+
+  // perform block-wise IDCT processing
+  computeIDCT8x8Gold2(ImgF2, ImgF1, StrideF, Size);
+
+  // colwert image back to byte representation
+  AddFloatPlane(128.0f, ImgF1, StrideF, Size);
+  CopyFloat2Byte(ImgF1, StrideF, ImgDst, Stride, Size);
+
+  // free float buffers
+  FreePlane(ImgF1);
+  FreePlane(ImgF2);
+
+  // return time taken by the operation
+  return TimerGoldSpan;
+}
+
+/**
+**************************************************************************
+*  Wrapper function for 1st LWCA version of DCT, quantization and IDCT
+*implementations
+*
+* \param ImgSrc         [IN] - Source byte image plane
+* \param ImgDst         [IN] - Quantized result byte image plane
+* \param Stride         [IN] - Stride for both source and result planes
+* \param Size           [IN] - Size of both planes
+*
+* \return Exelwtion time in milliseconds
+*/
+float WrapperLWDA1(byte *ImgSrc, byte *ImgDst, int Stride, ROI Size) {
+  // prepare channel format descriptor for passing texture into kernels
+  lwdaChannelFormatDesc floattex = lwdaCreateChannelDesc<float>();
+
+  // allocate device memory
+  lwdaArray *Src;
+  float *Dst;
+  size_t DstStride;
+  checkLwdaErrors(lwdaMallocArray(&Src, &floattex, Size.width, Size.height));
+  checkLwdaErrors(lwdaMallocPitch((void **)(&Dst), &DstStride,
+                                  Size.width * sizeof(float), Size.height));
+  DstStride /= sizeof(float);
+
+  // colwert source image to float representation
+  int ImgSrcFStride;
+  float *ImgSrcF = MallocPlaneFloat(Size.width, Size.height, &ImgSrcFStride);
+  CopyByte2Float(ImgSrc, Stride, ImgSrcF, ImgSrcFStride, Size);
+  AddFloatPlane(-128.0f, ImgSrcF, ImgSrcFStride, Size);
+
+  // copy from host memory to device
+  checkLwdaErrors(lwdaMemcpy2DToArray(
+      Src, 0, 0, ImgSrcF, ImgSrcFStride * sizeof(float),
+      Size.width * sizeof(float), Size.height, lwdaMemcpyHostToDevice));
+
+  // setup exelwtion parameters
+  dim3 threads(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 grid(Size.width / BLOCK_SIZE, Size.height / BLOCK_SIZE);
+
+  // create and start LWCA timer
+  StopWatchInterface *timerLWDA = 0;
+  sdkCreateTimer(&timerLWDA);
+  sdkResetTimer(&timerLWDA);
+
+  // execute DCT kernel and benchmark
+  lwdaTextureObject_t TexSrc;
+  lwdaResourceDesc texRes;
+  memset(&texRes, 0, sizeof(lwdaResourceDesc));
+
+  texRes.resType = lwdaResourceTypeArray;
+  texRes.res.array.array = Src;
+
+  lwdaTextureDesc texDescr;
+  memset(&texDescr, 0, sizeof(lwdaTextureDesc));
+
+  texDescr.normalizedCoords = false;
+  texDescr.filterMode = lwdaFilterModeLinear;
+  texDescr.addressMode[0] = lwdaAddressModeWrap;
+  texDescr.addressMode[1] = lwdaAddressModeWrap;
+  texDescr.readMode = lwdaReadModeElementType;
+
+  checkLwdaErrors(lwdaCreateTextureObject(&TexSrc, &texRes, &texDescr, NULL));
+
+  for (int i = 0; i < BENCHMARK_SIZE; i++) {
+    sdkStartTimer(&timerLWDA);
+    LWDAkernel1DCT<<<grid, threads>>>(Dst, (int)DstStride, 0, 0, TexSrc);
+    checkLwdaErrors(lwdaDeviceSynchronize());
+    sdkStopTimer(&timerLWDA);
+  }
+
+  getLastLwdaError("Kernel exelwtion failed");
+
+  // finalize LWCA timer
+  float TimerLWDASpan = sdkGetAverageTimerValue(&timerLWDA);
+  sdkDeleteTimer(&timerLWDA);
+
+  // execute Quantization kernel
+  LWDAkernelQuantizationFloat<<<grid, threads>>>(Dst, (int)DstStride);
+  getLastLwdaError("Kernel exelwtion failed");
+
+  // copy quantized coefficients from host memory to device array
+  checkLwdaErrors(lwdaMemcpy2DToArray(Src, 0, 0, Dst, DstStride * sizeof(float),
+                                      Size.width * sizeof(float), Size.height,
+                                      lwdaMemcpyDeviceToDevice));
+
+  // execute IDCT kernel
+  LWDAkernel1IDCT<<<grid, threads>>>(Dst, (int)DstStride, 0, 0, TexSrc);
+  getLastLwdaError("Kernel exelwtion failed");
+
+  // copy quantized image block to host
+  checkLwdaErrors(lwdaMemcpy2D(
+      ImgSrcF, ImgSrcFStride * sizeof(float), Dst, DstStride * sizeof(float),
+      Size.width * sizeof(float), Size.height, lwdaMemcpyDeviceToHost));
+
+  // colwert image back to byte representation
+  AddFloatPlane(128.0f, ImgSrcF, ImgSrcFStride, Size);
+  CopyFloat2Byte(ImgSrcF, ImgSrcFStride, ImgDst, Stride, Size);
+
+  // clean up memory
+  checkLwdaErrors(lwdaDestroyTextureObject(TexSrc));
+  checkLwdaErrors(lwdaFreeArray(Src));
+  checkLwdaErrors(lwdaFree(Dst));
+  FreePlane(ImgSrcF);
+
+  // return time taken by the operation
+  return TimerLWDASpan;
+}
+
+/**
+**************************************************************************
+*  Wrapper function for 2nd LWCA version of DCT, quantization and IDCT
+*implementations
+*
+* \param ImgSrc         [IN] - Source byte image plane
+* \param ImgDst         [IN] - Quantized result byte image plane
+* \param Stride         [IN] - Stride for both source and result planes
+* \param Size           [IN] - Size of both planes
+*
+* \return Exelwtion time in milliseconds
+*/
+
+float WrapperLWDA2(byte *ImgSrc, byte *ImgDst, int Stride, ROI Size) {
+  // allocate host buffers for DCT and other data
+  int StrideF;
+  float *ImgF1 = MallocPlaneFloat(Size.width, Size.height, &StrideF);
+
+  // colwert source image to float representation
+  CopyByte2Float(ImgSrc, Stride, ImgF1, StrideF, Size);
+  AddFloatPlane(-128.0f, ImgF1, StrideF, Size);
+
+  // allocate device memory
+  float *src, *dst;
+  size_t DeviceStride;
+  checkLwdaErrors(lwdaMallocPitch((void **)&src, &DeviceStride,
+                                  Size.width * sizeof(float), Size.height));
+  checkLwdaErrors(lwdaMallocPitch((void **)&dst, &DeviceStride,
+                                  Size.width * sizeof(float), Size.height));
+  DeviceStride /= sizeof(float);
+
+  // copy from host memory to device
+  checkLwdaErrors(lwdaMemcpy2D(
+      src, DeviceStride * sizeof(float), ImgF1, StrideF * sizeof(float),
+      Size.width * sizeof(float), Size.height, lwdaMemcpyHostToDevice));
+
+  // create and start LWCA timer
+  StopWatchInterface *timerLWDA = 0;
+  sdkCreateTimer(&timerLWDA);
+
+  // setup exelwtion parameters
+  dim3 GridFullWarps(Size.width / KER2_BLOCK_WIDTH,
+                     Size.height / KER2_BLOCK_HEIGHT, 1);
+  dim3 ThreadsFullWarps(8, KER2_BLOCK_WIDTH / 8, KER2_BLOCK_HEIGHT / 8);
+
+  // perform block-wise DCT processing and benchmarking
+  const int numIterations = 100;
+
+  for (int i = -1; i < numIterations; i++) {
+    if (i == 0) {
+      checkLwdaErrors(lwdaDeviceSynchronize());
+      sdkResetTimer(&timerLWDA);
+      sdkStartTimer(&timerLWDA);
+    }
+
+    LWDAkernel2DCT<<<GridFullWarps, ThreadsFullWarps>>>(dst, src,
+                                                        (int)DeviceStride);
+    getLastLwdaError("Kernel exelwtion failed");
+  }
+
+  checkLwdaErrors(lwdaDeviceSynchronize());
+  sdkStopTimer(&timerLWDA);
+
+  // finalize timing of LWCA Kernels
+  float avgTime = (float)sdkGetTimerValue(&timerLWDA) / (float)numIterations;
+  sdkDeleteTimer(&timerLWDA);
+  printf("%f MPix/s //%f ms\n",
+         (1E-6 * (float)Size.width * (float)Size.height) / (1E-3 * avgTime),
+         avgTime);
+
+  // setup exelwtion parameters for quantization
+  dim3 ThreadsSmallBlocks(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 GridSmallBlocks(Size.width / BLOCK_SIZE, Size.height / BLOCK_SIZE);
+
+  // execute Quantization kernel
+  LWDAkernelQuantizationFloat<<<GridSmallBlocks, ThreadsSmallBlocks>>>(
+      dst, (int)DeviceStride);
+  getLastLwdaError("Kernel exelwtion failed");
+
+  // perform block-wise IDCT processing
+  LWDAkernel2IDCT<<<GridFullWarps, ThreadsFullWarps>>>(src, dst,
+                                                       (int)DeviceStride);
+  checkLwdaErrors(lwdaDeviceSynchronize());
+  getLastLwdaError("Kernel exelwtion failed");
+
+  // copy quantized image block to host
+  checkLwdaErrors(lwdaMemcpy2D(
+      ImgF1, StrideF * sizeof(float), src, DeviceStride * sizeof(float),
+      Size.width * sizeof(float), Size.height, lwdaMemcpyDeviceToHost));
+
+  // colwert image back to byte representation
+  AddFloatPlane(128.0f, ImgF1, StrideF, Size);
+  CopyFloat2Byte(ImgF1, StrideF, ImgDst, Stride, Size);
+
+  // clean up memory
+  checkLwdaErrors(lwdaFree(dst));
+  checkLwdaErrors(lwdaFree(src));
+  FreePlane(ImgF1);
+
+  // return time taken by the operation
+  return avgTime;
+}
+
+/**
+**************************************************************************
+*  Wrapper function for short LWCA version of DCT, quantization and IDCT
+*implementations
+*
+* \param ImgSrc         [IN] - Source byte image plane
+* \param ImgDst         [IN] - Quantized result byte image plane
+* \param Stride         [IN] - Stride for both source and result planes
+* \param Size           [IN] - Size of both planes
+*
+* \return Exelwtion time in milliseconds
+*/
+float WrapperLWDAshort(byte *ImgSrc, byte *ImgDst, int Stride, ROI Size) {
+  // allocate host buffers for DCT and other data
+  int StrideS;
+  short *ImgS1 = MallocPlaneShort(Size.width, Size.height, &StrideS);
+
+  // colwert source image to short representation centered at 128
+  for (int i = 0; i < Size.height; i++) {
+    for (int j = 0; j < Size.width; j++) {
+      ImgS1[i * StrideS + j] = (short)ImgSrc[i * Stride + j] - 128;
+    }
+  }
+
+  // allocate device memory
+  short *SrcDst;
+  size_t DeviceStride;
+  checkLwdaErrors(lwdaMallocPitch((void **)(&SrcDst), &DeviceStride,
+                                  Size.width * sizeof(short), Size.height));
+  DeviceStride /= sizeof(short);
+
+  // copy from host memory to device
+  checkLwdaErrors(lwdaMemcpy2D(
+      SrcDst, DeviceStride * sizeof(short), ImgS1, StrideS * sizeof(short),
+      Size.width * sizeof(short), Size.height, lwdaMemcpyHostToDevice));
+
+  // create and start LWCA timer
+  StopWatchInterface *timerLibJpeg = 0;
+  sdkCreateTimer(&timerLibJpeg);
+  sdkResetTimer(&timerLibJpeg);
+
+  // setup exelwtion parameters
+  dim3 GridShort(Size.width / KERS_BLOCK_WIDTH, Size.height / KERS_BLOCK_HEIGHT,
+                 1);
+  dim3 ThreadsShort(8, KERS_BLOCK_WIDTH / 8, KERS_BLOCK_HEIGHT / 8);
+
+  // perform block-wise DCT processing and benchmarking
+  sdkStartTimer(&timerLibJpeg);
+  LWDAkernelShortDCT<<<GridShort, ThreadsShort>>>(SrcDst, (int)DeviceStride);
+  checkLwdaErrors(lwdaDeviceSynchronize());
+  sdkStopTimer(&timerLibJpeg);
+  getLastLwdaError("Kernel exelwtion failed");
+
+  // stop and destroy LWCA timer
+  float TimerLibJpegSpan16b = sdkGetAverageTimerValue(&timerLibJpeg);
+  sdkDeleteTimer(&timerLibJpeg);
+
+  // setup exelwtion parameters for quantization
+  dim3 ThreadsSmallBlocks(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 GridSmallBlocks(Size.width / BLOCK_SIZE, Size.height / BLOCK_SIZE);
+
+  // execute Quantization kernel
+  LWDAkernelQuantizationShort<<<GridSmallBlocks, ThreadsSmallBlocks>>>(
+      SrcDst, (int)DeviceStride);
+  getLastLwdaError("Kernel exelwtion failed");
+
+  // perform block-wise IDCT processing
+  LWDAkernelShortIDCT<<<GridShort, ThreadsShort>>>(SrcDst, (int)DeviceStride);
+  checkLwdaErrors(lwdaDeviceSynchronize());
+  getLastLwdaError("Kernel exelwtion failed");
+
+  // copy quantized image block to host
+  checkLwdaErrors(lwdaMemcpy2D(
+      ImgS1, StrideS * sizeof(short), SrcDst, DeviceStride * sizeof(short),
+      Size.width * sizeof(short), Size.height, lwdaMemcpyDeviceToHost));
+
+  // colwert image back to byte representation
+  for (int i = 0; i < Size.height; i++) {
+    for (int j = 0; j < Size.width; j++) {
+      ImgDst[i * Stride + j] = clamp_0_255(ImgS1[i * StrideS + j] + 128);
+    }
+  }
+
+  // free float buffers
+  checkLwdaErrors(lwdaFree(SrcDst));
+  FreePlane(ImgS1);
+
+  // return time taken by the operation
+  return TimerLibJpegSpan16b;
+}
+
+/**
+**************************************************************************
+*  Program entry point
+*
+* \param argc       [IN] - Number of command-line arguments
+* \param argv       [IN] - Array of command-line arguments
+*
+* \return Status code
+*/
+
+int main(int argc, char **argv) {
+  //
+  // Sample initialization
+  //
+  printf("%s Starting...\n\n", argv[0]);
+
+  // initialize LWCA
+  findLwdaDevice(argc, (const char **)argv);
+
+  // source and results image filenames
+  char SampleImageFname[] = "teapot512.bmp";
+  char SampleImageFnameResGold1[] = "teapot512_gold1.bmp";
+  char SampleImageFnameResGold2[] = "teapot512_gold2.bmp";
+  char SampleImageFnameResLWDA1[] = "teapot512_lwda1.bmp";
+  char SampleImageFnameResLWDA2[] = "teapot512_lwda2.bmp";
+  char SampleImageFnameResLWDAshort[] = "teapot512_lwda_short.bmp";
+
+  char *pSampleImageFpath = sdkFindFilePath(SampleImageFname, argv[0]);
+
+  if (pSampleImageFpath == NULL) {
+    printf("dct8x8 could not locate Sample Image <%s>\nExiting...\n",
+           pSampleImageFpath);
+    exit(EXIT_FAILURE);
+  }
+
+  // preload image (acquire dimensions)
+  int ImgWidth, ImgHeight;
+  ROI ImgSize;
+  int res = PreLoadBmp(pSampleImageFpath, &ImgWidth, &ImgHeight);
+  ImgSize.width = ImgWidth;
+  ImgSize.height = ImgHeight;
+
+  // CONSOLE INFORMATION: saying hello to user
+  printf("LWCA sample DCT/IDCT implementation\n");
+  printf("===================================\n");
+  printf("Loading test image: %s... ", SampleImageFname);
+
+  if (res) {
+    printf("\nError: Image file not found or invalid!\n");
+    exit(EXIT_FAILURE);
+    return 1;
+  }
+
+  // check image dimensions are multiples of BLOCK_SIZE
+  if (ImgWidth % BLOCK_SIZE != 0 || ImgHeight % BLOCK_SIZE != 0) {
+    printf("\nError: Input image dimensions must be multiples of 8!\n");
+    exit(EXIT_FAILURE);
+    return 1;
+  }
+
+  printf("[%d x %d]... ", ImgWidth, ImgHeight);
+
+  // allocate image buffers
+  int ImgStride;
+  byte *ImgSrc = MallocPlaneByte(ImgWidth, ImgHeight, &ImgStride);
+  byte *ImgDstGold1 = MallocPlaneByte(ImgWidth, ImgHeight, &ImgStride);
+  byte *ImgDstGold2 = MallocPlaneByte(ImgWidth, ImgHeight, &ImgStride);
+  byte *ImgDstLWDA1 = MallocPlaneByte(ImgWidth, ImgHeight, &ImgStride);
+  byte *ImgDstLWDA2 = MallocPlaneByte(ImgWidth, ImgHeight, &ImgStride);
+  byte *ImgDstLWDAshort = MallocPlaneByte(ImgWidth, ImgHeight, &ImgStride);
+
+  // load sample image
+  LoadBmpAsGray(pSampleImageFpath, ImgStride, ImgSize, ImgSrc);
+
+  //
+  // RUNNING WRAPPERS
+  //
+
+  // compute Gold 1 version of DCT/quantization/IDCT
+  printf("Success\nRunning Gold 1 (CPU) version... ");
+  float TimeGold1 = WrapperGold1(ImgSrc, ImgDstGold1, ImgStride, ImgSize);
+
+  // compute Gold 2 version of DCT/quantization/IDCT
+  printf("Success\nRunning Gold 2 (CPU) version... ");
+  float TimeGold2 = WrapperGold2(ImgSrc, ImgDstGold2, ImgStride, ImgSize);
+
+  // compute LWCA 1 version of DCT/quantization/IDCT
+  printf("Success\nRunning LWCA 1 (GPU) version... ");
+  float TimeLWDA1 = WrapperLWDA1(ImgSrc, ImgDstLWDA1, ImgStride, ImgSize);
+
+  // compute LWCA 2 version of DCT/quantization/IDCT
+  printf("Success\nRunning LWCA 2 (GPU) version... ");
+  float TimeLWDA2 = WrapperLWDA2(ImgSrc, ImgDstLWDA2, ImgStride, ImgSize);
+
+  // compute LWCA short version of DCT/quantization/IDCT
+  printf("Success\nRunning LWCA short (GPU) version... ");
+  float TimeLWDAshort =
+      WrapperLWDAshort(ImgSrc, ImgDstLWDAshort, ImgStride, ImgSize);
+  //
+  // Exelwtion statistics, result saving and validation
+  //
+
+  // dump result of Gold 1 processing
+  printf("Success\nDumping result to %s... ", SampleImageFnameResGold1);
+  DumpBmpAsGray(SampleImageFnameResGold1, ImgDstGold1, ImgStride, ImgSize);
+
+  // dump result of Gold 2 processing
+  printf("Success\nDumping result to %s... ", SampleImageFnameResGold2);
+  DumpBmpAsGray(SampleImageFnameResGold2, ImgDstGold2, ImgStride, ImgSize);
+
+  // dump result of LWCA 1 processing
+  printf("Success\nDumping result to %s... ", SampleImageFnameResLWDA1);
+  DumpBmpAsGray(SampleImageFnameResLWDA1, ImgDstLWDA1, ImgStride, ImgSize);
+
+  // dump result of LWCA 2 processing
+  printf("Success\nDumping result to %s... ", SampleImageFnameResLWDA2);
+  DumpBmpAsGray(SampleImageFnameResLWDA2, ImgDstLWDA2, ImgStride, ImgSize);
+
+  // dump result of LWCA short processing
+  printf("Success\nDumping result to %s... ", SampleImageFnameResLWDAshort);
+  DumpBmpAsGray(SampleImageFnameResLWDAshort, ImgDstLWDAshort, ImgStride,
+                ImgSize);
+  // print speed info
+  printf("Success\n");
+
+  printf("Processing time (LWCA 1)    : %f ms \n", TimeLWDA1);
+  printf("Processing time (LWCA 2)    : %f ms \n", TimeLWDA2);
+  printf("Processing time (LWCA short): %f ms \n", TimeLWDAshort);
+
+  // callwlate PSNR between each pair of images
+  float PSNR_Src_DstGold1 =
+      CallwlatePSNR(ImgSrc, ImgDstGold1, ImgStride, ImgSize);
+  float PSNR_Src_DstGold2 =
+      CallwlatePSNR(ImgSrc, ImgDstGold2, ImgStride, ImgSize);
+  float PSNR_Src_DstLWDA1 =
+      CallwlatePSNR(ImgSrc, ImgDstLWDA1, ImgStride, ImgSize);
+  float PSNR_Src_DstLWDA2 =
+      CallwlatePSNR(ImgSrc, ImgDstLWDA2, ImgStride, ImgSize);
+  float PSNR_Src_DstLWDAshort =
+      CallwlatePSNR(ImgSrc, ImgDstLWDAshort, ImgStride, ImgSize);
+  float PSNR_DstGold1_DstLWDA1 =
+      CallwlatePSNR(ImgDstGold1, ImgDstLWDA1, ImgStride, ImgSize);
+  float PSNR_DstGold2_DstLWDA2 =
+      CallwlatePSNR(ImgDstGold2, ImgDstLWDA2, ImgStride, ImgSize);
+  float PSNR_DstGold2_DstLWDA16b =
+      CallwlatePSNR(ImgDstGold2, ImgDstLWDAshort, ImgStride, ImgSize);
+
+  printf("PSNR Original    <---> CPU(Gold 1)    : %f\n", PSNR_Src_DstGold1);
+  printf("PSNR Original    <---> CPU(Gold 2)    : %f\n", PSNR_Src_DstGold2);
+  printf("PSNR Original    <---> GPU(LWCA 1)    : %f\n", PSNR_Src_DstLWDA1);
+  printf("PSNR Original    <---> GPU(LWCA 2)    : %f\n", PSNR_Src_DstLWDA2);
+  printf("PSNR Original    <---> GPU(LWCA short): %f\n", PSNR_Src_DstLWDAshort);
+  printf("PSNR CPU(Gold 1) <---> GPU(LWCA 1)    : %f\n",
+         PSNR_DstGold1_DstLWDA1);
+  printf("PSNR CPU(Gold 2) <---> GPU(LWCA 2)    : %f\n",
+         PSNR_DstGold2_DstLWDA2);
+  printf("PSNR CPU(Gold 2) <---> GPU(LWCA short): %f\n",
+         PSNR_DstGold2_DstLWDA16b);
+
+  bool bTestResult = (PSNR_DstGold1_DstLWDA1 > PSNR_THRESHOLD_EQUAL &&
+                      PSNR_DstGold2_DstLWDA2 > PSNR_THRESHOLD_EQUAL &&
+                      PSNR_DstGold2_DstLWDA16b > PSNR_THRESHOLD_EQUAL);
+
+  //
+  // Finalization
+  //
+
+  // release byte planes
+  FreePlane(ImgSrc);
+  FreePlane(ImgDstGold1);
+  FreePlane(ImgDstGold2);
+  FreePlane(ImgDstLWDA1);
+  FreePlane(ImgDstLWDA2);
+  FreePlane(ImgDstLWDAshort);
+
+  // finalize
+  printf("\nTest Summary...\n");
+
+  if (!bTestResult) {
+    printf("Test failed!\n");
+    exit(EXIT_FAILURE);
+  }
+
+  printf("Test passed\n");
+  exit(EXIT_SUCCESS);
+}

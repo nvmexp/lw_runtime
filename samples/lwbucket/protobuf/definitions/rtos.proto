@@ -1,0 +1,146 @@
+// _LWRM_COPYRIGHT_BEGIN_
+//
+// Copyright 2013-2019 by LWPU Corporation.  All rights reserved.  All
+// information contained herein is proprietary and confidential to LWPU
+// Corporation.  Any use, reproduction, or disclosure without the written
+// permission of LWPU Corporation is prohibited.
+//
+// _LWRM_COPYRIGHT_END_
+//
+
+package Rtos;
+
+//
+// This enum uniquely identifies falcon running RTOS.
+// Enum values should not change or get recycled.
+//
+enum FlcnId
+{
+    FLCN_PMU    = 1;
+    FLCN_DPU    = 2;
+    FLCN_SEC2   = 3;
+    FLCN_LWLINK = 4;
+    FLCN_BSP    = 5;
+    FLCN_FBFLCN = 6;
+    FLCN_HDA    = 7;
+    FLCN_MSENC0 = 8;
+    FLCN_MSENC1 = 9;
+    FLCN_MSENC2 = 10;
+};
+
+//
+// This enum identifies the falcon security model.
+// Enum values match LW_PFALCON_FALCON_HWCFG1_SELWRITY_MODEL_xyz.
+//
+enum FlcnSelwrity
+{
+    FLCN_SELWRITY_MODEL_NONE   = 0;
+    FLCN_SELWRITY_MODEL_LIGHT  = 2;
+    FLCN_SELWRITY_MODEL_HEAVY  = 3;
+};
+
+//
+// This message contains state of most important Falcon registers.
+//
+message FlcnRegs
+{
+    optional uint32 reg_ind_pc          = 1;
+    optional uint32 reg_ind_sp          = 2;
+    optional uint32 reg_ind_imb         = 3;
+    optional uint32 reg_ind_dmb         = 4;
+    optional uint32 reg_ind_csw         = 5;
+    optional uint32 reg_ind_ctx         = 6;
+    optional uint32 reg_ind_exci        = 7;
+
+    optional uint32 reg_os              = 21 [deprecated = true];
+    optional uint32 reg_cpuctl          = 22 [deprecated = true];
+    optional uint32 reg_idlestate       = 23 [deprecated = true];
+    optional uint32 reg_mailbox0        = 24 [deprecated = true];
+    optional uint32 reg_mailbox1        = 25 [deprecated = true];
+    optional uint32 reg_irqstat         = 26 [deprecated = true];
+    optional uint32 reg_irqmode         = 27 [deprecated = true];
+    optional uint32 reg_irqmask         = 28 [deprecated = true];
+    optional uint32 reg_irqdest         = 29 [deprecated = true];
+    optional uint32 reg_engctl          = 30 [deprecated = true];
+    optional uint32 reg_lwrctx          = 31 [deprecated = true];
+    optional uint32 reg_nxtctx          = 32 [deprecated = true];
+
+    optional uint32 bar0_error          = 51;
+    optional uint32 bar0_addr           = 52;
+    optional uint32 bar0_data           = 53;
+    optional uint32 bar0_timeout        = 54;
+    optional uint32 bar0_ctl            = 55;
+
+    repeated uint32 regs_mailbox        = 101 [packed=true];
+    repeated uint32 regs_debug          = 102 [packed=true];
+    repeated uint32 pmu_imem_block_info = 103 [packed=true];
+    repeated uint32 dmem_dump           = 104 [packed=true];
+    repeated uint32 regs_pctrace        = 105 [packed=true];
+    repeated uint32 reg_rstat           = 106 [packed=true];
+};
+
+//
+// This enum uniquely identifies tasks on falcons running RTOS.
+// Enum value should be preserved in case task is removed in RM / Falcon.
+//
+enum RtosTaskId
+{
+    RTOS_PMU_TASK_ID_UNKNOWN        =   1;
+    RTOS_PMU_TASK_ID_IDLE           =   2;
+    RTOS_PMU_TASK_ID_CMDMGMT        =   3;
+    RTOS_PMU_TASK_ID_GCX            =   4;
+    RTOS_PMU_TASK_ID_LPWR           =   5;
+    RTOS_PMU_TASK_ID_FBBA           =   6;
+    RTOS_PMU_TASK_ID_I2C            =   7;
+    RTOS_PMU_TASK_ID_SEQ            =   8;
+    RTOS_PMU_TASK_ID_PCM            =   9;
+    RTOS_PMU_TASK_ID_PCMEVT         =  10;
+    RTOS_PMU_TASK_ID_PMGR           =  11;
+    RTOS_PMU_TASK_ID_PERFMON        =  12;
+    RTOS_PMU_TASK_ID_DISP           =  13;
+    RTOS_PMU_TASK_ID_THERM          =  14;
+    RTOS_PMU_TASK_ID_HDCP           =  15;
+    RTOS_PMU_TASK_ID_ACR            =  16;
+    RTOS_PMU_TASK_ID_SPI            =  17;
+    RTOS_PMU_TASK_ID_PERF           =  18;
+    RTOS_PMU_TASK_ID_FAS            =  19;
+    RTOS_PMU_TASK_ID_PERF_DAEMON    =  20;
+    RTOS_PMU_TASK_ID_BIF            =  21;
+    RTOS_PMU_TASK_ID_LPWR_LP        =  25;
+    RTOS_PMU_TASK_ID_NNE            =  26;
+
+    RTOS_DPU_TASK_ID_UNKNOWN        = 101;
+    RTOS_DPU_TASK_ID_IDLE           = 102;
+    RTOS_DPU_TASK_ID_DISPATCH       = 103;
+    RTOS_DPU_TASK_ID_REGCACHE       = 104;
+    RTOS_DPU_TASK_ID_VRR            = 105;
+
+    RTOS_SEC2_TASK_ID_UNKNOWN       = 201;
+    RTOS_SEC2_TASK_ID_IDLE          = 202;
+    RTOS_SEC2_TASK_ID_CMDMGMT       = 203;
+};
+
+//
+// This message contains a common RTOS state.
+//
+message RtosState
+{
+    optional uint32         isr_stack_size  = 1;
+    optional uint32         isr_stack_free  = 2;
+    optional uint32         heap_total      = 3;
+    optional uint32         heap_free       = 4;
+    optional RtosTaskId     running_task_id = 5;
+};
+
+//
+// This message contains a task specific RTOS state.
+//
+message RtosTaskState
+{
+    optional RtosTaskId     task_id      = 1;
+    optional uint32         priv_level   = 2;
+    optional uint32         heap_used    = 3;
+    optional uint32         stack_size   = 4;
+    optional uint32         stack_free   = 5;
+    repeated uint32         attached_ovl = 6;
+};

@@ -1,0 +1,46 @@
+
+import dcgm_agent
+import dcgm_structs
+
+'''
+Class for managing a group of field IDs in the host engine.
+'''
+class DcgmFieldGroup:
+    '''
+    Constructor
+
+    dcgmHandle - DcgmHandle() instance to use for communicating with the host engine
+    name - Name of the field group to use within DCGM. This must be unique
+    fieldIds - Fields that are part of this group
+    fieldGroupId - If provided, this is used to initialize the object from an existing field group ID
+    '''
+    def __init__(self, dcgmHandle, name="", fieldIds=[], fieldGroupId=None):
+        self.name = name
+        self.fieldIds = fieldIds
+        self._dcgmHandle = dcgmHandle
+        if fieldGroupId is not None:
+            self.fieldGroupId = fieldGroupId
+        else:
+            self.fieldGroupId = None #Assign here so the destructor doesn't fail if the call below fails
+            self.fieldGroupId = dcgm_agent.dcgmFieldGroupCreate(self._dcgmHandle.handle, fieldIds, name)
+
+    '''
+    Remove this field group from DCGM. This object can no longer be passed to other APIs after this call.
+    '''
+    def Delete(self):
+        if self.fieldGroupId is not None:
+            try:
+                try:
+                    dcgm_agent.dcgmFieldGroupDestroy(self._dcgmHandle.handle, self.fieldGroupId)
+                except dcgm_structs.dcgmExceptionClass(dcgm_structs.DCGM_ST_NO_DATA):
+                    #someone may have deleted the group under us. That's ok.
+                    pass
+            except AttributeError as ae:
+                # When we're cleaning up at the end, dcgm_agent and dcgm_structs have been unloaded and we'll 
+                # get an AttributeError: "'NoneType' object has no 'dcgmExceptionClass'" Ignore this
+                pass
+            self.fieldGroupId = None
+
+    #Destructor
+    def __del__(self):
+        self.Delete()

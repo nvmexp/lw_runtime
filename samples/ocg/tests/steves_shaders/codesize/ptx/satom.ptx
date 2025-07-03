@@ -1,0 +1,64 @@
+.version 3.1
+.target sm_20
+.shared .f32 gf;
+.shared .s32 gs;
+.shared .u32 gu;
+
+.entry main {
+   .reg .s32 as, bs;
+   .reg .u32 au, bu;
+   .reg .f32 af, bf;
+
+   // atomic add
+   mov.f32 af, 0.0;
+   atom.shared.add.f32 af, [gf], 3.5;
+
+   atom.shared.add.s32 as, [gs], 3;
+   atom.shared.add.u32 au, [gu], 44;
+
+   // Bitwise operations
+   atom.shared.and.b32 au, [gu], au;
+   atom.shared.or.b32  au, [gu], au;
+   atom.shared.xor.b32 au, [gu], au;
+
+   // Inc/Dec
+   atom.shared.inc.u32  au, [gu], 55;
+   atom.shared.dec.u32  au, [gu], 101;
+
+   // Min/Max
+   atom.shared.min.u32  au, [gu], 55;
+   atom.shared.max.s32  as, [gs], 555;
+
+   // exch, swap
+   atom.shared.cas.b32   au, [gu], au, 444;
+   atom.shared.exch.b32  au, [gu], au;
+
+   bar.sync 0;
+  
+   st.shared.s32 [gs], as;
+   st.shared.u32 [gu], au;
+   st.shared.f32 [gf], af;
+
+
+   bar.sync 0;
+
+   // Global memory reduction
+   // add
+   red.shared.add.s32  [gs + 8], 44;
+   red.shared.add.u32  [gu + 16], 66;
+
+   // Bitwise
+   red.shared.and.b32  [gs], as;
+   red.shared.xor.b32  [gu], 44;
+   red.shared.or.b32   [gu], 90;
+
+   // Inc, Dec
+   red.shared.inc.u32  [gu], 33;
+   red.shared.dec.u32  [gu], 3;
+
+   // Min, Max
+   red.shared.min.s32  [gs], 44;
+   red.shared.max.u32  [gu], 34;
+
+   exit;
+}

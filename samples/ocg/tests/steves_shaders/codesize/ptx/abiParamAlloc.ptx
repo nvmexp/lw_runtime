@@ -1,0 +1,50 @@
+.version 3.1
+.target sm_20
+
+.func (.param .u64 out) myadd (.reg .u64 a, .reg .u32 b, .reg .u64 c,
+                               .reg .u32 e, .reg .u64 f, .reg .u32 g, .reg .u32 h,
+                               .reg .u32 i, .reg .u32 j, .reg .u32 k, .reg .u32 l)
+{
+    .reg .u32 cc, r;
+    .reg .u32 aLocal, cLocal, fLocal, gLocal, hLocal;
+    .reg .u64 rLocal;
+
+    cvt.u32.u64   aLocal, a;
+    cvt.u32.u64   cLocal, c;
+    cvt.u32.u64   fLocal, f;
+    cvt.u32.u16   gLocal, g;
+    cvt.u32.u16    hLocal, h;
+
+    add.u32       r, aLocal, b;
+    add.u32       r, r, cLocal;
+    add.u32       r, r, e;
+    add.u32       r, r, fLocal;
+    add.u32       r, r, gLocal;
+    add.u32       r, r, hLocal;
+    add.u32       r, r, i;
+    add.u32       r, r, j;
+    add.u32       r, r, k;
+    add.u32       r, r, l;
+    cvt.u64.u32   rLocal, r;
+
+    st.param.u32  [out], rLocal;
+    ret;
+}
+
+.entry main(.param .u32 output, .param .u32 output1)
+{
+    .reg .u32 o, temp;
+    .reg .u64 a;
+
+    call (a), myadd, (4, 6, 8, 14, 16, 18, 20, 22, 24, 26, 28);
+    ld.param.u32  o, [output];
+    st.b32        [o], a;
+
+    cvt.u32.u64  temp, a;
+    call (a), myadd, (a, temp, a, 14, 16, 18, 20, 22, 24, 26, 28);
+    ld.param.u32  o, [output1];
+    st.b32        [o], a;
+
+    exit;
+}
+ 

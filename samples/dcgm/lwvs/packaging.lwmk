@@ -1,0 +1,48 @@
+##############################################################################
+# Define the rules to create packages
+##############################################################################
+
+# lwvs packages go here (future testing package)
+PACKAGE_DIR := $(OUTPUTDIR)/packages/
+
+# the distributable release package goes in its own folder
+DIST_PACKAGE_DIR := $(PACKAGE_DIR)/distribution/
+
+DIST_DIR_NAME := lwpu-validation-suite-$(LW_TARGET_ARCH)-$(DRIVER_VERSION)
+DIST_DIR := $(DIST_PACKAGE_DIR)/$(DIST_DIR_NAME)
+DIST_DOC_DIR := $(DIST_DIR)/doc/
+
+DIST_PACKAGE := $(DIST_DIR).tar.gz
+
+build: $(DIST_PACKAGE)
+
+clean:
+	-$(RM) $(DIST_PACKAGE)
+	-$(RM) $(DIST_DIR)/*
+	
+# Copy all the needed files to the $(DIST_DIR) directory, then archive it
+$(DIST_PACKAGE): $(DIST_DIR)/lwvs.conf $(DIST_DIR)/lwvs \
+					$(DIST_DIR)/plugins  $(DIST_DIR)/configfile_examples \
+                    $(DIST_DIR)/docs $(DIST_DIR)/python_examples
+	@$(ECHO) Creating package $@
+	# clear all read only flags
+	cd $(DIST_DIR) && $(CHMOD) u+w -R .
+	cd $(DIST_DIR) && /bin/ln -sf ./lwvs ./lwpu-vs
+	# archive
+	cd $(DIST_PACKAGE_DIR) && $(TAR) cf $(DIST_DIR_NAME).tar $(DIST_DIR_NAME)
+	$(GZIP_CMD) -f $(@:.tar.gz=.tar)
+
+# Copy files from the output dir to the release package dir
+# All files that make it to the package dir should be free of sensitive strings
+$(DIST_DIR)/%: $(OUTPUTDIR)/%
+	$(MKDIR) -p $(DIST_DIR)    
+	@$(ECHO) Copying $< to $@
+	@$(COPY) -r $< $@
+	$(call LW_CHECK_GUARDWORDS_CMD,$@)
+
+# Copy files from the output dir to the release package docs dir
+$(DIST_DOC_DIR)/%: $(OUTPUTDIR)/%
+	$(MKDIR) -p $(DIST_DOC_DIR)    
+	@$(ECHO) Copying $< to $@
+	@$(COPY) $< $@
+	$(call LW_CHECK_GUARDWORDS_CMD,$@)

@@ -1,0 +1,59 @@
+include ../build/Common.lwmk
+include dwsources.mk
+
+
+LWWATCH_LIB_DIR ?= ../../lib
+
+# source files
+SOURCES += $(DWARF_SOURCES)
+
+CFLAGS += -DHAVE_CONFIG_H
+CFLAGS += -DLW_WINDOWS
+CFLAGS += -D__LIBELF_INTERNAL__
+
+#code search path 
+
+LW_INCLUDES += $(MSVC_COMPILER_DIR)/include
+LW_INCLUDES += ./
+LW_INCLUDES += ./win32
+LW_INCLUDES += ../libelf
+LW_INCLUDES += ../libelf/win32
+
+
+ifeq ($(LW_TARGET_ARCH),x86) 
+    L_INCLUDES += $(MSVC_COMPILER_DIR)/lib
+#   LIBEXE   := $(MSVC_COMPILER_DIR)/bin/link /DLL /nologo
+    LIBEXE   := $(MSVC_COMPILER_DIR)/bin/LIB /LTCG /NOLOGO
+else
+    L_INCLUDES += $(MSVC_COMPILER_DIR)/lib/amd64
+#   LIBEXE   := $(MSVC_COMPILER_DIR)/bin/amd64/lib /nologo
+    LIBEXE   := $(MSVC_COMPILER_DIR)/bin/amd64/LIB /LTCG /NOLOGO
+endif
+
+
+# linker options
+LIBFLAGS += -NODEFAULTLIB:libc
+LIBFLAGS += -subsystem:console
+LIBFLAGS += $(LWWATCH_LIB_DIR)/liblwelf.lib
+
+LIBFLAGS += $(addprefix -LIBPATH:,$(L_INCLUDES))
+
+#LIBFLAGS += -OUT:./$(OUTPUTDIR)/liblwdwarf.dll
+LIBFLAGS += -OUT:./$(OUTPUTDIR)/liblwdwarf.lib
+
+# adding list of obj files
+LIBFLAGS += $(OBJECTS)
+
+# finally... building lwdwarf
+$(OUTPUTDIR)/liblwdwarf.lib: $(OBJECTS)
+	@echo   Building liblwdwarf
+	@echo   $(OUTPUTDIR)
+	@echo   $(LIBEXE)
+	@echo   $(LIBFLAGS)
+	$(LIBEXE) $(strip $(LIBFLAGS))
+
+#some_install: COPY $(OUTPUTDIR)/liblwdwarf.lib $(LWWATCH_LIB_DIR)/. 
+
+build: startTimer $(OUTPUTDIR)/liblwdwarf.lib stopTimer
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

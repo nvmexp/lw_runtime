@@ -1,0 +1,186 @@
+// Copyright LWPU Corporation 2017
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "TriangleAdapterKernels.hpp"
+#include <lwda_fp16.h>
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+INLINE __device__ float3 mult(float4 M[3], float3 v)
+{
+  return make_float3(
+    M[0].x*v.x + M[0].y*v.y + M[0].z*v.z + M[0].w,
+    M[1].x*v.x + M[1].y*v.y + M[1].z*v.z + M[1].w,
+    M[2].x*v.x + M[2].y*v.y + M[2].z*v.z + M[2].w
+  );
+}
+
+INLINE __device__ float3 mult(float4 M[3], float2 v)
+{
+  return make_float3(
+    M[0].x*v.x + M[0].y*v.y + M[0].w,
+    M[1].x*v.x + M[1].y*v.y + M[1].w,
+    M[2].x*v.x + M[2].y*v.y + M[2].w
+  );
+}
+
+
+static __global__ __launch_bounds__(TRIANGLE_ADAPTER_EXEC_WARPS_PER_BLOCK * 32, TRIANGLE_ADAPTER_EXEC_BLOCKS_PER_SM)
+void TriangleAdapterExec(TriangleAdapterExecParams p)
+{
+    // Note: All work done by this kernel could instead be done on-the-fly in ModelPointers (as described in OP-1408)
+
+    int globalPrimitiveIndex = threadIdx.x + 32 * (threadIdx.y + TRIANGLE_ADAPTER_EXEC_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+    if (globalPrimitiveIndex >= p.numPrimitives)
+        return;
+
+    int arrayIndex = p.inArrayIndexing.getArrayIndex(globalPrimitiveIndex);
+    int localPrimitiveIndex = p.inArrayIndexing.getLocalPrimitiveIndex(globalPrimitiveIndex, arrayIndex);
+
+    InputTrianglesPointers ptrs = loadCachedAlign8(&p.trianglesPtrArray[arrayIndex]);
+    InputTrianglesDesc desc = loadCachedAlign4(&p.trianglesDescArray[arrayIndex]);
+
+    // Transform
+
+    float4 transform[3];
+    if (ptrs.transform)
+    {
+        transform[0] = loadCachedAlign16( &((float4 *) ptrs.transform)[0] );
+        transform[1] = loadCachedAlign16( &((float4 *) ptrs.transform)[1] );
+        transform[2] = loadCachedAlign16( &((float4 *) ptrs.transform)[2] );
+    }
+    else
+    {
+        transform[0] = make_float4( 1, 0, 0, 0 );
+        transform[1] = make_float4( 0, 1, 0, 0 );
+        transform[2] = make_float4( 0, 0, 1, 0 );
+    }
+
+    // Indices
+
+    uint3 indices;
+    if (desc.hasIndexBuffer())
+    {
+        int indexSize = desc.getIndexByteSize();
+        if (indexSize == 2)
+        {
+            unsigned short *int16Indices = (unsigned short *) ((const char *) ptrs.indices + localPrimitiveIndex * sizeof(short) * 3);
+            indices = { int16Indices[0], int16Indices[1], int16Indices[2] };
+        }
+        else // tris.getIndexByteSize() == 4
+        {
+            unsigned int *int32Indices = (unsigned int *) ((const char *) ptrs.indices + localPrimitiveIndex * desc.getIndexStride());
+            indices = { int32Indices[0], int32Indices[1], int32Indices[2] };
+        }
+    }
+    else
+    {
+        indices = make_uint3( 3 * localPrimitiveIndex + 0, 3 * localPrimitiveIndex + 1, 3 * localPrimitiveIndex + 2 );
+    }
+
+    // Vertices
+
+    int vertexStride = desc.getVertexStride();
+
+    const char* vertexPtr[] = {
+        &ptrs.vertices[indices.x * vertexStride],
+        &ptrs.vertices[indices.y * vertexStride],
+        &ptrs.vertices[indices.z * vertexStride]
+    };
+
+    InputTrianglesDesc::VertexFormat format = desc.getVertexFormat();
+
+    float3 vertex[3];
+
+    switch (format)
+    {
+        default: // Error!
+        case InputTrianglesDesc::VertexFormat_AlignedFloat4:
+            #pragma unroll
+            for (int vtx = 0; vtx < 3; vtx++)
+                vertex[vtx] = mult(transform, make_float3(LDG_OR_GLOBAL((float4*) vertexPtr[vtx])));
+            break;
+        case InputTrianglesDesc::VertexFormat_Float3:
+            #pragma unroll
+            for (int vtx = 0; vtx < 3; vtx++)
+                vertex[vtx] = mult(transform, fastUnalignedLoadFloat3((float3*) vertexPtr[vtx]));
+            break;
+        case InputTrianglesDesc::VertexFormat_Float2:
+            #pragma unroll
+            for (int vtx = 0; vtx < 3; vtx++)
+                vertex[vtx] = mult(transform, *(const float2 *) vertexPtr[vtx]);
+            break;
+        case InputTrianglesDesc::VertexFormat_Half3:
+            #pragma unroll
+            for (int vtx = 0; vtx < 3; vtx++)
+            {
+                const half* half_vertex = (const half *) vertexPtr[vtx];
+                float3 float_vertex = make_float3( __half2float(half_vertex[0]), __half2float(half_vertex[1]), __half2float(half_vertex[2]));
+                vertex[vtx] = mult(transform, float_vertex);
+            }
+            break;
+        case InputTrianglesDesc::VertexFormat_Half2:
+            #pragma unroll
+            for (int vtx = 0; vtx < 3; vtx++)
+            {
+                const half* half_vertex = (const half *) vertexPtr[vtx];
+                float2 float_vertex = make_float2( __half2float(half_vertex[0]), __half2float(half_vertex[1]));
+                vertex[vtx] = mult(transform, float_vertex);
+            }
+            break;
+    }
+
+    storeUncachedAlign4(&p.outVertices[globalPrimitiveIndex * 3 + 0], vertex[0]);
+    storeUncachedAlign4(&p.outVertices[globalPrimitiveIndex * 3 + 1], vertex[1]);
+    storeUncachedAlign4(&p.outVertices[globalPrimitiveIndex * 3 + 2], vertex[2]);
+
+    // PrimBits
+
+    if ( p.computePrimBits )
+    {
+        int geometryIndex = p.inArrayIndexing.getGeometryIndex(arrayIndex);
+
+        if( p.primBitsFormat == PRIMBITS_INDIRECT_32_TO_64 || p.primBitsFormat == PRIMBITS_DIRECT_64)
+        {
+            // Baked 32-bit primBits into triangles with indirection to 64-bit primBits array
+            ((uint64_t *) p.outPrimBits)[globalPrimitiveIndex] = (desc.isOpaque() ? ( uint64_t( 1 ) << 63 ) : 0) | ( uint64_t( geometryIndex ) << 32) | localPrimitiveIndex;
+        }
+        else if( p.primBitsFormat == PRIMBITS_DIRECT_32 )
+        {
+            // Baked 32-bit primBits into triangles
+            int          mode                    = p.primitiveIndexBits ? ( ( p.primitiveIndexBits - 1 ) / 4 ) : 0;
+            int          roundedNumPrimitiveBits = mode * 4 + 4;
+            unsigned int primBits =
+                ( desc.isOpaque() ? 0x80000000 : 0 ) | ( geometryIndex << ( roundedNumPrimitiveBits + 3 ) ) | ( localPrimitiveIndex << 3 ) | mode;
+            ( (uint32_t*)p.outPrimBits )[globalPrimitiveIndex] = primBits;
+        }
+        else if( p.primBitsFormat == PRIMBITS_LEGACY_DIRECT_32 )
+        {
+            // TODO: This will be removed
+            ((uint32_t *) p.outPrimBits)[globalPrimitiveIndex] = (desc.isOpaque() ? 0x80000000 : 0) | (geometryIndex << p.primitiveIndexBits) | localPrimitiveIndex;
+        }
+    }
+
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchTriangleAdapterExec(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const TriangleAdapterExecParams& p)
+{
+    if (lwdaFuncSetCacheConfig(TriangleAdapterExec, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    TriangleAdapterExec<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------
+

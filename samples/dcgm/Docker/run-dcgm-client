@@ -1,0 +1,116 @@
+#!/usr/bin/elw python2
+
+from __future__ import print_function
+import argparse
+import os
+import signal
+import subprocess
+import sys
+import time
+
+PYTHON = "python2"
+
+DCGM_SRC_DIR = "/usr/local/dcgm"
+BINDINGS_DIR = "/".join([DCGM_SRC_DIR, "bindings"])
+SCRIPTS_DIR = "/".join([DCGM_SRC_DIR, "sdk_samples/scripts"])
+
+CLIENT_CMD_TEMPLATE = "/".join([SCRIPTS_DIR, "dcgm_{}.py"])
+
+FLUENTD         = "fluentd"
+PROMETHEUS      = "prometheus"
+TELEGRAF        = "telegraf"
+
+CLIENTS = [ FLUENTD, PROMETHEUS, TELEGRAF ]
+
+# GLOBAL VARIABLE
+keep_running = True
+
+def exit_error(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+    exit(-1)
+
+def exit_handler(signum, frame):
+    global keep_running
+    print("Received signal:", signum)
+    print("Attempting graceful shutdown")
+    keep_running = False
+
+def initialize_signal_handlers():
+    signal.signal(signal.SIGINT, exit_handler)
+    signal.signal(signal.SIGTERM, exit_handler)
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run a DCGM metrics client")
+
+    parser.add_argument("client", help="Name of the client to run")
+    parser.add_argument("-n", "--host",
+                        help="Hostname where DCGM hostengine is running (incompatible with embedded). To provide port, use <host>:<port>")
+    parser.add_argument("-t", "--target-host",
+                        help="Hostname the client will send data to")
+    parser.add_argument("-p", "--port",
+                        help="Port that the client will send data to (or port that it will listen on in the case of Prometheus)")
+    parser.add_argument("-e", "--embedded", action="store_true",
+                        help="Whether the client should launch an embedded DCGM hostengine (incompatible with host)")
+    parser.add_argument("-f", "--field-id", dest='field_ids',
+                        help="Comma-separated field IDs to monitor. For a list, run 'dcgmi dmon -l'")
+
+    args = parser.parse_args()
+
+    if args.host and args.embedded:
+        exit_error("Error: '--host' and '--embedded' are mutually exclusive")
+
+    if args.client not in CLIENTS:
+        exit_error("Error: CLIENT must be one of: " + ", ".join(CLIENTS))
+
+    return args
+
+def prepare_command_args(raw_args):
+    args = []
+
+    if raw_args.host:
+        args.append("-n")
+        args.append(raw_args.host)
+
+    if raw_args.target_host:
+        args.append("-t")
+        args.append(raw_args.target_host)
+
+    if raw_args.port:
+        args.append("-p")
+        args.append(raw_args.port)
+
+    if raw_args.embedded:
+        args.append("-e")
+
+    if raw_args.field_ids:
+        args.append("-f")
+        args.append(raw_args.field_ids)
+
+    return args
+
+def run_client(raw_args):
+    global keep_running
+    ret = None
+
+    client_path = CLIENT_CMD_TEMPLATE.format(raw_args.client)
+    elw = os.elwiron.copy()
+    elw["PYTHONPATH"] = BINDINGS_DIR
+    command_args = prepare_command_args(raw_args)
+    command = [ PYTHON, client_path ] + command_args
+
+    print("Running command:", " ".join(command))
+
+    process = subprocess.Popen(command, elw=elw, stdout=sys.stdout)
+
+    while keep_running:
+        ret = process.poll()
+        if ret:
+            print("Return code: ", ret)
+            break
+        time.sleep(0.2)
+
+    exit(ret)
+
+initialize_signal_handlers()
+gArgs = parse_args()
+run_client(gArgs)

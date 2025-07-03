@@ -1,0 +1,66 @@
+##############################################################################
+# define LOCAL_SOURCES
+##############################################################################
+
+LW_CXX_EXCEPTIONS := 0
+LW_CXX_RTTI := 0
+LW_BUILD_PIC := 1
+
+LWRRENT_DIR := $(LWVS_DIR)/plugin_src/sw
+LOCAL_SOURCES :=
+LOCAL_SOURCES += Software.cpp
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+##############################################################################
+## define LOCAL_CFLAGS
+###############################################################################
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(LWVS_PLUGIN_INCLUDES)
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+LOCAL_CFLAGS += -fopenmp -Wno-sign-compare
+
+LWVS_SW_LIBRARY_NAME = libDeployment.so
+
+##############################################################################
+## define LOCAL_LDFLAGS
+###############################################################################
+
+LOCAL9_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL9_LDFLAGS += -lstdc++ -L$(OUTPUTDIR)/lwda9 -lpluginCommon
+
+LOCAL10_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL10_LDFLAGS += -lstdc++ -L$(OUTPUTDIR)/lwda10 -lpluginCommon
+
+sw9_TARGET  := $(OUTPUTDIR)/lwda9/$(LWVS_SW_LIBRARY_NAME)
+sw9_SONAME  := $(LWVS_SW_LIBRARY_NAME)
+sw9_OBJECTS := $(LOCAL_OBJECTS)
+sw9_CFLAGS  := $(LOCAL_CFLAGS)
+sw9_LDFLAGS := $(LOCAL9_LDFLAGS)
+sw9_DEPENDS ?= $(common9_TARGET)
+
+sw10_TARGET  := $(OUTPUTDIR)/lwda10/$(LWVS_SW_LIBRARY_NAME)
+sw10_SONAME  := $(LWVS_SW_LIBRARY_NAME)
+sw10_OBJECTS := $(LOCAL_OBJECTS)
+sw10_CFLAGS  := $(LOCAL_CFLAGS)
+sw10_LDFLAGS := $(LOCAL10_LDFLAGS)
+sw10_DEPENDS ?= $(common10_TARGET)
+
+# C++11 produces a ctor/dtor for basic_string that RedHat and CentOS do not
+# like; use the default C++ dialect.
+CXX_STD =
+
+build: $(sw10_TARGET) $(sw9_TARGET)
+$(eval $(call MAKE_SHARED_LIBRARY,sw10))
+$(eval $(call MAKE_SHARED_LIBRARY,sw9))
+build: $(sw10_TARGET).guardwords $(sw9_TARGET).guardwords
+
+#################################################################################
+## End of nested lwmk
+##################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

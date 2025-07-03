@@ -1,0 +1,1030 @@
+// LWIDIA_COPYRIGHT_BEGIN
+//
+// Copyright 2020-2022 by LWPU Corporation.  All rights reserved.  All
+// information contained herein is proprietary and confidential to LWPU
+// Corporation.  Any use, reproduction, or disclosure without the written
+// permission of LWPU Corporation is prohibited.
+//
+// LWIDIA_COPYRIGHT_END
+
+// This file describes the format and contents of the MLE log files.
+// Specification: https://developers.google.com/protocol-buffers/docs/proto3
+//
+// Considerations for extending this file:
+//
+// * Do not remove or alter existing entries.  Do not change indexes of
+//   existing entries.  Doing that would inhibit the ability to parse
+//   old/existing log files.
+//
+// * All fields are optional.  If a field does not appear in a message,
+//   its value defaults to 0 (integer/float) or empty string (for string).
+//   Design new entries to take advantage of this, so that the most commonly
+//   oclwring values are represented by 0.  This way the most common fields
+//   won't have to be emitted, which will in turn reduce the size of the log.
+//
+// * Field indexes from 1 to 15 require a single byte to encode the field
+//   header.  Plan to use these low indices for fields which occur very
+//   frequently.  Fields which occur rarely in the log should have indices
+//   16 or greater.  This will help reduce log size.
+//
+// * Attempt to reuse existing message types and fields when extending
+//   logged data.  Avoid copy-pasting entire messages just to add a few
+//   new fields.
+//
+// * Repeated fields of primitive types (integer, float) are packed, per
+//   specification.
+//
+// * If a field is repeated in a binary message, but it does not have the
+//   "repeated" keyword, the parser reading the message will only keep
+//   the last instance of that field encountered in a message and will
+//   discard any previous instances.
+
+syntax = "proto3";
+
+message MLE {
+    // First entry in the log, used to identify file type.
+    // Expected to contain string "MLE".  The binary encoding of this
+    // entry should thus be: "\x12\x03MLE"
+    string file_type = 2; // mods_keyword public;
+
+    // Subsequent log entries.
+    repeated Entry entry = 1; // mods_keyword public;
+
+    // Occasionally the program producing the logs can emit the sync
+    // entries, which are used to recover when the log gets corrupted.
+    // The sync entry resets the context fields.  This way a subsequent
+    // entry (Entry message) will fix uid, timestamp, etc.
+    repeated Sync sync = 3; // mods_keyword public;
+
+    reserved 4 to 15;
+}
+
+message Sync {
+    // Sync signature, should be a string "SYNC".
+    // This can be used to seek through the log to find subsequent
+    // sync entries.  The binary encoding of this field should thus be:
+    // "\x0A\x04SYNC"
+    string signature = 1; // mods_keyword public;
+
+    // Number of bytes in the log before the Sync entry.
+    // This can be useful when a part of log is missing.
+    // The field uses high index on purpose.  This index results in the
+    // field header being incoded with two bytes and we lwrrently have
+    // no other field with such index which comes even close.  This makes
+    // it easy to determine if the sync_pos field comes after the
+    // signature.
+    uint64 sync_pos = 2047; // mods_keyword public;
+}
+
+message Entry {
+    enum Priority {
+        Previous = 0; // use value from previous Print
+        Debug    = 1;
+        Low      = 2;
+        Normal   = 3;
+        Warn     = 4;
+        High     = 5;
+        Error    = 6;
+        Always   = 7;
+        MleOnly  = 14;
+    }
+
+    // Context
+    sint64    uid_delta       = 1;  // mods_keyword public; // uid - prevuid - 1
+    sint64    timestamp_delta = 2;  // mods_keyword public; // delta from the previous entry
+    sint32    thread_id       = 3;  // -1 no id, 0 same as previous entry, otherwise id+1
+    sint32    test_id         = 4;  // mods_keyword public; // -1 no id, 0 same as previous entry, otherwise id+1
+    sint32    dev_id          = 5;  // mods_keyword public; // -1 no id, 0 same as previous entry, otherwise id+1
+    Priority  priority        = 6;  // mods_keyword public; // default is Previous
+
+    // MLE entry types
+    string    print           = 7;  // PrintMetadata
+    TestInfo  test_info       = 8;  // mods_keyword public;
+    uint64    progress_update = 9;  // TestProgressUpdateMetadata, TestErrorUpdateMetadata
+
+    // Reserved for future entries emitted with a high frequency.
+    // Numbers up to 15 use a single byte to encode message type.
+    reserved 10 to 15;
+
+    TaggedStr          tagged_str              = 16; // TaggedStringMetadata, TaggedTestStringMetadata
+    Device             device                  = 17;
+    BgMonitor          bg_monitor              = 18; // BglHeaderMetadata, BglDataMetadata
+    HbmSite            hbm_site                = 19; // HbmSiteInfoMetadata
+    MemErrCtr          mem_err_ctr             = 20; // MemErrorCounterMetadata
+    MemErr             mem_err                 = 21; // MemErrorDecodeMetadata, MemErrorHbmDecodeMetadata
+    MemBadBits         mem_bad_bits            = 22; // MemBadBitsMetadata
+    ModsEnd            mods_end                = 23; // mods_keyword public; // ModsEndMetadata
+    ExitCode           exit_code               = 24; // mods_keyword public; // RcMetadata
+    PwmActorStats      pwm_actor_stats         = 25; // PwmActorStatsMetadata
+    PwmSamplerStats    pwm_sampler_stats       = 26; // PwmSamplerStatsMetadata
+    PageBlacklist      page_blacklist          = 27; // PageBlacklistMetadata
+    HbmRepair          hbm_lane_repair_attempt = 28; // HbmLaneRepairAttemptMetadata
+    HbmRepair          hbm_repaired_lane       = 29; // HbmRepairedLanesMetadata
+    HbmRepair          hbm_row_repair_attempt  = 30; // HbmRowRepairAttemptMetadata
+    HbmRepair          hbm_repaired_row        = 31; // HbmRepairedRowsMetadata
+    FloorsweepInfo     floorsweep_info         = 32; // FloorsweepInfoMetadata
+    UphyRegLog         uphy_reg_log            = 33; // UphyRegisterLogMetadata
+    LaneErrors         lane_errors             = 34; // LaneErrorsMetadata
+    ThermalResistance  thermal_resistance      = 35; // ThermalResistanceMetadata
+    FanInfo            fan_info                = 36; // FanInfoMetadata
+    ClocksTestInfo     clocks_test_info        = 37; // ClocksTestMetadata
+    PowerBalancingInfo power_balancing_info    = 38; // PowerBalancingMetadata
+    AdcStats           adc_stats               = 39; // AdcStatsMetadata
+    PexBWInfo          pex_bw_info             = 40; // PexBWMetadata
+    WorstAdcDelta      worst_adc_delta         = 41; // WorstAdcDeltaMetadata
+    AdcISenseDelta     adc_isense_delta        = 42; // AdcIsenseDeltaMetadata
+    PowerBalResult     power_bal_result        = 43; // PowerBalResultMetadata
+    LwlinkErrorInfo    lwlink_error_info       = 44; // LwlinkErrorMetadata
+    RowRemapInfo       row_remap_info          = 45; // RowRemapInfoMetadata
+    LwlinkStateChange  lwlink_state_change     = 46; // mods_keyword public; // LwlinkStateChangeFailureMetadata
+    PcieLinkSpeedMismatch pcie_link_speed_mismatch = 47; // PcieLinkSpeedMismatchMetadata
+    PcieLinkWidthMismatch pcie_link_width_mismatch = 48; // PcieLinkWidthMismatchMetadata
+    RcDesc             rc_desc                 = 49; // RcDescMetadata
+    BwFailure          bw_failure              = 50; // BwFailureMetadata
+    LwlinkEomFailure   lwlink_eom_failure      = 51; // mods_keyword public; // LwlinkEomFailureMetadata
+    SkuKappa           sku_kappa               = 52; // SkuKappaMetadata
+    FloorsweepSetInfo  floorsweep_set_info     = 53; // FloorSweepSetInfo
+    PowerHint          power_hint              = 54; // Power hint
+    LwlinkMismatch     lwlink_mismatch         = 55; // mods_keyword public; // LwlinkTopologyMismatch
+    I2cReadError       i2c_read_error          = 56; // mods_keyword public; // I2cReadError
+    OdtThermal         odt_thermal             = 57; // Onediag thermal test failure
+    ModsHeader         mods_header             = 58; // mods_keyword public;
+    LwlinkCCGradingMismatch lwlink_cc_grading_mismatch = 59; // mods_keyword public; // LwlinkCCGradingMismatch
+}
+
+message TestInfo {
+    message TestEnd {
+        uint32 rc = 1; // mods_keyword public;
+    }
+
+    string  test_name     = 16; // TestStartMetadata
+    string  virtual_name  = 17; // VirtualTestMetadata
+    string  virtual_desc  = 18; // VirtualTestMetadata
+    uint64  max_progress  = 19; // TestMaxProgressMetadata
+    string  progress_desc = 20; // TestMaxProgressMetadata
+    TestEnd test_end      = 21; // mods_keyword public; // TestEndMetadata
+    uint32  rc            = 22; // mods_keyword public; // TestErrorUpdateMetadata
+    string  pstate        = 23; // PstateChangeMetadata
+    sint32  parent_id     = 24; // mods_keyword public; // TestStartMetadata, parent test id plus 1
+}
+
+message BgMonitor {
+    message SampleDesc {
+        enum DataType {
+            type_float       = 0;
+            type_int         = 1;
+            type_str         = 2;
+            type_int_array   = 4;
+        }
+
+        string   desc        = 1;
+        string   unit        = 2;
+        bool     no_summary  = 3;
+        DataType data_type   = 4;
+    }
+
+    message SampleData {
+        float           value_float = 1;
+        sint64          value_int   = 2;
+        string          value_str   = 3;
+        reserved                      4;
+        repeated sint64 array_int   = 5;
+    }
+
+    uint32              type              = 1;
+    repeated SampleDesc desc              = 2; // BglHeaderMetadata
+    repeated SampleData data              = 3; // BglDataMetadata
+    float               single_data_float = 4; // BglDataMetadata
+    sint64              single_data_int   = 5; // BglDataMetadata
+}
+
+message TaggedStr {
+    string tag   = 1;
+    string key   = 2;
+    string value = 3;
+}
+
+message Device {
+    enum Type {
+        gpu      = 0;
+        lwswitch = 1;
+    }
+
+    uint32  index = 1; // corresponds to dev_id
+    Type    type  = 2;
+    string  name  = 3;
+    PciPort pci   = 4; // only for PCI devices
+}
+
+message HbmSite {
+    enum AddressMode {
+        unknown = 0;
+        pseudo  = 1;
+        legacy  = 2;
+    }
+
+    string      ecid             = 1;
+    uint32      site_id          = 2;
+    bool        gen2             = 3;
+    bool        ecc              = 4;
+    uint32      density_per_chan = 5;
+    uint32      mfg_id           = 6;
+    uint32      mfg_location     = 7;
+    uint32      mfg_year         = 8;
+    uint32      mfg_week         = 9;
+    uint64      serial_num       = 10;
+    AddressMode addr_mode        = 11;
+    uint32      channels_avail   = 12;
+    uint32      stack_height     = 13;
+    uint32      model_part_num   = 14;
+}
+
+message MemErrCtr {
+    enum MemErrSrc {
+        mats_info = 0;
+        ecc       = 1;
+    }
+
+    string    location  = 1;
+    string    type      = 2;
+    MemErrSrc error_src = 3;
+    uint32    part_gpc  = 4;
+    uint32    subp_tpc  = 5;
+    uint32    count     = 6;
+    uint32    rc        = 7;
+}
+
+message MemErr {
+    string          location    = 1;
+    string          type        = 2;
+    uint64          addr        = 3;
+    uint32          fbio        = 4;
+    uint32          subp        = 5;
+    uint32          pseudo_chan = 6;
+    uint32          bank        = 7;
+    uint32          row         = 8;
+    uint32          col         = 9;
+    uint32          beat        = 10;
+    uint32          beat_offs   = 11;
+    uint32          rank        = 12;
+    uint32          hbm_site    = 13;
+    uint32          hbm_chan    = 14;
+    repeated uint32 bits        = 15;
+    uint32          rc          = 16;
+}
+
+message MemBadBits {
+    uint32          rank = 1;
+    repeated string bits = 2;
+}
+
+message ModsEnd {
+    uint32 rc = 1; // mods_keyword public;
+}
+
+message ExitCode {
+    enum PerfPoint {
+        explicit_point     = 0;
+        min                = 1;
+        max                = 2;
+        tdp                = 3;
+        turbo              = 4;
+        intersect_v        = 5;
+        intersect_v_f      = 6;
+        intersect_pstate   = 7;
+        intersect_v_pstate = 8;
+        multiple_intersect = 9;
+    }
+
+    enum Rail {
+        unknown_rail = 0;
+        logic        = 1;
+        sram         = 2;
+        msvdd        = 3;
+    }
+
+    enum Domain {
+        unknown_dom    = 0;
+        not_applicable = 1;
+        gpc2           = 2;
+        disp           = 3;
+        dram           = 4;
+    }
+
+    enum PerfTestType {
+        static_point = 0;
+        perf_jump    = 1;
+        perf_sweep   = 2;
+        unknown_pt   = 3;
+    }
+
+    PerfTestType perf_test_type         = 1;
+    PerfPoint    perf_point_type        = 2;
+    Rail         intersect_rail         = 3;
+    Domain       intersect_clock_domain = 4;
+    uint32       pstate_num             = 5;
+    uint32       error_code             = 6; // mods_keyword public;
+    string       error_msg              = 7; // mods_keyword public;
+}
+
+message PwmActorStats {
+    uint64 duty_cycles         = 1;
+    float  avg_duty_cycle      = 2;
+    float  total_target_time_s = 3;
+    float  total_low_time_s    = 4;
+}
+
+message PwmSamplerStats {
+    string name      = 1;
+    string unit      = 2;
+    float  min_value = 3;
+    float  max_value = 4;
+    float  avg_value = 5;
+    uint64 samples   = 6;
+}
+
+message PageBlacklist {
+    enum Cause {
+        unknown   = 0;
+        mem_error = 1;
+        sbe       = 2;
+        dbe       = 3;
+    }
+
+    uint32 status       = 1;
+    string ecid         = 2;
+    uint64 ecc_off_addr = 3;
+    uint64 ecc_on_addr  = 4;
+    uint32 rbc_addr     = 5;
+    Cause  cause        = 6;
+    uint32 page_size    = 7;
+    bool   dynamic      = 8;
+}
+
+message HbmRepair {
+    enum Interface {
+        unknown_if = 0;
+        host2jtag  = 1;
+        ieee1500   = 2;
+    }
+
+    enum Type {
+        unknown_ty = 0;
+        data       = 1;
+        dbi        = 2;
+        dm         = 3;
+        addr       = 4;
+    }
+
+    enum RepairSource {
+        unknown_src = 0;
+        gpu         = 1;
+        hbm_fuses   = 2;
+    }
+
+    uint32          status                = 1;
+    string          ecid                  = 2;
+    string          name                  = 3;
+    Type            type                  = 4;
+    repeated uint32 pre_repair_ieee_data  = 5;
+    repeated uint32 post_repair_ieee_data = 6;
+    uint32          stack                 = 7;
+    uint32          bank                  = 8;
+    uint32          row                   = 9;
+    uint32          hw_fbpa               = 10;
+    uint32          subp                  = 11;
+    uint32          fbpa_lane             = 12;
+    uint32          site                  = 13;
+    uint32          channel               = 14;
+    uint32          dword                 = 15;
+    uint32          byte                  = 16;
+    uint32          row_repairs           = 17;
+    uint32          remap_val             = 18;
+    uint32          remap_mask            = 19;
+    Interface       interface             = 20;
+    bool            hard_repair           = 21;
+    bool            skip_verif            = 22;
+    bool            pseudo_repair         = 23;
+    RepairSource    repair_source         = 24;
+}
+
+message FloorsweepInfo {
+    message Result {
+        string          fuse = 1;
+        repeated uint32 mask = 2;
+    }
+
+    string          start_time  = 1;
+    string          end_time    = 2;
+    string          section_tag = 3;
+    repeated Result result      = 4;
+}
+
+message UphyRegLog {
+    enum Interface {
+        pcie       = 0;
+        lwlink     = 1;
+        unknown_if = 2;
+        c2c        = 3;
+    }
+
+    enum FomMode {
+        x          = 0;
+        xl_o       = 1;
+        xl_e       = 2;
+        xh_o       = 3;
+        xh_e       = 4;
+        y          = 5;
+        yl_0       = 6;
+        yl_e       = 7;
+        yh_o       = 8;
+        yh_e       = 9;
+        y_l        = 10;
+        y_m        = 11;
+        y_u        = 12;
+        unknown_fm = 13;
+    }
+
+    enum Version {
+        v30         = 0;
+        v31         = 1;
+        v32         = 2;
+        v50         = 3;
+        v61         = 4;
+        unknown_ver = 5;
+        v10         = 6;
+    }
+
+    enum LogPoint {
+        eom                = 0;
+        bandwidth_test     = 1;
+        pre_test           = 2;
+        post_test          = 3;
+        post_test_error    = 4;
+        post_link_training = 5;
+        manual             = 6;
+        background         = 7;
+        unknown            = 8;
+    }
+
+    message Fom {
+        message Link {
+            repeated sint32 eom_per_lane = 1;
+        }
+
+        FomMode       mode = 1;
+        repeated Link link = 2;
+    }
+
+    message Cln {
+        repeated uint32 cln_value_per_addr = 1;
+    }
+
+    message DlnAddress {
+        uint32 address   = 1;
+        uint32 cfg_index = 2;
+    }
+
+    message DlnLink {
+        message Lane {
+            repeated uint32 dln_value_per_addr = 1;
+        }
+
+        repeated Lane lane = 1;
+    }
+
+    string              device_name    = 1;
+    string              chip_name      = 2;
+    string              test_type      = 3;
+    string              report_suffix  = 4;
+    string              ecid           = 5;
+    string              bios_ver       = 6;
+    string              board          = 7;
+    string              board_ver      = 8;
+    string              board_serial   = 9;
+    string              topology_file  = 10;
+    string              ate_iddq       = 11;
+    string              ate_speedo     = 12;
+    Interface           interface      = 13;
+    uint32              links_per_cln  = 14;
+    uint32              max_links      = 15;
+    uint32              max_lanes      = 16;
+    uint32              line_rate_mbps = 17;
+    string              perf_point     = 18;
+    uint32              lwvdd_mv       = 19;
+    uint32              hvdd_mv        = 20;
+    uint32              dvdd_mv        = 21;
+    uint32              gpc_clk_khz    = 22;
+    uint32              dram_clk_khz   = 23;
+    uint32              host_clk_khz   = 24;
+    uint32              sys_clk_khz    = 25;
+    uint32              pwr_clk_khz    = 26;
+    uint32              disp_clk_khz   = 27;
+    float               temp_c         = 28;
+    Version             version        = 29;
+    LogPoint            log_point      = 30;
+    uint32              error_code     = 31;
+    repeated Fom        fom            = 32;
+    repeated uint32     cln_address    = 33;
+    repeated Cln        cln            = 34;
+    repeated DlnAddress dln_address    = 35;
+    repeated DlnLink    dln_link       = 36;
+}
+
+message LaneErrors {
+    enum Type {
+        unknown_ty = 0;
+        data       = 1;
+        dbi        = 2;
+        dm         = 3;
+        addr       = 4;
+    }
+
+    string name      = 1;
+    uint32 hw_fbpa   = 2;
+    uint32 fbpa_lane = 3;
+    Type   type      = 4;
+    uint32 errors    = 5;
+}
+
+message ThermalResistance {
+    string therm_channel   = 1;
+    float  final_r         = 2;
+    float  max_r           = 3;
+    float  min_r           = 4;
+    float  final_temp      = 5;
+    float  idle_temp       = 6;
+    float  temp_delta      = 7;
+    uint32 final_power     = 8;
+    uint32 idle_power      = 9;
+    sint32 power_delta     = 10;
+    uint32 checkpt_time_ms = 11;
+    uint32 checkpt_idx     = 12;
+}
+
+message FanInfo {
+    uint32 fan_idx         = 1;
+    bool   min_speed_check = 2;
+    uint32 measured_rpm    = 3;
+    uint32 expected_rpm    = 4;
+}
+
+message ClocksTestInfo {
+    enum Clock {
+        gpc     = 0;
+        unknown = 1;
+    }
+
+    Clock  clock             = 1;
+    string pstate            = 2;
+    uint32 pass_fail_percent = 3;
+    uint32 target_khz        = 4;
+    uint32 effective_khz     = 5;
+}
+
+message PowerBalancingInfo {
+    uint32 index                   = 1;
+    float  shift_percent_delta     = 2;
+    float  min_shift_percent_delta = 3;
+    float  linear_deviation        = 4;
+    float  max_linear_deviation    = 5;
+}
+
+message AdcStats {
+    enum AdcId {
+        adc_sys  = 0;
+        adc_ltc  = 1;
+        adc_xbar = 2;
+        adc_lwd  = 3;
+        adc_host = 4;
+        adc_gpc0 = 5;
+        adc_gpc1 = 6;
+        adc_gpc2 = 7;
+        adc_gpc3 = 8;
+        adc_gpc4 = 9;
+        adc_gpc5 = 10;
+        adc_gpc6 = 11;
+        adc_gpc7 = 12;
+        adc_gpcs = 13;
+        adc_sram = 14;
+        adc_gpc8 = 15;
+        adc_gpc9 = 16;
+        adc_gpc10 = 17;
+        adc_gpc11 = 18;
+        adc_sys_isink = 19;
+    }
+
+    enum RailId {
+        logic   = 0;
+        sram    = 1;
+        msvdd   = 2;
+        unknown = 3;
+    }
+
+    float  avg_sample      = 1;
+    uint32 min_sample      = 2;
+    uint32 max_sample      = 3;
+    AdcId  adc_id          = 4;
+    uint32 lwrrent_volt_uv = 5;
+    RailId rail_id         = 6;
+    uint32 expected_code   = 7;
+}
+
+message PexBWInfo {
+    uint64 raw_bw_kbps     = 1;
+    uint64 avg_bw_kbps     = 2;
+    uint32 link_speed_mbps = 3;
+    uint32 link_width      = 4;
+}
+
+message WorstAdcDelta {
+    enum AdcIdEnum {
+        adc_sys  = 0;
+        adc_ltc  = 1;
+        adc_xbar = 2;
+        adc_lwd  = 3;
+        adc_host = 4;
+        adc_gpc0 = 5;
+        adc_gpc1 = 6;
+        adc_gpc2 = 7;
+        adc_gpc3 = 8;
+        adc_gpc4 = 9;
+        adc_gpc5 = 10;
+        adc_gpc6 = 11;
+        adc_gpc7 = 12;
+        adc_gpcs = 13;
+        adc_sram = 14;
+        adc_gpc8 = 15;
+        adc_gpc9 = 16;
+        adc_gpc10 = 17;
+        adc_gpc11 = 18;
+        adc_sys_isink = 19;
+    }
+
+    AdcIdEnum adc_id                = 1;
+    float delta                     = 2;
+    float margin                    = 3;
+    uint32 lwrrent_volt_uv          = 4;
+    float simulating_temperature    = 5;
+}
+
+message AdcISenseDelta {
+    float worst_upper_delta       = 1;
+    float worst_upper_slope       = 2;
+    float worst_upper_intercept   = 3;
+    float worst_lower_delta       = 4;
+    float worst_lower_slope       = 5;
+    float worst_lower_intercept   = 6;
+    uint32 num_isense_fails       = 7;
+    uint32 total_count            = 8;
+    string delta_unit_lower       = 9;
+    string delta_unit_upper       = 10;
+}
+
+message PowerBalResult {
+    uint32   policy_index              = 1;
+    float    total_power_lowpwm_watt   = 2;
+    float    total_power_highpwm_watt  = 3;
+    float    primary_rail_delta_watt   = 4;
+    float    secondary_rail_delta_watt = 5;
+    string   pstate                    = 6;
+}
+
+message LwlinkErrorInfo {
+    enum SubCode {
+        not_an_error            = 0;
+        initphy_error           = 1;
+        rxcal_error             = 2;
+        initdlpl_error          = 3;
+        initlaneenable_error    = 4;
+        safe_transition_error   = 5;
+        minion_boot_error       = 6;
+        dlcmd_timeout_error     = 7;
+        initpll_error           = 8;
+        txclkswitch_pll_error   = 9;
+        initoptimize_error      = 10;
+        active_transition_error = 11;
+        inittl_error            = 12;
+        tl_transition_error     = 13;
+        initphase1_error        = 14;
+        initnegotiate_error     = 15;
+        initphase5_error        = 16;
+    }
+
+    uint64  lwlink_mask  = 1;
+    SubCode sub_code     = 2;
+    uint32  rc           = 3;
+}
+
+message RcDesc {
+    uint32 rc     = 1;
+    string rc_str = 2;
+}
+
+message BwFailure {
+    enum TransferType {
+        tt_unknown            = 0;
+        tt_unidir_read        = 1;
+        tt_unidir_write       = 2;
+        tt_bidir_read         = 3;
+        tt_bidir_write        = 4;
+        tt_read_write         = 5;
+    }
+
+    enum BwUnits {
+        kibi_bytes_per_sec = 0;
+        mega_bytes_per_sec = 1;
+    }
+
+    enum FailureCause {
+        too_low  = 0;
+        too_high = 1;
+    }
+
+    sint32               remote_dev_id      = 1;
+    uint64               src_link_mask      = 2;
+    uint64               remote_link_mask   = 3;
+    TransferType         transfer_type      = 4;
+    float                bandwidth          = 5;
+    float                threshold          = 6;
+    FailureCause         failure_cause      = 7;
+    UphyRegLog.Interface interface          = 8;
+    BwUnits              bw_units           = 9;
+}
+
+message RowRemapInfo {
+    enum Source {
+        unknown = 0;
+        none    = 1;
+        factory = 2;
+        field   = 3;
+        mods    = 4;
+    }
+
+    enum Cause {
+        mem_error   = 0;
+        sbe         = 1;
+        dbe         = 2;
+        cause_none  = 3;
+    }
+
+    uint32 timestamp    = 1;
+    Source source       = 2;
+    Cause  cause        = 3;
+    uint32 fbpa         = 4;
+    uint32 subpa        = 5;
+    uint32 rank         = 6;
+    uint32 bank         = 7;
+    uint32 row          = 8;
+    uint32 entry        = 9;
+}
+
+message LwlinkStateChange {
+    enum SubLinkState {
+        sls_off         = 0;
+        sls_safe_mode   = 1;
+        sls_training    = 2;
+        sls_single_lane = 3;
+        sls_high_speed  = 4;
+        sls_ilwalid     = 5;
+    }
+
+    uint64       lwlink_mask = 1; // mods_keyword public;
+    SubLinkState fromstate   = 2;
+    SubLinkState tostate     = 3;
+}
+
+message PcieLinkSpeedMismatch {
+    PciLink link                        = 1;
+    uint32 actual_link_speed_mbps       = 2;
+    uint32 expected_min_link_speed_mbps = 3;
+    uint32 expected_max_link_speed_mbps = 4;
+}
+
+message PcieLinkWidthMismatch {
+    PciLink link                    = 1;
+    bool    is_host                 = 2;
+    uint32  actual_link_width       = 3;
+    uint32  expected_min_link_width = 4;
+    uint32  expected_max_link_width = 5;
+}
+
+message PciLink {
+    PciPort host  = 1;
+    PciPort local = 2;
+}
+
+message PciPort {
+    uint32 domain   = 1; // mods_keyword public;
+    uint32 bus      = 2; // mods_keyword public;
+    uint32 device   = 3; // mods_keyword public;
+    uint32 function = 4; // mods_keyword public;
+}
+
+message LwlinkEomFailure {
+    uint32                   lwlink_id = 1; // mods_keyword public;
+    uint32                   lane      = 2; // mods_keyword public;
+    UphyRegLog.FomMode       fom_mode  = 3;
+    float                    threshold = 4;
+    float                    eom_value = 5;
+}
+
+message SkuKappa {
+    string         sku_name     = 1;
+    repeated float kappa_values = 2;
+}
+
+message PowerHint {
+    uint32 temperature = 1;
+    uint32 gpcclk = 2;
+    uint32 workload = 3;
+    float pwrestimate = 4;
+}
+
+message FloorsweepSetInfo {
+    enum State {
+        before = 0;
+        after  = 1;
+        final  = 2;
+    }
+
+    message Group {
+        message Elements {
+            string elName          = 1;
+            uint32 elMask          = 2;
+            bool elProtectedMask   = 3;
+        }
+        string            name        = 1;
+        uint32            mask        = 2;
+        bool              isProtected = 3;
+        repeated Elements elements    = 4;
+    }
+
+    State          state      = 1;
+    string         set_name   = 2;
+    repeated Group groups     = 3;
+}
+
+message LwlinkCCLaneGrading {
+    uint32 lane_id  = 1;
+    uint32 rx_init  = 2;
+    uint32 tx_init  = 3;
+    uint32 rx_maint = 4;
+    uint32 tx_maint = 5;
+}
+
+message  LwlinkMismatch {
+    enum DeviceType {
+        gpu         = 0;
+        lwswitch    = 1;
+        trex        = 2;
+        none        = 3;
+    }
+
+    enum MismatchReason {
+        device_not_assigned_topo_id         = 0;
+        port_mismatch                       = 1;
+        physical_id_mismatch                = 2;
+        physical_id_missing_in_topo_file    = 3;
+        multiple_topo_ids_assigned          = 4;
+        peer_device_not_found               = 5;
+        unmapped_topology_ids_found         = 6;
+        ambiguous_match                     = 7;
+        unknown                             = 8;
+    }
+
+    message LwlinkTopoMismatch {
+        MismatchReason            reason               = 1; // mods_keyword public;
+        uint32                    lwlink_id            = 2; // mods_keyword public;
+        uint32                    topology_id          = 3;
+        uint64                    peer_pci_dbdf        = 4;
+        DeviceType                unmapped_device_type = 5;
+    }
+
+    message LwswitchPortMismatch {
+        MismatchReason               reason           = 1; // mods_keyword public;
+        uint32                       lwlink_id        = 2; // mods_keyword public;
+        DeviceType                   detected_peer    = 3; // mods_keyword public;
+        DeviceType                   expected_peer    = 4; // mods_keyword public;
+        repeated LwlinkCCLaneGrading cc_lane_gradings = 5;
+    }
+
+    message LwlinkPhyIdMismatch {
+        MismatchReason  reason                        = 1; // mods_keyword public;
+        uint32          detected_physical_id          = 2;
+        repeated uint32 unmapped_physical_ids_in_topo = 3;
+    }
+
+    LwlinkTopoMismatch            lwlink_topo_mismatch   = 1;
+    LwswitchPortMismatch          lwswitch_port_mismatch = 2;
+    LwlinkPhyIdMismatch           lwlink_phy_id_mismatch = 3;
+}
+
+message I2cReadError {
+    enum I2cDevType {
+        optical_carrier = 0;
+        osfp            = 1;
+    }
+    I2cDevType dev_type           = 1; // mods_keyword public;
+    uint32     optical_device_id  = 2; // mods_keyword public;
+}
+
+message OnediagTest {
+    uint32      error_code   = 1;
+}
+
+message OdtThermal {
+    message GpuLoc {
+        PciPort pci_bdf = 1;
+    }
+
+    // from /dev/lwmeXnY, index1 = X, index2 = Y
+    message SsdLoc {
+        uint32 index1 = 1;
+        uint32 index2 = 2;
+    }
+
+    message DimmLoc {
+        uint32 index = 1;
+    }
+
+    message Component {
+        ComponentType type    = 1;
+        GpuLoc gpuLoc         = 2;
+        SsdLoc ssd_loc        = 3;
+        DimmLoc dimm_loc      = 4;
+    }
+
+    enum ComponentType {
+        component_unknown = 0;
+        gpuloc            = 1;
+        ssd               = 2;
+        dimm              = 3;
+    }
+
+    enum FailureType {
+        failure_unknown = 0;
+        dimm_stress     = 1;
+        ssd_stress      = 2;
+        thermal         = 3;
+        software_error  = 4;
+        setup_error     = 5;
+    }
+
+    enum FailureReason {
+        reason_unknown                        = 0;
+        thermal_spec_missing                  = 1;
+        no_ssd_drives_found                   = 2;
+        bmc_ver                               = 3;
+        malformed_testargs_components         = 4;
+        malformed_testargs_failure_thresholds = 5;
+        malformed_testargs_fan_pwms           = 6;
+        exception_thermal_ssd                 = 7;
+        dimms_test                            = 8;
+        temps_out_of_spec                     = 9;
+        ssd_temps_not_populated               = 10;
+        could_not_start_fans                  = 11;
+        could_not_start_ssd_test              = 12;
+
+    }
+
+    OnediagTest onediag_test_data    = 1;
+    FailureType failure_type         = 2;
+    FailureReason reason             = 3;
+    Component component              = 4;
+    uint32 expected_value            = 5;
+    uint32 found_value               = 6;
+}
+
+message LwlinkCCGradingMismatch {
+    enum GradingType {
+        rx_init  = 0;
+        tx_init  = 1;
+        rx_maint = 2;
+        tx_maint = 3;
+    }
+    uint32       cci_id       = 1; // mods_keyword public; 
+    uint32       lane         = 2; // mods_keyword public;
+    GradingType  grading_type = 3;
+    uint32       threshold    = 4;
+    uint32       grading      = 5;
+}
+
+message ModsHeader {
+    message Gpu {
+        message Vbios {
+            string version = 1; // mods_keyword public;
+        }
+
+        string name             = 1;    // mods_keyword public; // GPU name
+        PciPort pci_loc         = 5;    // mods_keyword public;
+        string raw_ecid_str     = 6;    // mods_keyword public;
+        string ecid             = 7;    // mods_keyword public;
+        uint32 pci_device_id    = 8;    // mods_keyword public; // GPU DID, ex. 0x24af
+        string device_id        = 9;    // Device ID, ex. GA104
+        Vbios vbios             = 10;   // mods_keyword public;
+    }
+
+    string run_label    = 1;
+    repeated Gpu gpus   = 2;    // mods_keyword public;
+}

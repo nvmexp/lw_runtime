@@ -1,0 +1,397 @@
+#include <lwtensor/internal/export.h>
+#include <lwtensor/internal/reduction.h>
+#include <lwtensor/internal/reductionImpl.h>
+#include <lwtensor/internal/elementwisePrototype.h>
+#include <lwtensor/internal/utilEx.h>
+#include <lwtensor/internal/typesEx.h>
+#include <lwtensor/internal/context.h>
+#include <lwtensor/internal/types.h>
+#include <lwtensor/internal/tensorContraction.h>
+
+namespace LWTENSOR_NAMESPACE
+{
+template<bool dummy>
+lwtensorStatus_t tensorReductionDispatcher(const void* alpha, const void* A, const void* B,
+                                           const void* beta,  const void* C,       void* D,
+                                           const ReductionParams& params,
+                                           void* workspace, uint64_t workspaceSize,
+                                           lwdaStream_t stream, bool dispatch)
+{
+    (void)alpha, (void)A, (void)B, (void)beta, (void)C, (void)D, (void)params,
+        (void)workspace, (void)workspaceSize, (void)stream, (void)dispatch; // surpress warnings
+    RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED)
+}
+
+template<bool dummy,
+         typename TypeA,
+         typename TypeB,
+         typename TypeC,
+         typename TypeScalar,
+         typename TypeCompute,
+         typename... Args>
+lwtensorStatus_t tensorReductionDispatcher(const void* alpha, const void* A, const void* B,
+                                           const void* beta,  const void* C,       void* D,
+                                           const ReductionParams& params,
+                                           void* workspace, uint64_t workspaceSize,
+                                           lwdaStream_t stream, bool dispatch)
+{
+    if( !params.isInitialized() )
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_INTERNAL_ERROR)
+    }
+    const auto typeA = params.typeA_;
+    const auto typeB = params.typeB_;
+    const auto typeC = params.typeC_;
+    const lwdaDataType_t typeCompute = computeTypeToLwda(params.typeCompute_, isComplex(typeC));
+    const auto typeScalar = getScalarType(typeC, params.typeCompute_);
+    const auto opA = params.opA_;
+    const auto opB = params.opB_;
+    const auto opC = params.opC_;
+    const auto opAB = params.opAB_;
+    const auto opReduce = params.opReduce_;
+    if ( (typeA == toLwdaDataType<TypeA>()) &&
+         ((B == nullptr) || (typeB == toLwdaDataType<TypeB>())) &&
+         (typeC == toLwdaDataType<TypeC>()) &&
+         (typeScalar == toLwdaDataType<TypeScalar>()) &&
+         lwdaTypeAsAclwrateAs(toLwdaDataType<TypeCompute>(), typeCompute))
+    {
+        if( !dispatch){
+            return LWTENSOR_STATUS_SUCCESS;
+        }
+        return launchReduction_L0<TypeA, TypeB, TypeC, TypeCompute, TypeScalar>(
+                (const TypeScalar*)alpha, (const TypeA*)A, (const TypeB*)B,
+                (const TypeScalar*)beta, (const TypeC*)C, (TypeC*)D,
+                opA, opB, opC, opAB, opReduce,
+                params, workspace, workspaceSize, stream);
+    }else{
+        return tensorReductionDispatcher<dummy, Args...>(alpha, A, B,
+                                        beta, C, D,
+                                        params,
+                                        workspace, workspaceSize,
+                                        stream, dispatch);
+    }
+    RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED)
+}
+
+
+/**
+  * Implements D = alpha opReduce(opAB(opA(A), opB(B))) + beta * opC(C)
+  *
+  * This funciton implements GEMV- and DOT-like tensor contractions.
+  * \param[in] dispatch Determines if we really dispatch (i.e., compute the reduction),
+  * otherwise we'll just test if the reduction is supported.
+  */
+lwtensorStatus_t tensorReductionDispatch(const Context* ctx,
+                                         const void* alpha, const void* A, const void* B,
+                                         const void* beta,  const void* C,       void* D,
+                                         const ReductionParams& params,
+                                         void* workspace, uint64_t workspaceSize,
+                                         lwdaStream_t stream, bool dispatch)
+{
+#if LWTENSOR_LWDA_VERSION_MAJOR >= 11
+    if ((params.typeCompute_ == LWTENSOR_COMPUTE_TF32 ||
+         params.typeCompute_ == LWTENSOR_COMPUTE_16BF) && !ctx->supportsBF16andTF32())
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+    }
+#else
+    (void)ctx;
+#endif
+
+    return tensorReductionDispatcher<
+        true, ///< Used to terminate the relwrssion
+        /* Uniform data types */
+#if LWTENSOR_LWDA_VERSION_MAJOR >= 11
+        BFloat16, BFloat16, BFloat16, float, float,
+#endif
+        half, half, half, float, float,
+        float, float, float, float, float,
+        double, double, double, double, double,
+        lwComplex, lwComplex, lwComplex, lwComplex, lwComplex,
+        lwDoubleComplex, lwDoubleComplex, lwDoubleComplex, lwDoubleComplex, lwDoubleComplex
+        >(alpha, A, B,
+                                        beta, C, D,
+                                        params,
+                                        workspace, workspaceSize,
+                                        stream, dispatch);
+}
+}
+
+/// Implements D = alpha * opReduce(opA(A)) + beta * opC(C)
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t lwtensorReduction(const lwtensorHandle_t* handle, 
+        const void* alpha, const void *A, const lwtensorTensorDescriptor_t* descA_, const int32_t* modeA,
+        const void* beta,  const void *C, const lwtensorTensorDescriptor_t* descC_, const int32_t* modeC,
+                                 void *D, const lwtensorTensorDescriptor_t* descD_, const int32_t* modeD,
+       lwtensorOperator_t opReduce, lwtensorComputeType_t typeCompute_, void *workspace, uint64_t workspaceSize, lwdaStream_t stream )
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    auto ctx = reinterpret_cast<const Context*>(handle);
+    if (ctx == nullptr || !ctx->isInitialized())
+    {
+        HANDLE_ERROR(lwtensorStatus_t::LWTENSOR_STATUS_NOT_INITIALIZED);
+    }
+
+    const TensorDescriptor *descA = (TensorDescriptor*) descA_;
+    const TensorDescriptor *descC = (TensorDescriptor*) descC_;
+    const TensorDescriptor *descD = (TensorDescriptor*) descD_;
+
+    const uint32_t alignmentReqA = getMaximalAlignmentPtr(A);
+    const uint32_t alignmentReqC = getMaximalAlignmentPtr(C);
+    const uint32_t alignmentReqD = getMaximalAlignmentPtr(D);
+
+    if (descD == nullptr)
+    {
+        RETURN_STATUS(ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Output descritor is nullptr."));
+    }
+    typeCompute_ = normalizeComputeType(typeCompute_); // necessary due to deprecated values
+    const auto typeScalar = getScalarType(descD->getDataType(), typeCompute_);
+    const bool isAlphaZero = isZero(alpha, typeScalar);
+    if (isAlphaZero)
+    {
+        descA = descD;
+        modeA = modeD;
+        A = (void*)42; // will not be used
+    }
+    const bool isBetaZero = isZero(beta, typeScalar);
+    if (isBetaZero)
+    {
+        descC = descD;
+        modeC = modeD;
+        C = (void*)42; // will not be used
+    }
+
+    if (alpha == nullptr)
+    {
+        RETURN_STATUS(ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: alpha is nullptr."));
+    }
+    else if (A == nullptr)
+    {
+        RETURN_STATUS(ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: A is nullptr."));
+    }
+    else if (beta == nullptr)
+    {
+        RETURN_STATUS(ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: beta is nullptr."));
+    }
+    else if (C == nullptr)
+    {
+        RETURN_STATUS(ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: C is nullptr."));
+    }
+    else if (D == nullptr)
+    {
+        RETURN_STATUS(ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: D is nullptr."));
+    }
+    else if( (workspaceSize > 0 && workspace == nullptr))
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_INSUFFICIENT_WORKSPACE)
+    }
+
+    const auto algo = LWTENSOR_ALGO_DEFAULT;
+    HANDLE_ERROR(tcValidateInput(ctx,
+                descA, modeA,
+                nullptr, nullptr,
+                descC, modeC,
+                descD, modeD,
+                typeCompute_, algo, true));
+
+    ModeRenamer renamer;
+    ModeList renameModeA = renamer.rename(modeA, descA->getNumModes());
+    modeA = renameModeA.data();
+    ModeList renameModeC = renamer.rename(modeC, descC->getNumModes());
+    modeC = renameModeC.data();
+    ModeList renameModeD = renamer.rename(modeD, descD->getNumModes());
+    modeD = renameModeD.data();
+
+    if (! renamer.valid())
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Too many distinct modes were passed");
+    }
+
+    if( !isValidBinaryOperator( opReduce, descC->getDataType()) )
+    {
+      RETURN_STATUS(ctx->logError(LWTENSOR_STATUS_NOT_SUPPORTED, "Reduction operator is not a supported binary operator."));
+    }
+
+
+    HANDLE_ERROR(validateModes(modeA, descA->getNumModes(),
+                nullptr, 0,
+                modeC, descC->getNumModes(), true));
+
+    /*
+     * Sort strides and modes in ascending order w.r.t. strides
+     */
+    ExtentMap extent;
+    ModeList modeA_;
+    StrideMap strideA_;
+    ModeList modeC_;
+    StrideMap strideC_;
+
+    HANDLE_ERROR(initStrideExtentModesSorted(descA, modeA, strideA_, modeA_, extent));
+    HANDLE_ERROR(initStrideExtentModesSorted(descC, modeC, strideC_, modeC_, extent));
+    /*
+     * Delete all extent-1 modes
+     */
+    for (auto it = modeC_.begin(); it != modeC_.end();)
+    {
+        auto mode = *it;
+        if (extent.at(mode) == 1)
+        {
+            it = modeC_.erase(it);
+            strideC_.erase(mode);
+
+            auto itA = std::find(modeA_.begin(), modeA_.end(), mode);
+            if (itA != modeA_.end())
+            {
+                modeA_.erase(itA);
+                strideA_.erase(mode);
+            }
+            extent.erase(mode);
+            if (it == modeC_.end())
+            {
+                break;
+            }
+        }
+        else
+        {
+            it++;
+        }
+    }
+    bool hasContractedMode = false;
+    for (auto it = modeA_.begin(); it != modeA_.end(); it++)
+    {
+        // a mode that doesn't appear in the output is reduced
+        if (std::find(modeC_.begin(), modeC_.end(), *it) == modeC_.end())
+        {
+            hasContractedMode = true;
+            break;
+        }
+    }
+
+    // broadcasting is not (yet) supported
+    for (auto it = modeC_.begin(); it != modeC_.end(); it++)
+    {
+        if (std::find(modeA_.begin(), modeA_.end(), *it) == modeA_.end())
+        {
+            return ctx->logError(LWTENSOR_STATUS_NOT_SUPPORTED, "Every mode in the output tensor must also appear in the input tensor (i.e., broadcasting of modes is not yet supported)");
+        }
+    }
+
+    const auto typeA = descA->getDataType();
+    const auto opA = descA->getOp(); 
+    const auto typeC = descC->getDataType();
+    const auto opC = descC->getOp(); 
+
+    auto modeAcopy(modeA_);
+    auto strideAcopy(strideA_);
+    HANDLE_ERROR(fuseModes(modeA_, strideA_, modeAcopy, strideAcopy,
+                // ensure that conselwtive k-modes are fused
+                modeC_, strideC_, extent));
+
+    if (isAlphaZero)
+    {
+        if (modeC_.empty()) // insert missing mode
+        {
+            assert(extent.find(RESERVED_M_MODE) == extent.end());
+            assert(strideC_.find(RESERVED_M_MODE) == strideC_.end());
+            extent[RESERVED_M_MODE] = 1;
+            strideC_[RESERVED_M_MODE] = 0;
+            modeC_.push_back(RESERVED_M_MODE);
+        }
+        ///< Dispatch to EW plan for the case alpha == 0
+        ElementwisePlan planForAlphaIsZero;
+        constexpr lwtensorOperator_t identity = LWTENSOR_OP_IDENTITY;
+        constexpr lwtensorOperator_t add = LWTENSOR_OP_ADD;
+        HANDLE_ERROR(lwtensorElementwiseInternal_L1(
+                    ctx,
+                    (void*)C, typeC, strideC_, modeC_, alignmentReqC,
+                    NULL,     typeC, strideC_, modeC_, 0, // not used
+                    (void*)D, typeC, strideC_, modeC_, alignmentReqD, alignmentReqD,
+                    extent, opC, identity, identity, add, add,
+                    typeScalar, &planForAlphaIsZero))
+        RETURN_STATUS(permutationExelwte(
+            ctx,
+            beta, C,
+                  D,
+            planForAlphaIsZero, stream));
+    }
+    else if (!hasContractedMode)
+    {
+        ///< Dispatch to elementwise if there's no mode to contract
+        ElementwisePlan ewPlan;
+        constexpr lwtensorOperator_t identity = LWTENSOR_OP_IDENTITY;
+        constexpr lwtensorOperator_t add = LWTENSOR_OP_ADD;
+        auto err = lwtensorElementwiseInternal_L1(
+                    ctx,
+                    (void*)A, typeA, strideA_, modeA_, alignmentReqA,
+                    NULL,     typeC, strideC_, modeC_, 0, // not used
+                    (void*)D, typeC, strideC_, modeC_, alignmentReqD, alignmentReqD,
+                    extent, opA, identity, opC, add, add,
+                    typeScalar, &ewPlan);
+        if (err == LWTENSOR_STATUS_SUCCESS)
+        {
+            RETURN_STATUS(elementwiseBinaryExelwte(
+                ctx,
+                alpha, A,
+                beta,  C,
+                       D,
+                ewPlan, stream));
+        }
+        else if (err != LWTENSOR_STATUS_NOT_SUPPORTED) // allow fallback in the NOT_SUPPORTED case
+        {
+            HANDLE_ERROR(err);
+        }
+    }
+
+    LWTENSOR_LOG_API(ctx, 1, reproduceCommand(descA, modeA, 0,
+                                              nullptr, nullptr, 0,
+                                              descC, modeC, 0,
+                                              typeCompute_,
+                                              LWTENSOR_ALGO_DEFAULT,
+                                              workspaceSize, -1,
+                                              LWTENSOR_ROUTINE_REDUCTION));
+
+    ModeList modeBreduce(modeA_);
+    for (auto mode : modeC_)
+    {
+        modeBreduce.remove(mode);
+    }
+    ReductionParams params;
+    HANDLE_ERROR(params.init(ctx, descA->getDataType(), descA->getDataType(), typeC, typeCompute_,
+            descA->getOp(), LWTENSOR_OP_IDENTITY, opC, LWTENSOR_OP_MUL,
+            opReduce,
+            modeA_, modeBreduce, modeC_, strideA_, strideA_, strideC_, extent));
+
+    return tensorReductionDispatch(ctx, alpha, A, nullptr,
+            beta, C, D, params, workspace,
+            workspaceSize, stream, true);
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t lwtensorReductionGetWorkspace(const lwtensorHandle_t* handle, 
+       const void *A, const lwtensorTensorDescriptor_t* descA_, const int32_t* modeA,
+       const void *C, const lwtensorTensorDescriptor_t* descC_, const int32_t* modeC,
+       const void *D, const lwtensorTensorDescriptor_t* descD_, const int32_t* modeD,
+       lwtensorOperator_t opReduce, lwtensorComputeType_t typeCompute_, uint64_t *workspaceSize)
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    typeCompute_ = normalizeComputeType(typeCompute_);
+
+    // surpress compiler warnings:
+    (void)A; (void) descA_; (void) modeA;
+    (void)C; (void) descC_; (void) modeC;
+    (void)D; (void) descD_; (void) modeD;
+    (void)opReduce; (void) typeCompute_;
+
+    auto ctx = reinterpret_cast<const Context*>(handle);
+    if (ctx == nullptr || !ctx->isInitialized())
+        HANDLE_ERROR(lwtensorStatus_t::LWTENSOR_STATUS_NOT_INITIALIZED);
+
+    if( workspaceSize == nullptr )
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_ILWALID_VALUE)
+    }
+    *workspaceSize = 128UL * 1024UL;
+    return LWTENSOR_STATUS_SUCCESS;
+}

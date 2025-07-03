@@ -1,0 +1,73 @@
+package fabricmanagerHA;
+
+// the following defines protobuf messages
+// which will be used to store and restore states for Fabric Manager HA 
+
+
+message pciInfo
+{
+    optional uint32 domain   = 1;  // PCI domain on which the device's bus resides, 0 to 0xffffffff
+    optional uint32 bus      = 2;  // bus on which the device resides, 0 to 0xff
+    optional uint32 device   = 3;  // device's id on the bus, 0 to 31
+    optional uint32 function = 4;  // PCI function information
+    optional bytes  busId    = 5;  //the tuple domain:bus:device PCI identifier (&amp; NULL terminator)
+};
+
+// Partition Info in Shared LWSwitch or vGPU based multitenancy mode
+message partitionGpuInfo
+{
+    required uint32 physicalId         = 1;
+    required bytes  uuid               = 2;
+    optional uint32 numEnabledLinks    = 3;
+    optional uint64 enabledLinkMask    = 4;
+    optional uint32 numLinksAvailable  = 5;
+    optional uint32 linkLineRateMBps   = 6;
+    optional uint32 discoveredLinkMask = 7;
+    optional pciInfo pciInfo           = 8;
+    optional uint32 gfid               = 9;
+    optional uint32 gfidMask           = 10;
+};
+
+message partitionSwitchInfo
+{
+    required uint32 physicalId      = 1;
+    optional uint32 archType        = 2;
+    optional uint32 numEnabledLinks = 3;
+    optional uint64 enabledLinkMask = 4;
+};
+
+message partitionInfo
+{
+    required uint32              partitionId    = 1;
+    optional uint32              partitionState = 2;
+    optional uint32              trunkConnCount = 3;
+    repeated partitionGpuInfo    gpuList        = 4;
+    repeated partitionSwitchInfo switchList     = 5;
+};
+
+message nodePartitionInfo
+{
+    required uint32        nodeId        = 1;
+    repeated partitionInfo partitionList = 2;
+};
+
+message infoHeader
+{
+    required uint32  version      = 1; // version of the info struct
+}
+
+message sharedFabricPartiontionInfo
+{
+    required infoHeader        header    = 1;
+    repeated nodePartitionInfo nodeList  = 2;
+};
+
+message fmHaState
+{
+    required uint32  majorVersion = 1; // fabric manager HA major version
+    required uint32  minorVersion = 2; // fabric manager HA minor version
+    optional string  platformId   = 3; // such as "DGX-2" that matches the name in the topology
+    optional string  timeStamp    = 4; // time when the info is generated
+    
+    optional sharedFabricPartiontionInfo sharedFabricState = 5;
+}

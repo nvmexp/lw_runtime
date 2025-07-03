@@ -1,0 +1,145 @@
+#################
+# Ansel
+#################
+
+ifeq ($(LW_TARGET_ARCH), x86)
+TARGET_NAME = LwCamera32
+else ifeq ($(LW_TARGET_ARCH), amd64)
+TARGET_NAME = LwCamera64
+else
+    $(error Valid arch: x86 amd64)
+endif
+
+LWMK_SOURCE = $(LW_SOURCE)/drivers/common/build
+LW_SYMBOLS_PDB := 1
+include $(LWMK_SOURCE)/lwCommon.lwmk
+include $(LWMK_SOURCE)/lwConfig.lwmk
+    
+override LW_WARNINGS_AS_ERRORS := 0
+LW_WDDM_WDK_COMPONENT_FAMILY=wgf2um
+include $(LW_SOURCE)/drivers/common/build/dispShared.lwmk
+
+ifeq ($(LW_TARGET_ARCH), x86)
+libraryDirs += $(MSVC_COMPILER_DIR)/lib/
+else ifeq ($(LW_TARGET_ARCH), amd64)
+libraryDirs += $(MSVC_COMPILER_DIR)/lib/amd64
+else
+    $(error Valid target arch: x86 amd64)
+endif
+
+libraryDirs += $(LW_WDKSDK_LIB)/um/$(LW_WDKSDK_LIB_CPU)
+    
+ifeq ($(LW_TARGET_ARCH), x86)
+ddkLibDirs += $(LW_TOOLS)/win32/$(MSVC_COMPILER)/vc/lib
+endif
+
+ifeq ($(LW_TARGET_ARCH), amd64)
+ddkLibDirs += $(LW_TOOLS)/win32/$(MSVC_COMPILER)/vc/lib/amd64
+endif
+
+RCEXE = $(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/bin/x86/rc.exe
+RC_COMMAND = $(RCEXE)
+RC_COMMAND += /i $(subst /,\,$(LW_TOOLS)/win32/$(LW_COMPILER)/VC/atlmfc/include)
+RC_COMMAND += /i $(subst /,\,$(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/Include/$(LW_DDK_INC_VER)/um)
+RC_COMMAND += /i $(subst /,\,$(LW_TOOLS)/ddk/$(LW_DDK_VER)/$(LW_DDK_SUBVER)/Include/$(LW_DDK_INC_VER)/shared)
+    
+anselSources += Ansel.cpp
+SOURCES += $(anselSources)
+
+LW_INCLUDES += $(LW_SOURCE)/drivers/lwapi/sdk/_out/Windows/lwsdk/$(LW_TARGET_ARCH)
+
+LW_INCLUDES += $(ddkLibDirs)
+LW_INCLUDES += $(ddkIncludes)
+    
+# - CFLAGS
+CFLAGS += /EHa
+ifeq ($(LW_TARGET_ARCH), amd64)
+CFLAGS += /D "WIN64" 
+else
+CFLAGS += /D "WIN32" 
+endif
+CFLAGS += /D "_WINDOWS" 
+CFLAGS += /D "_WINDLL" 
+CFLAGS += /D "_MBCS"
+CFLAGS += /D "UNICODE"
+CFLAGS += /D "_UNICODE"
+CFLAGS += /D_CRT_SELWRE_NO_WARNINGS
+ifeq ($(LW_BUILD_TYPE),debug)
+CFLAGS += /D _DEBUG
+CFLAGS += /Od
+CFLAGS += /MTd
+else
+CFLAGS += /O2
+CFLAGS += /MT
+endif
+ifeq ($(LW_SYMBOLS),1)
+CFLAGS += /Zi
+endif
+
+libraryDirs += $(ddkLibDirs)
+libraryDirs += $(LW_SOURCE)/drivers/lwapi/sdk/_out/Windows/lwsdk/$(LW_TARGET_ARCH)
+    
+libraries += rpcns4.lib
+libraries += rpcrt4.lib
+libraries += uuid.lib
+libraries += Advapi32.lib
+libraries += Gdi32.lib
+
+libraries += kernel32.lib
+libraries += user32.lib
+libraries += winspool.lib
+libraries += comdlg32.lib
+libraries += advapi32.lib
+
+libraries += shell32.lib
+libraries += ole32.lib
+libraries += oleaut32.lib
+libraries += uuid.lib
+libraries += odbc32.lib
+libraries += odbccp32.lib 
+
+libraries += dxgi.lib
+libraries += d3d11.lib
+libraries += d3dcompiler.lib
+libraries += d3d10.lib
+libraries += winmm.lib
+libraries += Shlwapi.lib
+    
+ifeq ($(LW_BUILD_TYPE),debug)
+libraries += libcmtd.lib
+else
+libraries += libcmt.lib
+endif
+
+ifeq ($(LW_TARGET_ARCH), amd64)
+libraries += lwapi64.lib
+else
+libraries += lwapi.lib
+endif
+    
+LFLAGS += -OUT:./$@
+LFLAGS += $(addprefix -libpath:,$(libraryDirs))
+LFLAGS += /IMPLIB:$(OUTPUTDIR)/$(TARGET_NAME).lib
+LFLAGS += /INCREMENTAL:NO
+LFLAGS += /DLL
+LFLAGS += /SUBSYSTEM:WINDOWS 
+LFLAGS += /TLBID:1 
+LFLAGS += /NOLOGO
+
+# Build LwAPI SDK
+LWAPI_SDK = $(LW_SOURCE)\drivers\lwapi\sdk
+    
+# silence some unhelpful warnings, add these to relwrsive make command:
+# LWCFG_GLOBAL_FEATURE_WORKSTATION=1 LWCFG_GLOBAL_CONSUMER_STEREO=1
+$(LWAPI_SDK).build :
+	@$(MAKE) -C $(basename $@) -f makefile.lwmk LW_TARGET_ARCH=$(LW_TARGET_ARCH) LW_TARGET_OS=$(LW_TARGET_OS) LW_BUILD_TYPE=$(LW_BUILD_TYPE) LWCFG_GLOBAL_FEATURE_WORKSTATION=1 LWCFG_GLOBAL_CONSUMER_STEREO=1
+
+$(call BUILD_OBJECT_LIST,$(OBJECTS)) $(OUTPUTDIR)/$(TARGET_NAME).dll: makefile.lwmk $(LWAPI_SDK).build
+$(OUTPUTDIR)/$(TARGET_NAME).dll: $(OBJECTS)
+	@$(LINK) $(strip $(LFLAGS)) $(OBJECTS) $(libraries)
+	signtool\do-sign.bat $(OUTPUTDIR)/$(TARGET_NAME).dll
+
+build: $(OUTPUTDIR)/$(TARGET_NAME).dll
+
+# Always include this last.
+include $(LWMK_SOURCE)/lwCommonRules.lwmk

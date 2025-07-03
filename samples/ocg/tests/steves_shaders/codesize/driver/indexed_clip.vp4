@@ -1,0 +1,34 @@
+!!LWvp4.0
+# Shader from bug 239301
+PARAM c[16] = { state.matrix.modelview.transpose,
+		state.matrix.mvp,
+		state.clip[0].plane,
+		state.clip[1].plane,
+		state.clip[2].plane,
+		state.clip[3].plane,
+		state.clip[4].plane,
+		state.clip[5].plane,
+		state.material.front.ambient,
+		state.material.back.ambient };
+OUTPUT outArray0[] = { result.clip[0..5] };
+TEMP R0, R1;
+TEMP RC, HC;
+MUL.F R0, vertex.attrib[0].y, c[1];
+MAD.F R0, vertex.attrib[0].x, c[0], R0;
+MOV.F result.color, c[14];
+MOV.F result.color.back, c[15];
+MAD.F R0, vertex.attrib[0].z, c[2], R0;
+MAD.F R0, vertex.attrib[0].w, c[3], R0;
+DP4.F result.position.w, vertex.attrib[0], c[7];
+DP4.F result.position.z, vertex.attrib[0], c[6];
+DP4.F result.position.y, vertex.attrib[0], c[5];
+DP4.F result.position.x, vertex.attrib[0], c[4];
+MOV.S R1.x, {0, 0, 0, 0};
+REP.S {6, 0, 0, 0};
+ MOV.U R1.y, R1.x;
+ DP4.F R1.z, R0, c[R1.y + 8];
+ MOV.F outArray0[R1.y].x, R1.z;
+ ADD.S R1.x, R1, {1, 0, 0, 0};
+ENDREP;
+END
+

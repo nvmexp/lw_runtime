@@ -1,0 +1,149 @@
+#
+# LWIDIA_COPYRIGHT_BEGIN
+#
+# Copyright 1999-2014 by LWPU Corporation.  All rights reserved.  All
+# information contained herein is proprietary and confidential to LWPU
+# Corporation.  Any use, reproduction, or disclosure without the written
+# permission of LWPU Corporation is prohibited.
+#
+# LWIDIA_COPYRIGHT_END
+#
+
+#
+# Build libflcndbg.so which is the flcndbg version for arch mods.  It is used
+# while debugging falcon under gdb.
+#
+
+# Set variables to their default state if they are not already set.
+MODS_DIR ?= ../../diag/mods
+LWTOPDIR ?= $(MODS_DIR)/../..
+RESMAN_ROOT ?= $(LWTOPDIR)/drivers/resman
+PMU_DEBUG = 0 
+
+dll_build = true
+base_name = libflcndbg
+
+ifeq "$(BUILD_OS)" "winsim"
+dll_build = false
+endif
+
+ifeq "$(BUILD_OS)" "linuxmfg"
+dll_build = false
+endif
+
+include $(MODS_DIR)/makedefs.inc
+
+# LWFLCNDBG config definitions
+LWFLCNDBGCFG_DIR = ./config
+LWFLCNDBGCFG_OUTPUTDIR = ./config
+LWFLCNDBGCFG_LWFLCNDBG_ROOT = .
+LWFLCNDBGCFG_RESMAN_ROOT = $(RESMAN_ROOT)
+LWFLCNDBGCFG_VERBOSE = default
+LWFLCNDBGCFG_CHIPCFG_ROOT ?= $(LWTOPDIR)/drivers/common/chip-config
+
+include_dirs += .
+include_dirs += inc
+include_dirs += inc/include
+include_dirs += hwref
+include_dirs += ./config
+include_dirs += $(LWTOPDIR)/drivers/common/inc/hwref
+include_dirs += $(RESMAN_ROOT)/kernel/inc
+include_dirs += $(RESMAN_ROOT)/arch/lwalloc/common/inc
+include_dirs += $(RESMAN_ROOT)/arch/lwalloc/mods/inc
+include_dirs += $(RESMAN_ROOT)/arch/lwalloc/unix/include
+include_dirs += $(LWTOPDIR)/diag/mods/core/include
+include_dirs += $(LWTOPDIR)/diag/mods/cheetah/include
+include_dirs += $(LWTOPDIR)/sdk/lwpu/inc
+include_dirs += $(LWTOPDIR)/diag/js
+
+
+defines += -DFERMI
+defines += -DTESLA
+
+ifeq ($(PMU_DEBUG), 1)
+LDFLAGS += -Llib -lfalconDebug
+endif
+
+# TODO This should get replaced with dll
+LDFLAGS += -Wl,--whole-archive -L$(abspath .)/lib -lflcndwarf -llwelf -llwdwarf -Wl,--no-whole-archive
+
+ifeq ($(PMU_DEBUG), 1)
+CFLAGS += -D PMU_DEBUG
+endif
+
+# Uncomment this line to enable sigdump on Linux lwwatch
+CFLAGS += -D SIGDUMP_ENABLE
+
+
+
+#-------------------------------------------------------------------------------
+# Listing of source files.
+#-------------------------------------------------------------------------------
+c_files += chip.c
+c_files += dac.c
+c_files += dpu0200.c
+c_files += dpu0201.c
+c_files += dpu0205.c
+c_files += dumpSession.c
+c_files += exts.c
+c_files += falcon0400.c
+c_files += flcngdb/flcngdb.c
+c_files += i2c.c
+c_files += os.c
+c_files += print.c
+c_files += hal.c
+c_files += halstubs.c
+c_files += lwutil.c
+c_files += simLinux.c
+c_files += pmugk107.c
+c_files += pmugm107.c
+c_files += socbrdgt124.c
+c_files += tegrasyst124.c
+c_files += tegrasyst114.c
+c_files += tegrasyst30.c
+c_files += tegrasyslw50.c
+c_files += tegrasys.c
+c_files += vgpu.c
+
+cpp_files += flcngdb/flcngdbUtilsWrapper.cpp
+cpp_files += flcngdb/flcngdbUtils.cpp
+cpp_files += flcngdb/flcngdbUI.cpp
+
+
+ifeq "$(toolchain)" "msvc"
+    defines += -DXP_PC
+    CFLAGS += /EHsc
+else
+    CFLAGS += -D OS_Linux
+    warnings += -Wno-multichar
+    LWWATCHCFG_PROFILE = unix-mods 
+endif
+defines += -DLWWATCH
+
+
+# Generic rules for a library build
+include $(MODS_DIR)/makelib.inc
+include $(MODS_DIR)/makerule.inc
+
+# This will run the lwwatch-config script needed for the build
+include $(LWFLCNDBGCFG_DIR)/makefile.mk
+
+# Wait for the config files to be generated:
+$(c_files): _lwflcndbg_config_all
+$(cpp_files): _lwflcndbg_config_all
+
+# copy the gdb script file to MODS_RUNSPACE directory
+install: lwflcndbg_install
+build_install: lwflcndbg_install
+
+lwflcndbg_install:
+	@echo "Copying flcndbg.gdb to $(install_target_dir)..."
+	$(Q)$(CP_IF_CHANGED) -f flcndbg.gdb $(install_target_dir)/flcndbg.gdb
+ifeq ($(PMU_DEBUG), 1)
+	@echo "Copying FALCON.md and libfalconDebug.so to $(install_target_dir)..."
+	$(Q)$(CP_IF_CHANGED) lib/FALCON.md $(install_target_dir)/FALCON.md
+	$(Q)$(CP_IF_CHANGED) lib/libfalconDebug.so $(install_target_dir)/libfalconDebug.so
+endif
+
+# Include dependency information.
+-include $(depend_files)

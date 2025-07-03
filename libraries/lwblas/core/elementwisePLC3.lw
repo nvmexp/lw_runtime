@@ -1,0 +1,139 @@
+#include <cstdio>
+#include <cfloat>
+#include <cmath>
+#include <cassert>
+#include <limits>
+
+#include <lwda_runtime.h>
+
+#include <lwtensor/internal/typesPLC3.h>
+#include <lwtensor/internal/utilPLC3.h>
+#include <lwtensor/internal/elementwisePrototypePLC3.h>
+#include <lwtensor/internal/elementwiseInstancePLC3.h>
+#include <lwtensor/internal/defines.h>
+
+namespace LWTENSOR_NAMESPACE
+{
+    lwtensorStatus_t elementwiseTrinaryExelwtePLC3(
+            void const * const alpha, void const * const A,
+            void const * const  beta, void const * const B,
+            void const * const gamma, void const * const C, void * const D,
+            ElementwisePlan const & plan, lwdaStream_t const stream)
+    {
+        constexpr bool checkInstanceAvailability {false};
+
+        /* Both tensor A and D must be valid. */
+        if (((alpha == nullptr) || (A == nullptr)) || (D == nullptr))
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_NOT_SUPPORTED;
+        }
+
+        /* Validate whether the input scalars and pointers matching the usage of the plan. */
+        if (plan.useA_)
+        {
+            if ((alpha == nullptr) || (A == nullptr))
+            {
+                return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+            }
+        }
+        else
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_NOT_SUPPORTED;
+        }
+        if (plan.useB_)
+        {
+            if ((beta == nullptr) || (B == nullptr))
+            {
+                return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+            }
+        }
+        if (plan.useC_)
+        {
+            if ((gamma == nullptr) || (C == nullptr))
+            {
+                return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+            }
+        }
+        /* Dispatch the input to a type-specific case that lwTensor supports. */
+        return elementwiseInstancePLC3(
+                checkInstanceAvailability,
+                plan.params_,
+                {plan.unaryOpA_, plan.unaryOpB_, plan.unaryOpC_, plan.binaryOp1_, plan.unaryOp1_, plan.binaryOp2_},
+                alpha, A, plan.typeA_,
+                beta,  B, plan.typeB_,
+                gamma, C, plan.typeC_,
+                       D, plan.typeCompute_, 
+                stream);
+    }
+
+    lwtensorStatus_t elementwiseBinaryExelwtePLC3(
+            void const * const alpha, void const * const A,
+            void const * const gamma, void const * const C,
+                                            void * const D,
+            ElementwisePlan const & plan, lwdaStream_t const stream)
+    {
+        return elementwiseTrinaryExelwtePLC3(alpha, A, nullptr, nullptr, gamma, C, D, plan, stream);
+    }
+
+    lwtensorStatus_t permutationExelwtePLC3(
+            void const * const alpha, void const * const A,
+                                            void * const D,
+            ElementwisePlan const & plan, lwdaStream_t const stream)
+    {
+        return elementwiseTrinaryExelwtePLC3(alpha, A, nullptr, nullptr, nullptr, nullptr, D, plan, stream);
+    }
+
+    lwtensorStatus_t elementwiseInstancePLC3(
+            bool const checkInstanceAvailability,
+            ElementwiseParameters const& params,
+            ElementwiseOpPack const opPack,
+            void const * const alpha, void const * const A, lwdaDataType_t const typeA,
+            void const * const beta,  void const * const B, lwdaDataType_t const typeB,
+            void const * const gamma, void const * const C, lwdaDataType_t const typeC,
+                                            void * const D, lwdaDataType_t const typeCompute,
+            lwdaStream_t const stream)
+    {
+        lwtensorStatus_t status;
+        /* Check if the input is one of the uni-precision case. */
+        status = elementwiseUniPrecisionPLC3(
+                checkInstanceAvailability,
+                params, 
+                {typeA, typeB, typeC, typeCompute, (beta != nullptr)}, 
+                opPack,
+                alpha, A, beta, B, gamma, C, D, stream);
+        if (status != lwtensorStatus_t::LWTENSOR_STATUS_NOT_SUPPORTED)
+        {
+            return status;
+        }
+        /* Check if the input is one of the real mixed-precision case. */
+        status = elementwiseMixedRealPLC3(
+                checkInstanceAvailability,
+                params, 
+                {typeA, typeB, typeC, typeCompute, (beta != nullptr)}, 
+                opPack,
+                alpha, A, beta, B, gamma, C, D, stream);
+        if (status != lwtensorStatus_t::LWTENSOR_STATUS_NOT_SUPPORTED)
+        {
+            return status;
+        }
+        /* Check if the input is one of the int8 with per-channel scaling case. */
+        status = elementwiseInt8WithScalingPLC3(
+                checkInstanceAvailability,
+                params, 
+                {typeA, typeB, typeC, typeCompute, (beta != nullptr)}, 
+                opPack,
+                alpha, A, beta, B, gamma, C, D, stream);
+        if (status != lwtensorStatus_t::LWTENSOR_STATUS_NOT_SUPPORTED)
+        {
+            return status;
+        }
+        /* Check if the input is one of the int8 mixed-precision case. */
+        status = elementwiseMixedInt8PLC3(
+                checkInstanceAvailability,
+                params, 
+                {typeA, typeB, typeC, typeCompute, (beta != nullptr)}, 
+                opPack,
+                alpha, A, beta, B, gamma, C, D, stream);
+        return status;
+    };
+} /* end namespace LWTENSOR_NAMESPACE */

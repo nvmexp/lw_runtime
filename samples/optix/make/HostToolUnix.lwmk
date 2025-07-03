@@ -1,0 +1,47 @@
+#
+#  Copyright (c) 2021 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+# HostToolUnix.lwmk - Variable definitions specific to compiling and linking Unix host tool exelwtables
+
+# link_optix_host_tool
+#
+# Link OptiX host tool exelwtable $(1) from objects $(2).
+#
+# Input variables:
+# $(1)
+#   The name of the tool exelwtable, without any platform specific suffix.
+#
+# $(2)
+#   List of object files to link together to form the exelwtable.
+#
+# Example: for Unix sometool,
+#   $(call link_optix_tool,sometool,$(sometool_OBJECTS))
+#
+define link_optix_host_tool
+  # Link tool exelwtable from built objects and necessary libraries.
+  $$($(1)_EXE): $(2) $$(LW_OPTIX)/make/HostTool.lwmk $$(LW_OPTIX)/make/HostToolWindows.lwmk $$($(1)_MAKEFILE) $$($(1)_DEPS)
+	$$(call quiet_cmd,HOST_LINKXX) \
+          -o $$($(1)_EXE) \
+          $$($(1)_LFLAGS) \
+          $(2) \
+          $$($(1)_LIBS) \
+          -static-libstdc++ \
+          -static-libgcc
+endef

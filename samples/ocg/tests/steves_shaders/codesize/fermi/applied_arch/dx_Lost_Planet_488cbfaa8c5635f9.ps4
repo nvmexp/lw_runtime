@@ -1,0 +1,72 @@
+ps_4_0
+dcl_input v1.xyzw, linear
+dcl_input v2.xyz, linear
+dcl_input v3.xyzw, linear
+dcl_input v4.xyw, linear
+dcl_output o0.xyzw
+dcl_constantbuffer cb0[25].xyzw, immediateindexed
+dcl_constantbuffer cb1[2].xyzw, immediateindexed
+dcl_constantbuffer cb2[4].xyzw, immediateindexed
+dcl_constantbuffer cb3[44].xyzw, dynamicindexed
+dcl_sampler s0, mode_comparison
+dcl_sampler s1, mode_default
+dcl_resource t0, texture2d, (float, float, float, float)
+dcl_resource t1, texture2d, (float, float, float, float)
+dcl_temps 5 
+add r0.x, -v1.w, cb3[19].x
+lt r0.x, r0.x, l(0.00000000)
+discard_sat r0.x
+dp3 r0.x, v2.xyzx, v2.xyzx
+rsq r0.x, r0.x
+mul r0.xyz, r0.xxxx, v2.xyzx
+dp3 r0.x, r0.xyzx, -cb3[16].yzwy
+lt r0.x, r0.x, l(0.00000000)
+discard_sat r0.x
+div r0.xyz, v3.xyzx, v3.wwww
+div r1.xy, v4.xyxx, v4.wwww
+mad r1.xy, r1.xyxx, l(0.50000000, 0.50000000, 0.00000000, 0.00000000), l(0.50000000, 0.50000000, 0.00000000, 0.00000000)
+mul r1.xy, r1.xyxx, cb1[1].xyxx
+mul r1.xy, r1.xyxx, cb3[18].wwww
+sample_l r1.xyzw, r1.xyxx, t1.xyzw, s1, l(0)
+add r0.w, r1.x, l(-0.50000000)
+mul r0.w, r0.w, l(6.28318501)
+sincos r1.x, null, r0.w
+sincos null, r0.w, r0.w
+mad r1.y, cb3[40].y, r0.y, cb3[40].z
+mul r1.y, r1.y, cb3[18].z
+mul r1.y, r1.y, cb3[40].x
+mul r1.z, r1.x, r1.y
+mul r1.x, r0.w, r1.y
+mul r2.xyzw, r1.xzxz, cb3[43].xyxy
+mov r1.w, -r1.z
+mul r1.xyzw, r1.wxwx, cb3[43].xyxy
+mov r0.w, l(0)
+mov r3.x, l(0)
+loop 
+ige r3.y, r3.x, l(0x10)
+breakc_nz r3.y
+mul r4.xyzw, r1.xyzw, cb3[r3.x+24].yyww
+mad r4.xyzw, r2.xyzw, cb3[r3.x+24].xxzz, r4.xyzw
+add r4.xyzw, r0.xyxy, r4.xyzw
+sample_c_lz r3.y, r4.xyxx, t0.xxxx, s0, r0.z
+add r3.y, r0.w, r3.y
+sample_c_lz r3.z, r4.zwzz, t0.xxxx, s0, r0.z
+add r0.w, r3.y, r3.z
+iadd r3.x, r3.x, l(0x1)
+endloop 
+mul r0.x, r0.w, l(0.03125000)
+mad_sat r0.y, v1.w, cb3[20].x, cb3[20].y
+mad r0.y, r0.y, -cb3[0].w, cb3[0].w
+mul o0.w, r0.x, r0.y
+add r0.xyz, -v1.xyzx, cb0[24].xyzx
+dp3 r0.x, r0.xyzx, r0.xyzx
+sqrt r0.x, r0.x
+add r0.x, r0.x, -cb2[1].x
+mul r0.x, r0.x, cb2[1].z
+min r0.x, r0.x, cb2[3].w
+max r0.x, r0.x, l(0.00000000)
+add r0.yzw, cb2[3].xxyz, -cb3[0].xxyz
+mad r0.xyz, r0.xxxx, r0.yzwy, cb3[0].xyzx
+movc r0.xyz, cb2[0].xxxx, r0.xyzx, cb3[0].xyzx
+mul o0.xyz, r0.xyzx, l(0.50000000, 0.50000000, 0.50000000, 0.00000000)
+ret 

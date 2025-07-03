@@ -1,0 +1,3984 @@
+#ifndef LWTENSOR_BUILD_ID
+#define LWTENSOR_BUILD_ID 0
+#endif
+
+#ifndef LWTENSOR_GIT_COMMIT
+#define LWTENSOR_GIT_COMMIT "dummy"
+#endif
+
+#ifndef LWTENSOR_GIT_TAG
+#define LWTENSOR_GIT_TAG "dummy"
+#endif
+
+#include <assert.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+
+#include <lwda_runtime.h>
+#include <lwda_fp16.h>
+#include <lwml.h>
+#include <lwblas_v2.h>
+#ifndef _WIN32
+#include <lwToolsExt.h>
+#endif
+
+#include <limits>
+#include <cfloat>
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <algorithm>
+#include <vector>
+#include <list>
+#include <unordered_map>
+#include <set>
+
+#include "gtest/gtest.h"
+
+#define HANDLE_LWDA_ERROR(x) {auto err = x; if(err != lwdaSuccess) { printf("lwca-error:%s in line %d\n",lwdaGetErrorString(err), __LINE__); FAIL();}}
+#define HANDLE_LWML_ERROR(errExpr) {auto lwmlErr = errExpr; if (LWML_SUCCESS != lwmlErr ) { printf("Error: %s\n", lwmlErrorString(lwmlErr)); exit(-1);}}
+
+#include <lwtensor/internal/operators.h>
+#include <lwtensor.h>
+
+#include <lwtensor/internal/lwtensor.h>
+#include <lwtensor/internal/defines.h>
+#include <lwtensor/internal/util.h>
+#include <lwtensor/internal/utilEx.h>
+#include <lwtensor/internal/defines.h>
+#include <lwtensor/internal/types.h>
+#include "util.h"
+#include "string_util.h"
+#include "random_util.h"
+#include "trash_util.h"
+#include "contraction_ref.h"
+#include "elementwise_ref.h"
+#include "wait_util.h"
+
+bool globalDryRun = atoi(string_util::with_default(getelw("LWTENSOR_DRY_RUN"), "0").c_str());
+
+typedef int mode_type_external;
+typedef half2 lwtensorHalfComplex; // TODO this should be moved somewhere else
+
+class AlgoInfo : public std::vector<float>
+{
+    public:
+
+    static const int PlanInfo_sz = 2048;
+
+    double relError;
+
+    char planInfo_[PlanInfo_sz] = "";
+
+    float getAverageRuntime() const
+    {
+        if (this->size() == 0)
+        {
+            return FLT_MAX;
+        }
+        float totalTime_ = 0.f;
+        for (auto t : *this)
+        {
+            totalTime_ += t;
+        }
+        return totalTime_ / this->size();
+    }
+
+    float getMedianRuntime() const
+    {
+        if (this->size() == 0)
+        {
+            return FLT_MAX;
+        }
+        std::vector<float> copy(*this);
+        std::sort(copy.begin(), copy.end());
+        auto size = copy.size();
+        if (size % 2 == 0)
+        {
+            return (copy[size/2 - 1] + copy[size/2])/2.;
+        }
+        else
+        {
+            return copy[size/2];
+        }
+    }
+
+    float getMinRuntime() const
+    {
+        float min = FLT_MAX;
+        for (auto t : *this)
+        {
+            min = std::min(min, t);
+        }
+        return min;
+    }
+};
+
+
+typedef std::vector< std::pair<int,AlgoInfo> > lwtensorAlgoInfo;
+
+// Timing structure
+struct GPUTimer
+{
+    GPUTimer(lwdaStream_t stream = 0, bool useLwdaGraph = false) : stream_(stream), useLwdaGraph_(useLwdaGraph)
+    {
+        if (!useLwdaGraph_)
+        {
+            lwdaEventCreate(&start_);
+            lwdaEventCreate(&stop_);
+            lwdaEventRecord(start_, stream_);
+        }
+    }
+
+    ~GPUTimer() 
+    {
+        if (!useLwdaGraph_)
+        {
+            lwdaEventDestroy(start_);
+            lwdaEventDestroy(stop_);
+        }
+    }
+
+    void start() 
+    {
+        if (!useLwdaGraph_)
+        {
+            lwdaEventRecord(start_, stream_);
+        }
+    }
+
+    float seconds() 
+    {
+
+        if (!useLwdaGraph_)
+        {
+            lwdaEventRecord(stop_, stream_);
+            lwdaEventSynchronize(stop_);
+            float time;
+            lwdaEventElapsedTime(&time, start_, stop_);
+            return time * 1e-3;
+        }
+        else
+        {
+            return 0.0f;
+        }
+    }
+    private:
+    bool useLwdaGraph_ = false; // indicates if lwca graph has been used => deactivate timer
+    lwdaEvent_t start_, stop_;
+    lwdaStream_t stream_;
+};
+
+size_t roundUp(size_t x, size_t y)
+{
+    if( x % y == 0 )
+        return x;
+    else
+        return x + y - (x%y);
+}
+
+#define REL(a,b) (std::abs((a)-(b))/std::max((a),(b)))
+
+typedef enum { LWTENSOR_PW, LWTENSOR_TC, LWTENSOR_REDUCTION, UNKNOWN } Routine;
+
+std::string colwertToCommandline(Routine routine)
+{
+    switch(routine)
+    {
+        case LWTENSOR_TC:
+            return std::string("contraction");
+        case LWTENSOR_PW:
+            return std::string("elementwise");
+        case LWTENSOR_REDUCTION:
+            return std::string("reduction");
+        default:
+            {
+                printf( "ERROR: Routine UNKNOWN.\n");
+                exit(-1);
+            }
+    }
+}
+std::string colwertToCommandline(lwtensorComputeType_t type)
+{
+    switch ( type )
+    {
+        case LWTENSOR_COMPUTE_8U:
+            return "k";
+        case LWTENSOR_COMPUTE_8I:
+            return "j";
+        case LWTENSOR_COMPUTE_32U:
+            return "u";
+        case LWTENSOR_COMPUTE_32I:
+            return "i";
+        case LWTENSOR_COMPUTE_16F:
+            return "h";
+        case LWTENSOR_COMPUTE_32F:
+            return "s";
+        case LWTENSOR_COMPUTE_64F:
+            return "d";
+        case LWTENSOR_COMPUTE_16BF:
+            return "b";
+        case LWTENSOR_COMPUTE_TF32:
+            return "t";
+        default:
+            {
+                printf( "ERROR: TYPE UNKNOWN. %d\n", type );
+                exit(-1);
+            }
+    }
+}
+
+std::string colwertToCommandline(lwdaDataType_t typeA)
+{
+    switch ( (int) typeA ) // WARNING: colwersion necessary to avoid compiler warnings (due to LWDA_R_TF32 not being part of lwdaDataType_t)
+    {
+        case LWDA_R_8U:
+            return std::string("k");
+        case LWDA_R_8I:
+            return std::string("j");
+        case LWDA_R_32U:
+            return std::string("u");
+        case LWDA_R_32I:
+            return std::string("i");
+        case LWDA_R_16F:
+            return std::string("h");
+        case LWDA_C_16F:
+            return std::string("g");
+        case LWDA_R_32F:
+            return std::string("s");
+        case LWDA_R_64F:
+            return std::string("d");
+        case LWDA_C_32F:
+            return std::string("c");
+        case LWDA_C_64F:
+            return std::string("z");
+        case LWDA_R_16BF:
+            return std::string("b");
+        case LWDA_R_TF32:
+            return std::string("t");
+        case LWDA_C_TF32:
+            return std::string("r");
+        default:
+            {
+                printf( "ERROR: TYPE UNKNOWN. %d\n", typeA );
+                exit(-1);
+            }
+    }
+}
+
+template<typename typeCompute>
+typename std::enable_if<!std::is_integral<typeCompute>::value, bool>::type
+isINF( typeCompute x );
+
+template<typename typeCompute>
+typename std::enable_if<std::is_integral<typeCompute>::value, bool>::type
+isINF( typeCompute x )
+{
+    (void)x;
+    return false;
+}
+
+#if LWTENSOR_LWDA_VERSION_MAJOR >= 11
+template<>
+bool isINF( LWTENSOR_NAMESPACE::BFloat16 x )
+{
+    return isinf(LWTENSOR_NAMESPACE::lwGet<float>(x));
+}
+#endif
+template<>
+bool isINF( half x )
+{
+    return isinf(LWTENSOR_NAMESPACE::lwGet<float>(x));
+}
+template<>
+bool isINF( float x )
+{
+    return isinf(x);
+}
+template<>
+bool isINF( double x )
+{
+    return isinf(x);
+}
+template<>
+bool isINF( lwComplex x )
+{
+    return isinf(lwCimagf(x)) || isinf(lwCrealf(x));
+}
+template<>
+bool isINF( lwDoubleComplex x )
+{
+    return isinf(lwCimag(x)) || isinf(lwCreal(x));
+}
+
+template<typename typeCompute>
+typename std::enable_if<!std::is_integral<typeCompute>::value, bool>::type
+isNAN( typeCompute x );
+
+template<typename typeCompute>
+typename std::enable_if<std::is_integral<typeCompute>::value, bool>::type
+isNAN( typeCompute x )
+{
+    (void) x; //surpress warning
+    return false;
+}
+#if LWTENSOR_LWDA_VERSION_MAJOR >= 11
+template<>
+bool isNAN( LWTENSOR_NAMESPACE::BFloat16 x )
+{
+    return isnan(LWTENSOR_NAMESPACE::lwGet<float>(x));
+}
+#endif
+template<>
+bool isNAN( half x )
+{
+    return isnan(LWTENSOR_NAMESPACE::lwGet<float>(x));
+}
+template<>
+bool isNAN( float x )
+{
+    return isnan(x);
+}
+template<>
+bool isNAN( double x )
+{
+    return isnan(x);
+}
+template<>
+bool isNAN( lwComplex x )
+{
+    return isnan(lwCimagf(x)) || isnan(lwCrealf(x));
+}
+template<>
+bool isNAN( lwDoubleComplex x )
+{
+    return isnan(lwCimag(x)) || isnan(lwCreal(x));
+}
+
+#if LWTENSOR_LWDA_VERSION_MAJOR >= 11
+float lwSub(LWTENSOR_NAMESPACE::BFloat16 a, LWTENSOR_NAMESPACE::BFloat16 b) {
+  return static_cast<float>(a) - static_cast<float>(b);
+}
+#endif
+
+template<typename typeCompute>
+double RelativeError( typeCompute lhs, typeCompute rhs )
+{
+    using namespace LWTENSOR_NAMESPACE;
+    auto isnanLHS = isNAN(lhs);
+    auto isnanRHS = isNAN(rhs);
+    if( isnanRHS != isnanLHS )
+    {
+        return 1.0;
+    }
+    double x = lw2Norm( lwSub( lhs, rhs ) );
+    double y = std::max( lw2Norm( lhs ), lw2Norm( rhs ) );
+    if( y == 0.0 )
+        return 0.0;
+    return x / y;
+}
+
+
+template<typename typeCompute>
+double SquareError( typeCompute lhs, typeCompute rhs )
+{
+    using namespace LWTENSOR_NAMESPACE;
+    double x = lwGet<double>(lwSub( lhs, rhs ));
+    return lwSquare2Norm( x );
+}
+
+template<typename typeA>
+std::pair<double, double> verify( typeA *A, typeA *Ref, size_t m, double tol )
+{
+    using namespace LWTENSOR_NAMESPACE;
+    std::pair<double, double> relError( (double)0, (double)0 );
+    double norm = 0;
+    double normA = 0;
+    double normRef = 0;
+    /** Error logs. */
+    std::vector<int> errors;
+    for ( size_t i = 0; i < m; i ++ )
+    {
+        double a = lwGet<double>(A[ i ]);
+        double ref = lwGet<double>(Ref[ i ]);
+
+        auto rel = RelativeError( a, ref );
+        if ( rel > tol )
+        {
+#ifdef DEBUG
+            if( errors.size() < 5 )
+            {
+                printf( "Warning: i:%ld cut:%e ref:%e rel:%e tol:%e\n", i,
+                        a,
+                        ref, rel, tol );
+            }
+#endif
+            errors.push_back( i );
+        }
+        relError.second = std::max( relError.second, rel );
+        norm  += SquareError( a, ref );
+        normA += lwSquare2Norm( a );
+        normRef += lwSquare2Norm( ref );
+    }
+    /** Compute relative error. */
+    norm  = std::sqrt( norm );
+    normA = std::sqrt( normA );
+    normRef = std::sqrt( normRef );
+
+    /* Both normA and normB are either -inf, +inf, or nan. */
+    if ((std::isinf(normA) && std::isinf(normRef)) || (isNAN(normA) && isNAN(normRef)))
+    {
+        if (*reinterpret_cast<uint64_t*>(&normA) ^ *reinterpret_cast<uint64_t*>(&normRef) == (uint64_t)0U)
+        {
+            return std::pair<double, double>(0.0, 0.0);
+        }
+        else
+        {
+            printf("NAN or INF doesn't match\n");
+            return std::pair<double, double>(1.0, 1.0);
+        }
+    }
+
+    if( isINF(normA) != isINF(normRef) )
+    {
+        relError.first = 1.0;
+        printf("INF doesn't match %d %d\n", isINF(normA), isINF(normRef));
+        return relError;
+    }
+    if( isNAN(normA) != isNAN(normRef) )
+    {
+        relError.first = 1.0;
+        printf("NAN doesn't match\n");
+        return relError;
+    }
+    auto maxValue = std::max( normA, normRef );
+    if( maxValue > 0 )
+        relError.first = norm / maxValue;
+    else
+        relError.first = 0;
+    /** Report error log. */
+    if ( errors.size() )
+    {
+        printf( "log: " );
+        for ( int i = 0; i < std::min( 5, (int)errors.size() ); i ++ )
+            printf( "%d, ", errors[ i ] );
+        printf( "\033[93mWARNING: \x1B[0m%ld/%ld %E tolerance: %E\n", errors.size(), m, relError.second, tol );
+    }
+    /** Return the relative 2-norm and element-wise error. */
+    return relError;
+}
+
+std::pair<double, double> verify( void*A, void *B, size_t m, lwdaDataType_t type, double tol )
+{
+    switch ( type )
+    {
+        case LWDA_R_8U:
+            return verify<uint8_t>( (uint8_t*)A, (uint8_t*)B, m, tol );
+        case LWDA_R_8I:
+            return verify<int8_t>( (int8_t*)A, (int8_t*)B, m, tol );
+        case LWDA_R_32U:
+            return verify<uint32_t>( (uint32_t*)A, (uint32_t*)B, m, tol );
+        case LWDA_R_32I:
+            return verify<int32_t>( (int32_t*)A, (int32_t*)B, m, tol );
+        case LWDA_R_16F:
+            return verify<half>( (half*)A, (half*)B, m, tol );
+        case LWDA_R_32F:
+            return verify<float>( (float*)A, (float*)B, m, tol );
+        case LWDA_R_64F:
+            return verify<double>( (double*)A, (double*)B, m, tol );
+        case LWDA_C_32F:
+            return verify<float>( (float*)A, (float*)B, 2L*m, tol );
+        case LWDA_C_64F:
+            return verify<double>( (double*)A, (double*)B, 2L*m, tol );
+#if LWTENSOR_LWDA_VERSION_MAJOR >= 11
+        case LWDA_R_16BF:
+            return verify<LWTENSOR_NAMESPACE::BFloat16>( (LWTENSOR_NAMESPACE::BFloat16*)A, (LWTENSOR_NAMESPACE::BFloat16*)B, m, tol );
+#endif
+        default:
+            printf("TYPE UNKNOWN\n");
+            exit(0);
+    }
+}
+
+mode_type_external parseMode(const std::string& str)
+{
+    if (str.size() == 1 && !isdigit(str[0]))
+    {
+        return str[0];
+    }
+    else
+    {
+        return std::stoi(str);
+    }
+}
+
+void initModes(std::vector<mode_type_external> &tokens, const std::vector<std::string>&& vec)
+{
+    for (auto s : vec)
+    {
+        tokens.push_back(parseMode(s));
+    }
+}
+
+std::vector<std::string> split( const char* str, const char* delim )
+{
+    std::vector<std::string> tokens;
+    char * pch;
+    char buffer[1024];
+    strcpy( buffer, str );
+    pch = strtok( buffer, delim );
+    while (pch != NULL)
+    {
+        tokens.push_back(std::string(pch));
+        pch = strtok (NULL, delim);
+    }
+    return tokens;
+}
+
+char typeToString( lwdaDataType_t type)
+{
+    switch((int) type)
+    {
+        case LWDA_R_8U:
+            return 'k';
+        case LWDA_R_8I:
+            return 'j';
+        case LWDA_R_32U:
+            return 'u';
+        case LWDA_R_32I:
+            return 'i';
+        case LWDA_R_16F:
+            return 'h';
+        case LWDA_R_32F:
+            return 's';
+        case LWDA_R_64F:
+            return 'd';
+        case LWDA_C_16F:
+            return 'g';
+        case LWDA_C_32F:
+            return 'c';
+        case LWDA_C_64F:
+            return 'z';
+        case LWDA_R_16BF:
+            return 'b';
+        case LWDA_C_TF32:
+            return 'r';
+        case LWDA_R_TF32:
+            return 't';
+        default:
+            printf("ERROR: TYPE UNKNOWN. %d\n",type);
+            exit(-1);
+    }
+}
+void initComputeType( lwtensorComputeType_t &type, char arg)
+{
+    switch ( arg )
+    {
+        case 'k':
+            type = LWTENSOR_COMPUTE_8U;
+            break;
+        case 'j':
+            type = LWTENSOR_COMPUTE_8I;
+            break;
+        case 'u':
+            type = LWTENSOR_COMPUTE_32U;
+            break;
+        case 'i':
+            type = LWTENSOR_COMPUTE_32I;
+            break;
+        case 'h':
+            type = LWTENSOR_COMPUTE_16F;
+            break;
+        case 's':
+            type = LWTENSOR_COMPUTE_32F;
+            break;
+        case 'd':
+            type = LWTENSOR_COMPUTE_64F;
+            break;
+        case 'b':
+            type = LWTENSOR_COMPUTE_16BF;
+            break;
+        case 't':
+            type = LWTENSOR_COMPUTE_TF32;
+            break;
+        default:
+            printf("ERROR: TYPE UNKNOWN. %c\n",arg);
+            exit(-1);
+    }
+}
+void initType( lwdaDataType_t &type, char arg)
+{
+    switch ( arg )
+    {
+        case 'k':
+            type = LWDA_R_8U;
+            break;
+        case 'j':
+            type = LWDA_R_8I;
+            break;
+        case 'u':
+            type = LWDA_R_32U;
+            break;
+        case 'i':
+            type = LWDA_R_32I;
+            break;
+        case 'g':
+            type = LWDA_C_16F;
+            break;
+        case 'h':
+            type = LWDA_R_16F;
+            break;
+        case 's':
+            type = LWDA_R_32F;
+            break;
+        case 'd':
+            type = LWDA_R_64F;
+            break;
+        case 'c':
+            type = LWDA_C_32F;
+            break;
+        case 'z':
+            type = LWDA_C_64F;
+            break;
+        case 'b':
+            type = LWDA_R_16BF;
+            break;
+        default:
+            printf("ERROR: TYPE UNKNOWN. %c\n",arg);
+            exit(-1);
+    }
+}
+
+#define LWTENSOR_TEST_MAX_NUM_THREADS 4
+
+static int32_t LWTENSOR_TEST_RANDOM_SEEDS[LWTENSOR_TEST_MAX_NUM_THREADS] = { 1,2,3,4 };
+
+void initialize( void* A, lwdaDataType_t typeA, size_t numElements, float value = 999, bool useLinear = false )
+{
+    // these values area chosen, s.t. the expected value of the product of two random
+    // numbers is equal to one (s.t. the sum over those values will be kept rather small
+    // to avoid overflow)
+    // Hence, we want that: (1-lower)/2 * (1+upper) / 2 == 1 => upper = 4 / (1-lower) - 1
+    double a = 1./4.;
+    double b = 4./ (1. - a) - 1.;
+    if ( value != 999 )
+    {
+        a = value;
+        b = value;
+    }
+    else if( typeA == LWDA_R_8I )
+    {
+        a = 0;
+        b = 30;
+    }
+    else if( typeA == LWDA_R_8U )
+    {
+        a = 0;
+        b = 40;
+    }
+    else if( typeA == LWDA_R_32I )
+    {
+        a = 0;
+        b = 600;
+    }
+    else if( typeA == LWDA_R_32U )
+    {
+        a = 0;
+        b = 1000;
+    }
+
+#ifdef _OPENMP
+#pragma omp parallel num_threads(LWTENSOR_TEST_MAX_NUM_THREADS)
+#endif
+    {
+#ifdef _OPENMP
+        int threadId = omp_get_thread_num();
+        int32_t &mySeed = LWTENSOR_TEST_RANDOM_SEEDS[threadId];
+#pragma omp for
+#else
+    int32_t &mySeed = LWTENSOR_TEST_RANDOM_SEEDS[0];
+#endif
+        for ( size_t i = 0; i < numElements; i++)
+        {
+            double lower = a;
+            double upper = b;
+            if ( useLinear )
+            {
+                lower = upper = i;
+            }
+
+            using namespace random_util;
+            if (lower != upper &&
+                typeA != LWDA_R_8I && typeA != LWDA_R_8U && typeA != LWDA_R_32I && typeA != LWDA_R_32U)
+            {
+                constexpr int kMaxValue = 10000;
+                if (UniformRandomNumber<int32_t>( 0, kMaxValue, mySeed ) < (kMaxValue/2))
+                { // 50% to pick a value below 1
+                    lower = a;
+                    upper = 1.;
+                }
+                else
+                { // 50% to pick a value above 1
+                    lower = 1.;
+                    upper = b;
+                }
+            }
+
+            switch ( typeA )
+            {
+                case LWDA_R_8I:
+                    ((int8_t*)A)[ i ] = UniformRandomNumber<int8_t>( lower, upper, mySeed );
+                    break;
+                case LWDA_R_8U:
+                    ((uint8_t*)A)[ i ] = UniformRandomNumber<uint8_t>( lower, upper, mySeed );
+                    break;
+                case LWDA_R_32I:
+                    ((int32_t*)A)[ i ] = UniformRandomNumber<int32_t>( lower, upper, mySeed );
+                    break;
+                case LWDA_R_32U:
+                    ((uint32_t*)A)[ i ] = UniformRandomNumber<uint32_t>( lower, upper, mySeed );
+                    break;
+                case LWDA_R_16F:
+                    ((half*)A)[ i ] = UniformRandomNumber<half>( lower, upper, mySeed );
+                    break;
+#if LWTENSOR_LWDA_VERSION_MAJOR >= 11
+                case LWDA_R_16BF:
+                    ((LWTENSOR_NAMESPACE::BFloat16*)A)[ i ] = UniformRandomNumber<LWTENSOR_NAMESPACE::BFloat16>( lower, upper, mySeed );
+                    break;
+#endif
+                case LWDA_R_32F:
+                    ((float*)A)[ i ] = UniformRandomNumber<float>( lower, upper, mySeed );
+                    break;
+                case LWDA_R_64F:
+                    ((double*)A)[ i ] = UniformRandomNumber<double>( lower, upper, mySeed );
+                    break;
+                case LWDA_C_16F:
+                    ((lwtensorHalfComplex*)A)[ i ].x = UniformRandomNumber<half>( lower, upper, mySeed );
+                    ((lwtensorHalfComplex*)A)[ i ].y = UniformRandomNumber<half>( lower, upper, mySeed );
+                    break;
+                case LWDA_C_32F:
+                    ((lwComplex*)A)[ i ] = UniformRandomNumber<lwComplex>( lower, upper, mySeed );
+                    break;
+                case LWDA_C_64F:
+                    ((lwDoubleComplex*)A)[ i ] = UniformRandomNumber<lwDoubleComplex>( lower, upper, mySeed );
+                    break;
+                default:
+                    printf( "ERROR: TYPE UNKNOWN. %d\n", typeA );
+                    exit(-1);
+            }
+        }
+    }
+}
+
+void initializeHelper( void* A, lwdaDataType_t typeA, size_t numElements, const bool useZero, const bool useNaN, const bool useOne, const bool useLinear)
+{
+    if (globalDryRun) return;
+    if (useZero)
+    {
+        initialize( A, typeA, numElements, 0);
+    }
+    else if (useNaN)
+    {
+        initialize( A, typeA, numElements, nanf(""));
+    }
+    else if (useOne)
+    {
+        initialize( A, typeA, numElements, 1);
+    }
+    else if (useLinear)
+    {
+        initialize( A, typeA, numElements, 1, true);
+    }
+    else
+    {
+        // random init
+        initialize( A, typeA, numElements);
+    }
+}
+
+struct TestOptions
+{
+    TestOptions() : algo_(kDefaultAlgo), hostA(false), hostB(false), hostC(false), hostD(false), useD(false), alpha(1.2f), beta(0.0f), gamma(0.0f),
+        typeA(LWDA_R_32F), typeB(LWDA_R_32F), typeC(LWDA_R_32F),
+        typeCompute((lwtensorComputeType_t)LWTENSOR_COMPUTE_32F), routine(UNKNOWN), showDevice(false),
+        fastVerification(false), disableVerification_(false), disableWaitKernel_(false), deviceId(0), verbose(false),
+        useA(false), useB(false), useC(false), graphMode(false), numRuns(5),
+        shouldWaive_(false), numCachelines_(0), cacheFile_(""), command_(""),
+        zeroInitA_(false), zeroInitB_(false), zeroInitC_(false), zeroInitD_(false),
+        oneInitA_(false), oneInitB_(false), oneInitC_(false), oneInitD_(false),
+        nanInitA_(false), nanInitB_(false), nanInitC_(false), nanInitD_(false),
+        linInitA_(false), linInitB_(false), linInitC_(false), linInitD_(false),
+        permute_(false), partitionsK_(-1), useSeeds_(false),
+        showFailureOnly(false), showNotSupport(false)
+    {
+        strideA.clear();
+        strideB.clear();
+        strideC.clear();
+        extent.clear();
+        opA = LWTENSOR_OP_IDENTITY;
+        opB = LWTENSOR_OP_IDENTITY;
+        opC = LWTENSOR_OP_IDENTITY;
+        opAB = LWTENSOR_OP_ADD;
+        opUnaryAfterBinary = LWTENSOR_OP_IDENTITY;
+        opABC = LWTENSOR_OP_ADD;
+        opReduce = LWTENSOR_OP_ADD;
+    }
+
+    static const int kDefaultAlgo = -100;
+    static const int kAlgoAllGett = -101; // autotune algo 0 till MAX
+
+    bool parseArgument(char* arg, const char* name, char* &value)
+    {
+      assert(arg[0] == '-');
+      if (strncmp(arg + 1, name, strlen(name)) == 0) {
+        value = arg + 1 + strlen(name);
+        argumentExplicitlySet_.insert(std::string(name));
+        return true;
+      }
+      value = NULL;
+      return false;
+    }
+
+    bool parseArgument(char* arg, const char* name, lwtensorComputeType_t& value)
+    {
+        char* str_value = NULL;
+        if (parseArgument(arg, name, str_value))
+        {
+            initComputeType(value, *str_value);
+            return true;
+        }
+        return false;
+    }
+
+    bool parseArgument(char* arg, const char* name, lwdaDataType_t& value)
+    {
+        char* str_value = NULL;
+        if (parseArgument(arg, name, str_value))
+        {
+            initType(value, *str_value);
+            return true;
+        }
+        return false;
+    }
+
+    bool parseArgument(char* arg, const char* name, lwtensorOperator_t& value)
+    {
+        char* str_value = NULL;
+        if (parseArgument(arg, name, str_value))
+        {
+            value = (lwtensorOperator_t) atoi(str_value);
+            return true;
+        }
+        return false;
+    }
+
+    bool parseArgument(char* arg, const char* name, int& value)
+    {
+        char* str_value = NULL;
+        if (parseArgument(arg, name, str_value))
+        {
+            value = atoi(str_value);
+            return true;
+        }
+        return false;
+    }
+
+    bool parseArgument(char* arg, const char* name, uint32_t& value)
+    {
+        char* str_value = NULL;
+        if (parseArgument(arg, name, str_value))
+        {
+            value = atoi(str_value);
+            return true;
+        }
+        return false;
+    }
+
+    bool parseArgument(char* arg, const char* name, size_t& value)
+    {
+        char* str_value = NULL;
+        if (parseArgument(arg, name, str_value))
+        {
+            value = atoll(str_value);
+            return true;
+        }
+        return false;
+    }
+
+    bool parseArgument(char* arg, const char* name, float& value)
+    {
+        char* str_value = NULL;
+        if (parseArgument(arg, name, str_value))
+        {
+            value = atof(str_value);
+            return true;
+        }
+        return false;
+    }
+
+    bool parseArgument(char* arg, const char* name, bool& value)
+    {
+        char* str_value = NULL;
+        if (parseArgument(arg, name, str_value))
+        {
+            value = true;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+      * Overwrites all settings with the once from other that are not default values
+      */
+    void overwrite(const TestOptions &other)
+    {
+        const TestOptions defaultTest;
+        if( other.deviceId != defaultTest.deviceId)
+        {
+            this->deviceId = other.deviceId;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find(std::string("numRuns")) )
+        {
+            this->numRuns = other.numRuns;
+        }
+        if( other.verbose != defaultTest.verbose)
+        {
+            this->verbose = other.verbose;
+        }
+        if( other.showFailureOnly != defaultTest.showFailureOnly)
+        {
+            this->showFailureOnly = other.showFailureOnly;
+        }
+        if( other.showNotSupport != defaultTest.showNotSupport)
+        {
+            this->showNotSupport = other.showNotSupport;
+        }
+        if( other.disableVerification_ != defaultTest.disableVerification_)
+        {
+            this->disableVerification_ = other.disableVerification_;
+        }
+        if( other.disableWaitKernel_ != defaultTest.disableWaitKernel_)
+        {
+            this->disableWaitKernel_ = other.disableWaitKernel_;
+        }
+        if( other.fastVerification != defaultTest.fastVerification)
+        {
+            this->fastVerification = other.fastVerification;
+        }
+        if( other.useA != defaultTest.useA)
+        {
+            this->useA = other.useA;
+        }
+        if( other.useB != defaultTest.useB)
+        {
+            this->useB = other.useB;
+        }
+        if( other.useC != defaultTest.useC)
+        {
+            this->useC = other.useC;
+        }
+        if( other.graphMode != defaultTest.graphMode)
+        {
+            this->graphMode = other.graphMode;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("Pa") )
+        {
+            this->typeA = other.typeA;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("Pb") )
+        {
+            this->typeB = other.typeB;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("Pc") )
+        {
+            this->typeC = other.typeC;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("Pcomp") )
+        {
+            this->typeCompute = other.typeCompute;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("opA") )
+        {
+            this->opA = other.opA;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("opB") )
+        {
+            this->opB = other.opB;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("opC") )
+        {
+            this->opC = other.opC;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("opAB") )
+        {
+            this->opAB = other.opAB;
+        }
+        if( other.opUnaryAfterBinary != defaultTest.opUnaryAfterBinary)
+        {
+            this->opUnaryAfterBinary = other.opUnaryAfterBinary;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("opABC") )
+        {
+            this->opABC = other.opABC;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("opReduce") )
+        {
+            this->opReduce = other.opReduce;
+        }
+        if( other.offsetWorkSpace != defaultTest.offsetWorkSpace)
+        {
+            this->offsetWorkSpace = other.offsetWorkSpace;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("alpha") )
+        {
+            this->alpha = other.alpha;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("beta") )
+        {
+            this->beta = other.beta;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("gamma") )
+        {
+            this->gamma = other.gamma;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("algo") )
+        {
+            this->algo_ = other.algo_;
+        }
+        if( other.hostA != defaultTest.hostA)
+        {
+            this->hostA = other.hostA;
+        }
+        if( other.hostB != defaultTest.hostB)
+        {
+            this->hostB = other.hostB;
+        }
+        if( other.hostC != defaultTest.hostC)
+        {
+            this->hostC = other.hostC;
+        }
+        if( other.hostD != defaultTest.hostD)
+        {
+            this->hostD = other.hostD;
+        }
+        if( other.useD != defaultTest.useD)
+        {
+            this->useD = other.useD;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("alignmentReqA") )
+        {
+            this->alignmentReqA = other.alignmentReqA;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("alignmentReqB") )
+        {
+            this->alignmentReqB = other.alignmentReqB;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("alignmentReqC") )
+        {
+            this->alignmentReqC = other.alignmentReqC;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("alignmentReqD") )
+        {
+            this->alignmentReqD = other.alignmentReqD;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("alignmentA") )
+        {
+            this->alignmentA = other.alignmentA;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("alignmentB") )
+        {
+            this->alignmentB = other.alignmentB;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("alignmentC") )
+        {
+            this->alignmentC = other.alignmentC;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("alignmentD") )
+        {
+            this->alignmentD = other.alignmentD;
+        }
+        if( other.autotuneMode_ != defaultTest.autotuneMode_)
+        {
+            this->autotuneMode_ = other.autotuneMode_;
+        }
+        if( other.workspaceSize_ != defaultTest.workspaceSize_)
+        {
+            this->workspaceSize_ = other.workspaceSize_;
+        }
+        if( other.workspacePref_ != defaultTest.workspacePref_)
+        {
+            this->workspacePref_ = other.workspacePref_;
+        }
+        if(  other.argumentExplicitlySet_.end() != other.argumentExplicitlySet_.find("numCachelines") )
+        {
+            this->numCachelines_ = other.numCachelines_;
+        }
+        if( other.incrementalAutotuneCount_ != defaultTest.incrementalAutotuneCount_)
+        {
+            this->incrementalAutotuneCount_ = other.incrementalAutotuneCount_;
+        }
+        if( other.cacheFile_ != defaultTest.cacheFile_)
+        {
+            this->cacheFile_ = other.cacheFile_;
+        }
+        if( other.cacheMode_ != defaultTest.cacheMode_)
+        {
+            this->cacheMode_ = other.cacheMode_;
+        }
+        if( other.contractionDescTag_ != defaultTest.contractionDescTag_ )
+        {
+            this->contractionDescTag_ = other.contractionDescTag_;
+        }
+        if( other.zeroInitA_ != defaultTest.zeroInitA_)
+        {
+            this->zeroInitA_ = other.zeroInitA_;
+        }
+        if( other.zeroInitB_ != defaultTest.zeroInitB_)
+        {
+            this->zeroInitB_ = other.zeroInitB_;
+        }
+        if( other.zeroInitC_ != defaultTest.zeroInitC_)
+        {
+            this->zeroInitC_ = other.zeroInitC_;
+        }
+        if( other.zeroInitD_ != defaultTest.zeroInitD_)
+        {
+            this->zeroInitD_ = other.zeroInitD_;
+        }
+        if( other.nanInitA_ != defaultTest.nanInitA_)
+        {
+            this->nanInitA_ = other.nanInitA_;
+        }
+        if( other.nanInitB_ != defaultTest.nanInitB_)
+        {
+            this->nanInitB_ = other.nanInitB_;
+        }
+        if( other.nanInitC_ != defaultTest.nanInitC_)
+        {
+            this->nanInitC_ = other.nanInitC_;
+        }
+        if( other.nanInitD_ != defaultTest.nanInitD_)
+        {
+            this->nanInitD_ = other.nanInitD_;
+        }
+        if( other.linInitA_ != defaultTest.linInitA_)
+        {
+            this->linInitA_ = other.linInitA_;
+        }
+        if( other.linInitB_ != defaultTest.linInitB_)
+        {
+            this->linInitB_ = other.linInitB_;
+        }
+        if( other.linInitC_ != defaultTest.linInitC_)
+        {
+            this->linInitC_ = other.linInitC_;
+        }
+        if( other.linInitD_ != defaultTest.linInitD_)
+        {
+            this->linInitD_ = other.linInitD_;
+        }
+    }
+    
+
+    std::string getAlgo(int algo) const {
+        std::string result = "";
+        if(algo != kDefaultAlgo) {
+            result += " ";
+            result += "-algo";
+            result += (algo < 0)? std::to_string(algo) : "+" + std::to_string(algo);
+        }
+        return result;
+    }
+
+    std::string getCommand(bool dvsOutput)
+    {
+        using namespace std;
+        std::string command;
+
+        const TestOptions defaults;
+
+        if(dvsOutput) {
+          command = this->commandPlain_;
+          std::string newPa = std::string("-Pa") + colwertToCommandline(this->typeA);
+          std::string newPb = std::string("-Pb") + colwertToCommandline(this->typeB);
+          std::string newPc = std::string("-Pc") + colwertToCommandline(this->typeC);
+          std::string newPcomp = std::string("-Pcomp") + colwertToCommandline(this->typeCompute);
+          string::size_type pos = 0;
+          string::size_type posC = 0;
+          if( (pos = command.rfind("-Pa")) != string::npos )
+          {
+              command.replace(pos, newPa.length()+1, "");
+          }
+          if( (pos = command.rfind("-Pb")) != string::npos )
+          {
+              command.replace(pos, newPb.length()+1, "");
+          }
+          pos  = command.rfind("-Pcomp");
+          posC = command.rfind("-Pc");
+          while ( posC == pos )
+          {
+              if ( posC == string::npos && pos == string::npos )
+                  break;
+              pos  = command.rfind("-Pcomp", pos-1);
+              posC = command.rfind("-Pc", posC-1);
+          }
+          if( posC != string::npos )
+          {
+              command.replace(posC, newPc.length()+1, "");
+          }
+          if( (pos = command.rfind("-Pcomp")) != string::npos )
+          {
+              command.replace(pos, newPcomp.length()+1, "");
+          }
+          command += " "+newPa;
+          command += " "+newPb;
+          command += " "+newPc;
+          command += " "+newPcomp;
+        } else {
+            if(command_.empty()) {
+                auto modeC = this->modeC;
+                auto modeA = this->modeA;
+                auto modeB = this->modeB;
+    
+                std::string descr  = " ";
+                            descr += "-modeC";
+    
+                for ( size_t i = 0; i < modeC.size(); i ++ )
+                {
+                    if (modeC[i] > 57)
+                    {
+                        descr += std::string(1, modeC[i]);
+                    }
+                    else
+                    {
+                        descr += std::to_string(modeC[i]);
+                    }
+                    if ( i != modeC.size() - 1 ) descr += string( "," );
+                }
+                if( this->useA )
+                {
+                    if (this->alignmentReqA != defaults.alignmentReqA)
+                        descr += std::string(" -alignmentReqA") + std::to_string(this->alignmentReqA);
+                    if (this->alignmentA != defaults.alignmentA)
+                        descr += std::string(" -alignmentA") + std::to_string(this->alignmentA);
+                    descr += string( " -modeA" );
+                    for (size_t i = 0; i < modeA.size(); i ++ )
+                    {
+                        if (modeA[i] > 57)
+                        {
+                            descr += std::string(1, modeA[i]);
+                        }
+                        else
+                        {
+                            descr += std::to_string(modeA[i]);
+                        }
+                        if( i != modeA.size() - 1 ) descr += string( "," );
+                    }
+                    if(this->strideA.size() > 0)
+                    {
+                        descr += std::string(" -strideA");
+                        for(auto i : this->strideA)
+                            descr += std::to_string(i) + std::string(",");
+                    }
+                }
+                if( this->useB )
+                {
+                    if (this->alignmentReqB != defaults.alignmentReqB)
+                        descr += std::string(" -alignmentReqB") + std::to_string(this->alignmentReqB);
+                    if (this->alignmentB != defaults.alignmentB)
+                        descr += std::string(" -alignmentB") + std::to_string(this->alignmentB);
+                    descr += string( " -modeB" );
+                    for ( size_t i = 0; i < modeB.size(); i ++ )
+                    {
+                        if (modeB[i] > 57)
+                        {
+                            descr += std::string(1, modeB[i]);
+                        }
+                        else
+                        {
+                            descr += std::to_string(modeB[i]);
+                        }
+                        if ( i != modeB.size() - 1 ) descr += string( "," );
+                    }
+                    if(this->strideB.size() > 0){
+                        descr += std::string(" -strideB");
+                        for(auto i : this->strideB)
+                            descr += std::to_string(i) + std::string(",");
+                    }
+                }
+                if( this->useD )
+                {
+                    descr += std::string(" -useD");
+                    if (this->alignmentReqD != defaults.alignmentReqD)
+                        descr += std::string(" -alignmentReqD") + std::to_string(this->alignmentReqD);
+                    if (this->alignmentD != defaults.alignmentD)
+                        descr += std::string(" -alignmentD") + std::to_string(this->alignmentD);
+                }
+    
+                map<mode_type_external, int64_t> extent_sorted(this->extent.begin(), this->extent.end());
+                descr += std::string(" -extent");
+                for (auto i : extent_sorted)
+                {
+                    if (i.first > 57)
+                    {
+                        descr += std::string(1, i.first);
+                    }
+                    else
+                    {
+                        descr += std::to_string(i.first);
+                    }
+                    descr += std::string("=") +std::to_string(i.second) + std::string(",");
+                }
+                if(this->strideC.size() > 0){
+                    descr += std::string(" -strideC");
+                    for(auto i : this->strideC)
+                        descr += std::to_string(i) + std::string(",");
+                }
+                if (this->alignmentReqC != defaults.alignmentReqC)
+                    descr += std::string(" -alignmentReqC") + std::to_string(this->alignmentReqC);
+                if (this->alignmentC != defaults.alignmentC)
+                    descr += std::string(" -alignmentC") + std::to_string(this->alignmentC);
+                if (this->opAB != defaults.opAB)
+                    descr += std::string(" -opAB") + std::to_string(this->opAB);
+                if (this->opABC != defaults.opABC)
+                    descr += std::string(" -opABC") + std::to_string(this->opABC);
+                if (this->opReduce != defaults.opReduce)
+                    descr += std::string(" -opReduce") + std::to_string(this->opReduce);
+                if (this->opA != defaults.opA)
+                    descr += std::string(" -opA") + std::to_string(this->opA);
+                if (this->opB != defaults.opB)
+                    descr += std::string(" -opB") + std::to_string(this->opB);
+                if (this->opC != defaults.opC)
+                    descr += std::string(" -opC") + std::to_string(this->opC);
+                descr += std::string(" -Pa") + colwertToCommandline(this->typeA);
+                descr += std::string(" -Pb") + colwertToCommandline(this->typeB);
+                descr += std::string(" -Pc") + colwertToCommandline(this->typeC);
+                descr += std::string(" -Pcomp") + colwertToCommandline(this->typeCompute);
+                if (this->alpha != defaults.alpha)
+                    descr += std::string(" -alpha") + std::to_string(this->alpha);
+                if (this->beta != defaults.beta)
+                    descr += std::string(" -beta") + std::to_string(this->beta);
+                if (this->gamma != defaults.gamma)
+                    descr += std::string(" -gamma") + std::to_string(this->gamma);
+                descr += std::string(" -R") + colwertToCommandline(this->routine);
+                if(this->algo_ != kDefaultAlgo)
+                {
+                    descr += std::string(" -algo") + std::to_string(this->algo_);
+                }
+                if (this->permute_) {
+                    descr += std::string(" -permute");
+                }
+                if (this->partitionsK_ != -1)
+                {
+                  descr += std::string(" -partitionsK") + std::to_string(this->partitionsK_);
+                }
+                if( verbose ) // verbose printing should be avoided for the "key:", since it would prevent to match identical tensor contraction (as part of our post-processing scripts)
+                {
+                    if( numCachelines_ > 0 )
+                    {
+                        descr += std::string(" -numCachelines") + std::to_string(this->numCachelines_);
+                        descr += std::string(" -incCount") + std::to_string(this->incrementalAutotuneCount_);
+                    }
+                    descr += std::string(" -numRuns") + std::to_string(this->numRuns);
+                }
+                command_ = descr;
+            }
+          command = this->command_;
+        }
+        return command;
+    }
+
+    std::string reproduceCommand(bool dvsOutput, int algo = kDefaultAlgo)
+    {
+      std::string descr  = this->commandBinary_;
+                  descr += (this->algo_ != kDefaultAlgo) ? "" : getAlgo(algo); // this->algo != -100 means algo value is in command_ / commandPlain_
+                  descr += getCommand(dvsOutput);
+      return descr;
+    }
+
+    size_t getElements(const std::vector<int64_t> &extent, const std::vector<int64_t> &stride, bool accountForStride) const
+    {
+        size_t elementsA = 1;
+        for(auto ex : extent)
+            elementsA *= ex;
+
+        // the strides may require us to allocate a larger buffer
+        if( accountForStride && (stride.size() == extent.size()) )
+        {
+            size_t elements = 1;
+            for (size_t i=0; i < stride.size(); ++i)
+                elements += (extent[i]-1) * stride.at(i);
+            elementsA = std::max(elements, elementsA);
+        }
+        return elementsA;
+    }
+
+    size_t getNumElements(char ABC, bool accountForStride) const
+    {
+        if( ABC == 'A' )
+            return getElements(extentA, strideA, accountForStride);
+        else if( ABC == 'B' )
+            return getElements(extentB, strideB, accountForStride);
+        else if( ABC == 'C' )
+            return getElements(extentC, strideC, accountForStride);
+        else{
+            printf("ERROR: %s %d\n", __FILE__, __LINE__);
+            exit(-1);
+        }
+    }
+
+    void initExtents()
+    {
+        extentA.clear();
+        for(auto mode : this->modeA)
+        {
+            if( this->extent.find(mode) == this->extent.end() ) { printf("ERROR: no extent has been provided for mode %c\n", mode); exit(-1); }
+            extentA.push_back(this->extent.at(mode));
+        }
+        extentB.clear();
+        for(auto mode : this->modeB)
+        {
+            if( this->extent.find(mode) == this->extent.end() ) { printf("ERROR: no extent has been provided for mode %c\n", mode); exit(-1); }
+            extentB.push_back(this->extent.at(mode));
+        }
+        extentC.clear();
+        for(auto mode : this->modeC)
+        {
+            if( this->extent.find(mode) == this->extent.end() ) { printf("ERROR: no extent has been provided for mode %c\n", mode); exit(-1); }
+            extentC.push_back(this->extent.at(mode));
+        }
+    }
+
+    void waive() const {
+        shouldWaive_ = true;
+    }
+
+    bool shouldWaive() const {
+        return shouldWaive_;
+    }
+
+    bool isOptiolwalid()
+    {
+        if ( algo_ != kDefaultAlgo && algo_ != kAlgoAllGett && algo_ < LWTENSOR_ALGO_LWTE ) 
+        {
+            fprintf( stderr, "ERROR: algo is invalid.\n" );
+            return false;
+        }
+        return true;
+    };
+
+    lwdaDataType_t computeTypeToDataType() const
+    {
+        const bool isComplex = (typeC == LWDA_C_16F) || (typeC == LWDA_C_32F) || (typeC == LWDA_C_64F);
+
+        if( !isComplex )
+        {
+            if( typeCompute == LWTENSOR_COMPUTE_16F )
+            {
+                return LWDA_R_16F;
+            }
+            else if( typeCompute == LWTENSOR_COMPUTE_16BF )
+            {
+                return LWDA_R_16BF;
+            }
+            else if( typeCompute == LWTENSOR_COMPUTE_TF32 )
+            {
+                return LWDA_R_TF32;
+            }
+            else if( typeCompute == LWTENSOR_COMPUTE_32F )
+            {
+                return LWDA_R_32F;
+            }
+            else if( typeCompute == LWTENSOR_COMPUTE_64F )
+            {
+                return LWDA_R_64F;
+            }
+            else if( typeCompute == LWTENSOR_COMPUTE_8I )
+            {
+                return LWDA_R_8I;
+            }
+            else if( typeCompute == LWTENSOR_COMPUTE_8U )
+            {
+                return LWDA_R_8U;
+            }
+            else if( typeCompute == LWTENSOR_COMPUTE_32I )
+            {
+                return LWDA_R_32I;
+            }
+            else if( typeCompute == LWTENSOR_COMPUTE_32U )
+            {
+                return LWDA_R_32U;
+            }
+        } else { 
+            if( typeCompute == LWTENSOR_COMPUTE_16F )
+            {
+                return LWDA_C_16F;
+            }
+            else if( typeCompute == LWTENSOR_COMPUTE_TF32 )
+            {
+                return LWDA_C_TF32;
+            }
+            else if( typeCompute == LWTENSOR_COMPUTE_32F )
+            {
+                return LWDA_C_32F;
+            }
+            else if( typeCompute == LWTENSOR_COMPUTE_64F )
+            {
+                return LWDA_C_64F;
+            }
+        } 
+        printf("ERROR: %s %d\n", __FILE__, __LINE__);
+        exit(-1);
+    }
+
+    lwdaDataType_t getLwdaComputeType() const
+    {
+        if( this->routine == LWTENSOR_PW )
+        {
+            return computeTypeToDataType();
+        }
+        return computeTypeToLwda(typeCompute, isComplex(typeC) );
+    }
+    lwdaDataType_t getLwdaScalarType() const
+    {
+        if( this->routine == LWTENSOR_PW )
+        {
+            return computeTypeToDataType();
+        }
+        return getScalarType(typeC, typeCompute);
+    }
+
+    double getFlops() const
+    {
+        if( isComplex(typeC) )
+        {
+            return 8.0;
+        }else{
+            return 2.0;
+        }
+    }
+
+    double getFlops(size_t &m, size_t &n, size_t &k, size_t &l) const
+    {
+        std::list<mode_type_external> modeM;
+        ReferenceTC::intersect(modeA, modeC, modeM);
+        std::list<mode_type_external> modeN;
+        ReferenceTC::intersect(modeB, modeC, modeN);
+        std::list<mode_type_external> modeK;
+        ReferenceTC::intersect(modeB, modeA, modeK);
+        std::list<mode_type_external> modeL;
+        ReferenceTC::intersect(modeM, modeN, modeL);
+
+        m = 1;
+        for(auto mode : modeM )
+            if(std::find(modeL.begin(), modeL.end(), mode) == modeL.end())
+                if(extent.find(mode) != extent.end())
+                {
+                    m *= extent.at(mode);
+                }else{
+                    printf("ERROR: mode %c not found!\n", mode);
+                    exit(-1);
+                }
+        n = 1;
+        for(auto mode : modeN )
+            if(std::find(modeL.begin(), modeL.end(), mode) == modeL.end())
+            {
+                if(extent.find(mode) != extent.end()){
+                    n *= extent.at(mode);
+                }else{
+                    printf("ERROR: mode %c not found!\n", mode);
+                    exit(-1);
+                }
+            }
+        k = 1;
+        for(auto mode : modeK )
+            if(std::find(modeL.begin(), modeL.end(), mode) == modeL.end())
+                if(extent.find(mode) != extent.end())
+                {
+                    k *= extent.at(mode);
+                }else{
+                    printf("ERROR: mode %c not found!\n", mode);
+                    exit(-1);
+                }
+        l = 1;
+        for(auto mode : modeL )
+            if(extent.find(mode) != extent.end())
+            {
+                l *= extent.at(mode);
+            }
+            else{
+                printf("ERROR: mode %c not found!\n", mode);
+                exit(-1);
+            }
+        //      printf("m:%ld n:%ld k:%ld loop:%ld\n", m,n,k,l);
+        return ((this->getFlops() *m)*n)*k*l;
+    }
+
+    double getTotalFlops() const{
+        size_t m, n, k, l;
+
+        return this->getFlops(m, n, k, l);
+    }
+
+    double getTotalFlops(size_t &m, size_t &n, size_t &k, size_t &l) const{
+        return this->getFlops(m, n, k, l);
+    }
+
+    void print()
+    {
+        printf("typeA: %c\n", typeToString(typeA));
+        printf("typeB: %c\n", typeToString(typeB));
+        printf("typeC: %c\n", typeToString(typeC));
+        printf("typeCompute: %d\n", (int)typeCompute);
+        printf("alpha: %f\n", alpha);
+        printf("beta: %f\n", beta);
+        printf("gamma: %f\n", gamma);
+        printf("modeC: ");
+        for(auto mode : modeC)
+            printf("%c ", mode);
+        printf("\nmodeA: ");
+        for(auto mode : modeA)
+            printf("%c ", mode);
+        printf("\nmodeB: ");
+        for(auto mode : modeB)
+            printf("%c ", mode);
+        printf("\nExtents: ");
+        for(auto ex : extent)
+            printf("%c=%ld ", ex.first,ex.second);
+        printf("\nStridesA: ");
+        for(auto ex : strideA)
+            printf("%ld ", ex);
+        printf("\nStridesB: ");
+        for(auto ex : strideB)
+            printf("%ld ", ex);
+        printf("\nStridesC: ");
+        for(auto ex : strideC)
+            printf("%ld ", ex);
+        printf("\n");
+    }
+
+    int deviceId;
+    int numRuns;
+    bool verbose;
+    bool showDevice;
+    bool disableVerification_;
+    bool disableWaitKernel_;
+    bool fastVerification;
+    bool useA, useB, useC;
+    bool graphMode;
+    bool showFailureOnly;
+    bool showNotSupport;
+    std::vector<mode_type_external> modeA;
+    std::vector<mode_type_external> modeB;
+    std::vector<mode_type_external> modeC;
+    std::vector<int64_t> strideA;
+    std::vector<int64_t> strideB;
+    std::vector<int64_t> strideC;
+    std::unordered_map<mode_type_external, int64_t> extent;
+    std::vector<int64_t>extentA;
+    std::vector<int64_t>extentB;
+    std::vector<int64_t>extentC;
+    lwdaDataType_t typeA;
+    lwdaDataType_t typeB;
+    lwdaDataType_t typeC; ///< output type
+    lwtensorComputeType_t typeCompute;
+    Routine routine;
+    lwtensorOperator_t opA;
+    lwtensorOperator_t opB;
+    lwtensorOperator_t opC;
+    lwtensorOperator_t opAB;
+    lwtensorOperator_t opUnaryAfterBinary;
+    lwtensorOperator_t opABC;
+    lwtensorOperator_t opReduce;
+
+    float alpha, beta, gamma;
+    int algo_;
+
+    bool hostA, hostB, hostC, hostD; // indicat if A, ... will resinde in host memory
+    bool useD;
+
+    static const size_t DEFAULT_ALIGNMENT = 128;
+    size_t alignmentReqA = DEFAULT_ALIGNMENT;
+    size_t alignmentReqB = DEFAULT_ALIGNMENT;
+    size_t alignmentReqC = DEFAULT_ALIGNMENT;
+    size_t alignmentReqD = DEFAULT_ALIGNMENT;
+    size_t alignmentA = DEFAULT_ALIGNMENT;
+    size_t alignmentB = DEFAULT_ALIGNMENT;
+    size_t alignmentC = DEFAULT_ALIGNMENT;
+    size_t alignmentD = DEFAULT_ALIGNMENT;
+
+    size_t workspaceSize_ = DEFAULT_WORKSPACE;
+    uint32_t workspacePref_ = LWTENSOR_WORKSPACE_MAX;
+    size_t offsetWorkSpace = 0;
+
+    uint32_t numCachelines_ = 4;
+    uint32_t incrementalAutotuneCount_ = 4;
+    uint32_t cacheMode_ = LWTENSOR_CACHE_MODE_PEDANTIC;
+    uint32_t autotuneMode_ = LWTENSOR_AUTOTUNE_INCREMENTAL;
+    bool contractionDescTag_ = false;
+    mutable bool shouldWaive_;
+
+    std::string cacheFile_;
+    std::string command_;
+    std::string commandPlain_;
+    std::string commandBinary_;
+
+    bool zeroInitA_, zeroInitB_, zeroInitC_, zeroInitD_;
+    bool oneInitA_, oneInitB_, oneInitC_, oneInitD_;
+    bool nanInitA_, nanInitB_, nanInitC_, nanInitD_;
+    bool linInitA_, linInitB_, linInitC_, linInitD_;
+
+    bool permute_;
+    int32_t partitionsK_; // -1 denotes default
+    bool useSeeds_;
+    int32_t seeds_[LWTENSOR_TEST_MAX_NUM_THREADS];
+    std::set<std::string> argumentExplicitlySet_;
+    static const size_t DEFAULT_WORKSPACE = std::numeric_limits<std::size_t>::max();
+};
+
+// Print results structure
+struct OutputResult
+{
+    OutputResult(bool dvsOutput, const TestOptions& test) : dvsOutput_(dvsOutput), test_(test)
+    {
+        for(int i=0; i < LWTENSOR_TEST_MAX_NUM_THREADS; ++i)
+        {
+            seeds_[i] = LWTENSOR_TEST_RANDOM_SEEDS[i];
+        }
+    }
+
+    void printTestName()
+    {
+        if(!dvsOutput_) {
+            std::cout << "#### RUNNING TEST ####" << std::endl << "## "<< test_.reproduceCommand(dvsOutput_) << " ##"   << std::endl;
+        }
+    }
+
+    void printResultHeader()
+    {if(!dvsOutput_) std::cout << "###### RESULTS #######" << std::endl;}
+
+    void printResultContraction(int algo, float runtime, float lwtensorPerfMax, float lwtensorPerfMedian,
+            float lwtensorPerfAvg, float lwblasPerf, float bandwidth, float memcpy, const
+            char* planInfo, bool printCommand, double relError = .0f)
+    {
+        if( atoi(string_util::with_default(getelw("LWTENSOR_TEST_VERBOSE"), "0").c_str()) == 1)
+        {
+            printCommand = true;
+        }
+
+        if(!dvsOutput_) {
+            printf("key:%s -algo%+d | lwTENSOR:%.3f GFLOPS | lwTENSOR-max:%.3f GFLOPS | lwTENSOR-avg:%.3f GFLOPS| lwBLAS:%.3f GFLOPS | bandwidth:%.3f GB/s | memcpy:%.3f GB/s | time:%.3e | info:%s | relError:%.2e \n",
+                    printCommand ? test_.getCommand(dvsOutput_).c_str() : "", algo, lwtensorPerfMedian,
+                    lwtensorPerfMax, lwtensorPerfAvg, lwblasPerf, bandwidth,  memcpy, runtime,
+                    planInfo == nullptr ? "" : planInfo, relError);
+        }
+    }
+
+    void printResultElementwiseReduction(float bandwidth, float memcpy)
+    {
+        if(!dvsOutput_) {
+                printf("%s | lwTENSOR:%.3f GB/s | memcpy:%.3f GB/s\n", test_.reproduceCommand(dvsOutput_).c_str(), bandwidth, memcpy);
+        }
+    }
+
+    void printResultEnd()
+    {if(!dvsOutput_) std::cout << "######################" << std::endl;}
+
+    void printNotSupported()
+    {
+        if(!dvsOutput_){
+            std::cout << "###### RESULTS #######" << std::endl;
+            std::cout << "NOT_SUPPORTED: "<< test_.reproduceCommand(dvsOutput_) << std::endl;
+            std::cout << "######################" << std::endl;
+        }
+    }
+
+    void printResultError(int line, const std::string errorString)
+    {
+        if(!dvsOutput_){
+            std::string commandString = test_.reproduceCommand(dvsOutput_);
+            printf( "\x1B[31mERROR \x1B[0m in line %d: %s ",
+                    line, commandString.c_str());
+            printf("-seed");
+            for(int i=0; i < LWTENSOR_TEST_MAX_NUM_THREADS; ++i)
+            {
+                printf("%d,",seeds_[i]);
+            }
+            printf(" failed with %s\n", errorString.c_str());
+        }
+    }
+
+    /////////////////////////////////////////////////////////////////////////////
+
+    void printTestNameDVS(int algo = TestOptions::kDefaultAlgo)
+    {
+        if(dvsOutput_) {
+            std::cout << "&&&& RUNNING " << test_.reproduceCommand(dvsOutput_, algo) << std::endl;
+        }
+    }
+
+    void printResultContractionDVS(int algo, float lwtensorPerf, float bandwidth)
+    {
+        if(dvsOutput_) {
+            printf("&&&& PERF -algo%+d_GFLOPS %.3f +GFLOPS\n", algo, lwtensorPerf);
+            printf("&&&& PERF -algo%+d_Bandwidth %.3f +GB/s\n",algo, bandwidth);
+        }
+    }
+
+    void printResultElementwiseReductionDVS(float bandwidth)
+    {
+        if(dvsOutput_) {
+            printf("&&&& PERF Bandwidth %.3f +GB/s\n", bandwidth);
+        }
+    }
+
+    void printNotSupportedDVS(int algo = TestOptions::kDefaultAlgo)
+    {
+        if(dvsOutput_){
+            std::cout << "&&&& WAIVED " << test_.reproduceCommand(dvsOutput_, algo) << std::endl;
+        }
+    }
+
+    void printResultEndDVS(int algo = TestOptions::kDefaultAlgo)
+    {
+        if(dvsOutput_) {
+            std::cout << "&&&& PASSED " << test_.reproduceCommand(dvsOutput_, algo) << std::endl;
+        }
+    }
+
+    void printResultErrorDVS(int algo = TestOptions::kDefaultAlgo)
+    {
+        if(dvsOutput_){
+            std::cout << "&&&& FAILED " << test_.reproduceCommand(dvsOutput_, algo) << std::endl;
+        }
+    }
+
+    private:
+        bool    dvsOutput_;
+        int          algo_;
+        TestOptions  test_;
+        // copy seeds in case of a failure (to reproduce inputs)
+        int32_t seeds_[LWTENSOR_TEST_MAX_NUM_THREADS]; 
+};
+
+static void usage()
+{ 
+    printf("lwtensorTest <options>\n");
+    printf("-R<name>                            : run the lwtensor routine with generic name\n");
+    printf("List of available routines:\n");
+    printf("   contraction\n");
+    printf("   elementwise\n");
+    printf("   reduciton\n");
+    printf("--help                              : display this help\n");
+    printf("-algo<int>                          : specify algorithm (only used for TC); algo -101 stands for algo 0-MAX (i.e., all GETT kernels)\n");
+    printf("-alpha<float>                       : scaling factor for A\n");
+    printf("-autotuneMode<int>                  : Specify contraction autotune mode(0, 1, 2, default: 1)\n");
+    printf("-beta<float>                        : scaling factor for B\n");
+    printf("-file <filename>                    : Allows users to specify multple test cases at once (less overhead)\n");
+    printf("-gamma<float>                       : scaling factor for C\n");
+    printf("-Pa<i,h,s,d,c,z>                    : data type of A \n");
+    printf("-Pb<i,h,s,d,c,z>                    : data type of B\n");
+    printf("-Pc<i,h,s,d,c,z>                    : data type of C\n");
+    printf("-Pcomp<i,h,s,d,c,z>                 : compute data type\n");
+    printf("-modeA<int,int,...>                 : modes of A\n");
+    printf("-modeB<int,int,...>                 : modes of B\n");
+    printf("-modeC<int,int,...>                 : modes of C\n");
+    printf("-p[ABCD]0                           : Initializes A, B, C, or D with zero\n");
+    printf("-p[ABCD]1                           : Initializes A, B, C, or D with one\n");
+    printf("-p[ABCD]n                           : Initializes A, B, C, or D with NaNs\n");
+    printf("-p[ABCD]l                           : Initializes A, B, C, or D with 0,1,2,... \n");
+    printf("-hostA                              : Allocate A on host\n");
+    printf("-hostB                              : Allocate B on host\n");
+    printf("-hostC                              : Allocate C on host\n");
+    printf("-testIdBegin<int>                   : first test case (inclusive) to run (default: 0); this option i only applicable if -file has been specified as well.\n");
+    printf("-testIdEnd<int>                     : last test case (exclusive) to run (default: -1); this option i only applicable if -file has been specified as well.\n");
+    printf("-useD                               : Use D != C\n");
+    printf("-permute                            : Use elementwise permutation\n");
+    printf("-partitionsK<int>                   : Partition the contracted dimension into multiple chunks that can be computed in parallel (default: -1, i.e., rely on heuristic)\n");
+    printf("-numRuns<int>                       : number of repeated runs (default: 3)\n");
+    printf("-numCachelines<int>                 : number of attached cachelines available for the contraction cache (default: 0)\n");
+    printf("-incCount<int>                      : number of autotuning iterations before hitting the cache (default: 4).\n");
+    printf("-cacheFile <string>                 : path to cachefile name (default: not used).\n");
+    printf("-cacheMode<int>                     : Specify contraction cache mode(0, 1, 2, 3, default: 1)\n");
+    printf("-contractionDescTag                 : Enable contraction descriptior tag(default: disable)\n");
+    printf("-alignmentReqA<int>                 : alignment requirement for A\n");
+    printf("-alignmentReqB<int>                 : alignment requirement for B\n");
+    printf("-alignmentReqC<int>                 : alignment requirement for C\n");
+    printf("-alignmentReqD<int>                 : alignment requirement for D\n");
+    printf("-alignmentA<int>                    : actual alignment of A\n");
+    printf("-alignmentB<int>                    : actual alignment of B\n");
+    printf("-alignmentC<int>                    : actual alignment of C\n");
+    printf("-alignmentD<int>                    : actual alignment of D\n");
+    printf("-workspace<size_t>                  : workspace size (in bytes) that will be used for this test case\n");
+    printf("-workspacePref<size_t>              : Specify workspace preference(1: MIN, 2: RECOMMEND, 3: MAX, default: 3)\n");
+    printf("-opA<int>                           : unary operator for A. The <int> value must correspond to lwtensorOperator_t.\n");
+    printf("-opB<int>                           : unary operator for B. The <int> value must correspond to lwtensorOperator_t.\n");
+    printf("-opC<int>                           : unary operator for C. The <int> value must correspond to lwtensorOperator_t.\n");
+    printf("-opAB<int>                          : binary operator for A and B. The <int> value must correspond to lwtensorOperator_t.\n");
+    printf("-opABC<int>                         : binary operator for opAB(A,B) and C. The <int> value must correspond to lwtensorOperator_t.\n");
+    printf("-opReduce<int>                      : binary operator for opReduce(A) (used by reduction). The <int> value must correspond to lwtensorOperator_t.\n");
+    printf("-offsetWorkSpace<size_t>            : Offset workspace n bytes\n");
+    printf("-paddingA<0,1>                      : whether to pad zeros in vectorized mode of A\n");
+    printf("-paddingB<0,1>                      : whether to pad zeros in vectorized mode of B\n");
+    printf("-paddingC<0,1>                      : whether to pad zeros in vectorized mode of C\n");
+    printf("-strideA<<int>,<int>,...>           : Specify the strides of A (strides are specified in the same order as modeA)\n");
+    printf("-strideB<<int>,<int>,...>           : Specify the strides of B (strides are specified in the same order as modeA)\n");
+    printf("-strideC<<int>,<int>,...>           : Specify the strides of C (strides are specified in the same order as modeA)\n");
+    printf("-seed<<int>,<int>,...>              : Specify the seeds used for the RNG\n");
+    printf("-s                                  : only shows the LWCA configuration of the machines\n");
+    printf("-verbose                            : verbose mode; prints addition information\n");
+    printf("-graphMode                          : tests with LWCA graph capture\n");
+    printf("-extent<int=<int>,int=<int>,...>    : Specify the extent of each mode\n");
+    printf("-d<int>                             : select LWCA device (default : 0)\n");
+    printf("-disableVerify                      : Disables verifycation (in the interest of speed)\n");
+    printf("-disableWaitKernel                  : Disables the wait_kernel, resulting in less-accurate measurements\n");
+    printf("-fastVerify                         : uses another LWCA algorithm as the baseline\n");
+    printf("\n");
+    printf("Examples:\n");
+    printf("  ./lwtensorTest -Relementwise -modeCc,w,h,n -modeAw,h,c,n -extentn=128,c=64,h=55,w=55 \n");
+    printf("  ./lwtensorTest -Rcontraction -modeCn,m,a -modeAu,m,n -modeBa,u -extenta=120,m=108,u=120,n=120 -Pad -Pbd -Pcd -Pcompd\n");
+    exit(-1);
+}
+
+int showDevices( int lwrrentDevice )
+{
+    int totalDevices;
+    lwdaError_t err;
+    err = lwdaGetDeviceCount(&totalDevices);
+    if (err != lwdaSuccess) {
+        printf("\nlwdaGetDeviceCount returns error=%d\n", (int)err);
+        return -1;
+    }
+    printf("\nThere are %d LWCA capable devices on your machine :\n", totalDevices);
+    for (int i=0; i< totalDevices; i++) {
+        struct lwdaDeviceProp prop;
+        err = lwdaGetDeviceProperties(&prop, i);
+        if (err != lwdaSuccess) {
+            printf("lwdaGetDeviceProperties on device %d returns error=%d\n", i, (int)err);
+            return -1;
+        }
+        printf( "device %d %s: sms %2d  Capabilities %d.%d, SmClock %.1f Mhz, MemSize (Mb) %d, MemClock %.1f Mhz, Ecc=%d, boardGroupID=%d\n",
+                i,
+                (i == lwrrentDevice)?"(current) ":"",
+                prop.multiProcessorCount, prop.major, prop.minor,
+                (float)prop.clockRate*1e-3,
+                (int)(prop.totalGlobalMem/(1024*1024)),
+                (float)prop.memoryClockRate*1e-3,
+                prop.ECCEnabled,
+                prop.multiGpuBoardGroupID);
+    }
+    return 0;
+}
+
+void parseArguments(const std::vector<std::string> &arguments, std::vector<TestOptions> &testcases,
+                    const bool isRelwrsiveCall, std::string &filename)
+{
+    TestOptions opts;
+    opts.deviceId = 0;
+    int error = 0;
+    constexpr char SWITCH_CHAR = '-';
+
+    bool fileFlagPresent = false;
+
+    int testIdBegin= 0;
+    int testIdEnd = -1;
+
+    size_t pos = arguments[0].find("lwtensorTest"); // remove anything that preceeds lwtensorTest
+    opts.commandBinary_ = arguments[0].substr(pos != std::string::npos ? pos : 0);
+    std::string plainCommand;
+
+    for (auto iter = arguments.begin() + 1; iter != arguments.end(); ++iter)
+    {
+        std::string arg = *iter;
+        plainCommand += " " + arg;
+
+        if( arg == "./lwtensorTest" )
+        {
+            continue;
+        }
+        char *argv= new char[arg.length() + 1];
+        strcpy(argv, arg.c_str());
+
+        if (*argv != SWITCH_CHAR) 
+        {
+            fprintf(stderr, "Invalid separator '%c' for option '%s'\n\n", *argv, argv);
+            exit(-1);
+        }
+
+        switch (*(argv + 1)) 
+        {
+            case 'a':
+                if (opts.parseArgument(argv, "alpha", opts.alpha)) {
+                } else if (opts.parseArgument(argv, "algo", opts.algo_)) {
+                } else if (opts.parseArgument(argv, "alignmentReqA", opts.alignmentReqA)) {
+                } else if (opts.parseArgument(argv, "alignmentReqB", opts.alignmentReqB)) {
+                } else if (opts.parseArgument(argv, "alignmentReqC", opts.alignmentReqC)) {
+                } else if (opts.parseArgument(argv, "alignmentReqD", opts.alignmentReqD)) {
+                } else if (opts.parseArgument(argv, "alignmentA", opts.alignmentA)) {
+                } else if (opts.parseArgument(argv, "alignmentB", opts.alignmentB)) {
+                } else if (opts.parseArgument(argv, "alignmentC", opts.alignmentC)) {
+                } else if (opts.parseArgument(argv, "alignmentD", opts.alignmentD)) {
+                } else if (strncmp(argv + 1, "autotuneMode", strlen("autotuneMode")) == 0) {
+                    opts.autotuneMode_ = atoi( argv + 1 + strlen( "autotuneMode" ) );
+                } else { error++; }
+                break;
+            case 'c':
+                if (strncmp(argv + 1, "cacheFile", strlen("cacheFile")) == 0)
+                {
+                    // check fileName is correctly provided
+                    if((++iter) == arguments.end()) {
+                        fprintf(stderr, "Invalid file name. You need to provide file name like this: -file fileName.\n");
+                        exit(-1);
+                    }
+                    opts.cacheFile_ = *iter;
+                } else if (strncmp(argv + 1, "cacheMode", strlen("cacheMode")) == 0) {
+                    opts.cacheMode_ = atoi( argv + 1 + strlen( "cacheMode" ) );
+                } else if (strncmp(argv + 1, "contractionDescTag", strlen("contractionDescTag")) == 0) {
+                    opts.contractionDescTag_ = true;
+                } else { error++; }
+                break;
+            case 'b':
+                if (opts.parseArgument(argv, "beta", opts.beta)) {
+                } else { error++; }
+                break;
+            case 'd':
+                if (opts.parseArgument(argv, "disableVerify", opts.disableVerification_)) {
+                } else if (opts.parseArgument(argv, "disableWaitKernel", opts.disableWaitKernel_)) {
+                } else {
+                    int numDevices;
+                    lwdaGetDeviceCount(&numDevices);
+                    opts.deviceId = atoi(argv + 2);
+                    if (opts.deviceId < 0 || opts.deviceId >= numDevices)
+                        error++;
+                }
+                break;
+            case 'e':
+                if (strncmp(argv + 1, "extent", strlen("extent")) == 0) 
+                {
+                    std::vector<std::string> extents = string_util::split(argv + 1 + strlen("extent"),",");
+                    for (size_t i = 0; i < extents.size(); i++)
+                    {
+                        std::vector<std::string> token = string_util::split(extents[i].c_str(), "=");
+                        if ( token.size() == 2 )
+                        {
+                            opts.extent[parseMode(token[0])] = std::stoi(token[1]);
+                        }
+                        else
+                        {
+                            error++;
+                            break;
+                        }
+                    }
+                }else
+                    error++;
+                break;
+            case 'f':
+                if (strncmp(argv + 1, "fastVerify", strlen("fastVerify")) == 0) {
+                    opts.fastVerification = true;
+                }
+                else if (strncmp(argv + 1, "file", strlen("file")) == 0 && !isRelwrsiveCall)
+                {
+                    fileFlagPresent = true;
+
+                    // check fileName is correctly provided
+                    if((++iter) == arguments.end()) {
+                        fprintf(stderr, "Invalid file name. You need to provide file name like this: -file fileName.\n");
+                        exit(-1);
+                    }
+                    // read file line by line and add testcases to list
+                    if (! filename.empty()) {
+                        fprintf(stderr, "Relwrsive -file options are not allowed \n");
+                        exit(-1);
+                    }
+                    filename = *iter;
+                    std::ifstream file(filename);
+                    if(!file.is_open()) {
+                        fprintf(stderr, "Error in opening file %s \n", filename.c_str());
+                        exit(-1);
+                    }
+                    std::string line;
+                    while (std::getline(file, line))
+                    {
+                         /* Skip empty lines and those who start with '#' */
+                        if ( line.length() <= 0 || line[0] == '#')
+                        {
+                            continue;
+                        }
+                        /* Split according to space " ". */
+                        std::vector<std::string> args = string_util::split(line.c_str(), " ");
+                        parseArguments( args, testcases, true, filename );
+                    }
+                }else
+                    error++;
+                break;
+            case 'g':
+                if (opts.parseArgument(argv, "gamma", opts.gamma)) {
+                } else if (opts.parseArgument(argv, "graphMode", opts.graphMode)) {
+                } else { error++; }
+                break;
+            case 'h':
+                if (strncmp(argv + 1, "hostC", strlen("hostC")) == 0) {
+                    opts.hostC = true;
+                }else if (strncmp(argv + 1, "hostA", strlen("hostA")) == 0) {
+                    opts.hostA = true;
+                }else if (strncmp(argv + 1, "hostB", strlen("hostB")) == 0) {
+                    opts.hostB = true;
+                } else
+                    error++;
+                break;
+            case 'i':
+                if (strncmp(argv + 1, "incCount", strlen("incCount")) == 0) {
+                    opts.incrementalAutotuneCount_ = atoi( argv + 1 + strlen( "incCount") );
+                }else{
+                    error++;
+                }
+                break;
+            case 'm':
+                if (strncmp(argv + 1, "modeC", strlen("modeC")) == 0) {
+                    opts.useC = true;
+                    initModes(opts.modeC, string_util::split(argv + 1 + strlen("modeC"),","));
+                }else if (strncmp(argv + 1, "modeA", strlen("modeA")) == 0) {
+                    opts.useA = true;
+                    initModes(opts.modeA, string_util::split(argv + 1 + strlen("modeA"),","));
+                }else if (strncmp(argv + 1, "modeB", strlen("modeB")) == 0) {
+                    opts.useB = true;
+                    initModes(opts.modeB, string_util::split(argv + 1 + strlen("modeB"),","));
+                } else
+                    error++;
+                break;
+            case 'n':
+                if (opts.parseArgument(argv, "numRuns", opts.numRuns)) {
+                } else if (opts.parseArgument(argv, "numCachelines", opts.numCachelines_)) {
+                } else
+                    error++;
+                break;
+            case '-':
+                if (strncmp(argv + 1, "-help", strlen("-help")) == 0)
+                    usage();
+                else
+                    error++;
+                break;
+            case 'o':
+                if (opts.parseArgument(argv, "opABC", opts.opABC)) {
+                } else if (opts.parseArgument(argv, "opAB", opts.opAB)) {
+                } else if (opts.parseArgument(argv, "opReduce", opts.opReduce)) {
+                } else if (opts.parseArgument(argv, "opA", opts.opA)) {
+                } else if (opts.parseArgument(argv, "opB", opts.opB)) {
+                } else if (opts.parseArgument(argv, "opC", opts.opC)) {
+                } else if (strncmp(argv + 1, "offsetWorkSpace", strlen("offsetWorkSpace")) == 0) {
+                    opts.offsetWorkSpace = atoi(argv + 1 + strlen("offsetWorkSpace"));
+                } else
+                    error++;
+                break;
+            case 'p':
+                if (opts.parseArgument(argv, "pA0", opts.zeroInitA_)) {
+                } else if (opts.parseArgument(argv, "pB0", opts.zeroInitB_)) {
+                } else if (opts.parseArgument(argv, "pC0", opts.zeroInitC_)) {
+                } else if (opts.parseArgument(argv, "pD0", opts.zeroInitD_)) {
+                } else if (opts.parseArgument(argv, "pA1", opts.oneInitA_)) {
+                } else if (opts.parseArgument(argv, "pB1", opts.oneInitB_)) {
+                } else if (opts.parseArgument(argv, "pC1", opts.oneInitC_)) {
+                } else if (opts.parseArgument(argv, "pD1", opts.oneInitD_)) {
+                } else if (opts.parseArgument(argv, "pAn", opts.nanInitA_)) {
+                } else if (opts.parseArgument(argv, "pBn", opts.nanInitB_)) {
+                } else if (opts.parseArgument(argv, "pCn", opts.nanInitC_)) {
+                } else if (opts.parseArgument(argv, "pDn", opts.nanInitD_)) {
+                } else if (opts.parseArgument(argv, "pAl", opts.linInitA_)) {
+                } else if (opts.parseArgument(argv, "pBl", opts.linInitB_)) {
+                } else if (opts.parseArgument(argv, "pCl", opts.linInitC_)) {
+                } else if (opts.parseArgument(argv, "pDl", opts.linInitD_)) {
+                } else if (opts.parseArgument(argv, "permute", opts.permute_)) {
+                } else if (opts.parseArgument(argv, "partitionsK", opts.partitionsK_)) {
+                } else { error++; }
+                break;
+            case 'P':
+                if (opts.parseArgument(argv, "Pa", opts.typeA)) {
+                } else if (opts.parseArgument(argv, "Pb", opts.typeB)) {
+                } else if (opts.parseArgument(argv, "Pcomp", opts.typeCompute)) {
+                } else if (opts.parseArgument(argv, "Pc", opts.typeC)) {
+                }else
+                    error++;
+                break;
+            case 'R':
+                if (strncmp(argv + 1, "Rcontraction", strlen("Rcontraction")) == 0) {
+                    opts.routine = LWTENSOR_TC;
+                }else if (strncmp(argv + 1, "Relementwise", strlen("Relementwise")) == 0) {
+                    opts.routine = LWTENSOR_PW;
+                }else if (strncmp(argv + 1, "Rreduction", strlen("Rreduction")) == 0) {
+                    opts.routine = LWTENSOR_REDUCTION;
+                }else
+                    error++;
+                break;
+            case 's':
+                if (opts.parseArgument(argv, "showFailureOnly", opts.showFailureOnly)) {
+                } else if (opts.parseArgument(argv, "showNotSupport", opts.showNotSupport)) {
+                } else if (strncmp(argv + 1, "stride", strlen("stride")) == 0) {
+                    std::vector<std::string> strides = string_util::split(argv + 2 + strlen("stride"),",");
+                    for (size_t i=0; i < strides.size(); i++)
+                    {
+                        if( strncmp(argv + 1 + strlen("stride"), "A", 1) == 0 )
+                        {
+                            opts.strideA.push_back(atoll(strides[i].c_str()));
+                        }
+                        else if( strncmp(argv + 1 + strlen("stride"), "B", 1) == 0 )
+                        {
+                            opts.strideB.push_back(atoll(strides[i].c_str()));
+                        }
+                        else if( strncmp(argv + 1 + strlen("stride"), "C", 1) == 0 )
+                        {
+                            opts.strideC.push_back(atoll(strides[i].c_str()));
+                        }
+                        else{
+                            error++;
+                            break;
+                        }
+                    }
+                }else if (strncmp(argv + 1, "seed", strlen("seed")) == 0)
+                {
+                    opts.useSeeds_ = true;
+                    std::vector<std::string> seeds = string_util::split(argv + 1 + strlen("seed"),",");
+                    for(int i=0; i < LWTENSOR_TEST_MAX_NUM_THREADS; ++i)
+                    {
+                        opts.seeds_[i] = atoi(seeds[i].c_str());
+                    }
+                }else if (strncmp(argv + 1, "s", strlen("s")) == 0) {
+                    opts.showDevice = true;
+                }else
+                    error++;
+                break;
+            case 't':
+                if (opts.parseArgument(argv, "testIdBegin", testIdBegin)) {
+                }else if (opts.parseArgument(argv, "testIdEnd", testIdEnd)) {
+                }else
+                    error++;
+                break;
+            case 'u':
+                if (strncmp(argv + 1, "useD", strlen("useD")) == 0) {
+                    opts.useD = true;
+                } else
+                    error++;
+                break;
+            case 'v':
+                if (opts.parseArgument(argv, "verbose", opts.verbose)) {
+                } else { error++; }
+                break;
+            case 'w':
+                if (strncmp(argv + 1, "workspacePref", strlen("workspacePref")) == 0 ) {
+                    opts.workspacePref_ = atoi(argv + 1 + strlen("workspacePref"));
+                } else if (opts.parseArgument(argv, "workspace", opts.workspaceSize_)) {
+                } else { error++; }
+                break;
+            default:
+                error++;
+                break;
+        }
+        if (error) {
+            fprintf(stderr, "Unknown switch '%c%s'\n\n", SWITCH_CHAR, argv + 1);
+            exit(-1);
+        }
+        delete [] argv;
+    }
+
+    if (! isRelwrsiveCall && (testIdBegin != 0 || testIdEnd != -1))
+    {
+        // the file has been processed
+        std::vector<TestOptions> testcasesPruned;
+        int end = (testIdEnd == -1) ? testcases.size() : ((testcases.size() > testIdEnd)? testIdEnd : testcases.size());
+        for(int i=testIdBegin; i < end; ++i){
+            testcasesPruned.emplace_back(testcases[i]);
+        }
+        testcases = testcasesPruned;
+    }
+
+    opts.commandPlain_  = plainCommand; 
+
+    if( !fileFlagPresent )
+    {
+        opts.initExtents();
+
+        if( opts.showDevice )
+        {
+            int ret = showDevices( opts.deviceId );
+            exit( ret );
+        }
+        if( opts.useC == false )
+        {
+            printf("Error: C must be provided.\n");
+            exit(-1);
+        }
+        if ( opts.fastVerification && opts.routine != LWTENSOR_TC )
+        {
+            printf("Warning: fastVerify is only supported for tensor contractions.\n");
+        }
+        if ( opts.verbose ) opts.print();
+
+        if ( !opts.isOptiolwalid() )
+        {
+            printf("Error: Invalid options from lwtensorTest command line\n");
+            exit(-1);
+        }
+
+        testcases.push_back(opts);
+    }
+    else
+    {
+        // use all settings from opts that are not the default (i.e., those that have been
+        // passed in explicitly) to overwrite the corresponding settings in each testcase
+        for(auto &test : testcases)
+        {
+            test.overwrite(opts);
+        }
+    }
+}
+
+
+double getTolerance(lwdaDataType_t type)
+{
+    const bool forcedTF32 = getelw("LWIDIA_TF32_OVERRIDE") && (atoi(getelw("LWIDIA_TF32_OVERRIDE")) == 1);
+    if ( forcedTF32 )
+        return 1E-2;
+    if ( type == LWDA_R_8I || type == LWDA_R_8U || type == LWDA_R_32I || type == LWDA_R_32U )
+        return 1E-7;
+    if ( type == LWDA_R_16F || type == LWDA_C_16F  || type == LWDA_R_16BF || type == LWDA_R_TF32 || type == LWDA_C_TF32)
+        return 1E-2;
+    if ( type == LWDA_C_32F || type == LWDA_R_32F )
+        return 1E-4;
+    if ( type == LWDA_C_64F || type == LWDA_R_64F )
+        return 1E-7;
+
+    printf( "ERROR: TYPE UNKNOWN. %d\n", type);
+    exit( -1 );
+}
+
+void* offsetPtr(void* ptr, size_t offset_bytes) {
+  return (void*)(((char*)ptr) + offset_bytes);
+}
+
+std::vector<TestOptions> testcases;
+std::string filename;
+
+
+/**
+  * \param[out] minTimeMEMCPY
+  * \param[out] transferedGB
+  */
+void runMemoryTest(const TestOptions& opts, trash_util::TrashCache& trash,
+                   float *memcpy1, const size_t maxSize1,
+                   float *memcpy2, const size_t maxSize2,
+                   lwdaStream_t stream,
+                   float& minTimeMEMCPY, float& transferedGB)
+{
+    size_t elementSizeA = getDataTypeSize(opts.typeA);
+    size_t elementSizeB = getDataTypeSize(opts.typeB);
+    size_t elementSizeC = getDataTypeSize(opts.typeC);
+
+    size_t denseSizeA = opts.getNumElements('A', false) * elementSizeA;
+    size_t denseSizeB = opts.getNumElements('B', false) * elementSizeB;
+    size_t denseSizeC = opts.getNumElements('C', false) * elementSizeC;
+
+    auto transferedBytes = denseSizeC;
+    transferedBytes     += (opts.alpha != 0.f) ? denseSizeA : 0;
+    transferedBytes     += (opts.routine == LWTENSOR_TC || (opts.routine == LWTENSOR_PW && opts.beta != 0.f)) ? denseSizeB : 0;
+    transferedBytes     += (opts.gamma != 0.f && ! opts.permute_) ? denseSizeC : 0;
+
+    const auto memcpySize = transferedBytes / 2;
+
+    if (memcpySize > maxSize1 || memcpySize > maxSize2)
+    {
+        // this case should never occur (based on how memcpysize is --by design-- <= sizeABC and both the passed in pointers are larger than that).
+        minTimeMEMCPY = FLT_MAX;
+        transferedGB = 0;
+        return;
+    }
+
+    ASSERT_EQ(lwdaMemsetAsync(memcpy1, 1, maxSize1, stream), lwdaSuccess);
+    ASSERT_EQ(lwdaMemsetAsync(memcpy2, 2, maxSize2, stream), lwdaSuccess);
+    ASSERT_EQ(lwdaStreamSynchronize(stream), lwdaSuccess);
+
+    for(int i=0; i < 3 && ! globalDryRun; ++i)
+    {
+        trash.trashL2(stream);
+
+        GPUTimer timer(stream);
+        timer.start();
+        ASSERT_EQ(lwdaMemcpy2DAsync(memcpy1, memcpySize,
+                                    memcpy2, memcpySize, memcpySize, 1, lwdaMemcpyDefault, stream), lwdaSuccess);
+        minTimeMEMCPY = std::min(timer.seconds(),minTimeMEMCPY);
+    }
+
+    transferedGB = transferedBytes / 1e9;
+}
+
+void runLwBlasTest(const lwblasHandle_t& lwblasHandle, const TestOptions& opts, trash_util::TrashCache& trash,
+                   size_t minimalAlignment, void* ABCD, void* ABCD_d, 
+                   void *output_copy, void* work,
+                   lwdaStream_t stream, float& minTimeLWBLAS, unsigned& succeededLwblasTests)
+{
+    (void) work; // may be used for lwblasLt
+
+    /********************************
+     * Retrieve configuration
+     ********************************/
+    if( opts.hostA != opts.hostB || opts.hostB != opts.hostC || opts.hostA != opts.hostC )
+    {
+        printf("Host not supported.\n");
+        exit(-1);
+    }
+
+    const auto nmodeA = opts.modeA.size();
+    const auto nmodeB = opts.modeB.size();
+    const auto nmodeC = opts.modeC.size();
+    auto modeA = opts.modeA;
+    auto modeB = opts.modeB;
+    auto modeC = opts.modeC;
+
+    size_t elementsA = opts.getNumElements('A', true);
+    size_t elementsB = opts.getNumElements('B', true);
+    size_t elementsC = opts.getNumElements('C', true);
+
+    size_t elementSizeA = getDataTypeSize(opts.typeA);
+    size_t elementSizeB = getDataTypeSize(opts.typeB);
+    size_t elementSizeC = getDataTypeSize(opts.typeC);
+
+    size_t sizeA = roundUp(elementSizeA * elementsA, minimalAlignment);
+    size_t sizeB = roundUp(elementSizeB * elementsB, minimalAlignment);
+    size_t sizeC = roundUp(elementSizeC * elementsC, minimalAlignment);
+
+    void *minAligned_A_d, *minAligned_B_d, *minAligned_C_d, *minAligned_D_d;
+    minAligned_A_d = opts.hostA ? ABCD : ABCD_d;
+    minAligned_B_d = offsetPtr(minAligned_A_d, sizeA + minimalAlignment);
+    minAligned_C_d = offsetPtr(minAligned_B_d, sizeB + minimalAlignment);
+    minAligned_D_d = opts.useD ? offsetPtr(minAligned_C_d, sizeC + minimalAlignment) : minAligned_C_d;
+
+    void *A_d, *B_d, *D_d;
+    A_d = offsetPtr(minAligned_A_d, opts.alignmentA);
+    B_d = offsetPtr(minAligned_B_d, opts.alignmentB);
+    D_d = offsetPtr(minAligned_D_d, opts.alignmentD);
+
+    const int nRuns = opts.numRuns;
+
+    /********************************
+     * Initialize data
+     ********************************/
+    double alpha_buff[4];
+    double beta_buff[4];
+
+    void *alpha = (void*)alpha_buff;
+    void *beta  = (void*)beta_buff;
+
+    initialize( alpha, opts.getLwdaScalarType(), 1, opts.alpha );
+    initialize( beta,  opts.getLwdaScalarType(), 1, opts.beta );
+
+    /********************************
+     * Run lwBLAS
+     ********************************/
+    size_t m, n, k, l;
+    double gflops = opts.getFlops(m, n, k, l) / 1e9;
+    bool lwblasSuccess = false;
+    for(int i=0; i < nRuns && opts.routine == LWTENSOR_TC && ! globalDryRun; ++i)
+    {
+        // restore output
+        ASSERT_EQ(lwdaMemcpy2DAsync(D_d, sizeC, output_copy, sizeC, sizeC, 1, lwdaMemcpyDefault, stream), lwdaSuccess);
+        ASSERT_EQ(lwdaStreamSynchronize(stream), lwdaSuccess);
+
+        trash.trashL2(stream);
+
+        auto algo = LWBLAS_GEMM_DEFAULT;
+        if( (opts.typeA == LWDA_R_16F && opts.typeB == LWDA_R_16F && opts.typeC == LWDA_R_16F && (opts.getLwdaComputeType() == LWDA_R_32F || opts.getLwdaComputeType() == LWDA_R_16F ) ) ||
+            (opts.typeA == LWDA_R_32F && opts.typeB == LWDA_R_32F && opts.typeC == LWDA_R_32F && (opts.getLwdaComputeType() == LWDA_R_16F ) ))
+            algo = LWBLAS_GEMM_DEFAULT_TENSOR_OP;
+
+        bool transA = false;
+        for (size_t i=0; i < nmodeB; ++i)
+            if( modeA.at(0)  == modeB.at(i) )
+                transA = true;
+        bool transB = true;
+        for (size_t i=0; i < nmodeA; ++i)
+            if( modeB.at(0)  == modeA.at(i) )
+                transB = false;
+        int lda = (transA) ? k : m;
+        int ldb = (transB) ? n : k;
+
+        GPUTimer timer(stream);
+        timer.start();
+        auto ret = lwblasGemmStridedBatchedEx(lwblasHandle,
+                transA ? LWBLAS_OP_T : LWBLAS_OP_N, transB ? LWBLAS_OP_T : LWBLAS_OP_N,
+                (int)m, (int)n, (int)k,
+                alpha, A_d, opts.typeA, lda, m * k,
+                       B_d, opts.typeB, ldb, n * k,
+                beta,  D_d, opts.typeC, (int)m, m * n,
+                l,
+                opts.getLwdaComputeType(), algo);
+        auto time = timer.seconds();
+
+        if ( ret != LWBLAS_STATUS_SUCCESS )
+        {
+            if ( !opts.showFailureOnly ) 
+                printf("Warning: lwblas failed with %d\n", ret);
+        }
+        else
+        {
+            minTimeLWBLAS = std::min(minTimeLWBLAS, time);
+            lwblasSuccess = true;
+        }
+    }
+
+    if(lwblasSuccess)
+    {
+        succeededLwblasTests++;
+    }
+}
+
+void runLwTensorTest(const lwtensorHandle_t* handle, const TestOptions& opts, trash_util::TrashCache& trash,
+                     size_t minimalAlignment, void* ABCD, void* ABCD_d, 
+                     void *output_ref, void *output_buffer, void *output_copy, void* work,
+                     size_t maxWorksize,
+                     wait_util::WaitKernel &wait_kernel,
+                     lwdaStream_t stream, const bool usePlanCache, OutputResult& printer, lwtensorAlgoInfo& algoInfos,
+                     unsigned& succeededAlgos, unsigned& succeededContractionTests, unsigned& succeededTests) 
+{
+    /********************************
+     * Retrieve configuration
+     ********************************/
+    if( opts.hostA != opts.hostB || opts.hostB != opts.hostC || opts.hostA != opts.hostC )
+    {
+        printf("Host not supported.\n");
+        exit(-1);
+    }
+
+    const auto nmodeA = opts.modeA.size();
+    const auto nmodeB = opts.modeB.size();
+    const auto nmodeC = opts.modeC.size();
+    auto modeA = opts.modeA;
+    auto modeB = opts.modeB;
+    auto modeC = opts.modeC;
+
+    size_t elementsA = opts.getNumElements('A', true);
+    size_t elementsB = opts.getNumElements('B', true);
+    size_t elementsC = opts.getNumElements('C', true);
+
+    size_t elementSizeA = getDataTypeSize(opts.typeA);
+    size_t elementSizeB = getDataTypeSize(opts.typeB);
+    size_t elementSizeC = getDataTypeSize(opts.typeC);
+
+    size_t alignmentReqA    = opts.alignmentReqA;
+    size_t alignmentReqB    = opts.alignmentReqB;
+    size_t alignmentReqC    = opts.alignmentReqC;
+    size_t alignmentReqD    = opts.useD ? opts.alignmentReqD : opts.alignmentReqC;
+    size_t sizeA = roundUp(elementSizeA * elementsA, minimalAlignment);
+    size_t sizeB = roundUp(elementSizeB * elementsB, minimalAlignment);
+    size_t sizeC = roundUp(elementSizeC * elementsC, minimalAlignment);
+
+    void *minAligned_A_d, *minAligned_B_d, *minAligned_C_d, *minAligned_D_d;
+    minAligned_A_d = opts.hostA ? ABCD : ABCD_d;
+    minAligned_B_d = offsetPtr(minAligned_A_d, sizeA + minimalAlignment);
+    minAligned_C_d = offsetPtr(minAligned_B_d, sizeB + minimalAlignment);
+    minAligned_D_d = opts.useD ? offsetPtr(minAligned_C_d, sizeC + minimalAlignment) : minAligned_C_d;
+
+    void *A_d, *B_d, *C_d, *D_d;
+    A_d = offsetPtr(minAligned_A_d, opts.alignmentA);
+    B_d = offsetPtr(minAligned_B_d, opts.alignmentB);
+    C_d = offsetPtr(minAligned_C_d, opts.alignmentC);
+    D_d = offsetPtr(minAligned_D_d, opts.alignmentD);
+
+    void *minAligned_A, *minAligned_B, *minAligned_C, *minAligned_D;
+    minAligned_A = ABCD;
+    minAligned_B = offsetPtr(minAligned_A, sizeA + minimalAlignment);
+    minAligned_C = offsetPtr(minAligned_B, sizeB + minimalAlignment);
+    minAligned_D = opts.useD ? offsetPtr(minAligned_C, sizeC + minimalAlignment) : minAligned_C;
+
+    void *A, *B, *C, *D;
+    A = offsetPtr(minAligned_A, opts.alignmentA);
+    B = offsetPtr(minAligned_B, opts.alignmentB);
+    C = offsetPtr(minAligned_C, opts.alignmentC);
+    D = offsetPtr(minAligned_D, opts.alignmentD);
+
+    const int nRuns = opts.numRuns;
+
+    /********************************
+     * Initialize data
+     ********************************/
+    double alpha_buff[4];
+    double beta_buff[4];
+    double gamma_buff[4];
+
+    void *alpha = (void*)alpha_buff;
+    void *beta  = (void*)beta_buff;
+    void *gamma = (void*)gamma_buff;
+
+    initialize( alpha, opts.getLwdaScalarType(), 1, opts.alpha );
+    initialize( beta,  opts.getLwdaScalarType(), 1, opts.beta );
+    initialize( gamma, opts.getLwdaScalarType(), 1, opts.gamma );
+
+    initializeHelper( A, opts.typeA, elementsA, opts.zeroInitA_, opts.nanInitA_, opts.oneInitA_, opts.linInitA_ );
+    initializeHelper( B, opts.typeB, elementsB, opts.zeroInitB_, opts.nanInitB_, opts.oneInitB_, opts.linInitB_ );
+//    printf("A:\n");
+//    for(int i=0; i < elementsA; ++i){
+//        printf("%.6e, ", LWTENSOR_NAMESPACE::lwGet<float>(((LWTENSOR_NAMESPACE::BFloat16*)A)[i]));
+//    }
+//    printf("\n");
+//    printf("B:\n");
+//    for(int i=0; i < elementsB; ++i){
+//        printf("%f\n", LWTENSOR_NAMESPACE::lwGet<float>(((half*)B)[i]));
+//    }
+//    printf("\n");
+
+    initializeHelper( C, opts.typeC, elementsC, opts.zeroInitC_, opts.nanInitC_, opts.oneInitC_, opts.linInitC_ ); //init C every time (since it may be overwritten)
+    if( opts.useD )
+    {
+        initializeHelper( D, opts.typeC, elementsC, opts.zeroInitD_, opts.nanInitD_, opts.oneInitD_, opts.linInitD_ );
+    }
+
+    if (! globalDryRun)
+    {
+        memcpy(output_copy, D, sizeC);
+        memcpy(output_ref, D, sizeC);
+    }
+
+    if( !opts.hostC  && !globalDryRun)
+    {
+        ASSERT_EQ(lwdaMemcpy2DAsync(C_d, sizeC, C, sizeC, sizeC, 1, lwdaMemcpyDefault, stream), lwdaSuccess);
+        ASSERT_EQ(lwdaStreamSynchronize(stream), lwdaSuccess);
+    }
+    if( !opts.hostA && !globalDryRun)
+    {
+        ASSERT_EQ(lwdaMemcpy2DAsync(A_d, sizeA, A, sizeA, sizeA, 1, lwdaMemcpyDefault, stream), lwdaSuccess);
+        ASSERT_EQ(lwdaStreamSynchronize(stream), lwdaSuccess);
+    }
+    if( !opts.hostB && !globalDryRun)
+    {
+        ASSERT_EQ(lwdaMemcpy2DAsync(B_d, sizeB, B, sizeB, sizeB, 1, lwdaMemcpyDefault, stream), lwdaSuccess);
+        ASSERT_EQ(lwdaStreamSynchronize(stream), lwdaSuccess);
+    }
+
+    int maxAlgosTC = 0;
+    lwtensorContractionMaxAlgos(&maxAlgosTC);
+
+    double gflops = opts.getFlops() / 1e9;
+
+    wait_kernel.reset();
+
+    /*************************
+     * LWTENSOR
+     ************************/
+    const int64_t* strideA = nullptr;
+    const int64_t* strideB = nullptr;
+    const int64_t* strideC = nullptr;
+    if( opts.strideA.size() == nmodeA )
+        strideA = opts.strideA.data();
+    if( opts.strideB.size() == nmodeB )
+        strideB = opts.strideB.data();
+    if( opts.strideC.size() == nmodeC )
+        strideC = opts.strideC.data();
+
+    /****************************
+     * Create Tensor Descriptors
+     ****************************/
+    lwtensorTensorDescriptor_t  descAobj;
+    lwtensorTensorDescriptor_t* descA = &descAobj;
+
+    if( opts.useA )
+    {
+        ASSERT_EQ( lwtensorInitTensorDescriptor( handle,
+                                                 descA,
+                                                 nmodeA,
+                                                 nmodeA ? opts.extentA.data() : nullptr,
+                                                 strideA,
+                                                 opts.typeA, opts.opA), LWTENSOR_STATUS_SUCCESS );
+    }else
+    {
+        descA = nullptr;
+    }
+
+    lwtensorTensorDescriptor_t descBobj;
+    lwtensorTensorDescriptor_t* descB = &descBobj;
+
+    if( opts.useB )
+    {
+        ASSERT_EQ( lwtensorInitTensorDescriptor( handle,
+                                                 descB,
+                                                 nmodeB,
+                                                 nmodeB ? opts.extentB.data() : nullptr,
+                                                 strideB,
+                                                 opts.typeB, opts.opB), LWTENSOR_STATUS_SUCCESS);
+
+    }
+    else
+    {
+        descB = nullptr;
+    }
+
+    lwtensorTensorDescriptor_t descCobj;
+    lwtensorTensorDescriptor_t* descC = &descCobj;
+
+    ASSERT_EQ( lwtensorInitTensorDescriptor( handle,
+                                             descC,
+                                             nmodeC,
+                                             nmodeC ? opts.extentC.data() : nullptr,
+                                             strideC,
+                                             opts.typeC, opts.opC), LWTENSOR_STATUS_SUCCESS);
+
+
+    /******************
+     * Get workspace
+     ******************/
+    size_t worksize = 0;
+    if (opts.workspaceSize_ != TestOptions::DEFAULT_WORKSPACE)
+    {
+        worksize = opts.workspaceSize_;
+    }
+    else if (opts.routine == LWTENSOR_REDUCTION || opts.routine == LWTENSOR_TC )
+    {
+        lwtensorStatus_t err;
+        if( opts.routine == LWTENSOR_TC )
+        {
+            lwtensorContractionDescriptor_t desc;
+            lwtensorContractionFind_t find;
+
+            err = lwtensorInitContractionDescriptor( handle, &desc,
+                                                     descA, modeA.data(), alignmentReqA,
+                                                     descB, modeB.data(), alignmentReqB,
+                                                     descC, modeC.data(), alignmentReqC, 
+                                                     descC, modeC.data(), alignmentReqD,
+                                                     opts.typeCompute);
+
+            if(err == LWTENSOR_STATUS_SUCCESS)
+            {
+                err = lwtensorInitContractionFind(handle, &find, LWTENSOR_ALGO_DEFAULT);
+
+                if(err == LWTENSOR_STATUS_SUCCESS)
+                {
+                    lwtensorWorksizePreference_t pref = (lwtensorWorksizePreference_t)opts.workspacePref_;
+                    err = lwtensorContractionGetWorkspace(handle, &desc, &find, pref, &worksize );
+                }
+            }
+        }
+        else if(opts.routine == LWTENSOR_REDUCTION)
+        {
+            err = lwtensorReductionGetWorkspace(handle, 
+                    A_d, descA, modeA.data(),
+                    C_d, descC, modeC.data(),
+                    C_d, descC, modeC.data(),
+                    opts.opReduce, opts.typeCompute, &worksize);
+        }
+        if ( err != LWTENSOR_STATUS_SUCCESS && err != LWTENSOR_STATUS_NOT_SUPPORTED )
+        {
+            printer.printResultError(__LINE__, lwtensorGetErrorString(err));
+            printer.printResultErrorDVS();
+            FAIL();
+        }
+    }
+    assert(worksize <= maxWorksize);
+
+    // for cases which are not_supported in lwTENSOR, we do not require the reference
+    // to have support either. this is partilwlarly important when using "-fastVerify"
+    // as any non-supported contraction leads to test failure otherwise.
+    bool all_lwtensor_runs_should_yield_not_supported = false;
+    /*********************************
+     * Run Reference 
+     *********************************/
+    if( !opts.disableVerification_ && ! globalDryRun)
+    {
+        if( opts.routine == LWTENSOR_PW )
+        {
+            if (opts.useA && opts.useB && opts.useC)
+            {
+                lwtensorStatus_t err = lwtensorElementwiseReference(handle,
+                        alpha, A, descA, nmodeA ? modeA.data() : nullptr,
+                        beta,  B, descB, nmodeB ? modeB.data() : nullptr,
+                        gamma, C, descC, nmodeC ? modeC.data() : nullptr,
+                        opts.opAB, opts.opUnaryAfterBinary, opts.opABC, output_ref,
+                        opts.getLwdaScalarType());
+                if(err != LWTENSOR_STATUS_SUCCESS)
+                {
+                    printer.printResultError(__LINE__, std::string("REFERENCE FAILED with ") +
+                            std::string(lwtensorGetErrorString(err)));
+                    printer.printResultErrorDVS();
+                    EXPECT_TRUE(false);
+                }
+            }
+            else if ( (!opts.useA || !opts.useB) && opts.useC )
+            {
+                if ( opts.useA )
+                {
+                    lwtensorStatus_t err = lwtensorElementwiseReference(handle,
+                            alpha, A, descA, nmodeA ? modeA.data() : nullptr,
+                            nullptr, nullptr, nullptr, nullptr,
+                            opts.permute_ ? nullptr : gamma, C, descC, nmodeC ? modeC.data() : nullptr,
+                            LWTENSOR_OP_ADD, opts.opUnaryAfterBinary, opts.opABC,
+                            output_ref, opts.getLwdaScalarType());
+                    if(err != LWTENSOR_STATUS_SUCCESS)
+                    {
+                        printer.printResultError(__LINE__, std::string("REFERENCE FAILED with ") + std::string(lwtensorGetErrorString(err)));
+                        printer.printResultErrorDVS();
+                        EXPECT_TRUE(false);
+                    }
+                }
+                else
+                {
+                    lwtensorStatus_t err = lwtensorElementwiseReference(handle,
+                            beta,  B, descB, nmodeB ? modeB.data() : nullptr,
+                            nullptr, nullptr, nullptr, nullptr,
+                            opts.permute_ ? nullptr : gamma, C, descC, nmodeC ? modeC.data() : nullptr,
+                            LWTENSOR_OP_ADD, opts.opUnaryAfterBinary, opts.opABC,
+                            output_ref, opts.getLwdaScalarType());
+                    if(err != LWTENSOR_STATUS_SUCCESS)
+                    {
+                        printer.printResultError(__LINE__, std::string("REFERENCE FAILED!") + std::string(lwtensorGetErrorString(err)));
+                        printer.printResultErrorDVS();
+                        EXPECT_TRUE(false);
+                    }
+                }
+            }
+            else
+            {
+                printer.printResultError(__LINE__, "REFERENCE NOT SUPPORTED!");
+                printer.printResultErrorDVS();
+                EXPECT_TRUE(false);
+            }
+        }
+        else if( opts.routine == LWTENSOR_TC )
+        {
+            lwtensorStatus_t err = LWTENSOR_STATUS_SUCCESS;
+
+            if( opts.fastVerification )
+            {
+                int algo = LWTENSOR_ALGO_GETT;
+                err = LWTENSOR_STATUS_NOT_SUPPORTED;
+                while( err != LWTENSOR_STATUS_SUCCESS && algo <= maxAlgosTC )
+                {
+                    // restore output
+                    ASSERT_EQ(lwdaMemcpy2DAsync(D_d, sizeC, output_copy, sizeC, sizeC, 1, lwdaMemcpyDefault, stream), 
+                            lwdaSuccess);
+                    ASSERT_EQ(lwdaStreamSynchronize(stream), lwdaSuccess);
+
+                    lwtensorContractionPlan_t plan;
+                    lwtensorContractionDescriptor_t desc;
+                    lwtensorContractionFind_t find;
+
+                    err = lwtensorInitContractionDescriptor( handle, &desc,
+                                                             descA, modeA.data(), alignmentReqA,
+                                                             descB, modeB.data(), alignmentReqB,
+                                                             descC, modeC.data(), alignmentReqC, 
+                                                             descC, modeC.data(), alignmentReqD,
+                                                             opts.typeCompute);
+                    if(err == LWTENSOR_STATUS_SUCCESS)
+                    {
+                        err = lwtensorInitContractionFind(handle, &find, (lwtensorAlgo_t) algo); 
+                        const lwtensorCacheMode_t cacheMode = LWTENSOR_CACHE_MODE_NONE;
+                        ASSERT_EQ(lwtensorContractionFindSetAttribute(
+                                    handle,
+                                    &find,
+                                    LWTENSOR_CONTRACTION_FIND_CACHE_MODE,
+                                    &cacheMode,
+                                    sizeof(lwtensorCacheMode_t)), LWTENSOR_STATUS_SUCCESS);
+
+                        if(err == LWTENSOR_STATUS_SUCCESS) {
+                            err = lwtensorInitContractionPlan(handle, &plan, &desc, &find, worksize);
+
+                            if(err == LWTENSOR_STATUS_SUCCESS) {
+                                err = lwtensorContraction(handle, &plan,
+                                        alpha, A_d,
+                                        B_d,
+                                        beta,  C_d, 
+                                        D_d,
+                                        work, worksize, 
+                                        stream /* used to be 0 stream */);
+                            }
+                        }
+                    }
+                    algo++;
+                }
+                if ( err == LWTENSOR_STATUS_SUCCESS )
+                {
+                    ASSERT_EQ(lwdaMemcpy2DAsync(output_ref, sizeC, D_d, sizeC, sizeC, 1, lwdaMemcpyDefault, stream), 
+                            lwdaSuccess);
+                    ASSERT_EQ(lwdaStreamSynchronize(stream), lwdaSuccess);
+                }
+                else if (err == LWTENSOR_STATUS_NOT_SUPPORTED)
+                {
+                    all_lwtensor_runs_should_yield_not_supported = true;
+                }
+                else
+                {
+                    printer.printResultError(__LINE__, std::string("No reference kernel was able to run!") + std::string(lwtensorGetErrorString(err)));
+                    printer.printResultErrorDVS();
+                    EXPECT_TRUE(false);
+                }
+            }
+            else
+            {
+                err = ReferenceTC::tensorMult_ref(
+                        alpha,  A, descA, modeA.data(),
+                                B, descB, modeB.data(),
+                        beta,   C, descC, modeC.data(),
+                                output_ref,
+                        LWTENSOR_OP_IDENTITY, LWTENSOR_OP_ADD,
+                        opts.getLwdaScalarType(), opts.getLwdaComputeType(), false, nullptr ); //&(helper.modeK)
+            }
+
+            if ((err == LWTENSOR_STATUS_NOT_SUPPORTED) && all_lwtensor_runs_should_yield_not_supported)
+            {
+            }
+            else if ( err != LWTENSOR_STATUS_SUCCESS )
+            {
+                printer.printResultError(__LINE__, std::string("TC REFERENCE FAILED with ") + std::string(lwtensorGetErrorString(err)));
+                printer.printResultErrorDVS();
+                EXPECT_TRUE(false);
+            }
+        }
+        else if( opts.routine == LWTENSOR_REDUCTION)
+        {
+            auto err = ReferenceTC::tensorMult_ref(
+                    alpha,  A, descA, modeA.data(),
+                            A, descA, modeA.data(), // will not be used
+                    gamma,  C, descC, modeC.data(),
+                            output_ref,
+                    LWTENSOR_OP_IDENTITY, opts.opReduce,
+                    opts.getLwdaScalarType(), opts.getLwdaComputeType(), true);
+            if ( err != LWTENSOR_STATUS_SUCCESS )
+            {
+                printer.printResultError(__LINE__, std::string("TC REFERENCE FAILED with") + std::string(lwtensorGetErrorString(err)));
+                printer.printResultErrorDVS();
+                EXPECT_TRUE(false);
+            }
+        }
+        else
+        {
+            printer.printResultError(__LINE__, "No valid routine has been specified!");
+            printer.printResultErrorDVS();
+            EXPECT_TRUE(false);
+        }
+    }
+
+    /*********************************
+     * Run lwTENSOR 
+     *********************************/
+    int maxVariants = LWTENSOR_ALGO_TTGT;
+    int algo = LWTENSOR_ALGO_LWTE;
+    work = offsetPtr(work, opts.offsetWorkSpace);
+    if(opts.routine == LWTENSOR_TC && opts.algo_ == TestOptions::kDefaultAlgo )
+    {
+        maxVariants = maxAlgosTC;
+    }
+    else
+    {
+        if( opts.algo_ != TestOptions::kDefaultAlgo ) // pick a specific kernel
+        {
+            if (opts.algo_ == TestOptions::kAlgoAllGett) // measure all GETT kernels only
+            {
+                algo = 0;
+                maxVariants = maxAlgosTC;
+            }
+            else
+            {
+                algo = opts.algo_;
+                maxVariants = opts.algo_;
+            }
+        }
+        else if (opts.routine == LWTENSOR_PW) // auto-tuning for element-wise
+        {
+            algo = -1; // -1 reflects heuristic
+#ifdef LWTENSOR_EXPOSE_INTERNAL
+            // without that flag, all algos for ew are the same
+            maxVariants = 100;
+#else
+            maxVariants = algo;
+#endif
+        }
+        else
+        {
+            algo = LWTENSOR_ALGO_DEFAULT;
+            maxVariants = LWTENSOR_ALGO_DEFAULT;
+        }
+    }
+
+    int succeededAlgosTestCase = 0;
+    bool verificationDone = false;
+
+    /* Loop over all algorithms. */
+    for(; algo <= maxVariants; algo++)
+    {
+        char setelw_str[255];
+        if( opts.routine == LWTENSOR_PW )
+        {
+            sprintf(setelw_str, "LWTENSOR_FORCE_EW_ALGO=%d", algo);
+            // putelw works on windows and linux, setelw is just posix
+            if (putelw(setelw_str) != 0)
+            {
+                printf("WARNING: couldn't set ALGO\n");
+            }
+        }
+        AlgoInfo algoInfo;
+        lwdaDeviceSynchronize();
+        float minTime = 1e100;
+        lwtensorStatus_t err = LWTENSOR_STATUS_NOT_SUPPORTED;
+        bool initPlanSucceeded = false;
+        for(int i=0; i < nRuns; ++i)
+        {
+            if (! globalDryRun)
+            {
+                // restore output
+                ASSERT_EQ(lwdaMemcpy2DAsync(D_d, sizeC, output_copy, sizeC, sizeC, 1, lwdaMemcpyDefault, stream), lwdaSuccess);
+                ASSERT_EQ(lwdaStreamSynchronize(stream), lwdaSuccess);
+                trash.trashL2(stream);
+
+                // this is necessary to avoid a deadlock due to the wait kernel. Details: lwdalaunch can sync
+                // if the local memory needs to be resized; this change is presistent after the first invocation
+                if( ! opts.disableWaitKernel_ && i > 0 && (!usePlanCache || i >= opts.incrementalAutotuneCount_) && !opts.graphMode)
+                {
+                    wait_kernel.launch();
+                }
+
+            }
+
+            float time = 0.; 
+
+            lwdaGraph_t graph;
+            if (opts.graphMode)
+            {
+                // Capture Graph
+                HANDLE_LWDA_ERROR(lwdaGraphCreate(&graph, 0));
+                HANDLE_LWDA_ERROR(lwdaStreamBeginCapture(stream, lwdaStreamCaptureModeGlobal));
+            }
+
+            // run lwtensor
+            if( opts.routine == LWTENSOR_TC )
+            {
+                lwtensorContractionPlan_t plan;
+                lwtensorContractionDescriptor_t desc;
+                lwtensorContractionFind_t find;
+
+                err = lwtensorInitContractionDescriptor( handle, &desc,
+                                                         descA, modeA.data(), alignmentReqA,
+                                                         descB, modeB.data(), alignmentReqB,
+                                                         descC, modeC.data(), alignmentReqC, 
+                                                         descC, modeC.data(), alignmentReqD,
+                                                         opts.typeCompute);
+
+                if(err == LWTENSOR_STATUS_SUCCESS) {
+
+                    if(err == LWTENSOR_STATUS_SUCCESS) {
+                        err = lwtensorInitContractionFind( handle, &find, (lwtensorAlgo_t) algo);
+                        if (opts.partitionsK_ != -1)
+                        {
+                            ASSERT_EQ(lwtensorContractionFindSetAttribute(
+                                        handle,
+                                        &find,
+                                        LWTENSOR_CONTRACTION_FIND_SPLITK_NUM,
+                                        &opts.partitionsK_,
+                                        sizeof(uint32_t)), LWTENSOR_STATUS_SUCCESS);
+                        }
+
+                        if( usePlanCache )
+                        {
+                            const lwtensorCacheMode_t cacheMode = (lwtensorCacheMode_t)opts.cacheMode_;
+                            ASSERT_EQ(lwtensorContractionFindSetAttribute(
+                                        handle,
+                                        &find,
+                                        LWTENSOR_CONTRACTION_FIND_CACHE_MODE,
+                                        &cacheMode,
+                                        sizeof(lwtensorCacheMode_t)), LWTENSOR_STATUS_SUCCESS);
+
+                            const lwtensorAutotuneMode_t autotuneMode = (lwtensorAutotuneMode_t)opts.autotuneMode_;
+                            ASSERT_EQ(lwtensorContractionFindSetAttribute(
+                                        handle,
+                                        &find,
+                                        LWTENSOR_CONTRACTION_FIND_AUTOTUNE_MODE,
+                                        &autotuneMode ,
+                                        sizeof(lwtensorAutotuneMode_t)), LWTENSOR_STATUS_SUCCESS);
+
+                            const uint32_t incCount = opts.incrementalAutotuneCount_;
+                            ASSERT_EQ(lwtensorContractionFindSetAttribute(
+                                        handle,
+                                        &find,
+                                        LWTENSOR_CONTRACTION_FIND_INCREMENTAL_COUNT,
+                                        &incCount,
+                                        sizeof(uint32_t)), LWTENSOR_STATUS_SUCCESS);
+                            if ( opts.contractionDescTag_ )
+                            {
+                                uint32_t tag = 1;
+                                ASSERT_EQ(lwtensorContractionDescriptorSetAttribute(
+                                  handle,
+                                  &desc,
+                                  LWTENSOR_CONTRACTION_DESCRIPTOR_TAG,
+                                  &tag,
+                                  sizeof(uint32_t)), LWTENSOR_STATUS_SUCCESS);
+                            }
+                        }
+                        err = lwtensorInitContractionPlan( handle, &plan, &desc, &find, worksize);
+
+                        if(err == LWTENSOR_STATUS_SUCCESS) {
+                            // collect additional kernel information (e.g., blocking), if possible
+#ifdef LWTENSOR_EXPOSE_INTERNAL
+                            lwtensorContractionPlanInfo(handle, &plan,
+                                    algoInfo.planInfo_,
+                                    AlgoInfo::PlanInfo_sz);
+#endif
+
+                            if (globalDryRun) {
+                                // lookup flop rate from info
+                                static std::vector<std::string> ground_truth = []()
+                                {
+                                    std::vector<std::string> result;
+                                    std::ifstream input(string_util::with_default(getelw("LWTENSOR_GROUND_TRUTH"), "ground_truth"));
+                                    std::string line;
+                                    while (std::getline(input, line))
+                                    {
+                                        if (line.find("-algo+1000") != std::string::npos) continue;
+                                        if (line.find("-algo-3") != std::string::npos) continue;
+                                        if (line.find("-algo-2") != std::string::npos) continue;
+                                        if (line.find("-algo-1") != std::string::npos) continue;
+                                        if (line.find("lwTENSOR:") == std::string::npos) continue;
+                                        result.push_back(line);
+                                    }
+                                    return result;
+                                }();
+                                static bool best_truth = atoi(string_util::with_default(getelw("LWTENSOR_BEST_TRUTH"), "0").c_str());
+                                TestOptions mod = opts;
+                                mod.algo_ = TestOptions::kDefaultAlgo;
+                                std::string command = mod.getCommand(false);
+                                err = LWTENSOR_STATUS_NOT_SUPPORTED;
+                                for (auto& line : ground_truth)
+                                {
+                                    if ((! best_truth) && (line.find(algoInfo.planInfo_) == std::string::npos)) continue;
+                                    if (line.find(command) == std::string::npos) continue;
+                                    std::string key = "lwTENSOR:";
+                                    auto start = line.find(key) + key.size();
+                                    auto end = line.find(" ", start);
+                                    auto gflops_truth = atof(line.substr(start, end - start).c_str());
+                                    float my_time = opts.getTotalFlops() * 1e-9 / gflops_truth;
+                                    if (err == LWTENSOR_STATUS_NOT_SUPPORTED || my_time < time)
+                                    {
+                                        time = my_time;
+                                    }
+                                    err = LWTENSOR_STATUS_SUCCESS;
+                                    break;
+                                }
+                            } else {
+                                GPUTimer timer(stream, opts.graphMode);
+                                timer.start();
+                                err = lwtensorContraction( handle, &plan,
+                                        alpha, A_d,
+                                        B_d,
+                                        beta,  C_d, 
+                                        D_d,
+                                        work, worksize, 
+                                        stream);
+                                wait_kernel.set();
+                                time = timer.seconds();
+
+                            }
+
+                        }
+                    }
+                }
+                if ( ! globalDryRun && ! opts.graphMode)
+                {
+                    lwdaStreamSynchronize(stream);
+                }
+            }
+            else if( opts.routine == LWTENSOR_PW )
+            {
+                if ( opts.useA && opts.useB && opts.useC )
+                {
+                    GPUTimer timer(stream, opts.graphMode);
+                    timer.start();
+                    err = lwtensorElementwiseTrinary( handle,
+                            alpha, A_d, descA, nmodeA ? modeA.data() : nullptr,
+                            beta,  B_d, descB, nmodeB ? modeB.data() : nullptr,
+                            gamma, C_d, descC, nmodeC ? modeC.data() : nullptr,
+                                   D_d, descC, nmodeC ? modeC.data() : nullptr,
+                            opts.opAB, opts.opABC,
+                            opts.getLwdaScalarType(), stream /* stream */);
+                    wait_kernel.set();
+                    time = timer.seconds();
+                }
+                else if ( (!opts.useA || !opts.useB) && opts.useC )
+                {
+                    if ( opts.useA )
+                    {
+                        if (opts.permute_)
+                        {
+                            GPUTimer timer(stream, opts.graphMode);
+                            timer.start();
+                            err = lwtensorPermutation( handle,
+                                    alpha, A_d, descA, nmodeA ? modeA.data() : nullptr,
+                                           D_d, descC, nmodeC ? modeC.data() : nullptr,
+                                    opts.getLwdaScalarType(), stream /* stream */);
+                            wait_kernel.set();
+                            time = timer.seconds();
+                        }
+                        else
+                        {
+                            GPUTimer timer(stream, opts.graphMode);
+                            timer.start();
+                            err = lwtensorElementwiseBinary( handle,
+                                    alpha, A_d, descA, nmodeA ? modeA.data() : nullptr,
+                                    gamma, C_d, descC, nmodeC ? modeC.data() : nullptr,
+                                           D_d, descC, nmodeC ? modeC.data() : nullptr,
+                                    opts.opABC, opts.getLwdaScalarType(), stream /* stream */);
+                            wait_kernel.set();
+                            time = timer.seconds();
+                        }
+                    }
+                    else
+                    {
+                        if (opts.permute_)
+                        {
+                            GPUTimer timer(stream, opts.graphMode);
+                            timer.start();
+                            err = lwtensorPermutation( handle,
+                                    beta,  B_d, descB, nmodeB ? modeB.data() : nullptr,
+                                           D_d, descC, nmodeC ? modeC.data() : nullptr,
+                                    opts.getLwdaScalarType(), stream /* stream */);
+                            wait_kernel.set();
+                            time = timer.seconds();
+                        }
+                        else
+                        {
+                            GPUTimer timer(stream, opts.graphMode);
+                            timer.start();
+                            err = lwtensorElementwiseBinary( handle,
+                                    beta,  B_d, descB, nmodeB ? modeB.data() : nullptr,
+                                    gamma, C_d, descC, nmodeC ? modeC.data() : nullptr,
+                                           D_d, descC, nmodeC ? modeC.data() : nullptr,
+                                    opts.opABC, opts.getLwdaScalarType(), stream /* stream */);
+                            wait_kernel.set();
+                            time = timer.seconds();
+                        }
+                    }
+                }
+                else
+                {
+                    err = LWTENSOR_STATUS_NOT_SUPPORTED;
+                }
+                if (err == LWTENSOR_STATUS_SUCCESS)
+                {
+#ifdef LWTENSOR_EXPOSE_INTERNAL
+                    const char* planInfoEW = getelw("LWTENSOR_EW_PLANINFO");
+                    if (planInfoEW != nullptr)
+                    {
+                        snprintf( algoInfo.planInfo_, AlgoInfo::PlanInfo_sz, "%s", planInfoEW);
+                    }
+#endif
+                }
+            }
+            else if( opts.routine == LWTENSOR_REDUCTION)
+            {
+                GPUTimer timer(stream, opts.graphMode);
+                timer.start();
+                err = lwtensorReduction( handle,
+                        alpha, A_d, descA, modeA.data(),
+                        gamma, C_d, descC, modeC.data(),
+                               D_d, descC, modeC.data(),
+                        opts.opReduce, opts.typeCompute, work, worksize,
+                        stream );
+                wait_kernel.set();
+                time = timer.seconds();
+            }
+            else{
+                printer.printResultError(__LINE__, "No valid routine has been specified!");
+                printer.printResultErrorDVS();
+                FAIL();
+            }
+
+            if (opts.graphMode)
+            {
+                // stop graph capture
+                HANDLE_LWDA_ERROR(lwdaStreamEndCapture(stream, &graph));
+
+                // Instantiate and launch the graph
+                lwdaGraphExec_t exelwtable_graph;
+                lwdaGraphNode_t error_graph_node;
+                char logBuffer[1000] = {};
+                HANDLE_LWDA_ERROR(lwdaGraphInstantiate(&exelwtable_graph, graph,
+                            &error_graph_node, logBuffer, sizeof(logBuffer)));
+
+                lwdaDeviceSynchronize();
+
+                GPUTimer timer(stream);
+                timer.start();
+                lwdaGraphLaunch(exelwtable_graph, stream);
+                wait_kernel.set();
+                time = timer.seconds();
+
+                // Destroy graph
+                HANDLE_LWDA_ERROR(lwdaGraphExecDestroy(exelwtable_graph));
+                HANDLE_LWDA_ERROR(lwdaGraphDestroy(graph));
+            }
+            wait_kernel.set();
+
+            auto lwdaErr = lwdaGetLastError(); // catch kernel errors early
+            if (lwdaErr != lwdaSuccess)
+            {
+                 printf("Error encountered for algo: %d\n", algo);
+#ifdef LWTENSOR_EXPOSE_INTERNAL
+                 printf("algoInfo:%s\n", algoInfo.planInfo_);
+#endif
+                 printer.printResultError(__LINE__, "This might be an error in the kernel.");
+                 printer.printResultErrorDVS();
+                 HANDLE_LWDA_ERROR(lwdaErr);
+            }
+
+            if (initPlanSucceeded && (err != LWTENSOR_STATUS_SUCCESS))
+            {
+                 // ensure that all success calls to lwtensor succeed if one of them has
+                 // succeeded. This is a helpful check for the cache.
+                 printer.printResultError(__LINE__, "A successive test didn't succeed (likely related to the cache)");
+                 printer.printResultErrorDVS();
+                 FAIL();
+            }
+
+            if ( err == LWTENSOR_STATUS_SUCCESS )
+            {
+                minTime = std::min(minTime,time);
+                algoInfo.push_back(time);
+
+                if( i == 0 )
+                {
+                    ASSERT_EQ(lwdaMemcpy2DAsync(output_buffer, sizeC, D_d, sizeC, sizeC, 1, lwdaMemcpyDeviceToHost, stream), lwdaSuccess);
+                    ASSERT_EQ(lwdaStreamSynchronize(stream), lwdaSuccess);
+                }
+                else if( !usePlanCache && !globalDryRun && !opts.disableVerification_) // with a cached plan we cannot guarantee bit-wise identical results
+                {
+                    // ensure that successive runs give bit-wise identical results
+                    ASSERT_EQ(lwdaMemcpy2DAsync(D, sizeC, D_d, sizeC, sizeC, 1, lwdaMemcpyDeviceToHost, stream), lwdaSuccess);
+                    ASSERT_EQ(lwdaStreamSynchronize(stream), lwdaSuccess);
+                    auto relError =  verify( D, output_buffer, elementsC, opts.typeC, 0);
+                    if( relError.first != 0.0 || relError.second != 0.0 )
+                    {
+                        printf("Error encountered for algo: %d\n", algo);
+#ifdef LWTENSOR_EXPOSE_INTERNAL
+                        printf("algoInfo:%s\n", algoInfo.planInfo_);
+#endif
+                        printer.printResultError(__LINE__, "Results differ between exelwtions!");
+                        printer.printResultErrorDVS();
+                        FAIL();
+                    }
+                }
+            }
+            lwdaDeviceSynchronize();
+        }
+
+        if ( err == LWTENSOR_STATUS_NOT_SUPPORTED )
+        {
+        }
+        else if ( err != LWTENSOR_STATUS_SUCCESS )
+        {
+            printer.printResultError(__LINE__, lwtensorGetErrorString(err));
+            printer.printResultErrorDVS();
+            FAIL();
+        }
+        else if (globalDryRun)
+        {
+            verificationDone = true;
+            algoInfos.push_back( std::pair<int, AlgoInfo>(algo,algoInfo) );
+            succeededAlgosTestCase++;
+        }
+        else
+        {
+            /**********************************
+             * Verify results
+             **********************************/
+            if (all_lwtensor_runs_should_yield_not_supported) {
+                printer.printResultError(__LINE__, std::string("No reference kernel was able to run!") + std::string(lwtensorGetErrorString(err)));
+                printer.printResultErrorDVS();
+                EXPECT_TRUE(false);
+
+                printer.printResultError(__LINE__, std::string("TC REFERENCE FAILED with ") + std::string(lwtensorGetErrorString(err)));
+                printer.printResultErrorDVS();
+                EXPECT_TRUE(false);
+            }
+
+            verificationDone = true;
+
+            lwdaStreamSynchronize(stream);
+
+            /** FP16 has 2-digit of tolerance. Others have 4-digit. */
+            double tolerance = std::max(getTolerance(opts.typeC),
+                    getTolerance(opts.getLwdaComputeType()));
+            /** Compute the relative error. */
+            auto relError = opts.disableVerification_ ? std::pair<double, double>( 0, 0) : verify( output_buffer, output_ref, elementsC, opts.typeC, tolerance );
+            algoInfo.relError = relError.first;
+            verificationDone = true;
+            /** If the relative 2-norm error is large, then definitely report this. */
+            if( relError.first > tolerance )
+            {
+                {
+                    char error_s[ 2000 ];
+                    sprintf( error_s, "[algo]%d \x1B[0m[nrm2]%.2e [elem]%.2e [GFLOPS]%.2f\n",
+                            algo, relError.first, relError.second, gflops/ minTime);
+
+                    printer.printResultError(__LINE__, error_s);
+                    printer.printResultErrorDVS();
+                    printf("algo info: %s\n",algoInfo.planInfo_);
+                    FAIL();
+                }
+            }
+
+            algoInfos.push_back( std::pair<int, AlgoInfo>(algo,algoInfo) );
+            succeededAlgosTestCase++;
+        }
+    }
+    succeededAlgos += succeededAlgosTestCase;
+
+    if ( !verificationDone && !opts.disableVerification_ && succeededAlgosTestCase > 0 )
+    {
+        printer.printResultError(__LINE__, "No verification performed");
+        printer.printResultErrorDVS();
+        FAIL();
+    }
+    if( succeededAlgosTestCase > 0 )
+    {
+        succeededTests++;
+
+        if(opts.routine == LWTENSOR_TC)
+        {
+            succeededContractionTests++;
+        }
+
+    }else{
+        if ( !opts.showFailureOnly || opts.showNotSupport ) {
+            printer.printNotSupported();
+            printer.printNotSupportedDVS();
+        }
+    }
+}
+
+float printTestResults(const TestOptions& opts, OutputResult& printer, float gflops, float transferedGB,
+                      const lwtensorAlgoInfo& algoInfos, float minTimeLWBLAS, float minTimeMEMCPY)
+{
+    float minLwTensorTime = 0;
+    if(!opts.showFailureOnly && algoInfos.size() > 0)
+    {
+        printer.printResultHeader();
+
+        float bandwidth = transferedGB / algoInfos[0].second.getMedianRuntime();
+        float memcpy    = transferedGB / minTimeMEMCPY;
+
+        if (opts.routine == LWTENSOR_TC || opts.routine == LWTENSOR_PW )
+        {
+            float perfMetric = (opts.routine == LWTENSOR_PW) ? transferedGB : gflops;
+            for(auto result : algoInfos)
+            {
+                printer.printResultContraction(result.first,
+                        result.second.getMedianRuntime(),
+                        perfMetric/result.second.getMinRuntime(),
+                        perfMetric/result.second.getMedianRuntime(),
+                        perfMetric/result.second.getAverageRuntime(),
+                        perfMetric/minTimeLWBLAS, bandwidth, memcpy,
+                        result.second.planInfo_, false, result.second.relError);
+                printer.printTestNameDVS(result.first);
+                printer.printResultContractionDVS(result.first, perfMetric/result.second.getMedianRuntime(), bandwidth);
+                printer.printResultEndDVS(result.first);
+            }
+
+            float globalMinTimeLWTENSOR = FLT_MAX; // minimal runtim across all algos
+            const char* planInfo = nullptr;
+            double relError = .0f;
+            for(const auto& result : algoInfos)
+            {
+                if (globalMinTimeLWTENSOR > result.second.getMedianRuntime())
+                {
+                    globalMinTimeLWTENSOR = result.second.getMedianRuntime();
+                    minLwTensorTime = min(minLwTensorTime, globalMinTimeLWTENSOR);
+                    planInfo = result.second.planInfo_;
+                    relError = result.second.relError;
+                }
+            }
+            int algo = 1000;
+            if (globalMinTimeLWTENSOR != FLT_MAX)
+            {
+                printer.printResultContraction(algo,
+                        globalMinTimeLWTENSOR,
+                        perfMetric/globalMinTimeLWTENSOR ,
+                        perfMetric/globalMinTimeLWTENSOR ,
+                        perfMetric/globalMinTimeLWTENSOR ,
+                        perfMetric/minTimeLWBLAS, bandwidth, memcpy, planInfo, true, relError);
+                printer.printTestNameDVS(algo);
+                printer.printResultContractionDVS(algo, perfMetric/globalMinTimeLWTENSOR, bandwidth);
+                printer.printResultEndDVS(algo);
+            }
+        }
+        else if (opts.routine == LWTENSOR_REDUCTION)
+        {
+            printer.printResultElementwiseReduction(bandwidth, memcpy);
+            printer.printTestNameDVS();
+            printer.printResultElementwiseReductionDVS(bandwidth);
+            printer.printResultEndDVS();
+        }
+
+        printer.printResultEnd();
+    }
+    return minLwTensorTime;
+}
+
+void updateAverageMetrics(const TestOptions& opts, float transferedGB,
+                          const lwtensorAlgoInfo& algoInfos, float minTimeLWBLAS, float minTimeMEMCPY, 
+                          float& avgSpeedupOverLwblas, float& avgSpeedupOverMemcpy)
+{
+    if(algoInfos.size() > 0)
+    {
+        // compute average speedup over lwBLAS w.r.t. the best lwTENSOR algo
+        if( (opts.routine == LWTENSOR_TC) && (minTimeLWBLAS != FLT_MAX) )
+        {
+            float globalMinTimeLWTENSOR = FLT_MAX;
+            for(auto result : algoInfos){
+                globalMinTimeLWTENSOR = std::min(result.second.getMedianRuntime(), globalMinTimeLWTENSOR);
+            }
+            if( globalMinTimeLWTENSOR != FLT_MAX)
+                avgSpeedupOverLwblas += (minTimeLWBLAS / globalMinTimeLWTENSOR);
+        }
+
+        if(opts.routine == LWTENSOR_PW || opts.routine == LWTENSOR_REDUCTION)
+        {
+            float bandwidth = transferedGB / algoInfos[0].second.getMedianRuntime();
+            float memcpy    = transferedGB / minTimeMEMCPY;
+            avgSpeedupOverMemcpy += (bandwidth / memcpy);
+        }
+    }
+}
+
+TEST(core, elementwise)
+{ 
+    /* Set the device we are going to use. */
+    int deviceId = testcases[0].deviceId;
+
+    // pick the desired GPU (in case we've multiple choices)
+    if (getelw("LWTENSOR_COMPUTE_ARCH") != nullptr)
+    {
+        int requested_sm = atoi(getelw("LWTENSOR_COMPUTE_ARCH")); // e.g., 70
+        int numDevices;
+        lwdaGetDeviceCount(&numDevices);
+        bool found = false;
+        for(int i=0; i < numDevices; ++i)
+        {
+            lwdaSetDevice(i);
+            lwdaDeviceProp prop;
+            HANDLE_LWDA_ERROR( lwdaGetDeviceProperties(&prop, i) );
+            if (prop.major == requested_sm / 10 &&
+                prop.minor == requested_sm % 10)
+            {
+                deviceId = i;
+                found = true;
+            }
+        }
+        if (! found)
+        {
+            printf("Error: Not suitable GPU was found (SM %d was requested)\n", requested_sm);
+            exit(-1);
+        }
+    }
+    lwdaSetDevice(deviceId);
+
+    /* 
+     * Print meta information
+     */
+    constexpr unsigned int maxDriverStrLenght = 1024;
+    char displayDriverVersion[maxDriverStrLenght] = "";
+
+    auto lwml_init_code = lwmlInit();
+    if (lwml_init_code != LWML_SUCCESS)
+    {
+        printf("[WARNING] LWML initialization failed with error %d.\n", lwml_init_code);
+    }
+    else
+    {
+        HANDLE_LWML_ERROR(lwmlSystemGetDriverVersion ( displayDriverVersion, maxDriverStrLenght ));
+        HANDLE_LWML_ERROR(lwmlShutdown());
+    }
+
+    lwdaDeviceProp prop;
+    HANDLE_LWDA_ERROR( lwdaGetDeviceProperties(&prop, deviceId) );
+    int runtimeVersion = -1;
+    HANDLE_LWDA_ERROR( lwdaRuntimeGetVersion(&runtimeVersion) );
+    size_t lwTensorVersion = lwtensorGetVersion();
+    printf("GPU-name:%s\n", prop.name);
+    printf("GPU-clock:%d\n", prop.clockRate);
+    printf("GPU-memoryClock:%d\n", prop.memoryClockRate);
+    printf("GPU-nSM:%d\n", prop.multiProcessorCount);
+    printf("GPU-major:%d\n", prop.major);
+    printf("GPU-minor:%d\n", prop.minor);
+    printf("Display driver-vers:%s\n",displayDriverVersion);
+    printf("LWCA-vers:%d\n",runtimeVersion);
+    printf("lwTENSOR-vers:%ld\n",lwTensorVersion);
+    printf("lwBLASLt-vers:%ld\n",lwblasLtGetVersion());
+    printf("build id:%d\n",LWTENSOR_BUILD_ID);
+    printf("git commit:%s\n",LWTENSOR_GIT_COMMIT);
+    printf("git tag:%s\n",LWTENSOR_GIT_TAG);
+
+    /* ``Must'' create the stream using lwdaStreamCreateWithFlags. */
+    lwdaStream_t stream;
+    ASSERT_EQ(lwdaStreamCreateWithFlags(&stream, 0), lwdaSuccess);
+
+    /* Query available device memory. */
+    size_t freeDeviceMemSize, totalDeviceMemSize;
+    ASSERT_EQ(lwdaMemGetInfo(&freeDeviceMemSize, &totalDeviceMemSize), lwdaSuccess);
+
+    /* Create the cache here since we need to know its size, but don't initialize yet */
+    trash_util::TrashCache trash;
+    const size_t trashSize = trash.getTrashSize();
+    ASSERT_LE(trashSize, freeDeviceMemSize);
+    freeDeviceMemSize -= trashSize;
+
+    uint32_t numCachelines = 0;
+    size_t minimalAlignment = 0;
+    for( const auto &test : testcases )
+    {
+        minimalAlignment = std::max(minimalAlignment, test.alignmentA);
+        minimalAlignment = std::max(minimalAlignment, test.alignmentB);
+        minimalAlignment = std::max(minimalAlignment, test.alignmentC);
+        minimalAlignment = std::max(minimalAlignment, test.alignmentD);
+        numCachelines = std::max(numCachelines, test.numCachelines_);
+    }
+
+    size_t extraSizeABCD = 4 * minimalAlignment;
+    ASSERT_LE(extraSizeABCD, freeDeviceMemSize);
+    freeDeviceMemSize -= extraSizeABCD;
+    
+    size_t maxSizeWork = 0;
+    size_t maxSizeABCD = 0;
+    size_t maxSizeC = 0;
+    size_t subMaxSizeWork = 0;
+    size_t subMaxSizeABCD = 0;
+    size_t offset = 0;
+    const auto workspaceLargeK = 16 * 1024 * 1024;
+
+    for( const auto &test : testcases )
+    {
+        auto maxTypeSizeC = std::max(getDataTypeSize(test.getLwdaScalarType()),
+                                     getDataTypeSize(test.typeC));
+        const auto elementsA = test.getNumElements('A', true);
+        const auto elementsB = test.getNumElements('B', true);
+        const auto elementsC = test.getNumElements('C', true);
+        constexpr size_t kDefaultAlignment = 256; // we only use this to match contractionPlan::kDefaultAlignment_ and increase the workspaceSize (lwbugs 200674262)
+        auto sizeA = roundUp(elementsA * getDataTypeSize(test.typeA), std::max(kDefaultAlignment, minimalAlignment));
+        auto sizeB = roundUp(elementsB * getDataTypeSize(test.typeB), std::max(kDefaultAlignment, minimalAlignment));
+        auto sizeC = roundUp(elementsC * maxTypeSizeC,                std::max(kDefaultAlignment, minimalAlignment));
+        size_t sizeD = test.useD ? sizeC : 0;
+        size_t sizeABC = sizeA + sizeB + sizeC;
+        size_t sizeABCD = sizeABC + sizeD;
+        auto worksize = (test.workspaceSize_ == TestOptions::DEFAULT_WORKSPACE) ? sizeABC : test.workspaceSize_;
+        size_t sizeGpuTotal = worksize + sizeABCD;
+
+        if (sizeGpuTotal > freeDeviceMemSize ||
+            elementsA > static_cast<int64_t>(std::numeric_limits<LWTENSOR_NAMESPACE::stride_type>::max()) ||
+            elementsB > static_cast<int64_t>(std::numeric_limits<LWTENSOR_NAMESPACE::stride_type>::max()) ||
+            elementsC > static_cast<int64_t>(std::numeric_limits<LWTENSOR_NAMESPACE::stride_type>::max()))
+        {
+            /* Waive this test case as there isn't enough memory to run it or if the individual tensors are too large. */
+            test.waive();
+            continue;
+        }
+#if LWTENSOR_LWDA_VERSION_MAJOR < 11
+        if (test.typeA == LWDA_R_16BF || test.typeB == LWDA_R_16BF || test.typeC == LWDA_R_16BF || test.typeCompute == LWTENSOR_COMPUTE_16BF)
+        {
+            test.waive();
+        }
+        if (test.typeA == LWDA_R_TF32 || test.typeB == LWDA_R_TF32 || test.typeC == LWDA_R_TF32 || test.typeCompute == LWTENSOR_COMPUTE_TF32)
+        {
+            test.waive();
+        }
+#else
+        // waive tests if not supported
+        if (prop.major < 8 && (test.typeA == LWDA_R_16BF || test.typeB == LWDA_R_16BF || test.typeC == LWDA_R_16BF || test.typeCompute == LWTENSOR_COMPUTE_16BF))
+        {
+            test.waive();
+        }
+        if (prop.major < 8 && (test.typeA == LWDA_R_TF32 || test.typeB == LWDA_R_TF32 || test.typeC == LWDA_R_TF32 || test.typeCompute == LWTENSOR_COMPUTE_TF32))
+        {
+            test.waive();
+        }
+#endif
+        maxSizeC = std::max(sizeC, maxSizeC);
+        maxSizeABCD = std::max(maxSizeABCD, sizeABCD);
+        maxSizeWork = std::max(maxSizeWork, worksize);
+        offset = std::max(offset, test.offsetWorkSpace);
+
+        if( freeDeviceMemSize < maxSizeWork+workspaceLargeK+maxSizeABCD+extraSizeABCD+offset  ){
+            maxSizeABCD = subMaxSizeABCD;
+            maxSizeWork = subMaxSizeWork;
+            test.waive();
+        }
+        else {
+            subMaxSizeWork = maxSizeWork;
+            subMaxSizeABCD = maxSizeABCD;
+        }
+    }
+
+    maxSizeWork += workspaceLargeK; // Extra workspace for large-k for GEMM
+    maxSizeWork += offset;
+    maxSizeABCD += extraSizeABCD;
+
+    bool dvs_output = (getelw("LWTENSOR_DVS_OUTPUT") != nullptr && atoi(getelw("LWTENSOR_DVS_OUTPUT")) == 1);
+
+    /***************************************
+     * Allocate memory
+     ***************************************/
+
+    // host
+    void *output_ref; // used to hold the reference result to compare against
+    void *output_copy; // used to hold a copy of the output to restore the output
+    void *output_buffer; // used to hold the device-side results that are copied to the hoshost
+    void *ABCD;
+    ABCD = malloc(maxSizeABCD);
+    output_ref= malloc(maxSizeC);
+    output_buffer= malloc(maxSizeC);
+    output_copy= malloc(maxSizeC);
+
+    lwtensorPlanCacheline_t* cachelines = nullptr;
+    if( numCachelines > 0 )
+    {
+        cachelines = new lwtensorPlanCacheline_t[numCachelines];
+    }
+
+    wait_util::WaitKernel wait_kernel;
+    ASSERT_EQ(wait_kernel.init(), lwdaSuccess);
+
+    // device
+    void *ABCD_d;
+    size_t totalBytesGpu = maxSizeABCD;
+    if( totalBytesGpu > 12 * 1e9 )
+        printf("Warning %d: allocating %.2f GB of device memory\n", __LINE__, totalBytesGpu / 1e9);
+    ASSERT_EQ(lwdaMalloc((void**)&ABCD_d, maxSizeABCD), lwdaSuccess);
+    ASSERT_EQ(freeDeviceMemSize >= maxSizeABCD, true);
+    freeDeviceMemSize -= maxSizeABCD;
+
+    void* work = nullptr;
+    totalBytesGpu += maxSizeWork;
+    if( totalBytesGpu > 12 * 1e9 )
+        printf("Warning %d: allocating %.2f GB of device memory\n", __LINE__, totalBytesGpu / 1e9);
+    ASSERT_EQ(lwdaMalloc(&work, maxSizeWork), lwdaSuccess);
+    ASSERT_EQ(freeDeviceMemSize >= maxSizeWork, true);
+    freeDeviceMemSize -= maxSizeWork;
+
+    trash.init(stream);
+    totalBytesGpu += trashSize;
+    if( totalBytesGpu > 12 * 1e9 )
+        printf("Warning %d: allocating %.2f GB of device memory\n", __LINE__, totalBytesGpu / 1e9);
+
+    /*****************************
+      Create Handles
+     *****************************/
+    lwblasHandle_t lwblasHandle;
+    ASSERT_EQ(lwblasCreate(&lwblasHandle), LWBLAS_STATUS_SUCCESS);
+
+    lwtensorHandle_t handle;
+    ASSERT_EQ(lwtensorInit(&handle), LWTENSOR_STATUS_SUCCESS);
+
+    std::string cacheFile = "";
+    for( const auto &opts : testcases )
+    {
+        if (opts.cacheFile_ != "")
+        {
+            cacheFile = opts.cacheFile_;
+            break;
+        }
+    }
+
+    const bool usePlanCache = cachelines != nullptr;
+    if( usePlanCache )
+    {
+        ASSERT_EQ( lwtensorHandleAttachPlanCachelines(&handle, cachelines, numCachelines), LWTENSOR_STATUS_SUCCESS );
+
+        if (cacheFile != "")
+        {
+            uint32_t numCachelinesRead = 0;
+            lwtensorStatus_t status = lwtensorHandleReadCacheFromFile(&handle, cacheFile.c_str(), &numCachelinesRead);
+            if (status == LWTENSOR_STATUS_SUCCESS)
+            {
+                printf("%d cachelines have been successfully read from file (%s).\n", numCachelinesRead, cacheFile.c_str());
+            }
+            else if (status == LWTENSOR_STATUS_IO_ERROR)
+            {
+                printf("File (%s) doesn't exist.\n", cacheFile.c_str());
+            }
+            else if (status == LWTENSOR_STATUS_INSUFFICIENT_WORKSPACE)
+            {
+                printf("Cannot read cache: Please attach at least %d cachelines to the handle.\n", numCachelinesRead);
+            }
+        }
+    }
+
+    /*****************************
+      Run testcases
+     *****************************/
+    unsigned succeededAlgos            = 0;
+    unsigned succeededTests            = 0;
+    unsigned succeededLwblasTests      = 0;
+    unsigned succeededContractionTests = 0;
+    float speedupOverLwblas            = 0;
+    float speedupOverMemcpy            = 0;
+    Routine testRoutine                = UNKNOWN;
+    float totalTime = 0;
+    for( const auto &opts : testcases )
+    {
+        if (opts.useSeeds_)
+        {
+            for(int i=0; i < LWTENSOR_TEST_MAX_NUM_THREADS; ++i)
+            {
+                LWTENSOR_TEST_RANDOM_SEEDS[i] = opts.seeds_[i];
+            }
+        }
+        testRoutine  = opts.routine;
+        size_t m, n, k, l;
+        float gflops = opts.getTotalFlops(m, n, k, l) / 1e9;
+        printf("m:%ld, n:%ld, k:%ld, l:%ld\n", m, n, k, l);
+        float transferedGB;
+        float minTimeMEMCPY = FLT_MAX;
+        float minTimeLWBLAS = FLT_MAX;
+        lwtensorAlgoInfo algoInfo; // Vector of tuples with (algo, minTime)
+
+        OutputResult printer(dvs_output, opts);
+
+        // Print test command
+        printer.printTestName();
+
+        if (opts.shouldWaive())
+        {
+            if ( !opts.showFailureOnly || opts.showNotSupport ) {
+                printer.printNotSupported();
+                printer.printNotSupportedDVS();
+            }
+            continue;
+        }
+        
+        // Run tests
+        runMemoryTest(opts, trash,
+                      (float*)ABCD_d, maxSizeABCD,
+                      (float*)work, maxSizeWork,
+                      stream, minTimeMEMCPY, transferedGB);
+
+        runLwBlasTest(lwblasHandle, opts, trash, minimalAlignment,
+                      ABCD, ABCD_d, output_copy, work, stream,
+                      minTimeLWBLAS, succeededLwblasTests);
+
+        runLwTensorTest(&handle, opts, trash, minimalAlignment,
+                        ABCD, ABCD_d, output_ref, output_buffer, output_copy, work,
+                        maxSizeWork,
+                        wait_kernel,
+                        stream, usePlanCache, printer, algoInfo,
+                        succeededAlgos, succeededContractionTests, succeededTests);
+
+        updateAverageMetrics(opts, transferedGB,
+                             algoInfo, minTimeLWBLAS, minTimeMEMCPY, 
+                             speedupOverLwblas, speedupOverMemcpy);
+
+        // Print test results
+        totalTime += printTestResults(opts, printer, gflops, transferedGB,
+                         algoInfo, minTimeLWBLAS, minTimeMEMCPY);
+    }
+
+    printf("totaltime:%.2e\n", totalTime);
+    /*****************************
+      Final metrics
+     *****************************/
+    float avgSpeedupOverLwblas = speedupOverLwblas/succeededLwblasTests;
+    float avgSpeedupOverMemcpy = speedupOverMemcpy/(succeededTests - succeededContractionTests);
+    avgSpeedupOverLwblas = isnan(avgSpeedupOverLwblas) ? 0. : avgSpeedupOverLwblas;
+    avgSpeedupOverMemcpy = isnan(avgSpeedupOverMemcpy) ? 0. : avgSpeedupOverMemcpy;
+
+    if(!dvs_output)
+    {
+        printf( "%ld / %ld test cases were not supported.\n", testcases.size() - succeededTests, testcases.size() );
+        printf( "A total of %d algos were successfully exelwted.\n", succeededAlgos );
+        if(testRoutine != LWTENSOR_PW)
+            printf( "Average speedup over lwBLAS: %.2f\n", avgSpeedupOverLwblas);
+        else
+            printf( "Average speedup over memcpy: %.2f\n", avgSpeedupOverMemcpy);
+    }
+    else
+    {
+        printf( "SUPPORTED TESTS &&&& PERF %u +tests.\n", succeededTests);
+        if(testRoutine != LWTENSOR_PW)
+            printf( "AVERAGE SPEEDUP VS lwBLAS &&&& PERF %.2f +speedup\n", avgSpeedupOverLwblas);
+        else
+          printf( "AVERAGE SPEEDUP VS MEMCPY &&&& PERF %.2f +speedup\n", avgSpeedupOverMemcpy);        
+    }
+
+    /*****************************
+      Handle regression
+     *****************************/
+    struct RegressionData
+    {
+      const char* file;
+      int succeededTests;
+      int numTests;
+      int succeededAlgos;
+    } regression_data[] = 
+    {
+      /* file             succeededTests numTests succeededAlgos */
+      { "lwtensorL0.sh",            0,    0,          0 },
+      { "lwtensorL1.sh",            0,    0,          0 },
+      { "lwtensorL2.sh",            0,    0,          0 },
+      { "lwtensorReductionL0.sh",   0,    0,          0 },
+      { "lwtensorReductionL1.sh",   0,    0,          0 },
+      { "lwtensorReductionL2.sh",   0,    0,          0 },
+      { "lwtensorContractionL0.sh", 0,    0,          0 },
+      { "lwtensorContractionL1.sh", 0,    0,          0 },
+      { "lwtensorContractionL2.sh", 0,    0,          0 },
+      { NULL            ,           0,    0,          0 },
+    }, *regression_iterator = regression_data;
+    if (! filename.empty()) {
+      for (; regression_iterator->file != NULL; regression_iterator++) 
+      {
+        int file_size = filename.size();
+        int regression_size = strlen(regression_iterator->file);
+        if (file_size < regression_size)
+        {
+          continue;
+        }
+        if (filename.substr(file_size - regression_size) != regression_iterator->file)
+        {
+          continue;
+        }
+        EXPECT_GE(succeededTests, regression_iterator->succeededTests);
+        EXPECT_GE(testcases.size(), regression_iterator->numTests);
+        EXPECT_GE(succeededAlgos, regression_iterator->succeededAlgos);
+      }
+    }
+    if( cachelines != nullptr )
+    {
+        if (cacheFile != "")
+        {
+            ASSERT_EQ( lwtensorHandleWriteCacheToFile(&handle, cacheFile.c_str()), LWTENSOR_STATUS_SUCCESS );
+        }
+        ASSERT_EQ( lwtensorHandleDetachPlanCachelines(&handle), LWTENSOR_STATUS_SUCCESS );
+        delete[] cachelines;
+        cachelines = nullptr;
+    }
+    /** Bug 200476479 (memory not freed) has been fixed. */
+    if( ABCD )
+        free(ABCD);
+    if( output_buffer )
+        free(output_buffer);
+    if( output_ref )
+        free(output_ref);
+    if( output_copy )
+        free(output_copy);
+    if( ABCD_d )
+        lwdaFree(ABCD_d);
+    if( work )
+        lwdaFree(work);
+
+    lwdaStreamDestroy(stream);
+
+    lwblasDestroy(lwblasHandle);
+}
+
+int main( int argc, char **argv )
+{
+    if ( argc <= 1 ) usage();
+
+    parseArguments({argv, argv + argc}, testcases, false, filename);
+   
+    ::testing::InitGoogleTest( &argc, argv );
+    return RUN_ALL_TESTS();
+}

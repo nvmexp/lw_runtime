@@ -1,0 +1,222 @@
+// aging_paint.cg of 16-Oct-02
+//
+//   Originally:  ?? instructions - ?? passes
+//   Lwrrently:  109 instructions - 43 passes - 1 R-regs, 6 H-regs
+//   Optimal:     ?? instructions - ?? passes
+
+#define __SurfaceRustEffectLength 0.6
+#define __DeepRustEffectLength 0.5
+#define __DeepRustStartTime 0.45
+#define __SurfaceRustStartTime 0.3
+
+//  this value has been renormalized to fit within X precision
+#define __Wavy_Factor fixed3(.15, .15, 1.0)
+#define __BleachSpeedFactors fixed2(.41176, 1.0)
+#define __BleachMaxes fixed2(0.8, 0.9)
+
+#define __SurfaceRustEffectLength__DeltaLength fixed2(-__SurfaceRustEffectLength, __DeepRustEffectLength-__SurfaceRustEffectLength)
+#define __IlwSurfaceRustStart__IlwDeltaStart fixed2(RUST_TIMES.w + __SurfaceRustStartTime, __SurfaceRustStartTime - __DeepRustStartTime);
+
+struct v2fConnector : vertex2fragment {
+  float4 WPos                   : WPOS;
+  float2 texture                : TEX0;
+  float4 WPos_spotLight0        : TEX1;   //  NOTE:  for performance reasons (dual-texture mode), this should be passed down as stqr, not strq!!!!
+  float3 tanEyeDir              : TEX2;
+  float3 spotLight0Talwec       : TEX3;   //  NOTE:  we will not take care of dual-cone problems with spotlight textures in this shader --
+  float3 spotLight0TanHalfAngle : TEX4;   //  assuming that the spotlight is _never_ in front of the truck!
+  float3 tanEyeMatrixX          : TEX5;   //  ( [ Tx, Bx, Nx ] )
+  float3 tanEyeMatrixY          : TEX6;   //  ( [ Ty, By, Ny ] )
+  float3 tanEyeMatrixZ          : TEX7;   //  ( [ Tz, Bz, Nz ] )
+  float2 fresnel                : COL0;
+};
+
+struct f2fConnector : fragment2framebuffer {
+  half4 color : COL;
+};
+
+/////////////////////////////////////////////////////////////////////////////
+//  define functions for each effect layer                                 //
+/////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////
+//  reflection -- sample from 2 lwbe maps, lerp between them to generate a blurry reflection.  lwbe maps should be pre-exponentiated
+//  1 pass
+
+fixed4 aged_reflect(fixed3 R, fixed paint_bleach_time, uniform samplerLWBE elwironment_new, uniform samplerLWBE elwironment_old) {
+  fixed4 s0 = x4texLWBE(elwironment_new, R);
+  fixed4 s1 = x4texLWBE(elwironment_old, R);
+  return lerp(s0, s1, paint_bleach_time);
+}
+
+/////////////////////////////////////////////////
+//  lighting -- does simple spelwlar lighting for shadow maps and spotlights  -- 2 passes
+//    uses per-pixel ndotl and ndoth
+
+fixed2 aged_lighting(fixed n_dot_l, fixed n_dot_h, fixed Ks, fixed spec_exp, float4 spotlight_stqr,
+                     uniform sampler2D shadowMap, uniform sampler2D spotlightMap, uniform sampler2D exponent_map) {
+  fixed2 lookup;
+  fixed2 result;
+  lookup.x = n_dot_h;
+  lookup.y = spec_exp;
+  fixed spotlight_effect = x1tex2Dproj(spotlightMap, spotlight_stqr.xyz);    
+  fixed spelwlar_term    = x1tex2D(exponent_map, lookup);
+  result.x = n_dot_l;
+  result.y = spotlight_effect;
+  result = result * spotlight_effect;
+  fixed shadow_effect = x1texcompare2D(shadowMap, spotlight_stqr.xywz);
+  result = result * shadow_effect;
+  return result;
+}
+
+///////////////////////////////////////////////////////////////////////
+//  aged_color  -- 5 passes
+//  this uses the object ndh and ndl to lookup into the flipflop texture
+//  this isn't necessarily correct, but its wrong
+//  the reveal texture is only used in color selection
+fixed4 aged_color(float2 tex_uv, fixed n_dot_l, fixed n_dot_h,
+                  fixed4  RUST_TIMES,                          // controls aging (x = rust time, z = hole time)
+                  uniform sampler2D rust_surfaceColor,
+                  uniform sampler2D rust_deepColor,
+                  uniform sampler2D paint_shift) {
+  fixed4 surfaceColor  = x4tex2D(rust_surfaceColor, tex_uv);   // local reveal time is in w
+  fixed4 deepRustColor = x4tex2D(rust_deepColor,    tex_uv);   // bleach speed is in w (0 = no bleach)
+  fixed2 paintPos;
+  paintPos.x = n_dot_l;
+  paintPos.y = n_dot_h;
+  fixed4 result;
+  result.w = deepRustColor.w;
+  fixed3 paintColor    = x3tex2D(paint_shift, paintPos);
+  fixed2 rust_lerp_coefficients;
+  
+  // roll RUST_TIMES.w into __IlwSurfaceRustStart__IlwDeltaStart to get it to compute everything in just 1 MAD
+  rust_lerp_coefficients   = surfaceColor.ww*__SurfaceRustEffectLength__DeltaLength + __IlwSurfaceRustStart__IlwDeltaStart;
+  rust_lerp_coefficients.x = RUST_TIMES.w - rust_lerp_coefficients.x;
+  rust_lerp_coefficients.y = (fixed) (1.0/((half)rust_lerp_coefficients.y));               // runs on the shader core
+  rust_lerp_coefficients.x = rust_lerp_coefficients.x * rust_lerp_coefficients.y;          // combiner 1
+  fixed3 rust_color = lerp(surfaceColor.xyz, deepRustColor.xyz, rust_lerp_coefficients.x); // combiner 2
+  result.xyz = (RUST_TIMES.x>surfaceColor.w)?rust_color:paintColor;
+  result.w   = (RUST_TIMES.x>surfaceColor.w)?-1:result.w;      // no bleaching if the paint has already rusted (-1 so that we can do fresnel properly)
+  result = (1 - (fixed)(RUST_TIMES.z>surfaceColor.w)) * result;
+  return result;
+}
+
+//////////////////////////////////////////////
+//  aged_normal -- generates a normal given height information -- 3 passes
+
+half3 aged_normal(float2 tex_uv, fixed4 PAINT_TIMES, fixed4 RUST_TIMES,
+                     uniform sampler2D revealSurround,
+                     uniform sampler2D bubbleSurroundTex,
+                     uniform sampler2D rustGrowth) {
+  fixed4 revealTimes = x4tex2D(revealSurround, tex_uv);
+  fixed4 bubbleSurround = x4tex2D(bubbleSurroundTex, tex_uv);
+
+  fixed4 bubbleHeight = clamp(PAINT_TIMES.xxxx*bubbleSurround - revealTimes*bubbleSurround, 0.0.xxxx, 1.0.xxxx);
+  fixed4 bubbleDecay  = clamp(RUST_TIMES.xxxx *bubbleSurround - revealTimes*bubbleSurround, 0.0.xxxx, 1.0.xxxx);
+
+  fixed4 rustHeights  = x4tex2D(rustGrowth, tex_uv);  // shove some other lookup here
+  
+  bubbleHeight = bubbleHeight - 2*bubbleDecay;
+  rustHeights =  clamp(RUST_TIMES.yyyy*rustHeights - revealTimes*rustHeights, 0.0.xxxx, 1.0.xxxx);
+  
+  bubbleHeight = bubbleHeight+rustHeights;
+  bubbleHeight.xy = bubbleHeight.wy - bubbleHeight.zx;
+  bubbleHeight.w  = -1.0;
+  half3 result;
+  result = bubbleHeight.xyw * -2.0;
+  return result;
+}
+
+///////////////////////////////////////////////////////////////
+//  what's left --
+//    transform normal into object space   (3-6 passes)
+//    normalize N                        \
+//    compute ndl and ndh                 >  1 pass
+//    compute bleaching terms            /
+//    do reflection with wavy map          <=4 passes
+//    fresnel term and sum                 1-2 passes
+
+half3  do_reflection(fixed3 jitteredN, float3 V) {
+  return reflect( (half3)V, (half3) jitteredN );
+}
+
+/////////////////////////////////////////////////////////////////////////////
+//  aged_bleach
+//    compute how bleached the surface of the paint is
+
+fixed2 aged_bleach(fixed bleachSpeed, fixed4 PAINT_TIMES) {
+  fixed bleachSpeedt = bleachSpeed * PAINT_TIMES.x;
+  fixed2 factors = clamp(bleachSpeedt.xx * __BleachSpeedFactors, 0.0.xx, 1.0.xx);
+  return factors*__BleachMaxes;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+//  aged_fresnel
+//    bleach the fresnel term (or clamp to 0 if rusted)
+
+fixed aged_fresnel(fixed spelwlarBleachTerm, fixed hasRusted, fixed2 fresnel_terms) {
+  fixed result = lerp(fresnel_terms.x, fresnel_terms.y, spelwlarBleachTerm);
+  result = (hasRusted<0)?0:result;
+  return result;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+//  main
+//    combine all the pieces
+
+f2fConnector main(v2fConnector v2f,
+                  uniform sampler2D paintColorShift,
+                  uniform sampler2D surroundBubbleHeights,
+                  uniform sampler2D surroundRevealTimes,
+                  uniform sampler2D wavyReflectionMap,
+                  uniform sampler2D deepRustColor_bleachSpeed,
+                  uniform sampler2D globalIllumination,
+                  uniform sampler2D surfaceRustColor_localReveal,
+                  uniform sampler2D surroundRustHeights,
+                  uniform sampler2D depthTarget_spotlight0,
+                  uniform sampler2D spotlight0_texture,
+                  uniform samplerLWBE elwironment_new,
+                  uniform samplerLWBE elwironment_old,
+                  uniform sampler2D powerLUT,
+                  uniform samplerLWBE normalizeLUT,
+                  uniform fixed4 PAINT_TIMES, 
+                  uniform fixed4 RUST_TIMES) {
+
+  fixed3  normal = aged_normal(v2f.texture, PAINT_TIMES, RUST_TIMES,
+                              surroundRevealTimes,
+                              surroundBubbleHeights,
+                              surroundRustHeights);
+  normal = x3texLWBE(normalizeLUT, normal);
+  fixed ndl = dot(normal, v2f.spotLight0Talwec);
+  fixed ndh = dot(normal, v2f.spotLight0TanHalfAngle);
+
+  fixed4 color = aged_color(v2f.texture, ndl, ndh, RUST_TIMES, 
+                            surfaceRustColor_localReveal,
+                            deepRustColor_bleachSpeed,
+                            paintColorShift);
+  fixed2 bleaching = aged_bleach(color.w, PAINT_TIMES);
+  color = lerp(color, 1.0.xxxx, bleaching.x);
+  fixed Ks  = lerp(1.0, 0.0, bleaching.y);
+  fixed exp = lerp(0.0, 1.0, bleaching.y);
+  fixed2 lighting = aged_lighting(ndl, ndh, Ks, exp, v2f.WPos_spotLight0,
+                                  depthTarget_spotlight0,
+                                  spotlight0_texture,
+                                  powerLUT);
+  fixed3 jitteredN = x3tex2D(wavyReflectionMap, v2f.texture) * __Wavy_Factor;
+  fixed3 tanR = do_reflection(jitteredN, v2f.tanEyeDir);
+  fixed3 R;
+  R.x = dot(tanR, v2f.tanEyeMatrixX);
+  R.y = dot(tanR, v2f.tanEyeMatrixY);
+  R.z = dot(tanR, v2f.tanEyeMatrixZ);
+  fixed4 colR = aged_reflect(R, bleaching.y, elwironment_new, elwironment_old);
+  fixed ambient = f1tex2D(globalIllumination, v2f.texture);
+  fixed F = aged_fresnel(bleaching.y, color.w, v2f.fresnel);
+  F = F*colR.w;
+  
+  fixed3 result = ambient*color.xyz + lighting.x*color.xyz;
+  result = lerp(result, colR.xyz, F);
+  result = result+lighting.yyy;
+
+  f2fConnector f2f;
+  f2f.color = result.xyzz;
+  return f2f;
+}

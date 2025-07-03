@@ -1,0 +1,29 @@
+##############################################################################
+#
+# _LWRM_COPYRIGHT_BEGIN_
+#
+# Copyright 2017-2019 by LWPU Corporation.  All rights reserved.  All
+# information contained herein is proprietary and confidential to LWPU
+# Corporation.  Any use, reproduction, or disclosure without the written
+# permission of LWPU Corporation is prohibited.
+#
+# _LWRM_COPYRIGHT_END_
+#
+#
+# This makefile is responsible for building the LWSwitch module's common
+# closed source into lw-kernel.o
+#
+
+# The Unix LWSwitch driver is only supported on 64-bit architectures
+ifeq ($(LW_TARGET_ARCH_IS_64_BITS),1)
+  include $(LW_SOURCE)/drivers/lwswitch/kernel/common.lwmk
+
+  # Disable alternate stacks for lwswitch code.  Although it is built into the
+  # same binary as the RM core, none of the entry points for lwswitch set up the
+  # alternate stack so it can't be used.
+  $(call BUILD_OBJECT_LIST,$(LWSWITCH_SOURCES)): LW_ALT_STACK =
+
+  LW_INCLUDES += $(LWSWITCH_INCLUDES)
+
+  SOURCES += $(LWSWITCH_SOURCES)
+endif

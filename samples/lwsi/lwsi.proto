@@ -1,0 +1,102 @@
+// lwsi Protocol Buffers specification
+//
+// see http://code.google.com/apis/protocolbuffers/docs/proto.html
+
+// Tag id ranges:
+//   1-15 can be encoded in 1 byte, so use those for frequent data
+//   16-2047 take two bytes, so use them for most other fields
+//   2048-19000 are for debug fields only.
+
+// Style:
+//   * Open braces go on the same line                   message LWSI {
+//   * Close braces go on their own line                 }
+//   * Package names are lowercase w/ underscores        package lwsi_pb;
+//   * Message names are initial-caps camel case         message GpuInfo
+//   * Put blank lines between logically grouped fields
+//   * Debug string fields are suffixed _str
+
+// We need to strive keep all strings out of our data stream (use enums!) so that the captured
+// data is opaque to the outside world.
+
+package lwsi_pb;
+
+// ########################################################
+// Master container message
+// ########################################################
+message GpuDataSegment {
+  optional string                    lwsi_internalVersion = 1;
+
+  // Win32 APIs
+  optional Win32GetNativeSystemInfo  win32_getNativeSystemInfo = 2;
+  optional Win32GetVersionEx         win32_getVersionEx = 3;
+  repeated Win32EnumDisplayDevices   win32_displayDevices = 5; // Returned from EnumDisplayDevices
+  repeated Win32HotFix               win32_hotFixes = 6;
+
+  // LwAPI APIs
+  repeated LwapiGpu                  gpu = 4;  // info from lwapi APIs instanced per physical GPU
+  repeated LwApiEdid                 lwapi_edid = 7;
+  
+}
+
+    
+message LwapiGpu {
+    optional string shortName = 1;  // From LwAPI_GPU_GetShortName()
+    optional string fullName = 2;   // From LwAPI_GPU_GetFullName()
+}  
+
+// Corresponds to SYSTEM_INFO returned from GetNativeSystemInfo()
+message Win32GetNativeSystemInfo {
+    optional uint32 wProcessorArchitecture = 1;
+    optional uint32 dwPageSize = 2;
+    optional uint64 lpMinimumApplicationAddress = 3;
+    optional uint64 lpMaximumApplicationAddress = 4;
+    optional uint64 dwActiveProcessorMask = 5;
+    optional uint32 dwNumberOfProcessors = 6;
+    optional uint32 dwProcessorType = 7;
+    optional uint32 dwAllocationGranularity = 8;
+    optional uint32 wProcessorLevel = 9;
+    optional uint32 wProcessorRevision = 10;
+}  
+
+// Corresponds to OSVERSIONINFOEX returned from GetVersionEx()
+message Win32GetVersionEx {
+    optional uint32 dwMajorVersion = 1;
+    optional uint32 dwMinorVersion = 2;
+    optional uint32 dwBuildNumber = 3;
+    optional uint32 dwPlatformId = 4;
+    optional string szCSDVersion = 5;
+    optional uint32 wServicePackMajor = 6;
+    optional uint32 wServicePackMinor = 7;
+    optional uint32 wSuiteMask = 8;
+    optional uint32 wProductType = 9;
+}
+
+// Corresponds to DISPLAY_DEVICEA returned from EnumDisplayDevices()
+message Win32EnumDisplayDevices {
+    optional string       DeviceName = 1;
+    optional string       DeviceString = 2;
+    optional uint32       StateFlags = 3;
+    optional string       DeviceID = 4;
+    optional string       DeviceKey = 5;
+    optional Win32DevMode devMode = 6;
+}
+
+// Corresponds to some of the fields of DEVMODEA returned from EnumDisplaySettings()
+// Add more fields as we need them
+message Win32DevMode {
+    optional uint32     dmBitsPerPel = 1;
+    optional uint32     dmPelsWidth = 2;
+    optional uint32     dmPelsHeight = 3;
+    optional uint32     dmDisplayFrequency = 4;
+}
+
+message Win32HotFix {
+    optional string     szHotFixId = 1;
+    optional string     szHotFixDesc = 2;
+}
+
+message LwApiEdid {
+    optional uint32     displayBit = 1;
+    optional uint32     sizeofEDID = 2;
+    optional bytes      data = 3;
+}

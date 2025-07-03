@@ -1,0 +1,884 @@
+# -*- mode: perl; -*-
+
+# Source file list
+# For a brief introduction to file format, see README in this directory.
+
+my $filesRef = [
+
+    LWWATCHSRC_CORE => [
+
+        FLAGS => ':CORE',                     # following are all part of core (non-hal)
+
+         # moving to common/...
+        'common/chip.c',
+        'common/diags.c',
+        'common/dumpSession.c',
+        'common/exts.c',
+        'common/hal.c',
+        'common/halstubs.c',
+        'common/heap.c',
+        'common/help.c',
+        'common/msa.c',
+        'common/lwerrors.c',
+        'common/lwutil.c',
+        'common/parse.c',
+        'common/pex.c',
+        'common/print.c',
+
+        # to os/common/...
+        'os/common/os.c',
+
+        [
+            ONLY_IF => 'WINDOWS_STANDALONE',
+            'os/common/UserMode/commandLookup.c',
+        ],
+
+        WINDOWS => [
+
+            ONLY_IF => 'PLATFORM_WINDOWS && !WINDOWS_STANDALONE',
+            '../../drivers/resman/src/libraries/lwlog/lwld.c',
+            '../../drivers/resman/src/libraries/lwlog/lwld_avl.c',
+            '../../drivers/resman/src/libraries/lwlog/lwld_db.c',
+            '../../drivers/resman/src/libraries/lwlog/lwld_printf.c',
+            '../../drivers/resman/src/libraries/lwlog/lwlog_filter.c',
+            '../../drivers/resman/src/libraries/lwsym/lwsym.c',
+            '../../drivers/resman/src/libraries/lwsym/lwsym_cmd.c',
+
+            # os/win/...
+            'os/win/backdoor.c',
+            'os/win/cdb.cpp',
+            'os/win/extscpp.cpp',
+            'os/win/lwdump.c',
+            'os/win/lwdumpWin.cpp',
+            'os/win/lwlog.cpp',
+            'os/win/lwoca.cpp',
+            'os/win/lwrmTableField.cpp',
+            'os/win/lwsyminit.cpp',
+            'os/win/lwwatch.cpp',
+            'os/win/objdump.cpp',
+            'os/win/objdump_lwlddmkm.cpp',
+            'os/win/odb.cpp',
+            'os/win/osMods.c',
+            'os/win/osWin.c',
+            'os/win/outputCb.cpp',
+            'os/win/pdb.cpp',
+            'os/win/regMods.cpp',
+            'os/win/rmlocks.cpp',
+            'os/win/rmlogging.cpp',
+            'os/win/windbg_CException.cpp',
+            'os/win/windbg_CSymHelpers.cpp',
+            'os/win/windbg_CSymModule.cpp',
+            'os/win/windbg_CSymType.cpp',
+
+            # ../../uproc/os/...
+            '../../uproc/os/libos-v2.0.0/debug/logdecode.c',
+            '../../uproc/os/libos-v2.0.0/debug/elf.c',
+            '../../uproc/os/libos-v2.0.0/debug/lines.c',
+
+            # os/win/...
+            ONLY_IF => 'PLATFORM_WINDOWS',
+            'os/win/osWin_shared.c',
+
+            # os/win/standalone/...
+            ONLY_IF => 'PLATFORM_WINDOWS && WINDOWS_STANDALONE',
+            'os/win/standalone/lwwatch_standalone.cpp',
+            'os/win/standalone/stubs_win_standalone.c',
+            'os/win/standalone/osWin.cpp',
+            'os/win/standalone/lwRing0Handler.cpp',
+
+        ],  # WINDOWS
+
+        MODS => [
+
+            ONLY_IF => 'PLATFORM_MODS',
+            # os/mods/...
+            'os/mods/simLinux.c',
+
+        ],
+
+        UNIX => [
+
+            ONLY_IF => 'PLATFORM_UNIX',
+            'os/unix/common/command.c',
+            'os/unix/common/delay.c',
+            'os/unix/common/input.c',
+            'os/unix/common/stubs.c',
+
+            ONLY_IF => 'UNIX_MMAP',
+            'os/unix/mmap/unix.c',
+
+            ONLY_IF => 'UNIX_JTAG',
+            'os/unix/jtag/jtag.c',
+
+            ONLY_IF => 'UNIX_HWSNOOP',
+            'os/unix/hwsnoop/hwsnoop.c',
+
+            ONLY_IF => 'UNIX_MOBILE',
+            'os/unix/mobile/mobile.c',
+
+        ],
+
+        MISC => [
+
+            ONLY_IF => 'MODS_UNIX || ! PLATFORM_UNIX',
+            # common/...
+            'common/methodParse.c',
+            'common/manual.cpp',
+            'common/priv.cpp',
+
+            ONLY_IF => '! PLATFORM_MODS ',
+            # common/...
+            'common/priv-drf.c', # drf.h is not supported
+
+        ], # MISC
+
+        REGEX => [
+
+            ONLY_IF => '! PLATFORM_MODS || ! MODS_UNIX',
+            # regex/...
+            'regex/regcomp.c',
+            'regex/regerror.c',
+            'regex/regexec.c',
+            'regex/regfree.c',
+
+        ], # REGEX
+
+    ],  # LWWATCHSRC_CORE
+
+    LWWATCHSRC_ENGINES => [
+
+        ACR => [
+
+            # gpu/acr/...
+            'gpu/acr/acr.c',
+            'gpu/acr/acrgm20x.c',
+            'gpu/acr/acrgp100.c',
+            'gpu/acr/acrgp10x.c',
+            'gpu/acr/acrgv100.c',
+            'gpu/acr/acrtu10x.c',
+            'gpu/acr/acrga100.c',
+            'gpu/acr/acrga10x.c',
+
+        ],
+
+        BIF => [
+
+            # gpu/bif/...
+            'gpu/bif/bifgk104.c',
+            'gpu/bif/biftu102.c',
+            'gpu/bif/bifgh100.c',
+
+        ],
+
+        BUS => [
+
+            # gpu/bus/...
+            'gpu/bus/busgk104.c',
+            'gpu/bus/busgh100.c',
+            'gpu/bus/busgh202.c',
+
+        ],
+
+        CE => [
+
+            # gpu/ce/...
+            'gpu/ce/ce.c',
+            'gpu/ce/cegf100.c',
+            'gpu/ce/cegk104.c',
+            'gpu/ce/cegm107.c',
+            'gpu/ce/cegm200.c',
+            'gpu/ce/cegp100.c',
+            'gpu/ce/cegp102.c',
+            'gpu/ce/cegv100.c',
+            'gpu/ce/cetu102.c',
+            'gpu/ce/cega100.c',
+            'gpu/ce/cega102.c',
+            'gpu/ce/cegh100.c',
+            'gpu/ce/cegb100.c',
+
+        ],
+
+        CLK => [
+
+            # gpu/clk/...
+            'gpu/clk/clk.c',
+            'gpu/clk/clkgf100.c',
+            'gpu/clk/clkgf117.c',
+            'gpu/clk/clkgk104.c',
+            'gpu/clk/clkgm200.c',
+            'gpu/clk/clkgp100.c',
+            'gpu/clk/clkgv100.c',
+
+            'gpu/clk/clktu102.c',
+            'gpu/clk/clktu104.c',
+            'gpu/clk/clktu106.c',
+            'gpu/clk/clktu116.c',
+            'gpu/clk/clktu117.c',
+            'gpu/clk/clkga100.c',
+            'gpu/clk/clkga102.c',
+            'gpu/clk/clkga103.c',
+            'gpu/clk/clkga104.c',
+            'gpu/clk/clkga106.c',
+            'gpu/clk/clkga107.c',
+            'gpu/clk/clkad102.c',
+            'gpu/clk/clkgh100.c',
+            'gpu/clk/clkt124.c',
+
+            'gpu/clk/fs/clkwire.c',
+            'gpu/clk/fs/clknafll.c',
+            'gpu/clk/fs/clkpll.c',
+            'gpu/clk/fs/clkbif.c',
+            'gpu/clk/fs/clkmux.c',
+            'gpu/clk/fs/clkldivv2.c',
+            'gpu/clk/fs/clkpdiv.c',
+            'gpu/clk/fs/clkxtal.c',
+
+            'gpu/clk/sd/clksdgh100.c',
+
+
+        ],
+
+        DEVINIT => [
+            # gpu/devinit/...
+            'gpu/devinit/dcb.c',
+        ],
+
+        DISP => [
+
+            # gpu/disp/...
+            'gpu/disp/disp.c',
+            'gpu/disp/disp0201.c',
+            'gpu/disp/disp0202.c',
+            'gpu/disp/disp0203.c',
+            'gpu/disp/disp0204.c',
+            'gpu/disp/disp0205.c',
+            'gpu/disp/disp0206.c',
+            'gpu/disp/disp0207.c',
+            'gpu/disp/disp0300.c',
+            'gpu/disp/disp0400.c',
+            'gpu/disp/disp0401.c',
+            'gpu/disp/disp0402.c',
+            'gpu/disp/dstate0300.c',
+            'gpu/disp/dispt124.c',
+        ],
+
+        DPAUX => [
+
+            # gpu/dpaux/...
+            'gpu/dpaux/dpaux0201.c',
+            'gpu/dpaux/dpaux0205.c',
+            'gpu/dpaux/dpmsg.c',          # displayport message transaction
+            'gpu/dpaux/dpparsedpcd.cpp',
+
+        ],
+
+        DPU => [
+
+            # gpu/dpu/...
+            'gpu/dpu/dpu.c',
+            'gpu/dpu/dpu0201.c',
+            'gpu/dpu/dpu0205.c',
+
+        ],
+
+        ELPG => [
+
+            # gpu/elpg/...
+            'gpu/elpg/elpg.c',
+            'gpu/lpwr/lpwr.c',
+            'gpu/elpg/elpggk104.c',
+            'gpu/elpg/elpggp10x.c',
+            'gpu/elpg/elpgtu10x.c',
+            'gpu/elpg/elpgga10x.c',
+            'gpu/elpg/elpgad102.c',
+            'gpu/elpg/elpggh100.c',
+            'gpu/elpg/elpglog.c',
+            'gpu/elpg/pggm107.c',
+            'gpu/elpg/pggv100.c',
+            'gpu/elpg/pgtu10x.c',
+
+        ],
+
+        FALCON => [
+
+            # gpu/falcon/...
+            'gpu/falcon/falcon.c',
+            'gpu/falcon/falcon0100.c',
+            'gpu/falcon/falcon0400.c',
+            'gpu/falcon/falcon0501.c',
+            'gpu/falcon/falcon0600.c',
+            'gpu/falcon/falcongk104.c',
+            'gpu/falcon/falcongk208.c',
+            'gpu/falcon/falcongm107.c',
+            'gpu/falcon/falcongp104.c',
+
+            'gpu/falcon/falctrace.c',
+            'gpu/falcon/flcndbg.c',
+            'gpu/falcon/flcnrtos.c',
+            'gpu/falcon/flcnst.c',
+            'gpu/falcon/flcnsym.c',
+
+            # current only supported on WINDOWS and MODS
+            ONLY_IF => 'PLATFORM_WINDOWS || PLATFORM_MODS',
+            # gpu/falcon/flcngdb/...
+            'gpu/falcon/flcngdb/flcngdb.c',
+            'gpu/falcon/flcngdb/flcngdbUI.cpp',
+            'gpu/falcon/flcngdb/flcngdbUtils.cpp',
+            'gpu/falcon/flcngdb/flcngdbUtilsWrapper.cpp',
+
+            ONLY_IF => 'PLATFORM_UNIX || MODS_UNIX || PLATFORM_WINDOWS',
+            # gpu/riscv/...
+            'gpu/riscv/lwsocket.c',
+            'gpu/riscv/riscv_adv.c',
+            'gpu/riscv/riscv_printing.c',
+            'gpu/riscv/lwsync_porting.c',
+            'gpu/riscv/riscv_adv_tu10x.c',
+            'gpu/riscv/riscv_adv_ga100.c',
+            'gpu/riscv/riscv_adv_ga10x.c',
+            'gpu/riscv/riscv_adv_gh100.c',
+            'gpu/riscv/riscv_adv_ad10x.c',
+            'gpu/riscv/riscv_bp.c',
+            'gpu/riscv/riscv_bp_tu10x.c',
+            'gpu/riscv/riscv_bp_ga10x.c',
+            'gpu/riscv/riscv_brom_ga10x.c',
+            'gpu/riscv/riscv_brom_gh100.c',
+            'gpu/riscv/riscv_brom_ad10x.c',
+            'gpu/riscv/riscv_gdbmon.c',
+            'gpu/riscv/riscv_gdbmon_tu10x.c',
+            'gpu/riscv/riscv_gdbstub.c',
+            'gpu/riscv/riscv_gdbstub_common.c',
+            'gpu/riscv/riscv_gdbscript.c',
+            'gpu/riscv/riscv_gdbscript_win.c',
+            'gpu/riscv/riscv_taskdbg.c',
+            'gpu/riscv/riscv_taskdbg_communication.c',
+            'gpu/riscv/riscv_taskdbg_gdbcmd.c',
+            'gpu/riscv/tdbg_legacy_messaging.c',
+            'gpu/riscv/tdbg_legacy_messaging_tu10x.c',
+            'gpu/riscv/riscv_icd.c',
+            'gpu/riscv/riscv_icd_tu10x.c',
+            'gpu/riscv/riscv_icd_ga10x.c',
+            'gpu/riscv/riscv_io.c',
+            'gpu/riscv/riscv_io_tu10x.c',
+            'gpu/riscv/riscv_io_ga100.c',
+            'gpu/riscv/riscv_io_ga10x.c',
+            'gpu/riscv/riscv_io_gh100.c',
+            'gpu/riscv/riscv_io_t234.c',
+            'gpu/riscv/riscv_io_dio.c',
+            'gpu/riscv/riscv_io_dio_t234.c',
+            'gpu/riscv/riscv_main.c',
+            'gpu/riscv/riscv_gdbmain.c',
+            'gpu/riscv/riscv_mem.c',
+            'gpu/riscv/riscv_mem_tu10x.c',
+            'gpu/riscv/riscv_misc.c',
+            'gpu/riscv/riscv_misc_tu10x.c',
+            'gpu/riscv/riscv_trace_tu10x.c',
+            'gpu/riscv/riscv_trace_ga10x.c',
+            'gpu/riscv/manuals/riscv_man.c',
+            'gpu/riscv/manuals/riscv_man_gh100_fsp.c',
+            'gpu/riscv/manuals/riscv_man_gh100_gsp.c',
+            'gpu/riscv/manuals/riscv_man_gh100_minion.c',
+            'gpu/riscv/manuals/riscv_man_gh100_lwdec.c',
+            'gpu/riscv/manuals/riscv_man_gh100_pmu.c',
+            'gpu/riscv/manuals/riscv_man_gh100_sec2.c',
+            'gpu/riscv/manuals/riscv_man_t234_lwdec.c',
+            'gpu/riscv/manuals/riscv_man_t234_pmu.c',
+            'gpu/riscv/manuals/riscv_man_t234_tsec.c',
+            'gpu/riscv/manuals/riscv_man_ls10_soe.c',
+        ],
+
+        FALCPHYS => [
+
+            # gpu/falcphys/...
+            'gpu/falcphys/falcphys.c',
+            'gpu/falcphys/falcphysgm20x.c',
+            'gpu/falcphys/falcphysgp100.c',
+            'gpu/falcphys/falcphysgp10x.c',
+            'gpu/falcphys/falcphysgv100.c',
+            'gpu/falcphys/falcphysga100.c',
+
+        ],
+
+        FB => [
+
+            # gpu/fb/...
+            'gpu/fb/fbgk104.c',
+            'gpu/fb/fbgk208.c',
+            'gpu/fb/fbgm107.c',
+            'gpu/fb/fbgm200.c',
+            'gpu/fb/fbgp100.c',
+            'gpu/fb/fbga102.c',
+            'gpu/fb/fbt124.c',
+            'gpu/fb/fbtu10x.c',
+            'gpu/fb/fbgh100.c',
+            'gpu/fb/fbgh202.c',
+        ],
+
+        FBFLCN => [
+
+            # gpu/fbflcn/...
+            'gpu/fbflcn/fbflcn.c',
+            'gpu/fbflcn/fbflcngv100.c',
+
+        ],
+
+        FECS => [
+
+            # gpu/fecs/...
+            'gpu/fecs/fecs.c',
+            'gpu/fecs/fecsgk104.c',
+
+        ],
+
+        FIFO => [
+
+            # gpu/fifo/...
+            'gpu/fifo/fifogk104.c',
+            'gpu/fifo/fifogk208.c',
+            'gpu/fifo/fifogm107.c',
+            'gpu/fifo/fifogm200.c',
+            'gpu/fifo/fifogp100.c',
+            'gpu/fifo/fifogp102.c',
+            'gpu/fifo/fifogv100.c',
+            'gpu/fifo/fifot124.c',
+            'gpu/fifo/fifot194.c',
+            'gpu/fifo/fifot210.c',
+            'gpu/fifo/fifotu102.c',
+            'gpu/fifo/fifoga100.c',
+            'gpu/fifo/fifoga102.c',
+            'gpu/fifo/fifogh100.c',
+            'gpu/fifo/fifogb100.c',
+        ],
+
+        GR => [
+
+            # gpu/gr/...
+            'gpu/gr/gr.c',
+            'gpu/gr/grgf100.c',
+            'gpu/gr/grgf104.c',
+            'gpu/gr/grgf108.c',
+            'gpu/gr/grgf119.c',
+            'gpu/gr/grgk104.c',
+            'gpu/gr/grgk110.c',
+            'gpu/gr/grgk208.c',
+            'gpu/gr/grgk20a.c',
+            'gpu/gr/grgm107.c',
+            'gpu/gr/grgm200.c',
+            'gpu/gr/grgp100.c',
+            'gpu/gr/grgp102.c',
+            'gpu/gr/grgv100.c',
+            'gpu/gr/grt124.c',
+            'gpu/gr/grtu102.c',
+            'gpu/gr/grga100.c',
+            'gpu/gr/grga102.c',
+            'gpu/gr/grgh100.c',
+            'gpu/gr/grg000.c',
+            'gpu/gr/grad102.c',
+
+        ],
+
+        GSP => [
+
+            # gpu/gsp/...
+            'gpu/gsp/gsp.c',
+            'gpu/gsp/gspgv100.c',
+            'gpu/gsp/gsptu10x.c',
+        ],
+
+        HDA => [
+
+            # gpu/hda/...
+            'gpu/hda/hda.c',
+            'gpu/hda/hda0200.c',
+
+        ],
+
+        HDCP => [
+
+            # gpu/hdcp/...
+            'gpu/hdcp/hdcp.c',
+            'gpu/hdcp/hdcp0201.c',
+            'gpu/hdcp/hdcp0205.c',
+            'gpu/hdcp/hdcp0300.c',
+            'gpu/hdcp/hdcp0401.c',
+            'gpu/hdcp/hdcp0402.c',
+        ],
+
+        HWPROD => [
+            # gpu/hwprod/...
+            'gpu/hwprod/prodValgk104.c',
+        ],
+
+
+
+        INSTMEM => [
+
+            # gpu/instmem/...
+            'gpu/instmem/instgf100.c',
+            'gpu/instmem/instgk104.c',
+            'gpu/instmem/instgm107.c',
+            'gpu/instmem/instgp100.c',
+            'gpu/instmem/instgv100.c',
+            'gpu/instmem/insttu102.c',
+            'gpu/instmem/instga100.c',
+            'gpu/instmem/instga102.c',
+            'gpu/instmem/instgb100.c',
+            'gpu/instmem/instgh202.c',
+
+        ],
+
+        INTR => [
+            # gpu/intr/...
+            'gpu/intr/intr.c',
+            'gpu/intr/intrtu102.c',
+            'gpu/intr/intrga100.c',
+            'gpu/intr/intrga102.c',
+            'gpu/intr/intrgh100.c',
+            'gpu/intr/intrgh202.c',
+        ],
+
+        MC => [
+
+            # gpu/mc/...
+            'gpu/mc/mcgk104.c',
+
+        ],
+
+        MMU => [
+
+            '../../drivers/resman/src/libraries/mmu/gmmu_fmt.c',
+
+            # gpu/mmu/mmu*.c
+            'gpu/mmu/mmugk104.c',
+            'gpu/mmu/mmugp100.c',
+            'gpu/mmu/mmut124.c',
+            'gpu/mmu/mmuga100.c',
+
+        ],
+
+        MSDEC => [
+
+            # gpu/msdec/...
+            'gpu/msdec/msdec.c',
+            'gpu/msdec/msdecgk104.c',
+
+        ],
+
+        MSENC => [
+
+            # gpu/msenc/...
+            'gpu/msenc/msenc.c',
+            'gpu/msenc/msenc0100.c',
+            'gpu/msenc/msenc0200.c',
+            'gpu/msenc/msenc0400.c',
+            'gpu/msenc/msenc0500.c',
+            'gpu/msenc/msenc0600.c',
+            'gpu/msenc/msenc0602.c',
+            'gpu/msenc/msenc0604.c',
+            'gpu/msenc/msenc0702.c',
+            'gpu/msenc/msenc0802.c',
+
+        ],
+
+        OFA => [
+
+            # gpu/ofa/...
+            'gpu/ofa/ofa.c',
+            'gpu/ofa/ofa0100.c',
+            'gpu/ofa/ofa0101.c',
+            'gpu/ofa/ofa0102.c',
+            'gpu/ofa/ofa0103.c',
+            'gpu/ofa/ofa0105.c',
+
+        ],
+
+        LWDEC => [
+
+            # gpu/lwdec/...
+            'gpu/lwdec/lwdec.c',
+            'gpu/lwdec/lwdec0100.c',
+            'gpu/lwdec/lwdec0101.c',
+            'gpu/lwdec/lwdec0200.c',
+            'gpu/lwdec/lwdec0300.c',
+            'gpu/lwdec/lwdec0301.c',
+            'gpu/lwdec/lwdec0302.c',
+            'gpu/lwdec/lwdec0401.c',
+            'gpu/lwdec/lwdec0402.c',
+            'gpu/lwdec/lwdec0403.c',
+            'gpu/lwdec/lwdec0500.c',
+            'gpu/lwdec/lwdec0600.c',
+
+        ],
+
+        LWJPG => [
+
+            # gpu/lwjpg/...
+            'gpu/lwjpg/lwjpg.c',
+            'gpu/lwjpg/lwjpg0200.c',
+            'gpu/lwjpg/lwjpg0202.c',
+            'gpu/lwjpg/lwjpg0203.c',
+
+        ],
+
+        LWLINK => [
+
+            # gpu/lwlink/...
+            'gpu/lwlink/lwlink.c',
+            'gpu/lwlink/lwlinkgp100.c',
+            'gpu/lwlink/lwlinkgv100.c',
+            'gpu/lwlink/lwlinkga100.c',
+            'gpu/lwlink/lwlinkgh100.c',
+            'gpu/lwlink/lwlinktu102.c',
+
+        ],
+
+        LWSR => [
+            # gpu/lwsr/...
+            'gpu/lwsr/lwsr_msg.c',
+            'gpu/lwsr/lwsr_parsereg.c',
+        ],
+
+        PMGR => [
+
+            # gpu/pmgr/...
+            'gpu/pmgr/pmgr.c',
+            'gpu/pmgr/pmgrgp100.c',
+            'gpu/pmgr/i2c.c',
+        ],
+
+        PMU => [
+
+            # gpu/pmu/...
+            'gpu/pmu/pmu.c',
+            'gpu/pmu/pmudbg.c',
+            'gpu/pmu/pmugk104.c',
+            'gpu/pmu/pmugk107.c',
+            'gpu/pmu/pmugk110.c',
+            'gpu/pmu/pmugk208.c',
+            'gpu/pmu/pmugm107.c',
+            'gpu/pmu/pmugm20x.c',
+            'gpu/pmu/pmugp100.c',
+            'gpu/pmu/pmugp10x.c',
+            'gpu/pmu/pmugv100.c',
+            'gpu/pmu/pmugv11b.c',
+            'gpu/pmu/pmutu102.c',
+            'gpu/pmu/pmuga102.c',
+            'gpu/pmu/pmumutex.c',
+            'gpu/pmu/pmuos.c',
+            'gpu/pmu/pmust.c',
+            'gpu/pmu/pmuswak.c',
+            'gpu/pmu/pmusym.c',
+            'gpu/pmu/pmut124.c',
+
+        ],
+
+        PRIV => [
+
+            # gpu/priv/...
+            'gpu/priv/privgk104.c',
+
+        ],
+
+        PSDL => [
+
+            # gpu/psdl/...
+            'gpu/psdl/psdl.c',
+            'gpu/psdl/psdlgm206.c',
+            'gpu/psdl/psdlgm20x.c',
+            'gpu/psdl/psdlga100.c',
+
+        ],
+
+
+        SEC => [
+            # gpu/sec/...
+            'gpu/sec/sec.c',
+            'gpu/sec/sect114.c',
+        ],
+
+
+        SEC2 => [
+
+            # gpu/sec2/...
+            'gpu/sec2/sec2.c',
+            'gpu/sec2/sec2gm10x.c',
+            'gpu/sec2/sec2gm200.c',
+            'gpu/sec2/sec2gp102.c',
+            'gpu/sec2/sec2gv100.c',
+            'gpu/sec2/sec2tu10x.c',
+
+        ],
+
+        SEQ => [
+
+            # gpu/seq/...
+            'gpu/seq/seqdbg.c',
+            'gpu/seq/seqdump.c',
+        ],
+
+        SIG => [
+
+            # gpu/sigdump/...
+            'gpu/sigdump/sigdump.c',
+            'gpu/sigdump/sigdump_gk104.c',
+            'gpu/sigdump/sigdump_gk106.c',
+            'gpu/sigdump/sigdump_gk107.c',
+            'gpu/sigdump/sigdump_gk110.c',
+            'gpu/sigdump/sigdump_gk208.c',
+            'gpu/sigdump/sigdump_gm107.c',
+            'gpu/sigdump/sigdump_gm200.c',
+            'gpu/sigdump/sigdump_gm204.c',
+            'gpu/sigdump/sigdump_gm206.c',
+            'gpu/sigdump/sigdump_gp100.c',
+
+            ONLY_IF => '! PLATFORM_MODS',
+            'gpu/sigdump/sigdump_helper.cpp',
+        ],
+
+        SMBPBI => [
+
+            # gpu/smbpbi/...
+            'gpu/smbpbi/smbpbi.c',
+            'gpu/smbpbi/smbpbidbg.c',
+            'gpu/smbpbi/smbpbigk104.c',
+
+        ],
+
+        TEGRASYS => [
+
+            # gpu/tegrasys/...
+            'gpu/tegrasys/tegrasys.c',
+            'gpu/tegrasys/tegrasysgh100.c',
+            'gpu/tegrasys/tegrasysgk104.c',
+            'gpu/tegrasys/tegrasyst124.c',
+            'gpu/tegrasys/tegrasyst186.c',
+            'gpu/tegrasys/tegrasyst194.c',
+            'gpu/tegrasys/tegrasyst234.c',
+
+        ],
+
+        VGPU => [
+
+            # gpu/vgpu/...
+            'gpu/vgpu/vgpu.c',
+
+        ],
+
+        VIC => [
+
+            # gpu/vic/...
+            'gpu/vic/vic.c',
+            'gpu/vic/vict124.c',
+
+        ],
+
+        VIRT => [
+
+            # gpu/virt/...
+            'gpu/virt/virtOp.c',
+            'gpu/virt/virtOpgk104.c',
+
+        ],
+
+        VMEM => [
+
+            # gpu/mmu/vmem*.c
+            'gpu/mmu/vmem.c',
+            'gpu/mmu/vmemgk104.c',
+            'gpu/mmu/vmemgm107.c',
+            'gpu/mmu/vmemgm200.c',
+            'gpu/mmu/vmemgp100.c',
+            'gpu/mmu/vmemt124.c',
+            'gpu/mmu/vmemt30.c',
+            'gpu/mmu/vmemtu102.c',
+            'gpu/mmu/vmemga100.c',
+            'gpu/mmu/vmemgh100.c',
+
+        ],
+
+        VPR => [
+
+            'gpu/vpr/vpr.c',
+            'gpu/vpr/vprgp102.c',
+            'gpu/vpr/vprtu10x.c',
+            'gpu/vpr/vprgv100.c',
+            'gpu/vpr/vprga100.c',
+            'gpu/vpr/vprga10x.c',
+            'gpu/vpr/vprgh100.c'
+
+        ],
+
+        MISC => [
+            # gpu/misc folder is used to collect files diffilwlt to clarified
+            # when building LwWatch src tree structure.
+            # please avoid adding more items into gpu/misc
+
+            # gpu/misc/...
+            'gpu/misc/deviceinfo.c',         #  the code is not protected by mcheck
+            'gpu/misc/gpuanalyzegt215.c',
+            'gpu/misc/ibmnpu.c',
+            'gpu/misc/lwBlockLinear.c',
+            'gpu/misc/rsvdlw50.c',           # only stub function. to deleted
+
+            # ScanLWTopology is not implemented on some platforms
+            ONLY_IF => '! PLATFORM_MODS ',
+            'gpu/misc/br04.c',
+        ],
+
+        L2ILA => [
+
+            # gpu/l2ila/...
+            'gpu/l2ila/l2ila.c'
+        ],
+
+        DFDASM => [
+
+            # gpu/dfd/...
+            'gpu/dfd/dfdasm.cpp'
+        ]
+
+    ], # LWWATCH_ENGINES
+
+];   # filesRef
+
+
+my $platformsRef = [
+
+    # the default if no platform is specified
+    PLATFORM_UNKNOWN => [  ],    # PLATFORM_UNKNOWN
+
+
+    PLATFORM_WINDOWS => [
+
+        LWWATCHSRC_ALL => [
+            FLAGS => ':CORE',
+            CHIPS_SUPPORTED => [ ALL, ],
+        ],
+
+    ],    # PLATFORM_WINDOWS
+
+
+    PLATFORM_UNIX    => [
+
+        LWWATCHSRC_ALL => [
+            FLAGS => ':CORE',
+            CHIPS_SUPPORTED => [ ALL, ],
+        ],
+
+    ],    # PLATFORM_UNIX
+
+
+    PLATFORM_MODS    => [
+
+        LWWATCHSRC_ALL => [
+            FLAGS => ':CORE',
+            CHIPS_SUPPORTED => [ ALL, ],
+        ],
+
+    ],    # PLATFORM_MODS
+
+
+];
+
+
+# return the file and platform lists
+return [ $filesRef, $platformsRef ];

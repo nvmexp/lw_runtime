@@ -1,0 +1,130 @@
+/*
+ * Copyright (c) 2021, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU Corporation and its licensors retain all intellectual property and proprietary
+ * rights in and to this software, related documentation and any modifications thereto.
+ * Any use, reproduction, disclosure or distribution of this software and related
+ * documentation without an express license agreement from LWPU Corporation is strictly
+ * prohibited.
+ *
+ * TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+ * AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+ * SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+ * LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+ * BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+ * INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGES
+ */
+
+#include <optix.h>
+#include <optix_types.h>
+
+#include <exp/accel/ExtendedAccelHeader.h>
+#include <private/optix_7_device_private.h>
+
+#include <lwda_runtime.h>
+
+#include "BuiltinISCompileTimeConstants.h"
+#include "BuiltinISCommon.h"
+#include "LwrvePhantomIntersector.h"
+
+namespace optix_exp {
+
+extern "C" __global__ void __intersection__is()
+{
+    size_t                 ptrGAS;
+    OptixTraversableHandle gasHandle = optixGetGASTraversableHandle();
+    asm( "call (%0), _optix_get_gas_ptr, (%1);" : "=l"( ptrGAS ) : "l"( gasHandle ) : );
+
+    if( optix_ext::optixPrivateGetCompileTimeConstant( BUILTIN_IS_COMPILE_TIME_CONSTANT_EXCEPTION ) )
+    {
+        // the GAS must have an extended header.
+        if( !hasExtendedHeader( gasHandle ) )
+            optixThrowException( OPTIX_EXCEPTION_CODE_BUILTIN_IS_MISMATCH );
+    }
+    ExtendedAccelHeader eh = loadCachedAlign16( optixGetExtendedAccelHeaderFromHandle( gasHandle ) );
+
+    if( optix_ext::optixPrivateGetCompileTimeConstant( BUILTIN_IS_COMPILE_TIME_CONSTANT_EXCEPTION ) )
+    {
+        // the GAS primitive type must match this intersector
+        if( eh.primitiveType != OPTIX_PRIMITIVE_TYPE_ROUND_CATMULLROM )
+            optixThrowException( OPTIX_EXCEPTION_CODE_BUILTIN_IS_MISMATCH );
+
+        if( optix_ext::optixPrivateGetCompileTimeConstant( BUILTIN_IS_COMPILE_TIME_CONSTANT_MOTION ) )
+        {
+            // this intersector is for motion lwrves
+            if( optixGetGASMotionStepCount( gasHandle ) <= 1 )
+                optixThrowException( OPTIX_EXCEPTION_CODE_BUILTIN_IS_MISMATCH );
+        }
+        else
+        {
+            // this intersector does not support motion
+            if( optixGetGASMotionStepCount( gasHandle ) > 1 )
+                optixThrowException( OPTIX_EXCEPTION_CODE_BUILTIN_IS_MISMATCH );
+        }
+
+        // this intersector supports only the low memory variant
+        if( eh.lowMem == false )
+            optixThrowException( OPTIX_EXCEPTION_CODE_BUILTIN_IS_MISMATCH );
+    }
+    float3 rayOrigin    = optixGetObjectRayOrigin();
+    float3 rayDirection = optixGetObjectRayDirection();
+
+    const size_t dataOffset      = ( (size_t)eh.dataOffset32 ) << 4;
+    const size_t indexOffset     = ( (size_t)eh.indexOffset ) << 4;
+    const size_t primIndexOffset = ( (size_t)eh.primIndexOffset ) << 4;
+
+    float4*       vertices     = reinterpret_cast<float4*>( (LWdeviceptr)ptrGAS + dataOffset );
+    unsigned int* indices      = reinterpret_cast<unsigned int*>( (LWdeviceptr)ptrGAS + dataOffset + indexOffset );
+    unsigned int* indexOffsets = reinterpret_cast<unsigned int*>( (LWdeviceptr)ptrGAS + dataOffset + primIndexOffset );
+
+    const unsigned int gas_idx  = optixGetSbtGASIndex();
+    const unsigned int prim_idx = optixGetPrimitiveIndex() + indexOffsets[gas_idx];
+
+    const float tmin = optixGetRayTmin();
+    const float tmax = fminf( LWRVE_FLT_MAX, optixGetRayTmax() );
+
+    // If there is no intersection, rayt will be -1
+    float segt, rayt;
+    int   raytype = ( optixGetRayFlags() & OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT ) ? RAY_TYPE_OCCLUSION : 0;
+
+    if( optix_ext::optixPrivateGetCompileTimeConstant( BUILTIN_IS_COMPILE_TIME_CONSTANT_MOTION ) )
+    {
+        float time = optixGetGASKeyTime();
+        float f_keyIdx = fmaxf( 0.f, ceilf( time - 1.f ) );
+        time -= f_keyIdx;  // local time in motion interval keyIdx
+        int keyIdx = (int)f_keyIdx;
+        int numMotionSteps = optixGetGASMotionStepCount( gasHandle );
+
+        const unsigned int c0_idx = indices[prim_idx] * numMotionSteps;
+
+        float4* q_0 = &vertices[c0_idx + keyIdx];
+        float4* q_1 = &vertices[c0_idx + numMotionSteps + keyIdx];
+        float4* q_2 = &vertices[c0_idx + 2 * numMotionSteps + keyIdx];
+        float4* q_3 = &vertices[c0_idx + 3 * numMotionSteps + keyIdx];
+
+        float4 q[4] = { q_0[0] + time * (q_0[1] - q_0[0]), q_1[0] + time * (q_1[1] - q_1[0]),
+                        q_2[0] + time * (q_2[1] - q_2[0]), q_3[0] + time * (q_3[1] - q_3[0]) };
+
+        PhantomIntersector<Lwrve3ScaledDifferentialBezier> phantom( q, rayOrigin, CATMULLROM );
+        phantom.intersect<CHECK_INTERNAL_SPLITTING>( rayOrigin, rayDirection, raytype, tmin, tmax, segt, rayt, 0.f, 1.f );
+    }
+    else
+    {
+        float4* q = &vertices[indices[prim_idx]];
+
+        PhantomIntersector<Lwrve3ScaledDifferentialBezier> phantom( q, rayOrigin, CATMULLROM );
+        phantom.intersect<CHECK_INTERNAL_SPLITTING>( rayOrigin, rayDirection, raytype, tmin, tmax, segt, rayt, 0.f, 1.f );
+    }
+
+    if( rayt > tmin && rayt < tmax )
+    {
+        optixReportIntersection( rayt,                                  // t of hit
+                                 OPTIX_HIT_KIND_LWRVES_CATMULLROM_HIT,  // user hit kind
+                                 float_as_int( segt ) );
+    }
+}
+
+}  // namespace optix_exp

@@ -1,0 +1,45 @@
+#
+# LWIDIA_COPYRIGHT_BEGIN
+#
+# Copyright 2010-2020 by LWPU Corporation.  All rights reserved.  All
+# information contained herein is proprietary and confidential to LWPU
+# Corporation.  Any use, reproduction, or disclosure without the written
+# permission of LWPU Corporation is prohibited.
+#
+# LWIDIA_COPYRIGHT_END
+#
+
+LW_MODS_MODULE := jsdb17 lib
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+LW_INCLUDES += ..
+LW_INCLUDES += .
+
+SOURCES += jsdebug.c
+SOURCES += jsd_atom.c
+SOURCES += jsd_high.c
+SOURCES += jsd_hook.c
+SOURCES += jsd_lock.c
+SOURCES += jsd_obj.c
+SOURCES += jsd_scpt.c
+SOURCES += jsd_stak.c
+SOURCES += jsd_step.c
+SOURCES += jsd_text.c
+SOURCES += jsd_val.c
+SOURCES += jsdrefl.c
+SOURCES += jsdb.c
+SOURCES += ../js.c
+
+CFLAGS += -DJSDEBUGGER -DJSDEBUGGER_C_UI -DJSD_LOWLEVEL_SOURCE
+
+LW_WARNINGS_AS_ERRORS :=
+LW_AGGRESSIVE_WARNINGS :=
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk
+
+# Workaround bug in gcc-4.9.2 toolchain which leads to multiple function definitions
+# for inline functions in the toolchain's headers.
+ifeq ($(LW_TOOLCHAIN),mods-gcc-4.9.2-x86_64)
+    CFLAGS += -U_FORTIFY_SOURCE
+endif

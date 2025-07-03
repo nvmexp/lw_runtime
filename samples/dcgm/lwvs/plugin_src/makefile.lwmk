@@ -1,0 +1,63 @@
+LWVS_DIR := $(LW_SOURCE)/apps/dcgm/lwvs/
+LWML_DIR := $(LW_SOURCE)/apps/lwml/
+DCGM_DIR := $(LW_SOURCE)/apps/dcgm
+
+OUTPUTDIR   := $(LWVS_DIR)/_out
+
+ifeq ($(LW_TARGET_ARCH),amd64)
+ifeq ($(LW_TARGET_OS), VMware)
+LW_TOOLCHAIN = gcc-4.4.3
+LW_HOST_TOOLCHAIN = gcc-4.4.3
+else
+LW_TOOLCHAIN = gcc-4.7.3
+LW_HOST_TOOLCHAIN = gcc-4.7.3
+endif
+endif
+
+LOCAL_LWDA_BASEDIR := $(LWVS_DIR)/lwca
+LOCAL_LWDA10_DIR   := $(LOCAL_LWDA_BASEDIR)/lwda100
+LOCAL_LWDA9_DIR    := $(LOCAL_LWDA_BASEDIR)/lwda90
+LWBLAS := lwblas_static
+LWDART := lwdart_static
+
+LWML_BUILD_DIR := $(LWML_DIR)/build/
+include $(LWML_BUILD_DIR)/common.lwmk
+
+include $(LWML_DIR)/lwml_headers.lwmk
+
+ifdef LWCFG_INITIALIZED
+LW_MODULE_LOGGING_NAME = "lwvs_plugin"
+
+#Define common include paths for all plugins
+LWVS_PLUGIN_INCLUDES := 
+LWVS_PLUGIN_INCLUDES += $(OUTPUTDIR)
+LWVS_PLUGIN_INCLUDES += $(LWVS_DIR)/include
+LWVS_PLUGIN_INCLUDES += $(LWVS_DIR)/plugin_src/include
+LWVS_PLUGIN_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LWVS_PLUGIN_INCLUDES += $(LWML_DIR)/common
+LWVS_PLUGIN_INCLUDES += $(LWML_DIR)/libs/json-c-0.12
+LWVS_PLUGIN_INCLUDES += $(LWML_DIR)/libs/zlib-1.2.8
+LWVS_PLUGIN_INCLUDES += $(LWVS_DIR)/libs/libtar-1.2.11/src
+LWVS_PLUGIN_INCLUDES += $(LWVS_DIR)/libs/jsoncpp-0.10.6/include
+LWVS_PLUGIN_INCLUDES += $(DCGM_DIR)/dcgmlib
+LWVS_PLUGIN_INCLUDES += $(DCGM_DIR)/common
+
+	
+
+##############################################################################
+# Include all sub projects
+##############################################################################
+include common/common.lwmk
+include memorybandwidth/memorybandwidth.lwmk
+include BusGrind/busgrind.lwmk
+include constantperf/constantperf.lwmk
+include constantpower/constantpower.lwmk
+include memory/memory.lwmk
+include sw/sw.lwmk
+include smperf/smperf.lwmk
+include gpuburn/gpuburn.lwmk
+include contextcreate/contextcreate.lwmk
+
+endif # LWCFG_INITIALIZED
+include $(LWML_BUILD_DIR)/commonRules.lwmk
+

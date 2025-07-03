@@ -1,0 +1,373 @@
+// Copyright (c) 2018, LWPU CORPORATION.
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include <KernelUtils/lwda_rti.h>
+#include <lwda_fp16.h>
+#include <o6/optix.h>
+#include <optixu/optixu_aabb_namespace.h>
+#include <optixu/optixu_math_namespace.h>
+
+using namespace optix;
+
+rtDeclareVariable( float2, barycentrics, attribute rtTriangleBarycentrics, );
+RT_PROGRAM void defaultTriangleAttributeProgram()
+{
+    barycentrics = rtGetTriangleBarycentrics();
+}
+
+rtDeclareVariable( Ray, ray, rtLwrrentRay, );
+
+enum RThitkindflags
+{
+    RT_HIT_KIND_BUILTIN_PRIMITIVE_TYPE = 0x80,
+    RT_HIT_KIND_TRIANGLE_FRONT_FACE    = 0xFE,
+    RT_HIT_KIND_TRIANGLE_BACK_FACE     = 0xFF,
+};
+
+// copied from rtcore... types.h
+/* Values need to be powers of 2 since they are used in a bit field. */
+typedef enum RtcRayFlags {
+    RTC_RAY_FLAG_NONE                       = 0,
+    RTC_RAY_FLAG_FORCE_OPAQUE               = 1, /* mutually exclusive with RTC_RAY_FLAG_FORCE_NO_OPAQUE */
+    RTC_RAY_FLAG_FORCE_NO_OPAQUE            = 2, /* mutually exclusive with RTC_RAY_FLAG_FORCE_OPAQUE */
+    RTC_RAY_FLAG_TERMINATE_ON_FIRST_HIT     = 4,
+    RTC_RAY_FLAG_SKIP_CLOSEST_HIT_SHADER    = 8,
+    RTC_RAY_FLAG_LWLL_BACK_FACING_TRIANGLES = 16, /* mutually exclusive with RTC_RAY_FLAG_LWLL_FRONT_FACING_TRIANGLES */
+    RTC_RAY_FLAG_LWLL_FRONT_FACING_TRIANGLES = 32, /* mutually exclusive with RTC_RAY_FLAG_LWLL_BACK_FACING_TRIANGLES */
+    RTC_RAY_FLAG_LWLL_OPAQUE                 = 64, /* mutually exclusive with RTC_RAY_FLAG_FORCE_OPAQUE, RTC_RAY_FLAG_FORCE_NO_OPAQUE, RTC_RAY_FLAG_LWLL_NON_OPAQUE */
+    RTC_RAY_FLAG_LWLL_NON_OPAQUE = 128 /* mutually exclusive with RTC_RAY_FLAG_FORCE_OPAQUE, RTC_RAY_FLAG_FORCE_NO_OPAQUE, RTC_RAY_FLAG_LWLL_OPAQUE */
+} RtcRayFlags;
+/* Values need to be powers of 2 since they are used in a bit field. */
+typedef enum RtcInstanceFlags {
+    RTC_INSTANCE_FLAG_NONE                       = 0,
+    RTC_INSTANCE_FLAG_TRIANGLE_LWLL_DISABLE      = 1,
+    RTC_INSTANCE_FLAG_TRIANGLE_LWLL_FLIP_WINDING = 2,
+    RTC_INSTANCE_FLAG_FORCE_OPAQUE               = 4,
+    RTC_INSTANCE_FLAG_FORCE_NO_OPAQUE            = 8
+} RtcInstanceFlags;
+
+__device__ __noinline__ bool intersect_triangle_sidedness( const Ray&    ray,
+                                                              const float3& p0,
+                                                              const float3& p1,
+                                                              const float3& p2,
+                                                              float&        t,
+                                                              float&        beta,
+                                                              float&        gamma,
+                                                              bool&         frontface )
+{
+    const float3 e0 = p1 - p0;
+    const float3 e1 = p0 - p2;
+    const float3 n  = cross( e1, e0 );
+    const float3 e2 = ( 1.0f / dot( n, ray.direction ) ) * ( p0 - ray.origin );
+    const float3 i  = cross( ray.direction, e2 );
+
+    beta      = dot( i, e1 );
+    gamma     = dot( i, e0 );
+    t         = dot( n, e2 );
+    frontface = dot( n, ray.direction ) < 0;
+
+    return ( ( t < ray.tmax ) & ( t > ray.tmin ) & ( beta >= 0.0f ) & ( gamma >= 0.0f ) & ( beta + gamma <= 1 ) );
+}
+
+__device__ __forceinline__ void intersect_triangle( const float3& p0, const float3& p1, const float3& p2 )
+{
+    float t, beta, gamma;
+    bool  frontface;
+    if( intersect_triangle_sidedness( ray, p0, p1, p2, t, beta, gamma, frontface ) )
+    {
+        unsigned int instanceFlags, rayFlags;
+        asm volatile( "call (%0), _rti_get_instance_flags, ();" : "=r"( instanceFlags ) : );
+        rayFlags = rtGetRayFlags();
+
+        if( instanceFlags & RTC_INSTANCE_FLAG_TRIANGLE_LWLL_FLIP_WINDING )
+            frontface = !frontface;
+
+        if( ( instanceFlags ^ RTC_INSTANCE_FLAG_TRIANGLE_LWLL_DISABLE )
+            && ( ( frontface && ( rayFlags & RTC_RAY_FLAG_LWLL_FRONT_FACING_TRIANGLES ) )
+                 || ( !frontface && ( rayFlags & RTC_RAY_FLAG_LWLL_BACK_FACING_TRIANGLES ) ) ) )
+            return;
+
+        unsigned char hitkind   = frontface ? RT_HIT_KIND_TRIANGLE_FRONT_FACE : RT_HIT_KIND_TRIANGLE_BACK_FACE;
+        unsigned int  matlIndex = 0;
+        // This will check t and report intersection at the same time
+        rtiReportFullIntersectionFF( t, matlIndex, hitkind, beta, gamma );
+    }
+}
+
+__device__ __noinline__ void aabb_triangle( const float3& p0, const float3& p1, const float3& p2, float result[6] )
+{
+    const float area = length( cross( p1 - p0, p2 - p0 ) );
+
+    Aabb* aabb = (Aabb*)result;
+
+    if( area > 0.0f && !isinf( area ) )
+    {
+        aabb->m_min = fminf( fminf( p0, p1 ), p2 );
+        aabb->m_max = fmaxf( fmaxf( p0, p1 ), p2 );
+    }
+    else
+    {
+        aabb->ilwalidate();
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+__device__ __noinline__ void load_vertices( int vertexFormat, const char* vertexPtr[3], float3& p0, float3& p1, float3& p2 )
+{
+    switch( vertexFormat )
+    {
+        case 0:
+            // float3, not that we have a hard time to do a 16byte aligned load, as we cannot pre-determine on the host if &vertices[byteOffset] is 16byte aligned
+            {
+                p0 = *(float3*)vertexPtr[0];
+                p1 = *(float3*)vertexPtr[1];
+                p2 = *(float3*)vertexPtr[2];
+            }
+            break;
+
+        case 1:
+            // float2
+            {
+                p0 = make_float3( *(float2*)vertexPtr[0], 0.0f );
+                p1 = make_float3( *(float2*)vertexPtr[1], 0.0f );
+                p2 = make_float3( *(float2*)vertexPtr[2], 0.0f );
+            }
+            break;
+
+        case 2:
+            // half3
+            {
+                const half* half_vertex;
+                half_vertex = (const half*)vertexPtr[0];
+                p0 = make_float3( __half2float( half_vertex[0] ), __half2float( half_vertex[1] ), __half2float( half_vertex[2] ) );
+                half_vertex = (const half*)vertexPtr[1];
+                p1 = make_float3( __half2float( half_vertex[0] ), __half2float( half_vertex[1] ), __half2float( half_vertex[2] ) );
+                half_vertex = (const half*)vertexPtr[2];
+                p2 = make_float3( __half2float( half_vertex[0] ), __half2float( half_vertex[1] ), __half2float( half_vertex[2] ) );
+            }
+            break;
+
+        case 3:
+        default:
+            // half2
+            {
+                const half* half_vertex;
+                half_vertex = (const half*)vertexPtr[0];
+                p0          = make_float3( __half2float( half_vertex[0] ), __half2float( half_vertex[1] ), 0.0f );
+                half_vertex = (const half*)vertexPtr[1];
+                p1          = make_float3( __half2float( half_vertex[0] ), __half2float( half_vertex[1] ), 0.0f );
+                half_vertex = (const half*)vertexPtr[2];
+                p2          = make_float3( __half2float( half_vertex[0] ), __half2float( half_vertex[1] ), 0.0f );
+            }
+            break;
+    }
+}
+
+
+__device__ __noinline__ void load_vertices( int vertexFormat, uint3 indices, bool hasMotion, int motionKey, float3& p0, float3& p1, float3& p2 )
+{
+    int vertexBufferID;
+    asm volatile( "call (%0), _rti_get_geometry_triangles_vertexBufferID, ();" : "=r"( vertexBufferID ) : );
+
+    long long vertexBufferOffset;
+    asm volatile( "call (%0), _rti_get_geometry_triangles_vertexBufferOffset, ();" : "=l"( vertexBufferOffset ) : );
+
+    unsigned long long vertexBufferStride;
+    asm volatile( "call (%0), _rti_get_geometry_triangles_vertexBufferStride, ();" : "=l"( vertexBufferStride ) : );
+
+    unsigned long long vertexBufferMotionStride = 0ull;
+    if( hasMotion )
+        asm volatile( "call (%0), _rti_get_motion_geometry_triangles_vertexBufferMotionStride, ();"
+                      : "=l"( vertexBufferMotionStride )
+                      : );
+
+    const long long          byteOffset = vertexBufferOffset;
+    const unsigned long long byteStride = vertexBufferStride;
+    if( ~0ull == vertexBufferMotionStride )
+    {
+        // buffer of buffer IDs
+        rtBufferId<int, 1>  idsBuffer( vertexBufferID );
+        rtBufferId<char, 1> verticesBuffer( idsBuffer[motionKey] );
+        const char* vertexPtr[] = {&verticesBuffer[byteOffset + byteStride * indices.x],
+                                   &verticesBuffer[byteOffset + byteStride * indices.y],
+                                   &verticesBuffer[byteOffset + byteStride * indices.z]};
+        load_vertices( vertexFormat, vertexPtr, p0, p1, p2 );
+    }
+    else
+    {
+        const unsigned long long motionStride = motionKey * vertexBufferMotionStride;
+        rtBufferId<char, 1> verticesBuffer( vertexBufferID );
+        const char* vertexPtr[] = {&verticesBuffer[byteOffset + byteStride * indices.x + motionStride],
+                                   &verticesBuffer[byteOffset + byteStride * indices.y + motionStride],
+                                   &verticesBuffer[byteOffset + byteStride * indices.z + motionStride]};
+        load_vertices( vertexFormat, vertexPtr, p0, p1, p2 );
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+__device__ __noinline__ void load_indices( bool useIndexBuffer, bool indexFormatByte4, int primIdx, uint3& indices )
+{
+    if( !useIndexBuffer )
+    {
+        indices = make_uint3( primIdx * 3 + 0, primIdx * 3 + 1, primIdx * 3 + 2 );
+    }
+    else
+    {
+        int indexBufferID;
+        asm volatile( "call (%0), _rti_get_geometry_triangles_indexBufferID, ();" : "=r"( indexBufferID ) : );
+
+        rtBufferId<char, 1> indicesBuffer( indexBufferID );
+
+        unsigned long long indexBufferStride;
+        asm volatile( "call (%0), _rti_get_geometry_triangles_indexBufferStride, ();" : "=l"( indexBufferStride ) : );
+
+        long long indexBufferOffset;
+        asm volatile( "call (%0), _rti_get_geometry_triangles_indexBufferOffset, ();" : "=l"( indexBufferOffset ) : );
+
+        const long long          byteOffset = indexBufferOffset;
+        const unsigned long long byteStride = indexBufferStride;
+
+        if( indexFormatByte4 )
+        {
+            // uint3
+            indices = *(uint3*)&indicesBuffer[byteOffset + byteStride * primIdx];
+        }
+        else
+        {
+            // ushort3
+            unsigned short* int16Indices = (unsigned short*)&indicesBuffer[byteOffset + byteStride * primIdx];
+            indices                      = {int16Indices[0], int16Indices[1], int16Indices[2]};
+        }
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+rtDeclareVariable( float, globalTime, rtLwrrentTime, );
+
+__device__ __forceinline__ void intersect_motion_triangle( int vertexFormat, uint3 indices )
+{
+    float motionRangeStart;
+    asm volatile( "call (%0), _rti_get_motion_geometry_triangles_timeBegin, ();" : "=f"( motionRangeStart ) : );
+
+    float motionRangeEnd;
+    asm volatile( "call (%0), _rti_get_motion_geometry_triangles_timeEnd, ();" : "=f"( motionRangeEnd ) : );
+
+    const float t0 = motionRangeStart;
+    const float t1 = motionRangeEnd;
+
+    int motionNumIntervals;
+    asm volatile( "call (%0), _rti_get_motion_geometry_triangles_motionNumIntervals, ();"
+                  : "=r"( motionNumIntervals )
+                  : );
+
+    float time = ( globalTime - t0 ) * motionNumIntervals / ( t1 - t0 );
+    if( time < 0.f )
+    {
+        int motionBorderMode;
+        asm volatile( "call (%0), _rti_get_motion_geometry_triangles_motionBorderModeBegin, ();"
+                      : "=r"( motionBorderMode )
+                      : );
+
+        if( motionBorderMode == RT_MOTIONBORDERMODE_VANISH )
+            return;
+        time = 0.f;
+    }
+    else if( time > motionNumIntervals )
+    {
+        int motionBorderMode;
+        asm volatile( "call (%0), _rti_get_motion_geometry_triangles_motionBorderModeEnd, ();"
+                      : "=r"( motionBorderMode )
+                      : );
+
+        if( motionBorderMode == RT_MOTIONBORDERMODE_VANISH )
+            return;
+        time = (float)motionNumIntervals;
+    }
+
+    const float fltKey = floorf( time );
+    const float localt = time - fltKey;
+    const int   key    = (int)fltKey;
+
+    float3 p0, p1, p2;
+    load_vertices( vertexFormat, indices, true, key, p0, p1, p2 );
+
+    if( localt > 0.0f )
+    {
+        float3 p0_t1, p1_t1, p2_t1;
+        load_vertices( vertexFormat, indices, true, key + 1, p0_t1, p1_t1, p2_t1 );
+
+        p0 = lerp( p0, p0_t1, localt );
+        p1 = lerp( p1, p1_t1, localt );
+        p2 = lerp( p2, p2_t1, localt );
+    }
+
+    intersect_triangle( p0, p1, p2 );
+}
+
+
+// Generate all kinds of programs that resolve all of the template parameters above
+// As a result, each program should be as optimal as possible
+// On the host side, we pick the required program via...
+// progName_(motion_)(indexed_indexFormatByte4)_vertexFormat
+// indexFormatByte4 can be 0,1
+// vertexFormat can be 0,1,2,3 for float3, float2, half3, half2
+#define FINAL( hasMotionN, hasMotionT, vFormatN, vFormatT, iFormatByte4N, iFormatByte4T, indexedN, doIndexing ) \
+                                                                                                                \
+RT_PROGRAM void aabb_##hasMotionN##indexedN##iFormatByte4N##vFormatN(                                           \
+        int primIdx, int motionIdx, float result[6] )                                                           \
+                                                                                                                \
+{                                                                                                               \
+        uint3 indices;                                                                                          \
+        load_indices( doIndexing, iFormatByte4T, primIdx, indices );                                            \
+        float3 p0, p1, p2;                                                                                      \
+        load_vertices( vFormatT, indices, hasMotionT, hasMotionT ? motionIdx : 0, p0, p1, p2 );                 \
+        aabb_triangle( p0, p1, p2, result );                                                                    \
+                                                                                                                \
+}                                                                                                               \
+                                                                                                                \
+RT_PROGRAM void intersect_##hasMotionN##indexedN##iFormatByte4N##vFormatN( int primIdx )                        \
+                                                                                                                \
+{                                                                                                               \
+        uint3 indices;                                                                                          \
+        load_indices( doIndexing, iFormatByte4T, primIdx, indices );                                            \
+        if( hasMotionT )                                                                                        \
+            intersect_motion_triangle( vFormatT, indices );                                                     \
+        else                                                                                                    \
+        {                                                                                                       \
+            float3 p0, p1, p2;                                                                                  \
+            load_vertices( vFormatT, indices, false, 0, p0, p1, p2 );                                           \
+            intersect_triangle( p0, p1, p2 );                                                                   \
+        }                                                                                                       \
+    \
+}
+
+#define ADD_INDEXED_FORMAT( hasMotionN, hasMotionT, vFormatN, vFormatT )            \
+    FINAL( hasMotionN, hasMotionT, vFormatN, vFormatT, 0, false, indexed_, true )   \
+    FINAL( hasMotionN, hasMotionT, vFormatN, vFormatT, 1, true, indexed_, true )
+
+#define ADD_INDEXED( hasMotionN, hasMotionT, vFormatN, vFormatT )           \
+    ADD_INDEXED_FORMAT( hasMotionN, hasMotionT, _##vFormatN, vFormatT )     \
+    FINAL( hasMotionN, hasMotionT, vFormatN, vFormatT, , false, , false )
+
+#define ADD_VERTEX_FORMAT( hasMotionN, hasMotionT ) \
+    ADD_INDEXED( hasMotionN, hasMotionT, 0, 0 )     \
+    ADD_INDEXED( hasMotionN, hasMotionT, 1, 1 )     \
+    ADD_INDEXED( hasMotionN, hasMotionT, 2, 2 )     \
+    ADD_INDEXED( hasMotionN, hasMotionT, 3, 3 )
+
+#define GEN_PROGS                       \
+    ADD_VERTEX_FORMAT( motion_, true )  \
+    ADD_VERTEX_FORMAT(, false )
+
+GEN_PROGS

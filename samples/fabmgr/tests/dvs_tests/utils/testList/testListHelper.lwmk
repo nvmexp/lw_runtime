@@ -1,0 +1,32 @@
+# This makefile will call into the generation script to build
+# the test runner helper binary and generate the header containing
+# the platform-specific and build-time information.
+LOCAL_SOURCES += main.cpp
+LOCAL_SOURCES += supportContext.cpp
+LOCAL_GEN_FILES += g_testlist.h
+
+LOCAL_COMMONS += GTEST BOOST RM_TEST_COMMON
+
+# Location of the testlist directory holding our testList scripts and data
+# files.
+TESTLISTDIR=$(APPS_ROOT_DIR)/utils/testList/
+
+# The location of the python g_testlist.h generation script to generate
+# the testlist json.
+GENHELPER=$(TESTLISTDIR)gen_helper.py
+
+# Suffix of the SRT exelwtables; baked into the helper binary for query
+# by the runner script during test exelwtions.
+BINSUFFIX = $(SRT_SUFFIX)$(EXESUFFIX)
+
+# The list of SRT suite names to be baked into the helper binary.
+my_makefiles := TARGETS_MAKEFILE
+
+SUITELIST=$(filter-out testListHelper,$(basename $(notdir $($(my_makefiles)))))
+
+$(addsuffix $(OBJ_SUFFIX),$(LOCAL_OUTDIR)main): $(LOCAL_OUTDIR)g_testlist.h
+
+$(LOCAL_OUTDIR)g_testlist.h: $(GENHELPER) utils/testList/testListHelper.lwmk testlist.mk
+	$(ECHO) "Generating $@"
+	$(MKDIR) $(dir $@)
+	$(PYTHON) $(GENHELPER) "$(BINSUFFIX)" "$(SUITELIST)" >$@

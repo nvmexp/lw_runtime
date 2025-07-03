@@ -1,0 +1,52 @@
+##############################################################################
+# Define the rules to create testing packages
+##############################################################################
+
+COMP_ARCHIVESUFFIX := $(ARCHIVESUFFIX).gz
+build: $(OUTPUTDIR)/bindings$(COMP_ARCHIVESUFFIX)
+dcgmbuildsyncpoint:: $(OUTPUTDIR)/bindings$(COMP_ARCHIVESUFFIX) 
+
+TESTINGDIR := $(OUTPUTDIR)/testing
+BINDINGSDIR := bindings
+COMMONDIR := common
+
+$(OUTPUTDIR)/$(BINDINGSDIR)$(COMP_ARCHIVESUFFIX): $(OUTPUTDIR)/testing$(ARCHIVESUFFIX) $(SDK_SAMPLES_OUT) $(DCGMPROFTESTER_PTX_TARGET) $(dcgmproftester_TARGET)
+	@$(ECHO) Generating bindings package for $@...
+	@$(FORCE_RMDIR) $(OUTPUTDIR)/$(BINDINGSDIR)
+
+	@$(MKDIR) $(OUTPUTDIR)/$(BINDINGSDIR)
+	@$(MKDIR) $(OUTPUTDIR)/$(BINDINGSDIR)/$(COMMONDIR)
+
+	$(COPY) $(TESTINGDIR)/$(COMMONDIR)/__init__.py $(OUTPUTDIR)/$(BINDINGSDIR)/$(COMMONDIR)/__init__.py
+	$(COPY) $(TESTINGDIR)/$(COMMONDIR)/dcgm_client_cli_parser.py $(OUTPUTDIR)/$(BINDINGSDIR)/$(COMMONDIR)/dcgm_client_cli_parser.py
+	$(COPY) $(TESTINGDIR)/$(COMMONDIR)/dcgm_client_main.py $(OUTPUTDIR)/$(BINDINGSDIR)/$(COMMONDIR)/dcgm_client_main.py
+
+	$(COPY) $(TESTINGDIR)/dcgm_agent.py $(OUTPUTDIR)/$(BINDINGSDIR)/dcgm_agent.py
+	$(COPY) $(TESTINGDIR)/dcgm_fields.py $(OUTPUTDIR)/$(BINDINGSDIR)/dcgm_fields.py
+	$(COPY) $(TESTINGDIR)/dcgm_structs.py $(OUTPUTDIR)/$(BINDINGSDIR)/dcgm_structs.py
+	$(COPY) $(TESTINGDIR)/dcgmvalue.py $(OUTPUTDIR)/$(BINDINGSDIR)/dcgmvalue.py
+	$(COPY) $(TESTINGDIR)/DcgmDiag.py $(OUTPUTDIR)/$(BINDINGSDIR)/DcgmDiag.py
+	$(COPY) $(TESTINGDIR)/DcgmGroup.py $(OUTPUTDIR)/$(BINDINGSDIR)/DcgmGroup.py
+	$(COPY) $(TESTINGDIR)/DcgmHandle.py $(OUTPUTDIR)/$(BINDINGSDIR)/DcgmHandle.py
+	$(COPY) $(TESTINGDIR)/DcgmJsonReader.py $(OUTPUTDIR)/$(BINDINGSDIR)/DcgmJsonReader.py
+	$(COPY) $(TESTINGDIR)/DcgmReader.py $(OUTPUTDIR)/$(BINDINGSDIR)/DcgmReader.py
+	$(COPY) $(TESTINGDIR)/DcgmStatus.py $(OUTPUTDIR)/$(BINDINGSDIR)/DcgmStatus.py
+	$(COPY) $(TESTINGDIR)/DcgmSystem.py $(OUTPUTDIR)/$(BINDINGSDIR)/DcgmSystem.py
+	$(COPY) $(TESTINGDIR)/DcgmFieldGroup.py $(OUTPUTDIR)/$(BINDINGSDIR)/DcgmFieldGroup.py
+	$(COPY) $(TESTINGDIR)/pydcgm.py $(OUTPUTDIR)/$(BINDINGSDIR)/pydcgm.py
+	$(COPY) $(TESTINGDIR)/dcgm_field_helpers.py $(OUTPUTDIR)/$(BINDINGSDIR)/dcgm_field_helpers.py
+	$(COPY) $(TESTINGDIR)/dcgm_errors.py $(OUTPUTDIR)/$(BINDINGSDIR)/dcgm_errors.py
+	$(COPY) $(OUTPUTDIR)/sdk_samples/scripts/dcgm_example.py $(OUTPUTDIR)/$(BINDINGSDIR)/dcgm_example.py
+	$(COPY) $(TESTINGDIR)/dcgm_collectd_plugin.py $(OUTPUTDIR)/sdk_samples/scripts/dcgm_collectd_plugin.py
+	$(COPY) $(TESTINGDIR)/dcgm_fluentd.py $(OUTPUTDIR)/sdk_samples/scripts/dcgm_fluentd.py
+	$(COPY) $(TESTINGDIR)/dcgm_prometheus.py $(OUTPUTDIR)/sdk_samples/scripts/dcgm_prometheus.py
+	$(COPY) $(TESTINGDIR)/dcgm_telegraf.py $(OUTPUTDIR)/sdk_samples/scripts/dcgm_telegraf.py
+	$(COPY) $(TESTINGDIR)/blacklist_recommendations.py $(OUTPUTDIR)/sdk_samples/scripts/blacklist_recommendations.py
+
+	$(MKDIR) $(OUTPUTDIR)/sdk_samples/dcgmproftester
+	$(COPY) $(dcgmproftester_TARGET) $(OUTPUTDIR)/sdk_samples/dcgmproftester/
+	$(COPY) $(DCGMPROFTESTER_PTX_TARGET) $(OUTPUTDIR)/sdk_samples/dcgmproftester/
+
+	$(TAR) -C $(OUTPUTDIR) -cf $(@:.tar.gz=.tar)  $(BINDINGSDIR)
+	$(GZIP_CMD) -f $(@:.tar.gz=.tar)
+

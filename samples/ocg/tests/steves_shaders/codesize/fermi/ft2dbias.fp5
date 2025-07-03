@@ -1,0 +1,77 @@
+!!LWfp5.0
+OPTION LW_internal;
+OPTION LW_gpu_program_fp64;
+OPTION LW_bindless_texture;
+# cgc version 3.4.0001, build date Apr 13 2017
+# command line args: 
+#vendor LWPU Corporation
+#version 3.4.0.1 COP Build Date Apr 13 2017
+#profile gp5fp
+#program main
+#semantic isam
+#semantic sam
+#semantic shsam
+#semantic usam
+#semantic block : BUFFER[0]
+#var float4 Color : $vout.COL00 : COL0[0] : -1 : 1
+#var ulong isam :  : c[0] : -1 : 1
+#var ulong sam :  : c[1] : -1 : 1
+#var ulong shsam :  : c[2] : -1 : 1
+#var ulong usam :  : c[3] : -1 : 1
+#var int granularity : BUFFER[0] : buffer[0][0] : -1 : 1
+#var float bias : BUFFER[0] : buffer[0][4] : -1 : 1
+PARAM c[4] = { program.local[0..3] };
+CBUFFER buf0[] = { program.buffer[0] };
+TEMP R0, R1, R2, R3, R4;
+LONG TEMP D0;
+TEMP RC;
+SHORT TEMP HC;
+OUTPUT result_color0 = result.color;
+LDC.S32 R0.x, buf0[0];
+LDC.F32 R1.x, buf0[4];
+MOV.F R2.z, R1.x;
+MOV.S R4.y, R0.x;
+MOV.F R2.xy, {0.5, 0, 0, 0}.x;
+MOV.S R4.x, {0, 0, 0, 0};
+PK64.U D0.x, c[1];
+TXB.FOOTPRINT.FOOTPRINTPRED.U R1, R2.xyzz, R4, handle(D0.x), 2D;
+MOV.U.CC HC.x, 0;
+MOV.U.CC HC.x (SINGLELOD), 0xffffffff;
+PK64.U D0.x, c[0];
+TXB.FOOTPRINT.FOOTPRINTPRED.U.COARSELEVEL R3, R2.xyzz, R4, handle(D0.x), 2D;
+MOV.U R4.z, 0;
+MOV.U R4.z (SINGLELOD), 0xffffffff;
+PK64.U D0.x, c[3];
+TXB.FOOTPRINT.FOOTPRINTPRED.U.COARSELEVEL R0, R2.xyzz, R4, handle(D0.x), 2D;
+I2F.U R3, R3;
+I2F.U R1, R1;
+ADD.F32 R1, R1, R3;
+I2F.U R3, R0;
+MOV.U R4.w, 0;
+MOV.U R4.w (SINGLELOD), 0xffffffff;
+PK64.U D0.x, c[2];
+TXB.FOOTPRINT.FOOTPRINTPRED.U.COARSELEVEL R2, R2.xyzz, R4, handle(D0.x), 2D;
+I2F.U R0, R2;
+ADD.F32 R1, R1, R3;
+ADD.F32 R1, R1, R0;
+MOV.F R0, R1;
+MOV.F result_color0, R1;
+MOV.U R1.x, 0;
+MOV.U R1.x (SINGLELOD), 0xffffffff;
+IF    NE.x;
+ADD.F32 result_color0.w, R0, {1, 0, 0, 0}.x;
+ENDIF;
+MOV.U.CC RC.x, R4.z;
+IF    NE.x;
+ADD.F32 result_color0.z, R0, {1, 0, 0, 0}.x;
+ENDIF;
+MOV.U.CC RC.x, R4.w;
+IF    NE.x;
+ADD.F32 result_color0.y, R0, {1, 0, 0, 0}.x;
+ENDIF;
+MOV.U.CC RC.x, R1;
+IF    NE.x;
+ADD.F32 result_color0.x, R0, {1, 0, 0, 0};
+ENDIF;
+END
+# 42 instructions, 5 R-regs, 1 D-regs

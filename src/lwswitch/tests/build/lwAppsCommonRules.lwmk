@@ -1,0 +1,173 @@
+###############################################################################
+# drivers/resman/tests/lwAppsCommonRules.lwmk
+###############################################################################
+
+# Input: $(1) package name (not including directory or file extension
+#        $(2) path to file to add to package
+#
+# Generates appropriate rules to include a given file into a package.
+# BUILD_PACKAGE must be called for each individual package to generate the
+# actual recipe used to create the package.
+#
+define ADD_TO_PACKAGE
+  ifeq (,$(findstring $(OUTPUTDIR),$(2)))
+
+    $$(addprefix $(OUTPUTDIR)/,$(2)): $(2)
+	  $$(MKDIR) $$(dir $$@)
+	  $$(COPY) $$? $$@
+
+    $$(OUTPUTDIR)/$(1)$$(PKG_SUFFIX): $$(addprefix $$(OUTPUTDIR)/,$(2))
+
+  else
+
+    $$(OUTPUTDIR)/$(1)$$(PKG_SUFFIX): $(2)
+
+  endif
+endef
+
+##############################################################################
+
+# Input: Absolute source path list $(1)
+#
+# Generates a non-flat output folder structure for object files
+# compiled from source files in the $(APPS_ROOT_DIR). For sources
+# outside of that folder we already presume that they are named
+# having in mind the flat structure of our regular output folders
+# so they are put directly in _out.  If a source file is in _out already (i.e.
+# generated sources) then we place its object file next to it.
+#
+define OUT_FILE_BASENAME
+    $(addprefix $(OUTPUTDIR)/_out_files/,\
+        $(subst $(APPS_ROOT_DIR)/,,\
+            $(filter $(APPS_ROOT_DIR)/%,$(basename $(1)))))\
+    $(addprefix $(OUTPUTDIR)/,\
+        $(notdir $(filter-out $(OUTPUTDIR)/% $(APPS_ROOT_DIR)/%,$(basename $(1)))))\
+    $(filter $(OUTPUTDIR)/%,$(basename $(1)))
+endef
+
+#
+# Any target can override this variable with a simply expanded target specific
+# assignment, and that will be picked up by the global CFLAGS
+#
+TARGET_SPECIFIC_CFLAGS ?=
+CFLAGS += $(TARGET_SPECIFIC_CFLAGS)
+
+# Some platforms (e.g. Windows) define this to clean up the CFLAGS.
+ifndef CLEAN_TARGET_CFLAGS
+  # Default definition - just get all cflags
+  # Input: Target path $(1)
+  define CLEAN_TARGET_CFLAGS
+    $($(1)_CFLAGS) $(addprefix -I, $($(1)_INCLUDES))
+  endef
+endif
+
+# Input: Target path $(1)
+#
+# Generates rules to make the application exelwtables from objects. An additional
+# phony colwenience rule is created for the application name so you can just type
+# "lwmake @<application_name>" to make a single application.
+#
+# We use "order-only-prerequisites" (the stuff after the '|') to define that
+# all generated files are needed before generating object files.  The files are
+# considered a prerequisite for the object files to make sure no compilation is
+# run prior to the files being generated.
+#
+define MAKE_TARGET_RULES
+  $$(call TARGET_OBJECTS,$(1)): TARGET_SPECIFIC_CFLAGS := $$(call CLEAN_TARGET_CFLAGS,$(1))
+
+  $$(call TARGET_OBJECTS,$(1)): | $$($(1)_GEN_FILES)
+
+  ifeq ($(LW_TARGET_OS_FAMILY),Unix)
+    $(OUTPUTDIR)/$($(1)_EXE): LINK_LDFLAGS += $$($(1)_UNIX_LDFLAGS)
+  else ifeq ($(LW_TARGET_OS_FAMILY),MacOSX)
+    $(OUTPUTDIR)/$($(1)_EXE): LDFLAGS += $$($(1)_MACOSX_LDFLAGS)
+  else ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+    $(OUTPUTDIR)/$($(1)_EXE): LFLAGS += $$($(1)_WIN_LDFLAGS) $$($(1)_WIN_LIBS)
+  endif
+
+  $(OUTPUTDIR)/$($(1)_EXE): $$($(1)_PREREQUISITES)
+
+  $(call BUILD_EXELWTABLE,$(1))
+
+  $($(1)_EXE): $(OUTPUTDIR)/$($(1)_EXE)
+  .PHONY: $($(1)_EXE)
+  $(basename $($(1)_EXE)): $(OUTPUTDIR)/$($(1)_EXE)
+  .PHONY: $(basename $($(1)_EXE))
+
+  # All exelwtables get added to a package
+  $(call ADD_TO_PACKAGE,$(PACKAGE_NAME),$(OUTPUTDIR)/$($(1)_EXE))
+endef
+
+$(eval $(call BUILD_PACKAGE,$(PACKAGE_NAME)))
+
+ifeq ($(LW_TARGET_OS_FAMILY),Unix)
+  # rmapi_tegra mangles LwRm* function symbols in release builds.
+  # We don't bother mangling in the non-rmapi_tegra case, because the rmapi
+  # library isn't a real shared library so we don't need to match symbols with
+  # other builds.
+  MANGLE_SUFFIX = $(if $(and $(LW_MANGLE_SYMBOLS),$(LW_RMAPI_TEGRA)),.mangled)
+else
+  MANGLE_SUFFIX =
+endif
+
+# Override these three functions defined in lwCommon.lwmk.
+#
+# DEPFILE_FROM_SOURCE is ilwoked by the common rules to generate the target
+# dependency file given a source file.
+#
+# BUILD_OBJECT_LIST is ilwoked by the common rules to generate the target
+# object file of each source file in the input list.
+#
+# BUILD_MANGLED_OBJECT_LIST is ilwoked by MANGLE_OBJECT_FILE_RULE from the
+# common rules to generate the target mangled object file of each source file
+# in the input list.
+#
+# We override these to place the locations of these generated files in a custom
+# location.
+DEPFILE_FROM_SOURCE = $(addsuffix _dep.lwmk,$(call OUT_FILE_BASENAME,$(1)))
+BUILD_OBJECT_LIST = $(addsuffix $(OBJ_SUFFIX),$(call OUT_FILE_BASENAME,$(1)))
+BUILD_MANGLED_OBJECT_LIST = $(addsuffix $(MANGLE_SUFFIX)$(OBJ_SUFFIX),$(call OUT_FILE_BASENAME,$(1)))
+
+# Tell lwmake all sources to build
+SOURCES = $(sort $(foreach TARGET,$(TARGETS),$($(TARGET)_SOURCES)))
+
+# Take all the generated source files for each target and create a master list.
+GEN_SOURCES = $(sort $(foreach TARGET,$(TARGETS),\
+                $(addprefix $(OUTPUTDIR)/_out_files/$(TARGET),\
+                  $(subst $(APPS_ROOT_DIR)/,,$($(TARGET)_GEN_SOURCES)))))
+
+SOURCES += $(GEN_SOURCES)
+
+# Input: Target name $(1)
+#
+# Simple helper to return the list of all objects required by the given target.
+ifeq ($(LW_TARGET_OS_FAMILY_LOWER_CASE),macosx)
+    TARGET_OBJECTS = $(call BUILD_OBJECT_LIST,$($(1)_SOURCES)) \
+                     $(addsuffix $(OBJ_SUFFIX),$(addprefix $(OUTPUTDIR)/_out_files/$(1),$(basename $($(1)_GEN_SOURCES)))) \
+                     $(foreach COMMON,$(COMMONS),$(addsuffix $(OBJ_SUFFIX),$(addprefix $(OUTPUTDIR)/_out_files/$(COMMON),$(basename $($(COMMON)_GEN_SOURCES))))) \
+                     $($(1)_MACOSX_LIBS)
+else
+    TARGET_OBJECTS = $(call BUILD_MANGLED_OBJECT_LIST,$($(1)_SOURCES)) $(addsuffix $(MANGLE_SUFFIX)$(OBJ_SUFFIX),\
+                     $(addprefix $(OUTPUTDIR)/_out_files/$(1),$(basename $($(1)_GEN_SOURCES))))
+endif
+
+# Create targets for all mangled object files
+ifneq ($(MANGLE_SUFFIX),)
+  OBJECTS_TO_MANGLE = $(call BUILD_OBJECT_LIST,$(SOURCES))
+  $(foreach obj, $(OBJECTS_TO_MANGLE), \
+    $(eval $(call MANGLE_OBJECT_FILE_RULE,$(obj),$(RMAPI_TEGRA_MANGLE_FILE))))
+endif
+
+SRT_SUFFIX ?=
+# Generating exelwtable names
+$(foreach TARGET_MAKEFILE, $(TARGETS_MAKEFILE),\
+    $(eval $(dir $(TARGET_MAKEFILE))_EXE := $(notdir $(basename $(TARGET_MAKEFILE)))$(SRT_SUFFIX)$(EXESUFFIX)))
+
+# Create targets for all applications
+$(foreach TARGET,$(TARGETS),$(eval $(call MAKE_TARGET_RULES,$(TARGET))))
+
+# Since we're using a non-standard location for the object files, tell lwmake
+# what to remove on a clean.
+OTHER_FILES_TO_REMOVE += $(call BUILD_OBJECT_LIST,$(SOURCES)) $(call BUILD_OBJECT_LIST,$(GEN_SOURCES)) $(GEN_SOURCES)
+OTHER_FILES_TO_REMOVE += $(foreach TARGET,$(TARGETS), $($(TARGET)_GEN_FILES))
+

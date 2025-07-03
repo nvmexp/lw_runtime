@@ -1,0 +1,253 @@
+# -*- mode: perl; -*-
+
+# BUS Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $ceHal = [
+
+    # per-GPU defaults for CE for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+
+        IS_VALID => [
+
+            DESCRIPTION   => "Determine if a CE engine is valid on this GPU type",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _GK104        => [ ],
+            _GM107        => [ dMAXWELL, ],
+            _GP100        => [ PASCAL_and_later, ],
+            _STUB         => [ ],
+        ],
+
+        IS_SUPPORTED => [
+
+            DESCRIPTION   => "Determine if CE is supported on this GPU",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _GK104        => [ dMAXWELL, ],
+            _GP100        => [ PASCAL_and_later, ],
+            _STUB         => [ ],
+        ],
+
+        DUMP_PRIV => [
+
+            DESCRIPTION   => "Dump CE priv space",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL, ],
+            _GP100        => [ GP100, ],
+            _GP102        => [ PASCAL, -GP100, ],
+            _GV100        => [ VOLTA_thru_TURING, ],
+            _GA100        => [ AMPERE_thru_ADA, IG000, ],
+            _GH100        => [ HOPPER, -GH202, ],
+            _GB100        => [ BLACKWELL_and_later, GH202, -IG000, ],
+            _STUB         => [ ],
+        ],
+
+        TEST_STATE => [
+
+            DESCRIPTION   => "Test if CE engine is in a valid state",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL_and_later, ],
+            _STUB         => [ ],
+        ],
+
+        TEST_CE_STATE  => [
+
+            DESCRIPTION   => "test CE state",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => ERROR,
+
+            _GF100       => [ ],
+            _GK104       => [ dMAXWELL_and_later, ],
+        ],
+
+        IS_PRESENT => [
+
+            DESCRIPTION   => "Get CE floorsweeping status",
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => LwU32,
+            STUB_RETURNS  => FALSE,
+
+            _GK104        => [ ],
+            _GM107        => [ dMAXWELL, ],
+            _GP100        => [ PASCAL_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+            _STUB         => [ ],
+        ],
+
+        IS_ENABLED => [
+
+            DESCRIPTION   => "Check if any PCE is assigned to the LCE",
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => TRUE,
+
+            _GP100        => [ PASCAL_and_later, ],
+            _STUB         => [ pre_PASCAL, ],
+        ],
+
+        GET_PRIVS => [
+
+            DESCRIPTION   => "Get CE priv registers",
+            RETURN_TYPE   => "void*",
+            ARGUMENTS     => void,
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ GM10X, ],
+            _GM200        => [ GM20X, ],
+            _STUB         => [ PASCAL_and_later, ],
+        ],
+
+        CHECK_CE_STATE  => [
+
+            DESCRIPTION   => "check CE state",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL, ],
+            _GP100        => [ PASCAL_and_later, ],
+            _STUB         => [ ],
+        ],
+
+        GET_PRESENT_PCE_MASK => [
+
+            DESCRIPTION     => "Read LW_CE_PCE_MAP register as present PCE mask",
+            RETURN_TYPE     => LwU32,
+            ARGUMENTS       => void,
+            STUB_RETURNS    => ZERO,
+
+            _GV100          => [ VOLTA_thru_TURING, ],
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_Volta, ],
+        ],
+
+        GET_PCE_MAP => [
+
+            DESCRIPTION     => "Get lceIdx that the PCE is mapped to",
+            RETURN_TYPE     => BOOL,
+            ARGUMENTS       => "LwU32, LwU32*",
+            STUB_RETURNS    => FALSE,
+
+            _GV100          => [ VOLTA_thru_TURING, ],
+            _GA100          => [ AMPERE_thru_ADA, GH20X, ],
+            _GH100          => [ HOPPER_and_later, -GH20X,],
+            _STUB           => [ pre_Volta, ],
+        ],
+
+        IS_LCE_GRCE => [
+
+            DESCRIPTION     => "Check if the LCE is GRCE",
+            RETURN_TYPE     => BOOL,
+            ARGUMENTS       => LwU32,
+            STUB_RETURNS    => FALSE,
+
+            _GV100          => [ VOLTA_thru_TURING, ],
+            _GA100          => [ AMPERE_and_later, ],
+            _STUB           => [ pre_Volta, ],
+        ],
+
+        PRINT_PCE_LCE_MAP  => [
+
+            DESCRIPTION   => "Print PCE-LCE mappings",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => void,
+
+            _GP100        => [ PASCAL, ],
+            _GV100        => [ VOLTA_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+            _STUB         => [ pre_PASCAL, ],
+        ],
+
+        IS_PCE_ASSIGNED_TO_LCE  => [
+
+            DESCRIPTION   => "Determine if PCE is assigned to given LCE",
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => "LwU32, LwU32, LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _GP100        => [ PASCAL, ],
+            _GV100        => [ VOLTA_and_later, ],
+            _STUB         => [ pre_PASCAL, ],
+        ],
+
+        GET_PCE_TO_LCE_CONFIG_SIZE => [
+
+            DESCRIPTION   => "Get count of PCE to LCE Config Size",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => ZERO,
+
+            _GV100        => [ VOLTA, ],
+            _TU102        => [ TURING, ],
+            _GA100        => [ GA100, ],
+            _GA102        => [ AMPERE_thru_ADA, -GA100, GH202, ],
+            _GH100        => [ HOPPER_and_later, -GH202, ],
+            _STUB         => [ pre_VOLTA, ],
+        ],
+        
+        GET_CE_LCE_STATUS_SIZE => [
+
+            DESCRIPTION   => "Get count of CE LCE Status Size",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => ZERO,
+
+            _GV100        => [ VOLTA, ],
+            _TU102        => [ TURING_thru_ADA, -GA100, GH202, ],
+            _GA100        => [ GA100, HOPPER_and_later, -GH202, ],
+            _STUB         => [ pre_VOLTA, ],
+        ],
+
+        GET_GRCE  => [
+
+            DESCRIPTION   => "Get the GRCOPY engine",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => LwU32,
+            STUB_RETURNS  => NEG1,
+
+            _GP100        => [ PASCAL_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+            _STUB         => [ pre_PASCAL, ],
+        ],
+
+        READ_PCE_PIPESTATUS => [
+
+            DESCRIPTION   => "Read the LW_CE_PCE_PIPESTATUS register",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => LwU32,
+            STUB_RETURNS  => ZERO,
+
+            _GP100        => [ PASCAL, ],
+            _GV100        => [ VOLTA_thru_HOPPER, IG000, -GH202, ],
+            _GB100        => [ BLACKWELL_and_later, GH202, -IG000, ],
+            _STUB         => [ pre_PASCAL, ],
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $ceHal;

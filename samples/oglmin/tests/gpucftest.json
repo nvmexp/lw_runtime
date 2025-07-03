@@ -1,0 +1,61 @@
+[
+  {
+    "Type": "Control",
+    "OutputDirectory": "GPUCFTest",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryLookup": {
+      "GPUCFTest": "[Netapp]\\GPUCFTest\\2022-02-09-b"
+    },
+    "DvsPackages": [
+      {
+        "Name": "Develop-UMD",
+        "Package": "gpu_drv_dev_a Develop Windows wddm2-x64 Display Driver",
+        "Changelist": "<=",
+        "ReplaceSrc": "[LocalPackage]\\Display.Driver\\lwoglv64.dll",
+        "ReplaceDst": "[DriverStore:lwoglv64.dll]"
+      }
+    ],
+    "Server": "hqlwoglsql01:8200",
+    "TestDefinitions": [
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VK_DYNAMIC_PERF_STRAT=0"
+      },
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-l"
+      },
+      {
+        "Command": "[GPUCFTest]\\GPUCFTest.exe",
+        "Arguments": "",
+        "RedirectStdout": "[OutputDirectory]\\GPUCFTest-stdout.txt",
+        "RedirectStderr": "[OutputDirectory]\\GPUCFTest-stderr.txt"
+      },
+      {
+        "Command": "Verify",
+        "Arguments": "[OutputDirectory]\\GPUCFTest-stdout.txt:LoadBalancer: initialized=true, Pass"
+      },
+      {
+        "Command": "Verify",
+        "Arguments": "[OutputDirectory]\\GPUCFTest-stdout.txt:ComputeBasic: initialized=true, Pass"
+      },
+      {
+        "Command": "Verify",
+        "Arguments": "[OutputDirectory]\\GPUCFTest-stdout.txt:FragmentBasic: initialized=true, Pass"
+      },
+      {
+        "Command": "Verify",
+        "Arguments": "[OutputDirectory]\\GPUCFTest-stdout.txt:FragmentPerformance: initialized=true, Pass"
+      },
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-u"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVK_DYNAMIC_PERF_STRAT"
+      }
+    ]
+  }
+]
+

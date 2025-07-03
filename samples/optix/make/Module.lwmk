@@ -1,0 +1,266 @@
+#
+#  Copyright (c) 2019-2020 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+#
+# Module.lwmk - Functions to generate rules and targets to create an OptiX "module".
+#
+
+# Phony target that lets you clean xxx_ALL_OBJECTS for all modules.
+.PHONY: optix-module-clean
+
+# optix_module
+#
+# Generate all the rules to compile files into a "module". A module is simply a named bag
+# of object files, possibly with specific compilation criteria.
+#
+# For host objects, $(OPTIX_CFLAGS), $(OPTIX_DEFINES) and $(OPTIX_INCLUDES) are assumed
+# and to not need to be specified by a module.
+#
+# Variables that can be defined for a module:
+#
+# $(1)_CFLAGS
+#     Compilation flags used for host compilation.
+# $(1)_DEFINES
+#     Macro definitions used for host, clang and lwcc compilation.
+# $(1)_INCLUDES
+#     Include directories used for host, clang and lwcc compilation.
+# $(1)_SOURCES
+#     C++ files compiled into host objects.
+# $(1)_LLVM_IR_FILES
+#     LLVM IR files assembled into bitcode and embedded directly.
+# $(1)_LW_SOURCES
+#     LWCA files compiled into host object files via lwcc -c.
+# $(1)_BINARY_LW_PTX_SOURCES
+#     LWCA files compiled into PTX and embedded as binary data.
+# $(1)_BINARY_LW_ENCRYPTED_PTX_SOURCES
+#     LWCA files compiled into PTX, encrypted and embedded as binary data.
+# $(1)_BINARY_FILES
+#     Binary payloads embedded as binary data without change.
+# $(1)_LW_FATBIN_SOURCES
+#     LWCA files compiled to FATBIN and embedded as binary data.
+# $(1)_NEEDS_LWVM_HEADERS
+#   If set to 1, then the object files for this module depend on LWVM generated
+#   headers.
+#
+# Usage:
+#
+# foo_CFLAGS = -O1
+# foo_DEFINES = EXTRA_DEFINE
+# foo_INCLUDES = $(LW_OPTIX)/foo
+# foo_SOURCES = foo.cpp
+# $(call optix_module,foo)
+#
+define optix_module_impl
+  MOD_NAME := $(1)
+  $(1)_CFLAGS ?=
+  $(1)_DEFINES ?=
+  $(1)_INCLUDES ?=
+  $(1)_SOURCES ?=
+  $(1)_LW_SOURCES ?=
+  $(1)_BINARY_LW_PTX_SOURCES ?=
+  $(1)_BINARY_LW_ENCRYPTED_PTX_SOURCES ?=
+  $(1)_BINARY_FILES ?=
+  $(1)_LLVM_IR_FILES ?=
+  $(1)_BITCODE_FILES ?=
+  $(1)_LW_FATBIN_SOURCES ?=
+  $(1)_NEEDS_LWVM_HEADERS ?= 0
+  $(1)_ALL_OBJECTS =
+  $(1)_BINARY_SOURCES =
+  $(1)_BINARY_OBJECTS =
+  # The makefile that ilwoked this template.  The module objects depend on this makefile.
+  $(1)_MAKEFILE ?= $$(call ILWOKING_MAKEFILE)
+
+  # The object list for this module.  Not that this is a lazily expanded variable, so
+  # as we add new sources to $(1)_SOURCES, they don't need to also be added to the object
+  # list.
+  # BUILD_OPTIX_OBJECT_LIST prefixes with the module name to avoid clashes.
+  $(1)_OBJECTS = $$(call BUILD_OPTIX_OBJECT_LIST,$(1),$$($(1)_SOURCES))
+
+  # Force any objects built from .c files to be compiled as C, not C++
+  $(1)_C_OBJECTS = $$(call BUILD_OPTIX_OBJECT_LIST,$(1),$$(filter %.c,$$($(1)_SOURCES)))
+  $$($(1)_C_OBJECTS): LW_COMPILE_AS_CXX=
+
+  ### Handle .lw files to be embedded as NUL-terminated binary data.
+  $(1)_BINARY_SOURCES += $$(call optix_binary_lw_ptx_source,$$($(1)_BINARY_LW_PTX_SOURCES))
+  $(1)_BINARY_OBJECTS += $$(call BUILD_OPTIX_OBJECT_LIST,$(1),$$(call optix_binary_lw_ptx_source,$$($(1)_BINARY_LW_PTX_SOURCES)))
+  ifeq ($$(LW_AUTO_DEPEND),1)
+    # Include generated dependency files.
+    $$(foreach f,$$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$($(1)_BINARY_LW_PTX_SOURCES:.lw=.lw.ptx)),$$(eval $$(call INCLUDE_DEPFILE_RULE,$$(f))))
+  endif
+  # 0 means don't encrypt the PTX
+  $$(foreach f,$$($(1)_BINARY_LW_PTX_SOURCES),$$(call optix_binary_lw_ptx,$$(f),0))
+  $$(foreach f,$$($(1)_BINARY_LW_PTX_SOURCES),$$(eval $$(call LW_OPTIX_PTX_FROM_SOURCE,$$(f),$$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$(f:.lw=.lw.ptx)))))
+
+  ### Handle .lw files to be embedded as encrypted PTX
+  $(1)_BINARY_SOURCES += $$(call optix_binary_lw_ptx_source,$$($(1)_BINARY_LW_ENCRYPTED_PTX_SOURCES))
+  $(1)_BINARY_OBJECTS += $$(call BUILD_OPTIX_OBJECT_LIST,$(1),$$(call optix_binary_lw_ptx_source,$$($(1)_BINARY_LW_ENCRYPTED_PTX_SOURCES)))
+  ifeq ($$(LW_AUTO_DEPEND),1)
+    # Include generated dependency files.
+    $$(foreach f,$$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$($(1)_BINARY_LW_ENCRYPTED_PTX_SOURCES:.lw=.lw.ptx)),$$(eval $$(call INCLUDE_DEPFILE_RULE,$$(f))))
+  endif
+  # 1 means encrypt the PTX
+  $$(foreach f,$$($(1)_BINARY_LW_ENCRYPTED_PTX_SOURCES),$$(call optix_binary_lw_ptx,$$(f),1))
+  # Generate rules to compile source to PTX
+  $$(foreach f,$$($(1)_BINARY_LW_ENCRYPTED_PTX_SOURCES),$$(eval $$(call LW_OPTIX_PTX_FROM_SOURCE,$$(f),$$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$(f:.lw=.lw.ptx)))))
+
+  ### Handle binary files to be embedded directly.
+  $(1)_BINARY_SOURCES += $$(call optix_binary_source,$$($(1)_BINARY_FILES))
+  $(1)_BINARY_OBJECTS += $$(call BUILD_OPTIX_OBJECT_LIST,$(1),$$(call optix_binary_source,$$($(1)_BINARY_FILES)))
+  $$(foreach f,$$($(1)_BINARY_FILES),$$(call optix_binary_file,$$(f)))
+
+  ### Handle bitcode files to be embedded directly
+  $(1)_BITCODE_SOURCES = $$(call optix_binary_bitcode_source,$$($(1)_BITCODE_FILES))
+  $(1)_BITCODE_OBJECTS += $$(call BUILD_OPTIX_OBJECT_LIST,$(1),$$($(1)_BITCODE_SOURCES))
+  $(1)_SOURCES += $$($(1)_BITCODE_SOURCES)
+  $$(foreach f,$$($(1)_BITCODE_FILES),$$(call optix_binary_bitcode_file,$$(f)))
+
+  ### Handle LLVM IR files to be assembled into bitcode and embedded directly.
+  $(1)_LLVM_IR_SOURCES = $$(call optix_binary_llvm_ir_source,$$($(1)_LLVM_IR_FILES))
+  $(1)_LLVM_IR_OBJECTS += $$(call BUILD_OPTIX_OBJECT_LIST,$(1),$$($(1)_LLVM_IR_SOURCES))
+  $(1)_SOURCES += $$($(1)_LLVM_IR_SOURCES)
+  $$(foreach f,$$($(1)_LLVM_IR_FILES),$$(call optix_binary_llvm_ir_file,$$(f)))
+
+  ## Handle LWCA files compiled to host object files.
+  $(1)_LW_OBJECTS += $$(foreach f,$$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$($(1)_LW_SOURCES)),$$(f:.lw=.lw.obj))
+  ifeq ($$(LW_AUTO_DEPEND),1)
+    # Include generated dependency files.
+    $$(foreach f,$$($(1)_LW_OBJECTS),$$(eval $$(call INCLUDE_DEPFILE_RULE,$$(f))))
+  endif
+  ifeq ($$(LW_VERBOSE),1)
+    ifneq ($$($(1)_LW_SOURCES),)
+      $$(info Added LW Objects: $$($(1)_LW_OBJECTS) for $$($(1)_LW_SOURCES))
+    endif
+  endif
+  # Generate rules to build object files from LWCA files
+  $$(foreach f,$$($(1)_LW_SOURCES),$$(eval $$(call LW_OPTIX_OBJ_FROM_LW_SOURCE,$$(f),$$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$(f:.lw=.lw.obj)))))
+
+  ## Handle LWCA files compiled to FATBIN and embedded directly.
+  $(1)_LW_FATBIN_FILES += $$(foreach f,$$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$($(1)_LW_FATBIN_SOURCES)),$$(f:.lw=.fatbin))
+  ifeq ($$(LW_AUTO_DEPEND),1)
+    # Include generated dependency files.
+    $$(foreach f,$$($(1)_LW_FATBIN_FILES),$$(eval $$(call INCLUDE_DEPFILE_RULE,$$(f))))
+  endif
+  ifeq ($$(LW_VERBOSE),1)
+    ifneq ($$($(1)_LW_FATBIN_SOURCES),)
+      $$(info Added LW FATBIN Files: $$($(1)_LW_FATBIN_FILES) for $$($(1)_LW_FATBIN_SOURCES))
+    endif
+  endif
+  $$($(1)_LW_FATBIN_FILES): LWCC_FLAGS += -Xptxas "--hide-user-functions"
+  # Generate rules to build a module's fatbin files from the module's LWCA files
+  $$(foreach f,$$($(1)_LW_FATBIN_SOURCES),$$(eval $$(call LW_OPTIX_FATBIN_FROM_SOURCE,$$(f),$$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$(f:.lw=.fatbin)))))
+
+  ### Add the generated FATBIN files to the list of binary files to be embedded directly.
+  $(1)_BINARY_SOURCES += $$(call optix_binary_fatbin_source,$$($(1)_LW_FATBIN_FILES))
+  $$(foreach f,$$($(1)_LW_FATBIN_FILES),$$(call optix_binary_fatbin_file,$$(f)))
+
+  # Include all generated binary sources into the module's source list
+  $(1)_SOURCES += $$($(1)_BINARY_SOURCES)
+  # Include all LWCA host binary objects in the module's all object list.
+  $(1)_ALL_OBJECTS = $$($(1)_OBJECTS) $$($(1)_LW_OBJECTS)
+
+  # Sanity check to look for duplicates.
+  ifneq ($$(words $$($(1)_BINARY_SOURCES)),$$(words $$(sort $$($(1)_BINARY_SOURCES))))
+    $$(foreach f,$$($(1)_BINARY_SOURCES),$$(info $$(SPACE)$$(SPACE)$$(f)))
+    $$(error Duplicate binary sources for module $(1))
+  endif
+  ifneq ($$(words $$($(1)_BINARY_OBJECTS)),$$(words $$(sort $$($(1)_BINARY_OBJECTS))))
+    $$(foreach f,$$($(1)_BINARY_OBJECTS),$$(info $$(SPACE)$$(SPACE)$$(f)))
+    $$(error Duplicate binary objects for module $(1))
+  endif
+  ifneq ($$(words $$($(1)_SOURCES)),$$(words $$(sort $$($(1)_SOURCES))))
+    $$(foreach f,$$($(1)_SOURCES),$$(info $$(SPACE)$$(SPACE)$$(f)))
+    $$(error Duplicate sources for module $(1))
+  endif
+  ifneq ($$(words $$($(1)_OBJECTS)),$$(words $$(sort $$($(1)_OBJECTS))))
+    $$(foreach f,$$($(1)_OBJECTS),$$(info $$(SPACE)$$(SPACE)$$(f)))
+    $$(error Duplicate objects for module $(1))
+  endif
+  ifneq ($$(words $$($(1)_LW_SOURCES)),$$(words $$(sort $$($(1)_LW_SOURCES))))
+    $$(foreach f,$$($(1)_LW_SOURCES),$$(info $$(SPACE)$$(SPACE)$$(f)))
+    $$(error Duplicate LWCA sources for module $(1))
+  endif
+  ifneq ($$(words $$($(1)_LW_OBJECTS)),$$(words $$(sort $$($(1)_LW_OBJECTS))))
+    $$(foreach f,$$($(1)_LW_OBJECTS),$$(info $$(SPACE)$$(SPACE)$$(f)))
+    $$(error Duplicate LWCA objects for module $(1))
+  endif
+  ifneq ($$(words $$($(1)_LW_FATBIN_SOURCES)),$$(words $$(sort $$($(1)_LW_FATBIN_SOURCES))))
+    $$(foreach f,$$($(1)_LW_FATBIN_SOURCES),$$(info $$(SPACE)$$(SPACE)$$(f)))
+    $$(error Duplicate LWCA sources for module $(1))
+  endif
+  ifneq ($$(words $$($(1)_LW_FATBIN_FILES)),$$(words $$(sort $$($(1)_LW_FATBIN_FILES))))
+    $$(foreach f,$$($(1)_LW_FATBIN_FILES),$$(info $$(SPACE)$$(SPACE)$$(f)))
+    $$(error Duplicate FATBIN files for module $(1))
+  endif
+  ifneq ($$(words $$($(1)_ALL_OBJECTS)),$$(words $$(sort $$($(1)_ALL_OBJECTS))))
+    $$(foreach f,$$($(1)_ALL_OBJECTS),$$(info $$(SPACE)$$(SPACE)$$(f)))
+    $$(error Duplicate all objects for module $(1))
+  endif
+
+  # Generate rules to build a module's object files from the module's source files.
+  $$(foreach f,$$(sort $$($(1)_SOURCES)),$$(eval $$(call LW_OBJECT_FROM_SOURCE_RULE,$$(f),$$(call BUILD_OPTIX_OBJECT_LIST,$(1),$$(f)))))
+  ifeq ($$(LW_VERBOSE),1)
+    ifneq ($$($(1)_SOURCES),)
+      $$(info $(1) Object list $$(foreach f,$$(sort $$($(1)_SOURCES)),$$(call BUILD_OPTIX_OBJECT_LIST,$(1),$$(f))))
+    endif
+  endif
+
+  # If a module contains binary files, then establish an order dependency between
+  # the module's objects and generated binary header files.
+  ifneq ($$($(1)_BINARY_LW_PTX_SOURCES),)
+    $$($(1)_ALL_OBJECTS): | $$(foreach f,$$($(1)_BINARY_LW_PTX_SOURCES),$$(call optix_binary_lw_ptx_header,$$(f)))
+  endif
+  ifneq ($$($(1)_BINARY_LW_ENCRYPTED_PTX_SOURCES),)
+    $$($(1)_ALL_OBJECTS): | $$(foreach f,$$($(1)_BINARY_LW_ENCRYPTED_PTX_SOURCES),$$(call optix_binary_lw_ptx_header,$$(f)))
+  endif
+  ifneq ($$($(1)_BINARY_FILES),)
+    $$($(1)_ALL_OBJECTS): | $$(foreach f,$$($(1)_BINARY_FILES),$$(call optix_binary_header,$$(f)))
+  endif
+  ifneq ($$($(1)_LW_FATBIN_FILES),)
+    $$($(1)_ALL_OBJECTS): | $$(foreach f,$$($(1)_LW_FATBIN_FILES),$$(call optix_binary_fatbin_header,$$(f)))
+  endif
+
+  # The "private" keyword prevents this module's variables from being applied
+  # to its prequisites. This keeps us from polluting the rest of the build with
+  # include directories and flags that should only be applied to this module.
+  $$($(1)_ALL_OBJECTS): private CFLAGS += $$(OPTIX_CFLAGS) $$($(1)_CFLAGS)
+  $$($(1)_ALL_OBJECTS): private LW_DEFINES += $$(OPTIX_DEFINES) $$($(1)_DEFINES)
+  $$($(1)_ALL_OBJECTS): private LW_INCLUDES += $$(OPTIX_INCLUDES) $$($(1)_INCLUDES)
+
+  # All objects depend on the makefile that called optix_module and Module.lwmk
+  $$($(1)_ALL_OBJECTS): $$($(1)_MAKEFILE) $$(LW_OPTIX)/make/Module.lwmk
+
+  # Module might depend on generated LWVM headers.
+  ifeq ($$($(1)_NEEDS_LWVM_HEADERS),1)
+    $$($(1)_ALL_OBJECTS): | lwvm-build
+  endif
+
+  # A phony target that lets you build only the objects for a particular module.
+  .PHONY: optix-$(1)
+  optix-$(1): $$($(1)_ALL_OBJECTS)
+
+  # A phony target that lets you remove all the built objects for a module.
+  .PHONY: optix-clean-$(1)
+  optix-clean-$(1):
+	$$(RM) $$($(1)_ALL_OBJECTS)
+
+  optix-module-clean: optix-clean-$(1)
+endef
+
+optix_module = $(eval $(call optix_module_impl,$(1)))

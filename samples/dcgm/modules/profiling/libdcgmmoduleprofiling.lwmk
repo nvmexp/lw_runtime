@@ -1,0 +1,90 @@
+
+PERFWORKS_SO_NAME := liblwperf_dcgm_host.so
+
+ifeq ($(LW_TARGET_ARCH),ppc64le)
+  PERFWORKS_SO_FULL_NAME := $(DCGM_DIR)/PerfWorks/lib/ppc64le/$(PERFWORKS_SO_NAME)
+else
+  PERFWORKS_SO_FULL_NAME := $(DCGM_DIR)/PerfWorks/lib/x64/$(PERFWORKS_SO_NAME)
+endif
+
+PERFWORKS_SO_TARGET := $(OUTPUTDIR)/$(PERFWORKS_SO_NAME)
+
+#Copy the perfworks library to the output folder
+$(PERFWORKS_SO_TARGET):
+	@$(COPY) $(PERFWORKS_SO_FULL_NAME) $(PERFWORKS_SO_TARGET)
+
+build: $(PERFWORKS_SO_TARGET)
+
+
+##############################################################################
+# define LOCAL_SOURCES
+##############################################################################
+
+
+LW_CXX_EXCEPTIONS := 0
+LW_CXX_RTTI := 0
+
+LWRRENT_DIR := $(LW_SOURCE)/apps/dcgm/modules/profiling
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += DcgmLopConfig.cpp
+LOCAL_SOURCES += DcgmLopGpu.cpp
+LOCAL_SOURCES += DcgmModuleProfiling.cpp
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/common/protobuf
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/protobuf-2.6.0/include/
+LOCAL_INCLUDES += $(DCGM_DIR)/common
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/src/
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/
+LOCAL_INCLUDES += $(DCGM_DIR)/common/transport
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/profiling
+LOCAL_INCLUDES += $(DCGM_DIR)/PerfWorks/include
+LOCAL_INCLUDES += $(DCGM_DIR)/PerfWorks/include/linux-desktop-x64
+#We should probably get rid of the below eventually
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/libevent-2.0.22-stable/include/
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/libevent-2.0.22-stable/include/event2/
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(LWML_DIR)
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_CFLAGS += -fPIC
+endif
+
+DCGMPROFILING_SHARED_LIBRARY_NAME:=libdcgmmoduleprofiling.so
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+    
+LOCAL_LDFLAGS += -rdynamic
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS) -lstdc++ -ldcgm -lgcc_s 
+
+dcgmmoduleprofiling_TARGET  := $(OUTPUTDIR)/$(DCGMPROFILING_SHARED_LIBRARY_NAME)
+dcgmmoduleprofiling_SONAME  := $(DCGMPROFILING_SHARED_LIBRARY_NAME)
+dcgmmoduleprofiling_OBJECTS := $(LOCAL_OBJECTS)
+dcgmmoduleprofiling_CFLAGS  := $(LOCAL_CFLAGS)
+dcgmmoduleprofiling_LDFLAGS := $(LOCAL_LDFLAGS)
+dcgmmoduleprofiling_DEPENDS ?= $(dcgm_TARGET)
+
+DCGMMODULEPROFILING_DECODE_DB := $(OUTPUTDIR)/dcgmmoduleprofiling_decode_db.txt
+$(DCGMMODULEPROFILING_DECODE_DB) : $(LOCAL_SOURCES)
+	$(GREP) -n -B 1 -A 4 -e '^\s*PRINT_' -e 'DEBUG_' $^ > $@
+
+build: $(dcgmmoduleprofiling_TARGET)
+dcgmbuildsyncpoint:: $(dcgmmoduleprofiling_TARGET)
+$(eval $(call MAKE_SHARED_LIBRARY,dcgmmoduleprofiling))
+build: $(dcgmmoduleprofiling_TARGET).guardwords
+
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

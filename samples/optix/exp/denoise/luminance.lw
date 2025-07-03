@@ -1,0 +1,134 @@
+//
+// Copyright 2020 LWPU Corporation. All rights reserved.
+//
+
+// Autoexposure
+
+#include <lwda_fp16.h>
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+#ifndef IRAY_BUILD
+#include <corelib/system/LwdaDriver.h>
+#include <exp/context/DeviceContext.h>
+#endif
+
+#include "layers_inline.h"
+#include "luminance.h"
+
+namespace optix_exp {
+
+#define BLOCK_SIZE 1024
+#define GRID_SIZE  32
+
+static inline __device__ bool dIntensity( const floatRdAccess& input, int index, float & result )
+{
+    const int x = index % input.image.width;
+    const int y = index / input.image.width;
+
+    float R = __clamp0( input( x, y, 0 ) );
+    float G = __clamp0( input( x, y, 1 ) );
+    float B = __clamp0( input( x, y, 2 ) );
+
+    float intensity = R * 0.212586f + G * 0.715170f + B * 0.072200f;
+    if( intensity > 1e-8f )
+    {
+        result = __logf( intensity );
+        return true;
+    }
+
+    return false;
+}
+
+static __global__ void k_autoexposureInput( const floatRdAccess input, float * sumOut, int * countOut )
+{
+    const int idx   = threadIdx.x;
+    const int index = blockIdx.x * blockDim.x + idx;
+    const int gSize = blockDim.x * gridDim.x;
+
+    __shared__ float result[BLOCK_SIZE];
+
+    float sum = 0;
+    int count = 0;
+    for( int i = index; i < input.image.width * input.image.height; i += gSize )
+    {
+        float intensity;
+        if( dIntensity( input, i, intensity ) )
+            sum += intensity;
+        else
+            count++;
+    }
+    result[idx] = sum;
+    if( count )
+        atomicAdd( countOut, count );
+    __syncthreads();
+
+    for( int size = blockDim.x/2; size > 0; size /= 2 )
+    {
+        if( idx < size )
+            result[idx] += result[idx + size];
+        __syncthreads();
+    }
+    if( idx == 0 )
+        sumOut[blockIdx.x] = result[0];
+}
+
+static __global__ void k_reduceBlocks( float* res, const float* sumOut, int inputSize, int totalInputSize )
+{
+    const int idx = threadIdx.x;
+
+    __shared__ float result[BLOCK_SIZE];
+
+    result[idx] = idx < inputSize ? sumOut[idx] : 0;
+
+    __syncthreads();
+
+    for (int size = blockDim.x/2; size > 0; size /= 2)
+    {
+        if( idx < size )
+            result[idx] += result[idx + size];
+        __syncthreads();
+    }
+    if( idx == 0 )
+    {
+        int counter = totalInputSize - *(int*)res;      // res holds the number of nonzero pixels from autoexposure
+        float scale = counter == 0 ? 1.f : 0.18f / __expf( result[0] / counter );
+        float d = __powf( 10.f, 6 - ceilf( __log10f( scale ) ) );
+        *res = roundf( scale * d ) / d;
+    }
+}
+
+OptixResult denoiseAutoexposure( const OptixImage2D* input, float* scale, void* scratch, size_t scratchSize, lwdaStream_t streamId, ErrorDetails& errDetails )
+{
+    const unsigned int dim = input->width * input->height;
+    if( dim == 0 )
+        return OPTIX_SUCCESS;
+    
+    size_t minScratchSize = sizeof( float );
+    if( scratchSize < minScratchSize )
+        return errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE, corelib::stringf( "not enough scratch memory, need "
+                                                                                   "at least %llu bytes",
+                                                                                   static_cast<unsigned long long>( minScratchSize ) ) );
+    int gridSize = GRID_SIZE;
+    size_t memReq = gridSize * sizeof( float );
+
+    if( scratchSize < memReq )
+        gridSize = scratchSize / sizeof(float);
+
+    // set nonzero-pixel counter to zero
+    if( const LWresult lwret = corelib::lwdaDriver().LwMemsetD8Async( (LWdeviceptr)scale, 0, sizeof( int ), streamId ) )
+        return errDetails.logDetails( lwret, "initialization of scratch buffer for autoexposure failed" );
+ 
+    k_autoexposureInput<<<gridSize, BLOCK_SIZE, 0, streamId>>>( floatRdAccess(*input), (float*)scratch, (int*)scale );
+    k_reduceBlocks<<<1, BLOCK_SIZE, 0, streamId>>>( scale, (float*)scratch, gridSize, dim );
+
+    return OPTIX_SUCCESS;
+}
+
+OptixResult denoiseAutoexposureComputeMemoryResources( size_t& sizeInBytes, ErrorDetails& errDetails )
+{
+    sizeInBytes = GRID_SIZE * sizeof( float );
+    return OPTIX_SUCCESS;
+}
+
+};  // namespace optix_exp

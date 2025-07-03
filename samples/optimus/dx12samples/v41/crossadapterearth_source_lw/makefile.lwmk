@@ -1,0 +1,134 @@
+
+#
+# only build in winnext
+#
+LW_TARGET_OS := winnext
+LW_AUTO_DEPEND := 0
+LW_GEN_COD := 0
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+#
+# validate platform
+#
+ifeq ($(findstring $(LW_TARGET_OS), "winnext"),)
+    $(error This project only support winnext target OS)
+endif
+
+
+TARGET_FILE_NAME := lw_crossAEarthv41
+RES_FILE_NAME    := bumpearth
+
+SOURCES += main.cpp
+
+DX12SDK := ..
+DX12SDK_INCLUDE := $(DX12SDK)
+WIN10SDK := $(LW_TOOLS)\sdk\WinSDK\8.1
+
+RC   := $(WIN10SDK)/bin/x86/rc
+ifeq ($(LW_TARGET_ARCH), x86)
+    CC   := $(LW_TOOLS)/win32/msvc120u2/VC/bin/cl
+    LINK := $(LW_TOOLS)/win32/msvc120u2/VC/bin/link
+    BINOUT := $(DX12SDK)\x86chk
+else
+    CC   := $(LW_TOOLS)/win32/msvc120u2/VC/bin/amd64/cl
+    LINK := $(LW_TOOLS)/win32/msvc120u2/VC/bin/amd64/link
+    BINOUT := $(DX12SDK)\amd64chk
+endif
+
+LW_INCLUDES += $(DX12SDK)
+LW_INCLUDES += $(DX12SDK)\crossadapterearth_source_lwmake
+LW_INCLUDES += $(LW_TOOLS)\win32\msvc120u2\VC\include
+LW_INCLUDES += $(LW_TOOLS)\win32\msvc120u2\VC\atlmfc\include
+LW_INCLUDES += $(WIN10SDK)\include\um
+LW_INCLUDES += $(WIN10SDK)\include\shared
+LW_INCLUDES += $(WIN10SDK)\include\winrt
+
+RCFLAGS += /l 0x0409
+RCFLAGS += /nologo
+RCFLAGS += /D "_MBCS"
+RCFLAGS += /fo $(OUTPUTDIR)/$(RES_FILE_NAME).res
+
+#
+# Use LW_DEFINES
+#
+LW_DEFINES += WIN32
+LW_DEFINES += _DEBUG
+LW_DEFINES += _WINDOWS
+LW_DEFINES += _MBCS
+
+CFLAGS += -sdl
+CFLAGS += -GS
+#CFLAGS += -analyze-
+CFLAGS += -W3
+CFLAGS += -Zc:wchar_t
+CFLAGS += -Zi
+CFLAGS += -Gm
+CFLAGS += -Od
+CFLAGS += -Fd"$(OUTPUTDIR)\$(TARGET_FILE_NAME).pdb"
+CFLAGS += -fp:precise
+CFLAGS += -errorReport:prompt
+CFLAGS += -WX-
+CFLAGS += -Zc:forScope
+#CFLAGS += -Oy-
+CFLAGS += -MDd
+CFLAGS += -TP
+CFLAGS += -EHsc
+CFLAGS += -nologo
+CFLAGS += -Fo"$(OUTPUTDIR)\\"
+CFLAGS += -RTC1
+CFLAGS += -Gd
+#CFLAGS += -Fp"$(OUTPUTDIR)\$(TARGET_FILE_NAME).pch" 
+#CFLAGS += $(addprefix -D,$(LW_DEFINES))
+#CFLAGS += $(addprefix -I,$(LW_INCLUDES))
+CFLAGS += -c
+
+OBJECTS := $(call BUILD_OBJECT_LIST, $(SOURCES))
+
+LFLAGS += /DYNAMICBASE
+LFLAGS += "d3d12.lib" "DXGI.lib" "winmm.lib" "kernel32.lib" "user32.lib" "gdi32.lib" "winspool.lib" "comdlg32.lib" "advapi32.lib" "shell32.lib" "ole32.lib" "oleaut32.lib" "uuid.lib" "odbc32.lib" "odbccp32.lib"
+LFLAGS += /INCREMENTAL
+LFLAGS += /DEBUG
+LFLAGS += /PDB:$(OUTPUTDIR)\$(TARGET_FILE_NAME).pdb
+LFLAGS += /OUT:$(OUTPUTDIR)\$(TARGET_FILE_NAME).exe
+LFLAGS += /ERRORREPORT:PROMPT
+LFLAGS += /TLBID:1
+LFLAGS += /NXCOMPAT
+LFLAGS += /IMPLIB:$(OUTPUTDIR)\$(TARGET_FILE_NAME).lib
+
+ifeq ($(LW_TARGET_ARCH), x86)
+    LFLAGS += -libpath:$(DX12SDK)\x86chk
+    LFLAGS += -libpath:$(WIN10SDK)\lib\wilw6.3\um\x86
+    LFLAGS += -libpath:$(LW_TOOLS)\win32\msvc120u2\VC\lib
+    LFLAGS += -libpath:$(LW_TOOLS)\win32\msvc120u2\VC\atlmfc\lib
+    LFLAGS += /MACHINE:X86
+else
+    LFLAGS += -libpath:$(DX12SDK)\amd64chk
+    LFLAGS += -libpath:$(WIN10SDK)\lib\wilw6.3\um\x64
+    LFLAGS += -libpath:$(LW_TOOLS)\win32\msvc120u2\VC\lib\amd64
+    LFLAGS += -libpath:$(LW_TOOLS)\win32\msvc120u2\VC\atlmfc\lib\amd64
+    LFLAGS += /MACHINE:X64
+endif
+
+#
+# MAKE rules
+#
+build: $(OUTPUTDIR)/$(TARGET_FILE_NAME).exe
+
+$(OUTPUTDIR)/$(TARGET_FILE_NAME).exe: $(OUTPUTDIR)/$(RES_FILE_NAME).res $(OBJECTS)
+	@$(ECHO)      Linking $@
+	@$(FILEECHO)  $(OUTPUTDIR)/linkParameters.txt $(OUTPUTDIR)/$(RES_FILE_NAME).res $(OBJECTS) $(strip $(LFLAGS))
+	$(LINK)      @$(OUTPUTDIR)/linkParameters.txt
+	@$(ECHO)      Copying to $(shell $(FULLPATH) $(BINOUT)/$(TARGET_FILE_NAME).exe)
+	$(COPY)      $(OUTPUTDIR)/$(TARGET_FILE_NAME).exe  $(BINOUT)/$(TARGET_FILE_NAME).exe
+	@$(ECHO)      Copying to $(shell $(FULLPATH) $(BINOUT)/$(TARGET_FILE_NAME).pdb)
+	$(COPY)      $(OUTPUTDIR)/$(TARGET_FILE_NAME).pdb  $(BINOUT)/$(TARGET_FILE_NAME).pdb
+
+$(RES_FILE_NAME).res: $(RES_FILE_NAME).rc
+	@$(ECHO)      Resource compiling: [$(shell $(FULLPATH) $<)]
+	$(RC)         $(strip $(RCFLAGS)) $(shell $(FULLPATH) $<)
+
+
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

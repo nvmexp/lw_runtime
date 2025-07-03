@@ -1,0 +1,68 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+Corelib_NEEDS_LWVM_HEADERS = 1
+
+# drivers/rtcore:                       <corelib> headers
+# drivers/gpgpu/lwca/inc:               LWCA API headers
+# drivers/compiler/lwvm/common/include  LWVM API headers
+# LWVM_LW_SDK_INCLUDES:                 lwtypes.h
+# drivers/common/inc                    lwSelwreLoadLibrary.c includes lwSelwreLoadLibrary.h without path so we have to add this directory
+# drivers                               to include common/inc/lwSelwreLoadLibrary.h
+#
+Corelib_DEFINES += $(OPTIX_DEFINES)
+
+Corelib_INCLUDES = \
+  $(LW_SOURCE)/drivers \
+  $(LW_SOURCE)/drivers/common/inc \
+  $(LW_SOURCE)/drivers/rtcore \
+  $(LW_SOURCE)/drivers/gpgpu/lwca/inc \
+  $(LW_SOURCE)/drivers/compiler/lwvm/common/include \
+  $(LWVM_LW_SDK_INCLUDES)
+
+Corelib_SOURCES := \
+  $(LWVM_ASSERT_HANDLER) \
+  $(addprefix $(LW_SOURCE)/drivers/rtcore/corelib/, \
+    compiler/ControlDependenceGraph.cpp \
+    compiler/ColwertPointerMathToGEP.cpp \
+    compiler/LiveValues.cpp \
+    compiler/LLVMUtil.cpp \
+    compiler/LocalMemorySpaceOpt.cpp \
+    compiler/PeepholePass.cpp \
+    compiler/Reaches.cpp \
+    misc/String.cpp \
+    misc/ProfileDump.cpp \
+    misc/lwStringClass_link.cpp \
+    system/LwdaDriver.cpp \
+    system/ExelwtableModule.cpp \
+    system/PtxCompilerUtils.cpp \
+    system/System.cpp \
+    system/SystemError.cpp \
+    system/Timer.cpp \
+  )
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+  Corelib_SOURCES += $(LW_OPTIX)/support/lwselwreloadlibrary/wrapLwSelwreLoadLibrary.c
+endif
+
+$(call create_static_library,Corelib)

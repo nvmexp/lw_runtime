@@ -1,0 +1,87 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:output method="xml" encoding="UTF-8" omit-xml-declaration="yes"/>
+  
+  <xsl:template match="/eventDefinition">
+//
+// Copyright (c) 2017, LWPU CORPORATION.  All rights reserved.
+//
+// LWPU CORPORATION and its licensors retain all intellectual property
+// and proprietary rights in and to this software, related documentation
+// and any modifications thereto.  Any use, reproduction, disclosure or
+// distribution of this software and related documentation without an express
+// license agreement from LWPU CORPORATION is strictly prohibited.
+//
+
+#pragma once
+
+#include <xsl:text disable-output-escaping="yes">&lt;</xsl:text>windows.h<xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+#include <xsl:text disable-output-escaping="yes">&lt;</xsl:text>string<xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+#include <xsl:text disable-output-escaping="yes">&lt;</xsl:text>cstdint<xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+
+namespace LwTelemetry
+{
+  namespace <xsl:value-of select="@clientName"/>
+  {
+    <xsl:apply-templates select="types"/>
+    HRESULT Init();
+    HRESULT DeInit();
+    <xsl:apply-templates select="events"/>
+  }
+}
+</xsl:template>
+
+<xsl:template match="events">
+  <xsl:for-each select="event">
+    HRESULT Send_<xsl:value-of select="@name"/>_Event(
+      <xsl:for-each select="parameters/key"><xsl:value-of select="@type"/><xsl:text> </xsl:text><xsl:value-of select="@name"/>,
+      </xsl:for-each>const std::string<xsl:text disable-output-escaping="yes">&amp;</xsl:text> clientVer,
+      const std::string<xsl:text disable-output-escaping="yes">&amp;</xsl:text> userId
+    );
+  </xsl:for-each>
+</xsl:template>
+
+<xsl:template match="types">
+  <xsl:apply-templates select="type"/>
+</xsl:template>
+
+<xsl:template match="type">
+  <xsl:choose>
+    <xsl:when test="enum and @name!='Presentation_TarconID' and @name!='Click_TarconID'">
+    enum class <xsl:value-of select="@name"/> : <xsl:if test="(count(*)>0) and 256>(count(*))">uint8_t</xsl:if>
+                                                <xsl:if test="(count(*)>255) and 65536>(count(*))">uint16_t</xsl:if>
+                                                <xsl:if test="(count(*)>65535)">uint32_t</xsl:if>
+    {
+      <xsl:for-each select="enum">
+      <xsl:value-of select="@name"/><xsl:if test="position()!=last()">,
+      </xsl:if>
+    </xsl:for-each>
+    };
+    </xsl:when>
+    <xsl:when test="@name='Click_TarconID' or @name='Presentation_TarconID'">
+    typedef const std::string<xsl:text disable-output-escaping="yes">&amp; </xsl:text><xsl:value-of select="@name"/>;
+    </xsl:when>
+    <xsl:otherwise>
+    typedef <xsl:call-template name="NativeType"/><xsl:value-of select="@name"/>;
+    </xsl:otherwise>
+  </xsl:choose>
+</xsl:template>
+
+<xsl:template name="NativeType">
+  <xsl:if test="@nativeType = 'userID'">const std::string<xsl:text disable-output-escaping="yes">&amp; </xsl:text></xsl:if>
+  <xsl:if test="@nativeType = 'uint8'">uint8_t </xsl:if>
+  <xsl:if test="@nativeType = 'int8'">int8_t </xsl:if>
+  <xsl:if test="@nativeType = 'uint16'">uint16_t </xsl:if>
+  <xsl:if test="@nativeType = 'int16'">int16_t </xsl:if>
+  <xsl:if test="@nativeType = 'uint32'">uint32_t </xsl:if>
+  <xsl:if test="@nativeType = 'int32'">int32_t </xsl:if>
+  <xsl:if test="@nativeType = 'int64'">int64_t </xsl:if>
+  <xsl:if test="@nativeType = 'string16'">const std::string<xsl:text disable-output-escaping="yes">&amp; </xsl:text></xsl:if>
+  <xsl:if test="@nativeType = 'string32'">const std::string<xsl:text disable-output-escaping="yes">&amp; </xsl:text></xsl:if>
+  <xsl:if test="@nativeType = 'string64'">const std::string<xsl:text disable-output-escaping="yes">&amp; </xsl:text></xsl:if>
+  <xsl:if test="@nativeType = 'string128'">const std::string<xsl:text disable-output-escaping="yes">&amp; </xsl:text></xsl:if>
+  <xsl:if test="@nativeType = 'stringVariableLength'">const std::string<xsl:text disable-output-escaping="yes">&amp; </xsl:text></xsl:if>
+  <xsl:if test="@nativeType = 'float'">float </xsl:if>
+  <xsl:if test="@nativeType = 'double'">double </xsl:if>
+</xsl:template>
+</xsl:stylesheet>

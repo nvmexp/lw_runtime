@@ -1,0 +1,357 @@
+# -*- mode: perl; -*-
+
+# SEC2 Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $sec2Hal = [
+
+    # per-GPU defaults for SEC2 engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+
+        IS_SUPPORTED => [
+            DESCRIPTION   => "Determine if SEC2 is supported on this GPU",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_FALSE,
+
+            _GM107        => [ GM10X_and_later, -GM108, ],
+            _STUB         => [ pre_MAXWELL, GM108, ],
+        ],
+
+        MASTER_RESET  => [
+            DESCRIPTION   => "Resets SEC2",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_OK,
+
+            _GM107        => [ GM10X_thru_GM20X, -GM108, GP100, ],
+            _STUB         => [ All, -GM10X_thru_GM20X, GM108, -GP100, ],
+        ],
+
+        IS_DEBUG_MODE => [
+            DESCRIPTION   => "Check if SEC2 is in DEBUG mode or not",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_FALSE,
+
+            _GM107        => [ GM10X_thru_dVOLTA, -GM108, ],
+            _TU10X        => [ TU10X_and_later, ],
+            _STUB         => [ pre_MAXWELL, GM108, ],
+         ],
+
+        GET_FALCON_CORE_IFACE => [
+            DESCRIPTION     => "Return the falcon core interface",
+            RETURN_TYPE     => "const FLCN_CORE_IFACES *",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => NULL,
+            INTERFACE_TAG   => "sec2GetFalconCoreIFace",  #IFace instead of Iface
+
+            _GM107          => [ GM10X, -GM108, ],
+            _GM200          => [ GM20X, GP100, ],
+            _GP104          => [ GP10x_and_later, -GP100, ],
+            _STUB           => [ pre_MAXWELL, GM108, ],
+        ],
+
+        GET_FALCON_ENGINE_IFACE => [
+            DESCRIPTION    => "Return the falcon engine interface",
+            RETURN_TYPE    => "const FLCN_ENGINE_IFACES *",
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => NULL,
+            INTERFACE_TAG  => "sec2GetFalconEngineIFace",  #IFace instead of Iface
+
+            _GM107         => [ GM10X, -GM108, ],
+            _GM200         => [ GM20X, GP100, ],
+            _GP102         => [ GP10X_and_later, -GP100, ],
+            _STUB          => [ pre_MAXWELL, GM108, ],
+        ],
+
+        GET_FALCON_BASE => [
+            DESCRIPTION    => "Return the Falcon base",
+            RETURN_TYPE    => "LwU32",
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => IS_DEBUG_MODE,
+        ],
+
+        UCODE_NAME => [
+            DESCRIPTION  => "returns ucode file name, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE  => "const char *",
+            ARGUMENTS    => "",
+            STUB_RETURNS => "NULL",
+
+            _STUB        => [ ALL, ], #Not yet used
+        ],
+
+        QUEUE_GET_NUM  => [
+            DESCRIPTION    => "Sec2QueueGetNum, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE    =>  LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP102_and_later, ],
+            _STUB          => [ pre_GP102, ],
+        ],
+
+        QUEUE_READ  => [
+            DESCRIPTION    => "Sec2QueueRead, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE    =>  LwBool,
+            ARGUMENTS      => "LwU32 queueId, PFLCN_QUEUE pQueue",
+            STUB_RETURNS   => LW_FALSE,
+
+            LIKE_INTERFACE => QUEUE_GET_NUM,
+        ],
+
+        IS_DMEM_RANGE_ACCESSIBLE => [
+            DESCRIPTION    => "Check if the DMEM range is accessible",
+            RETURN_TYPE    => "LwBool",
+            ARGUMENTS      => "LwU32 blkLo, LwU32 blkHi",
+            STUB_RETURNS   => LW_TRUE, # All of DMEM is readable in pre-carveouts land
+
+            _GM200         => [ GM20X_and_later, ],
+            _STUB          => [ pre_MAXWELL, GM10X, ],
+        ],
+
+        GET_DMEM_NUM_PRIV_RANGES => [
+            DESCRIPTION    => "Get the number of DMEM priv ranges (carveouts)",
+            RETURN_TYPE    =>  LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => IS_DMEM_RANGE_ACCESSIBLE,
+        ],
+
+        EMEM_GET_SIZE => [
+            DESCRIPTION    => "Get the size of EMEM",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP10X_thru_dVOLTA, -GP100, ],
+            _TU10X         => [ TU10X_and_later, ],
+            _STUB          => [ pre_PASCAL, GP100, ],
+        ],
+
+        EMEM_GET_OFFSET_IN_DMEM_VA_SPACE => [
+            DESCRIPTION    => "Get the offset off EMEM in DMEM VA space",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP10X_and_later, -GP100, ],
+            _STUB          => [ pre_PASCAL, GP100, ],
+        ],
+
+        EMEM_GET_NUM_PORTS => [
+            DESCRIPTION    => "Get the number of EMEM ports",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => EMEM_GET_SIZE,
+        ],
+
+        EMEM_READ => [
+            DESCRIPTION    => "Read the EMEM carveout",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "LwU32 offset, LwU32 length, LwU32 port, LwU32 *pBuf",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => EMEM_GET_OFFSET_IN_DMEM_VA_SPACE,
+        ],
+
+        EMEM_WRITE => [
+            DESCRIPTION    => "Write to the EMEM carveout",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "LwU32 offset, LwU32 val, LwU32 width, LwU32 length, LwU32 port",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => EMEM_GET_OFFSET_IN_DMEM_VA_SPACE,
+        ],
+
+        LOCK_EMEM => [
+            DESCRIPTION    => "Lock EMEM for read or write",
+            RETURN_TYPE    => LW_STATUS,
+            ARGUMENTS      => "LwU32 *pMutexId",
+            STUB_RETURNS   => LW_OK,
+
+            _GP102         => [ PASCAL, -GP100, ],
+            _GV100         => [ VOLTA, ],
+            _STUB          => [ pre_PASCAL, GP100, TURING_and_later, ],
+        ],
+
+        UNLOCK_EMEM => [
+            DESCRIPTION    => "Unlock the EMEM after read/write is done",
+            RETURN_TYPE    => LW_STATUS,
+            ARGUMENTS      => "LwU32 mutexId",
+            STUB_RETURNS   => ERROR,
+
+            LIKE_INTERFACE => LOCK_EMEM,
+        ],
+
+        ACQUIRE_MUTEX_BY_INDEX => [
+            DESCRIPTION    => "Acquire SEC2 mutex by index",
+            RETURN_TYPE    => LW_STATUS,
+            ARGUMENTS      => "LwU32 physMutexId, LwU32 *pOwnerId",
+            STUB_RETURNS   => ERROR,
+
+            LIKE_INTERFACE => LOCK_EMEM,
+        ],
+
+        RELEASE_MUTEX_BY_INDEX => [
+            DESCRIPTION    => "Release SEC2 mutex by index",
+            RETURN_TYPE    => void,
+            ARGUMENTS      => "LwU32 physMutexId, LwU32 ownerId",
+            STUB_RETURNS   => void,
+
+            LIKE_INTERFACE => LOCK_EMEM,
+        ],
+
+        OBJ_BASE_ADDR => [
+            DESCRIPTION   => "Sets the base address of SEC2 falcon",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => void,
+
+            _GM107        => [ GM10X_thru_dVOLTA, -GM108, ],
+            _TU10X        => [ TU10X_and_later, ],
+            _STUB         => [ pre_MAXWELL, GM108, ],
+        ],
+
+        GET_QUEUE_HEAD_SIZE => [
+            DESCRIPTION   => "Returns LW_PSEC_QUEUE_HEAD__SIZE_1 value for corresponding chip",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP102_thru_dVOLTA, ],
+            _TU10X         => [ TU10X_and_later, ],
+            _STUB          => [ pre_GP102, ],
+        ],
+
+        GET_MSGQ_HEAD_SIZE => [
+            DESCRIPTION   => "Returns LW_PSEC_MSGQ_HEAD__SIZE_1 value for corresponding chip",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP102_thru_dVOLTA, ],
+            _TU10X         => [ TU10X_and_later, ],
+            _STUB          => [ pre_GP102, ],
+        ],
+
+        GET_QUEUE_HEAD => [
+            DESCRIPTION   => "Returns LW_PSEC_QUEUE_HEAD value for corresponding chip",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP102_thru_dVOLTA, ],
+            _TU10X         => [ TU10X_and_later, ],
+            _STUB          => [ pre_GP102, ],
+        ],
+
+        GET_QUEUE_TAIL => [
+            DESCRIPTION   => "Returns LW_PSEC_QUEUE_TAIL value for corresponding chip",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP102_thru_dVOLTA, ],
+            _TU10X         => [ TU10X_and_later, ],
+            _STUB          => [ pre_GP102, ],
+        ],
+
+        GET_MSGQ_HEAD => [
+            DESCRIPTION   => "Returns LW_PSEC_MSGQ_HEAD value for corresponding chip",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP102_thru_dVOLTA, ],
+            _TU10X         => [ TU10X_and_later, ],
+            _STUB          => [ pre_GP102, ],
+        ],
+
+        GET_MSGQ_TAIL => [
+            DESCRIPTION   => "Returns LW_PSEC_MSGQ_TAIL value for corresponding chip",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP102_thru_dVOLTA, ],
+            _TU10X         => [ TU10X_and_later, ],
+            _STUB          => [ pre_GP102, ],
+        ],
+
+        GET_EMEMC_SIZE => [
+            DESCRIPTION   => "Returns LW_PSEC_EMEMC__SIZE_1 value for corresponding chip",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP102_thru_dVOLTA, ],
+            _TU10X         => [ TU10X_and_later, ],
+            _STUB          => [ pre_GP102, ],
+        ],
+
+        GET_EMEMC => [
+            DESCRIPTION   => "Returns LW_PSEC_EMEMC value for corresponding chip",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP102_thru_dVOLTA, ],
+            _TU10X         => [ TU10X_and_later, ],
+            _STUB          => [ pre_GP102, ],
+        ],
+
+        GET_EMEMD => [
+            DESCRIPTION   => "Returns LW_PSEC_EMEMD value for corresponding chip",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP102_thru_dVOLTA, ],
+            _TU10X         => [ TU10X_and_later, ],
+            _STUB          => [ pre_GP102, ],
+        ],
+
+        GET_MUTEX_ID => [
+            DESCRIPTION   => "Returns the physical address of LW_PSEC_MUTEX_ID register",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS   => ZERO,
+
+            _GP102         => [ GP102_thru_dVOLTA, ],
+            _TU10X         => [ TU10X_and_later, ],
+            _STUB          => [ pre_GP102, ],
+        ],
+
+        GET_EMEM_PORT_ID => [
+            DESCRIPTION   => "Returns port ID for EMEM access",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GP102         => [ GP102_thru_dVOLTA, ],
+            _TU10X         => [ TU10X_and_later, ],
+            _STUB          => [ pre_GP102, ],
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $sec2Hal;

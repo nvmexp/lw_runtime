@@ -1,0 +1,69 @@
+#ifndef THC_GENERIC_FILE
+#define THC_GENERIC_FILE "generic/Threshold.lw"
+#else
+
+#include "../common.h"
+
+void THNN_(Threshold_updateOutput)(
+           THCState *state,
+           THCTensor *input,
+           THCTensor *output,
+           accreal threshold_,
+           accreal val_,
+           bool inplace)
+{
+  real threshold = ScalarColwert<accreal, real>::to(threshold_);
+  real val = ScalarColwert<accreal, real>::to(val_);
+  THLWNN_assertSameGPU(state, 2, input, output);
+
+  if (inplace)
+  {
+    THC_pointwiseApply1(state, input,
+      ThresholdUpdateOutputIP<real>(threshold, val)
+    );
+    THCTensor_(set)(state, output, input);
+  }
+  else
+  {
+    THCTensor_(resizeAs)(state, output, input);
+    THC_pointwiseApply2(state, output, input,
+      ThresholdUpdateOutput<real>(threshold, val)
+    );
+  }
+
+  THLwdaCheck(lwdaGetLastError());
+}
+
+void THNN_(Threshold_updateGradInput)(
+           THCState *state,
+           THCTensor *input,
+           THCTensor *gradOutput,
+           THCTensor *gradInput,
+           accreal threshold_,
+           accreal val_,
+           bool inplace)
+{
+  real threshold = ScalarColwert<accreal, real>::to(threshold_);
+  real val = ScalarColwert<accreal, real>::to(val_);
+  THLWNN_check_nElement(state, input, gradOutput);
+  THLWNN_assertSameGPU(state, 3, input, gradInput, gradOutput);
+
+  if (inplace)
+  {
+    THC_pointwiseApply2(state, gradOutput, input,
+      ThresholdUpdateGradInputIP<real>(threshold)
+    );
+    THCTensor_(set)(state, gradInput, gradOutput);
+  }
+  else
+  {
+    THCTensor_(resizeAs)(state, gradInput, input);
+    THC_pointwiseApply3(state, gradInput, input, gradOutput,
+       ThresholdUpdateGradInput<real>(threshold)
+    );
+  }
+
+  THLwdaCheck(lwdaGetLastError());
+}
+
+#endif

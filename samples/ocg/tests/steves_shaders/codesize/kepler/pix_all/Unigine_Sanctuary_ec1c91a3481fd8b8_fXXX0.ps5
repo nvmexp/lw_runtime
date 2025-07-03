@@ -1,0 +1,987 @@
+// BEGIN_SHADER
+//     BEGIN_SECTION SHADER_ID
+//         DIRECTX: 11.0
+//         TYPE: PIXEL 
+//         SHADER_HASH: 0xec1c91a3481fd8b8
+//         FINGERPRINTER_HASH: 0x0000000000000000
+//         UCODE_HASH: 0x4d33dd3021fe70ce
+//         POOL: APP
+//         VERSION: 20
+//         # USES: 1247
+//         # Constant Folding: 1
+//         # Disable 595261: 1
+//         # Reduction Hack: 0
+//         # Tex / Tld vectorized: 0
+//         # Texture Filtering: 0
+//     END_SECTION
+//     BEGIN_SECTION CHIP_ID
+//         CLASS: FERMI
+//         CHIP_ID: GF100
+//         SM_VERSION: SMClassic  // SM 2.0
+//     END_SECTION
+//     BEGIN_SECTION RESOURCES
+//         REGISTER_COUNT: 26
+//         TEXTURE_SLOTS: 15
+//         SAMPLER_SLOTS: 6
+//     END_SECTION
+//     BEGIN_SECTION FERMI_SHADER_HEADER
+//         SPHType: TYPE_02_PS
+//         Version: 3
+//         ShaderType: PIXEL
+//         SassVersion: 1
+//         PROPERTIES:
+//             MRT_ENABLE
+//         IMAP:
+//             POSITION_X
+//             POSITION_Y
+//             POSITION_W
+//             GENERIC01_X          PERSPECTIVE
+//             GENERIC01_Y          PERSPECTIVE
+//             GENERIC02_X          PERSPECTIVE
+//             GENERIC02_Y          PERSPECTIVE
+//             GENERIC02_Z          PERSPECTIVE
+//             GENERIC03_X          PERSPECTIVE
+//             GENERIC03_Y          PERSPECTIVE
+//             GENERIC03_Z          PERSPECTIVE
+//             GENERIC04_X          PERSPECTIVE
+//             GENERIC04_Y          PERSPECTIVE
+//             GENERIC04_Z          PERSPECTIVE
+//             GENERIC04_W          PERSPECTIVE
+//             GENERIC05_X          PERSPECTIVE
+//             GENERIC05_Y          PERSPECTIVE
+//             GENERIC05_Z          PERSPECTIVE
+//             GENERIC05_W          PERSPECTIVE
+//         OMAP:
+//             TARGET00_R
+//             TARGET00_G
+//             TARGET00_B
+//             TARGET00_A
+//     END_SECTION
+//     BEGIN_SECTION APP_SHADER_INFO
+        ps_5_0
+        dcl_globalflags refactoringAllowed
+        dcl_constantbuffer cb0[14].xyzw, immediateIndexed
+        dcl_constantbuffer cb1[16].xyzw, immediateIndexed
+        dcl_constantbuffer cb2[3].xyzw, immediateIndexed
+        dcl_constantbuffer cb3[2].xyzw, immediateIndexed
+        dcl_constantbuffer cb4[1].xyzw, immediateIndexed
+        dcl_sampler s1, mode_default
+        dcl_sampler s2, mode_default
+        dcl_sampler s3, mode_default
+        dcl_sampler s12, mode_default
+        dcl_sampler s13, mode_comparison
+        dcl_sampler s14, mode_default
+        dcl_resource t1, texture2d, (float, float, float, float)
+        dcl_resource t2, texture2d, (float, float, float, float)
+        dcl_resource t3, texture2d, (float, float, float, float)
+        dcl_resource t12, texture2d, (float, float, float, float)
+        dcl_resource t13, texture2d, (float, float, float, float)
+        dcl_resource t14, texture3d, (float, float, float, float)
+        dcl_input_ps_siv v0.xy, position, linear noperspective
+        dcl_input_ps v1.xy, linear
+        dcl_input_ps v2.xyz, linear
+        dcl_input_ps v3.xyz, linear
+        dcl_input_ps v4.xyzw, linear
+        dcl_input_ps v5.xyzw, linear
+        dcl_output o0.xyzw
+        dcl_temps 7 
+        sample (texture2d) (float,float,float,float) r0.xyzw, v1.xyxx, t1.xyzw, s1
+        sample (texture2d) (float,float,float,float) r1.xy, v1.xyxx, t2.xyzw, s2
+        sample (texture2d) (float,float,float,float) r2.xyzw, v1.xyxx, t3.xyzw, s3
+        dp2 r1.w, r1.xyxx, r1.xyxx
+        add r1.w, -r1.w, l(1.00000000)
+        max r1.w, r1.w, l(0.00000000)
+        sqrt r1.z, r1.w
+        dp3 r1.w, v2.xyzx, r1.xyzx
+        mov_sat r3.x, r1.w
+        add r1.w, -|r1.w|, l(1.00000000)
+        add r3.y, -cb3[1].x, l(1.00000000)
+        add r1.w, r1.w, -cb3[1].x
+        div r3.y, l(1.00000000, 1.00000000, 1.00000000, 1.00000000), r3.y
+        mul_sat r1.w, r1.w, r3.y
+        mad r3.y, r1.w, l(-2.00000000), l(3.00000000)
+        mul r1.w, r1.w, r1.w
+        mul r1.w, r1.w, r3.y
+        mad_sat r1.w, r1.w, cb3[1].y, r3.x
+        mul r1.w, r1.w, cb3[0].x
+        dp3 r3.x, v3.xyzx, v3.xyzx
+        rsq r3.x, r3.x
+        dp3 r3.y, v3.xyzx, r1.xyzx
+        mul r3.y, r3.x, r3.y
+        add r3.y, -|r3.y|, l(1.00000000)
+        max r3.y, r3.y, l(0.00000000)
+        log r3.y, r3.y
+        mul r3.y, r3.y, cb2[2].z
+        exp r3.y, r3.y
+        mad_sat r3.y, r3.y, cb2[2].y, cb2[2].x
+        dp3 r3.z, -v2.xyzx, r1.xyzx
+        add r3.z, r3.z, r3.z
+        mad r1.xyz, r1.xyzx, -r3.zzzz, -v2.xyzx
+        dp3 r1.x, r1.xyzx, v3.xyzx
+        mul_sat r1.x, r3.x, r1.x
+        mul r1.y, r2.w, cb3[0].z
+        log r1.x, r1.x
+        mul r1.x, r1.x, r1.y
+        exp r1.x, r1.x
+        mul r1.x, r1.x, cb3[0].y
+        mul r1.x, r3.y, r1.x
+        mul r1.xyz, r1.xxxx, r2.xyzx
+        mad r1.xyz, r0.xyzx, r1.wwww, r1.xyzx
+        mul r2.xyzw, v4.yyyy, cb1[1].xyzw
+        mad r2.xyzw, cb1[0].xyzw, v4.xxxx, r2.xyzw
+        mad r2.xyzw, cb1[2].xyzw, v4.zzzz, r2.xyzw
+        mad r2.xyzw, cb1[3].xyzw, v4.wwww, r2.xyzw
+        div r2.xyz, r2.xyzx, r2.wwww
+        add r3.xy, r2.xyxx, l(-0.25000000, -0.25000000, 0.00000000, 0.00000000)
+        max r1.w, |r3.y|, |r3.x|
+        lt r1.w, r1.w, l(0.23999999)
+        if_nz r1.w
+          mov r1.w, l(0)
+          mov r2.w, v5.x
+        else 
+          mul r3.xyzw, v4.yyyy, cb1[5].xyzw
+          mad r3.xyzw, cb1[4].xyzw, v4.xxxx, r3.xyzw
+          mad r3.xyzw, cb1[6].xyzw, v4.zzzz, r3.xyzw
+          mad r3.xyzw, cb1[7].xyzw, v4.wwww, r3.xyzw
+          div r2.xyz, r3.xyzx, r3.wwww
+          add r3.xy, r2.xyxx, l(-0.75000000, -0.25000000, 0.00000000, 0.00000000)
+          max r3.x, |r3.y|, |r3.x|
+          lt r3.x, r3.x, l(0.23999999)
+          if_nz r3.x
+            mov r1.w, l(0)
+            mov r2.w, v5.y
+          else 
+            mul r3.xyzw, v4.yyyy, cb1[9].xyzw
+            mad r3.xyzw, cb1[8].xyzw, v4.xxxx, r3.xyzw
+            mad r3.xyzw, cb1[10].xyzw, v4.zzzz, r3.xyzw
+            mad r3.xyzw, cb1[11].xyzw, v4.wwww, r3.xyzw
+            div r2.xyz, r3.xyzx, r3.wwww
+            add r3.xy, r2.xyxx, l(-0.25000000, -0.75000000, 0.00000000, 0.00000000)
+            max r3.x, |r3.y|, |r3.x|
+            lt r3.x, r3.x, l(0.23999999)
+            if_nz r3.x
+              mov r1.w, l(0)
+              mov r2.w, v5.z
+            else 
+              mul r3.xyzw, v4.yyyy, cb1[13].xyzw
+              mad r3.xyzw, cb1[12].xyzw, v4.xxxx, r3.xyzw
+              mad r3.xyzw, cb1[14].xyzw, v4.zzzz, r3.xyzw
+              mad r3.xyzw, cb1[15].xyzw, v4.wwww, r3.xyzw
+              div r2.xyz, r3.xyzx, r3.wwww
+              add r3.xy, r2.xyxx, l(-0.75000000, -0.75000000, 0.00000000, 0.00000000)
+              max r3.x, |r3.y|, |r3.x|
+              lt r3.x, r3.x, l(0.23999999)
+              if_nz r3.x
+                mov r1.w, l(0)
+                mov r2.w, v5.w
+              else 
+                mov r1.w, l(0x3f800000)
+                mov r2.w, l(0)
+              endif 
+            endif 
+          endif 
+        endif 
+        eq r3.x, r1.w, l(0.00000000)
+        if_nz r3.x
+          sample_l (texture2d) (float,float,float,float) r3.xyzw, r2.xyxx, t12.xyzw, s12, l(0)
+          mov r4.xy, v0.xyxx
+          mov r4.zw, l(0, 0, 0, 0x3d800000)
+          mul r4.xyz, r4.xyzx, l(0.06250000, 0.06250000, 0.06250000, 0.00000000)
+          add r2.xy, r2.xyxx, -cb0[13].zzzz
+          sample_l (texture3d) (float,float,float,float) r5.xyzw, r4.xyzx, t14.xyzw, s14, l(0)
+          mad r5.xy, r5.xyxx, cb0[13].wwww, r2.xyxx
+          sample_c_lz (texture2d) (float,float,float,float) r5.x, r5.xyxx, t13.xxxx, s13, r2.z
+          add r1.w, r1.w, r5.x
+          mad r5.xy, r5.zwzz, cb0[13].wwww, r2.xyxx
+          sample_c_lz (texture2d) (float,float,float,float) r5.x, r5.xyxx, t13.xxxx, s13, r2.z
+          add r1.w, r1.w, r5.x
+          sample_l (texture3d) (float,float,float,float) r5.xyzw, r4.xywx, t14.xyzw, s14, l(0)
+          mad r5.xy, r5.xyxx, cb0[13].wwww, r2.xyxx
+          sample_c_lz (texture2d) (float,float,float,float) r5.x, r5.xyxx, t13.xxxx, s13, r2.z
+          add r1.w, r1.w, r5.x
+          mad r5.xy, r5.zwzz, cb0[13].wwww, r2.xyxx
+          sample_c_lz (texture2d) (float,float,float,float) r5.x, r5.xyxx, t13.xxxx, s13, r2.z
+          add r1.w, r1.w, r5.x
+          mov r4.zw, l(0, 0, 0x3e000000, 0x3e400000)
+          sample_l (texture3d) (float,float,float,float) r5.xyzw, r4.xyzx, t14.xyzw, s14, l(0)
+          mad r5.xy, r5.xyxx, cb0[13].wwww, r2.xyxx
+          sample_c_lz (texture2d) (float,float,float,float) r5.x, r5.xyxx, t13.xxxx, s13, r2.z
+          add r1.w, r1.w, r5.x
+          mad r5.xy, r5.zwzz, cb0[13].wwww, r2.xyxx
+          sample_c_lz (texture2d) (float,float,float,float) r5.x, r5.xyxx, t13.xxxx, s13, r2.z
+          add r1.w, r1.w, r5.x
+          sample_l (texture3d) (float,float,float,float) r5.xyzw, r4.xywx, t14.xyzw, s14, l(0)
+          mad r5.xy, r5.xyxx, cb0[13].wwww, r2.xyxx
+          sample_c_lz (texture2d) (float,float,float,float) r5.x, r5.xyxx, t13.xxxx, s13, r2.z
+          add r1.w, r1.w, r5.x
+          mad r5.xy, r5.zwzz, cb0[13].wwww, r2.xyxx
+          sample_c_lz (texture2d) (float,float,float,float) r5.x, r5.xyxx, t13.xxxx, s13, r2.z
+          add r1.w, r1.w, r5.x
+          mul r5.x, r1.w, l(0.12500000)
+          mad r5.y, -r1.w, l(0.12500000), l(1.00000000)
+          mul r5.y, r5.y, r5.x
+          ne r5.y, r5.y, l(0.00000000)
+          if_nz r5.y
+            mov r4.zw, l(0, 0, 0x3e800000, 0x3ea00000)
+            sample_l (texture3d) (float,float,float,float) r6.xyzw, r4.xyzx, t14.xyzw, s14, l(0)
+            mad r5.yz, r6.xxyx, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mad r5.yz, r6.zzwz, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            sample_l (texture3d) (float,float,float,float) r6.xyzw, r4.xywx, t14.xyzw, s14, l(0)
+            mad r5.yz, r6.xxyx, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mad r5.yz, r6.zzwz, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mov r4.zw, l(0, 0, 0x3ec00000, 0x3ee00000)
+            sample_l (texture3d) (float,float,float,float) r6.xyzw, r4.xyzx, t14.xyzw, s14, l(0)
+            mad r5.yz, r6.xxyx, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mad r5.yz, r6.zzwz, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            sample_l (texture3d) (float,float,float,float) r6.xyzw, r4.xywx, t14.xyzw, s14, l(0)
+            mad r5.yz, r6.xxyx, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mad r5.yz, r6.zzwz, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mov r4.zw, l(0, 0, 0x3f000000, 0x3f100000)
+            sample_l (texture3d) (float,float,float,float) r6.xyzw, r4.xyzx, t14.xyzw, s14, l(0)
+            mad r5.yz, r6.xxyx, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mad r5.yz, r6.zzwz, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            sample_l (texture3d) (float,float,float,float) r6.xyzw, r4.xywx, t14.xyzw, s14, l(0)
+            mad r5.yz, r6.xxyx, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mad r5.yz, r6.zzwz, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mov r4.zw, l(0, 0, 0x3f200000, 0x3f300000)
+            sample_l (texture3d) (float,float,float,float) r6.xyzw, r4.xyzx, t14.xyzw, s14, l(0)
+            mad r5.yz, r6.xxyx, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mad r5.yz, r6.zzwz, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            sample_l (texture3d) (float,float,float,float) r6.xyzw, r4.xywx, t14.xyzw, s14, l(0)
+            mad r5.yz, r6.xxyx, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mad r5.yz, r6.zzwz, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mov r4.zw, l(0, 0, 0x3f400000, 0x3f500000)
+            sample_l (texture3d) (float,float,float,float) r6.xyzw, r4.xyzx, t14.xyzw, s14, l(0)
+            mad r5.yz, r6.xxyx, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mad r5.yz, r6.zzwz, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            sample_l (texture3d) (float,float,float,float) r6.xyzw, r4.xywx, t14.xyzw, s14, l(0)
+            mad r5.yz, r6.xxyx, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mad r5.yz, r6.zzwz, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r5.y, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r5.y
+            mov r4.zw, l(0, 0, 0x3f600000, 0x3f700000)
+            sample_l (texture3d) (float,float,float,float) r6.xyzw, r4.xyzx, t14.xyzw, s14, l(0)
+            mad r5.yz, r6.xxyx, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r4.z, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r4.z
+            mad r5.yz, r6.zzwz, cb0[13].wwww, r2.xxyx
+            sample_c_lz (texture2d) (float,float,float,float) r4.z, r5.yzyy, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r4.z
+            sample_l (texture3d) (float,float,float,float) r4.xyzw, r4.xywx, t14.xyzw, s14, l(0)
+            mad r4.xy, r4.xyxx, cb0[13].wwww, r2.xyxx
+            sample_c_lz (texture2d) (float,float,float,float) r4.x, r4.xyxx, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r4.x
+            mad r2.xy, r4.zwzz, cb0[13].wwww, r2.xyxx
+            sample_c_lz (texture2d) (float,float,float,float) r2.x, r2.xyxx, t13.xxxx, s13, r2.z
+            add r1.w, r1.w, r2.x
+            mul r5.x, r1.w, l(0.03125000)
+          endif 
+          add_sat r1.w, r5.x, cb0[13].y
+          mul r2.xyz, r1.wwww, r1.xyzx
+          lt r1.w, l(0.00000000), r5.x
+          lt r2.w, r3.w, r2.w
+          and r1.w, r1.w, r2.w
+          add_sat r3.xyz, r3.xyzx, cb0[13].yyyy
+          mul r3.xyz, r2.xyzx, r3.xyzx
+          movc r1.xyz, r1.wwww, r3.xyzx, r2.xyzx
+        endif 
+        mul r0.xyz, r1.xyzx, cb0[2].xyzx
+        mul o0.xyzw, r0.xyzw, cb4[0].xyzw
+        ret 
+//     END_SECTION
+//     BEGIN_SECTION COP_CONSTANTS
+//         COP_CONST[0]: 0xb9f378e6 // -0.000464
+//         COP_CONST[1]: 0xba938766 // -0.001126
+//         COP_CONST[2]: 0xba521ffc // -0.000802
+//         COP_CONST[3]: 0x3aa64ce6 // 0.001269
+//         COP_CONST[4]: 0x3b525aa3 // 0.003210
+//         COP_CONST[5]: 0xb93ec836 // -0.000182
+//         COP_CONST[6]: 0x3f0d9feb // 0.553221
+//         COP_CONST[7]: 0x3ee4fffe // 0.447266
+//         COP_CONST[8]: 0x3f1affff // 0.605469
+//         COP_CONST[9]: 0x3e75c28f // 0.240000
+//         COP_CONST[10]: 0xb99d2635 // -0.000300
+//         COP_CONST[11]: 0xb95fd3c2 // -0.000213
+//         COP_CONST[12]: 0x39b12513 // 0.000338
+//         COP_CONST[13]: 0x3a60123c // 0.000855
+//         COP_CONST[14]: 0x3f036f49 // 0.513417
+//         COP_CONST[15]: 0x3f800000 // 1.000000
+//     END_SECTION
+//     BEGIN_SECTION USER_CONSTANTS
+//         USER_CONST: c[0][8] = 0x401ba900 // 2.432190
+//         USER_CONST: c[0][9] = 0x3fcd1af5 // 1.602385
+//         USER_CONST: c[0][10] = 0x3f9b0cb6 // 1.211325
+//         USER_CONST: c[0][53] = 0x00000000 // 0.000000
+//         USER_CONST: c[0][54] = 0x3a800000 // 0.000977
+//         USER_CONST: c[0][55] = 0x3b000000 // 0.001953
+//         USER_CONST: c[1][0] = 0xba521ffc // -0.000802
+//         USER_CONST: c[1][1] = 0xba938766 // -0.001126
+//         USER_CONST: c[1][2] = 0xb9f378e6 // -0.000464
+//         USER_CONST: c[1][3] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][4] = 0x3b5dfdae // 0.003387
+//         USER_CONST: c[1][5] = 0xbac07e5c // -0.001469
+//         USER_CONST: c[1][6] = 0xb82f130b // -0.000042
+//         USER_CONST: c[1][7] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][8] = 0x3aa64ce6 // 0.001269
+//         USER_CONST: c[1][9] = 0x3b525aa3 // 0.003210
+//         USER_CONST: c[1][10] = 0xb93ec836 // -0.000182
+//         USER_CONST: c[1][11] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][12] = 0x3f1affff // 0.605469
+//         USER_CONST: c[1][13] = 0x3ee4fffe // 0.447266
+//         USER_CONST: c[1][14] = 0x3f0d9feb // 0.553221
+//         USER_CONST: c[1][15] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][16] = 0xb95fd3c2 // -0.000213
+//         USER_CONST: c[1][17] = 0xb99d2635 // -0.000300
+//         USER_CONST: c[1][18] = 0xb9f378e6 // -0.000464
+//         USER_CONST: c[1][19] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][20] = 0x3a6c778a // 0.000902
+//         USER_CONST: c[1][21] = 0xb9cd0bcd // -0.000391
+//         USER_CONST: c[1][22] = 0xb82f130b // -0.000042
+//         USER_CONST: c[1][23] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][24] = 0x39b12513 // 0.000338
+//         USER_CONST: c[1][25] = 0x3a60123c // 0.000855
+//         USER_CONST: c[1][26] = 0xb93ec836 // -0.000182
+//         USER_CONST: c[1][27] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][28] = 0x3f534000 // 0.825195
+//         USER_CONST: c[1][29] = 0x3e8d0000 // 0.275391
+//         USER_CONST: c[1][30] = 0x3f036f49 // 0.513417
+//         USER_CONST: c[1][31] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][32] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][33] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][34] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][35] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][36] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][37] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][38] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][39] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][40] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][41] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][42] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][43] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][44] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][45] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][46] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][47] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][48] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][49] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][50] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][51] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][52] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][53] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][54] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][55] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][56] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][57] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][58] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][59] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][60] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][61] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][62] = 0x00000000 // 0.000000
+//         USER_CONST: c[1][63] = 0x3f800000 // 1.000000
+//         USER_CONST: c[3][0] = 0x3f800000 // 1.000000
+//         USER_CONST: c[4][3] = 0x3f800000 // 1.000000
+//     END_SECTION
+//     # Exelwtion Time: 19.778ms [0.921 percent]
+//     BEGIN_SECTION USER_CONSTANT_HISTOGRAM_INFO
+//                 ~c[0][8] = 100.00%@2.43218994
+//                 ~c[0][9] = 100.00%@1.60238516
+//                 ~c[0][10] = 100.00%@1.21132541
+//                 ~c[0][53] = 100.00%@0.00000000
+//                 ~c[0][54] = 100.00%@0.00097656
+//                 ~c[0][55] = 100.00%@0.00195313
+//                 ~c[1][0] = 100.00%@-0.00080156
+//                 ~c[1][1] = 100.00%@-0.00112556
+//                 ~c[1][2] = 100.00%@-0.00046439
+//                 ~c[1][3] = 100.00%@0.00000000
+//                 ~c[1][4] = 100.00%@0.00338731
+//                 ~c[1][5] = 100.00%@-0.00146861
+//                 ~c[1][6] = 100.00%@-0.00004174
+//                 ~c[1][7] = 100.00%@0.00000000
+//                 ~c[1][8] = 100.00%@0.00126877
+//                 ~c[1][9] = 100.00%@0.00320975
+//                 ~c[1][10] = 100.00%@-0.00018194
+//                 ~c[1][11] = 100.00%@0.00000000
+//                 ~c[1][12] = 100.00%@0.60546869
+//                 ~c[1][13] = 100.00%@0.44726557
+//                 ~c[1][14] = 100.00%@0.55322140
+//                 ~c[1][15] = 100.00%@1.00000000
+//                 ~c[1][16] = 100.00%@-0.00021346
+//                 ~c[1][17] = 100.00%@-0.00029974
+//                 ~c[1][18] = 100.00%@-0.00046439
+//                 ~c[1][19] = 100.00%@0.00000000
+//                 ~c[1][20] = 100.00%@0.00090205
+//                 ~c[1][21] = 100.00%@-0.00039109
+//                 ~c[1][22] = 100.00%@-0.00004174
+//                 ~c[1][23] = 100.00%@0.00000000
+//                 ~c[1][24] = 100.00%@0.00033788
+//                 ~c[1][25] = 100.00%@0.00085476
+//                 ~c[1][26] = 100.00%@-0.00018194
+//                 ~c[1][27] = 100.00%@0.00000000
+//                 ~c[1][28] = 100.00%@0.82519531
+//                 ~c[1][29] = 100.00%@0.27539063
+//                 ~c[1][30] = 100.00%@0.51341683
+//                 ~c[1][31] = 100.00%@1.00000000
+//                 ~c[1][32] = 100.00%@1.00000000
+//                 ~c[1][33] = 100.00%@0.00000000
+//                 ~c[1][34] = 100.00%@0.00000000
+//                 ~c[1][35] = 100.00%@0.00000000
+//                 ~c[1][36] = 100.00%@0.00000000
+//                 ~c[1][37] = 100.00%@1.00000000
+//                 ~c[1][38] = 100.00%@0.00000000
+//                 ~c[1][39] = 100.00%@0.00000000
+//                 ~c[1][40] = 100.00%@0.00000000
+//                 ~c[1][41] = 100.00%@0.00000000
+//                 ~c[1][42] = 100.00%@1.00000000
+//                 ~c[1][43] = 100.00%@0.00000000
+//                 ~c[1][44] = 100.00%@0.00000000
+//                 ~c[1][45] = 100.00%@0.00000000
+//                 ~c[1][46] = 100.00%@0.00000000
+//                 ~c[1][47] = 100.00%@1.00000000
+//                 ~c[1][48] = 100.00%@1.00000000
+//                 ~c[1][49] = 100.00%@0.00000000
+//                 ~c[1][50] = 100.00%@0.00000000
+//                 ~c[1][51] = 100.00%@0.00000000
+//                 ~c[1][52] = 100.00%@0.00000000
+//                 ~c[1][53] = 100.00%@1.00000000
+//                 ~c[1][54] = 100.00%@0.00000000
+//                 ~c[1][55] = 100.00%@0.00000000
+//                 ~c[1][56] = 100.00%@0.00000000
+//                 ~c[1][57] = 100.00%@0.00000000
+//                 ~c[1][58] = 100.00%@1.00000000
+//                 ~c[1][59] = 100.00%@0.00000000
+//                 ~c[1][60] = 100.00%@0.00000000
+//                 ~c[1][61] = 100.00%@0.00000000
+//                 ~c[1][62] = 100.00%@0.00000000
+//                 ~c[1][63] = 100.00%@1.00000000
+//                  c[2][8] = 91.73%@0.25000000 8.27%@0.10000000
+//                  c[2][9] = 91.73%@0.75000000 8.27%@0.89999998
+//                  c[2][10] = 91.73%@1.79999995 8.27%@2.29999995
+//                 ~c[3][0] = 100.00%@1.00000000
+//                  c[3][1] = 91.73%@0.80000001 8.27%@2.40000010
+//                  c[3][2] = 91.73%@60.00000000 8.27%@3.50000000
+//                  c[3][4] = 100.00%@0.69999999
+//                  c[3][5] = 100.00%@0.15000001
+//                  c[4][0] = 100.00%@1.00000000
+//                  c[4][1] = 100.00%@1.00000000
+//                  c[4][2] = 100.00%@1.00000000
+//                 ~c[4][3] = 100.00%@1.00000000
+//     END_SECTION
+//     BEGIN_SECTION TEXTURE_STATE_HISTOGRAM_INFO
+//         TEXTURE_SLOT 0x0
+//         100.00% width=0x780, height=0x4b0, mips=0x1, DXGI_FORMAT_R16G16B16A16_FLOAT
+//         TEXTURE_SLOT 0x1
+//         100.00% width=0x200, height=0x200, mips=0x1, DXGI_FORMAT_R8G8B8A8_UNORM
+//         TEXTURE_SLOT 0x2
+//         100.00% width=0x200, height=0x200, mips=0xa, DXGI_FORMAT_BC5_SNORM
+//         TEXTURE_SLOT 0x3
+//         100.00% width=0x200, height=0x200, mips=0xa, DXGI_FORMAT_BC1_UNORM
+//         TEXTURE_SLOT 0x4
+//         100.00% width=0x20, height=0x20, mips=0x1, DXGI_FORMAT_R8G8B8A8_UNORM
+//         TEXTURE_SLOT 0x5
+//         100.00% width=0x400, height=0x400, mips=0xb, DXGI_FORMAT_BC4_UNORM
+//         TEXTURE_SLOT 0x6
+//         100.00% width=0x4, height=0x4, mips=0x1, DXGI_FORMAT_R8G8B8A8_UNORM
+//         TEXTURE_SLOT 0x7
+//         100.00% width=0x800, height=0x800, mips=0x1, DXGI_FORMAT_R16G16B16A16_FLOAT
+//         TEXTURE_SLOT 0x8
+//         100.00% width=0x800, height=0x800, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         TEXTURE_SLOT 0x9
+//         100.00% width=0x10, height=0x10, mips=0x1, DXGI_FORMAT_R8G8B8A8_UNORM
+//         TEXTURE_SLOT 0xa
+//         100.00% width=0x80, height=0x80, mips=0x1, DXGI_FORMAT_R16G16B16A16_UNORM
+//         TEXTURE_SLOT 0xb
+//         TEXTURE_SLOT 0xc
+//         TEXTURE_SLOT 0xd
+//         TEXTURE_SLOT 0xe
+//     END_SECTION
+//     BEGIN_SECTION SAMPLER_STATE_INFO
+//         SAMPLER_SLOT 0x0
+//         100.00%  min=Linear, mag=Linear, mip=Point aniso=1, minLOD=0.000000, maxLOD=0.000000
+//         addressU=CLAMP, addressV=CLAMP, addressW=CLAMP
+//         SAMPLER_SLOT 0x1
+//         100.00%  min=Linear, mag=Linear, mip=Point aniso=1, minLOD=0.000000, maxLOD=0.000000
+//         addressU=WRAP, addressV=WRAP, addressW=WRAP
+//         SAMPLER_SLOT 0x2
+//         100.00%  min=Anisotropic, mag=Linear, mip=Linear aniso=16, minLOD=0.000000, maxLOD=340282346638528860000000000000000000000.000000
+//         addressU=WRAP, addressV=WRAP, addressW=WRAP
+//         SAMPLER_SLOT 0x3
+//         100.00%  min=Anisotropic, mag=Linear, mip=Linear aniso=16, minLOD=0.000000, maxLOD=340282346638528860000000000000000000000.000000
+//         addressU=WRAP, addressV=WRAP, addressW=WRAP
+//         SAMPLER_SLOT 0x4
+//         100.00%  min=Linear, mag=Linear, mip=Point aniso=1, minLOD=0.000000, maxLOD=0.000000
+//         addressU=CLAMP, addressV=CLAMP, addressW=CLAMP
+//         SAMPLER_SLOT 0x5
+//         100.00%  min=Anisotropic, mag=Linear, mip=Linear aniso=16, minLOD=0.000000, maxLOD=340282346638528860000000000000000000000.000000
+//         addressU=WRAP, addressV=WRAP, addressW=WRAP
+//     END_SECTION
+//     BEGIN_SECTION UCODE
+//     	!!SPA2.1
+//     	.THREAD_TYPE PIXEL
+//     	IPA.PASS R0, a[0x7c];            # [  0][000000] POSITION_W
+//     	MUFU.RCP R6, R0;                 # [  1][000008]
+//     	IPA R9, a[0x94], R6;             # [  2][000010] GENERIC_ATTRIBUTE_01_Y
+//     	IPA R8, a[0x90], R6;             # [  3][000018] ATTR1
+//     	TEX.NODEP.T R4, R8, 0x2, 0x2, 2D, 0x3; # [  4][000020]
+//     	TEX.NODEP.T R0, R8, 0x3, 0x3, 2D; # [  5][000028]
+//     	TEX.NODEP.T R12, R8, 0x1, 0x1, 2D; # [  6][000030]
+//     	FMUL.FTZ R7, R4, R4;             # [  7][000038]
+//     	IPA R9, a[0xa0], R6;             # [  8][000040] ATTR2
+//     	IPA R17, a[0xa4], R6;            # [  9][000048] GENERIC_ATTRIBUTE_02_Y
+//     	FFMA.FTZ R7, R5, R5, R7;         # [ 10][000050]
+//     	IPA R16, a[0xa8], R6;            # [ 11][000058] GENERIC_ATTRIBUTE_02_Z
+//     	IPA R11, a[0xb0], R6;            # [ 12][000060] ATTR3
+//     	FADD.FTZ R7, -R7, 1;             # [ 13][000068]
+//     	IPA R20, a[0xc0], R6;            # [ 14][000070] ATTR4
+//     	FMNMX.FTZ R8, R7, RZ, !PT;       # [ 15][000078]
+//     	FMUL.FTZ R7, R9, -R4;            # [ 16][000080]
+//     	FMUL.FTZ R18, R11, R4;           # [ 17][000088]
+//     	MUFU.RSQ R10, R8;                # [ 18][000090]
+//     	FFMA.FTZ R8, R17, -R5, R7;       # [ 19][000098]
+//     	MUFU.RCP R7, R10;                # [ 20][0000a0]
+//     	FFMA.FTZ R10, R16, -R7, R8;      # [ 21][0000a8]
+//     	IPA R8, a[0xb4], R6;             # [ 22][0000b0] GENERIC_ATTRIBUTE_03_Y
+//     	FADD.FTZ R19, R10, R10;          # [ 23][0000b8]
+//     	FMUL.FTZ R10, R9, R4;            # [ 24][0000c0]
+//     	FFMA.FTZ R21, R4, -R19, -R9;     # [ 25][0000c8]
+//     	FFMA.FTZ R4, R17, R5, R10;       # [ 26][0000d0]
+//     	FFMA.FTZ R10, R8, R5, R18;       # [ 27][0000d8]
+//     	FFMA.FTZ R18, R5, -R19, -R17;    # [ 28][0000e0]
+//     	IPA R5, a[0xc4], R6;             # [ 29][0000e8] GENERIC_ATTRIBUTE_04_Y
+//     	FMUL.FTZ R17, R21, R11;          # [ 30][0000f0]
+//     	IPA R9, a[0xb8], R6;             # [ 31][0000f8] GENERIC_ATTRIBUTE_03_Z
+//     	FMUL.FTZ R21, R11, R11;          # [ 32][000100]
+//     	FFMA.FTZ R4, R16, R7, R4;        # [ 33][000108]
+//     	FFMA.FTZ R19, R7, -R19, -R16;    # [ 34][000110]
+//     	FFMA.FTZ R21, R8, R8, R21;       # [ 35][000118]
+//     	FFMA.FTZ R17, R18, R8, R17;      # [ 36][000120]
+//     	FMUL32I.FTZ R16, R5, 0x3b5dfdae; # [ 37][000128]
+//     	FMUL32I.FTZ R11, R5, 0xbac07e5c; # [ 38][000130]
+//     	IPA R8, a[0xc8], R6;             # [ 39][000138] GENERIC_ATTRIBUTE_04_Z
+//     	FMUL32I.FTZ R23, R5, 0xb82f130b; # [ 40][000140]
+//     	FFMA.FTZ R7, R9, R7, R10;        # [ 41][000148]
+//     	FMUL.FTZ R22, R5, RZ;            # [ 42][000150]
+//     	FFMA.FTZ R10, R19, R9, R17;      # [ 43][000158]
+//     	FFMA.FTZ R21, R9, R9, R21;       # [ 44][000160]
+//     	FFMA.FTZ R16, R20, c[0x10][0x8], R16; # [ 45][000168]
+//     	FFMA.FTZ R11, R20, c[0x10][0x4], R11; # [ 46][000170]
+//     	IPA R9, a[0xcc], R6;             # [ 47][000178] GENERIC_ATTRIBUTE_04_W
+//     	FFMA.FTZ R5, R20, c[0x10][0x0], R23; # [ 48][000180]
+//     	FFMA.FTZ R20, RZ, R20, R22;      # [ 49][000188]
+//     	FFMA.FTZ R19, R8, c[0x10][0xc], R16; # [ 50][000190]
+//     	FFMA.FTZ R18, R8, c[0x10][0x10], R11; # [ 51][000198]
+//     	MUFU.RSQ R11, R21;               # [ 52][0001a0]
+//     	FFMA.FTZ R16, RZ, R8, R20;       # [ 53][0001a8]
+//     	FFMA.FTZ R5, R8, c[0x10][0x14], R5; # [ 54][0001b0]
+//     	FFMA.FTZ R8, R9, c[0x10][0x20], R19; # [ 55][0001b8]
+//     	MOV32I R17, 0x3f800000;          # [ 56][0001c0]
+//     	F2F R19, -|R11|;                 # [ 57][0001c8]
+//     	F2F R7, |R7|;                    # [ 58][0001d0]
+//     	FFMA.FTZ R5, R9, c[0x10][0x18], R5; # [ 59][0001d8]
+//     	FFMA.FTZ R18, R9, c[0x10][0x1c], R18; # [ 60][0001e0]
+//     	FADD.FTZ R9, R9, R16;            # [ 61][0001e8]
+//     	FFMA.FTZ R16, R19, R7, R17;      # [ 62][0001f0]
+//     	FADD.FTZ R19, R17, -c[0x3][0x10]; # [ 63][0001f8]
+//     	MUFU.RCP R17, R9;                # [ 64][000200]
+//     	FMUL.FTZ.SAT R20, R11, R10;      # [ 65][000208]
+//     	MUFU.RCP R10, R19;               # [ 66][000210]
+//     	FMUL.FTZ R22, R5, R17;           # [ 67][000218]
+//     	FMUL.FTZ R8, R8, R17;            # [ 68][000220]
+//     	FMUL.FTZ R9, R18, R17;           # [ 69][000228]
+//     	FMNMX.FTZ R5, R16, RZ, !PT;      # [ 70][000230]
+//     	MUFU.LG2 R16, R20;               # [ 71][000238]
+//     	FMUL.FTZ R17, R3, c[0x3][0x8];   # [ 72][000240]
+//     	MUFU.LG2 R18, R5;                # [ 73][000248]
+//     	FADD.FTZ R3, R8, -0.25;          # [ 74][000250]
+//     	FMUL.FTZ R5, R16, R17;           # [ 75][000258]
+//     	FADD.FTZ R16, R9, -0.25;         # [ 76][000260]
+//     	FADD.FTZ R17, -|R4|, 1;          # [ 77][000268]
+//     	FMUL.FTZ R18, R18, c[0x2][0x28]; # [ 78][000270]
+//     	FMNMX.FTZ R3, |R16|, |R3|, !PT;  # [ 79][000278]
+//     	FADD.FTZ R17, R17, -c[0x3][0x10]; # [ 80][000280]
+//     	RRO.EX2 R16, R18;                # [ 81][000288]
+//     	RRO.EX2 R5, R5;                  # [ 82][000290]
+//     	MOV32I R7, 0x40400000;           # [ 83][000298]
+//     	MOV R11, c[0x2][0x20];           # [ 84][0002a0]
+//     	FMUL.FTZ.SAT R10, R17, R10;      # [ 85][0002a8]
+//     	MUFU.EX2 R16, R16;               # [ 86][0002b0]
+//     	FSETP.LT.FTZ.AND P0, PT, R3, c[0x10][0x24], PT; # [ 87][0002b8]
+//     	MUFU.EX2 R17, R5;                # [ 88][0002c0]
+//     	FFMA.FTZ R7, R10, -2, R7;        # [ 89][0002c8]
+//     	FMUL.FTZ R5, R10, R10;           # [ 90][0002d0]
+//     	FFMA.FTZ.SAT R11, R16, c[0x2][0x24], R11; # [ 91][0002d8]
+//     	FMUL.FTZ R16, R17, c[0x3][0x4];  # [ 92][0002e0]
+//     	F2F.SAT R10, R4;                 # [ 93][0002e8]
+//     	FMUL.FTZ R4, R5, R7;             # [ 94][0002f0]
+//     	FMUL.FTZ R5, R11, R16;           # [ 95][0002f8]
+//     	FFMA.FTZ.SAT R3, R4, c[0x3][0x14], R10; # [ 96][000300]
+//     	FMUL.FTZ R4, R5, R0;             # [ 97][000308]
+//     	FMUL.FTZ R1, R5, R1;             # [ 98][000310]
+//     	FMUL.FTZ R0, R5, R2;             # [ 99][000318]
+//     	FFMA.FTZ R16, R12, R3, R4;       # [100][000320]
+//     	FFMA.FTZ R17, R13, R3, R1;       # [101][000328]
+//     	FFMA.FTZ R18, R14, R3, R0;       # [102][000330]
+//     	SSY L0618;                       # [103][000338]
+//     	@!P0 BRA L0358;                  # [104][000340]
+//     	IPA R19, a[0xd0], R6;            # [105][000348] ATTR5
+//     	MOV.S R10, RZ;                   # [106][000350]
+//     L0358:
+//     	IPA R3, a[0xc4], R6;             # [107][000358] GENERIC_ATTRIBUTE_04_Y
+//     	IPA R2, a[0xc0], R6;             # [108][000360] ATTR4
+//     	IPA R1, a[0xc8], R6;             # [109][000368] GENERIC_ATTRIBUTE_04_Z
+//     	IPA R0, a[0xcc], R6;             # [110][000370] GENERIC_ATTRIBUTE_04_W
+//     	FMUL.FTZ R4, R3, RZ;             # [111][000378]
+//     	FMUL32I.FTZ R7, R3, 0x3a6c778a;  # [112][000380]
+//     	FMUL32I.FTZ R5, R3, 0xb9cd0bcd;  # [113][000388]
+//     	FFMA.FTZ R4, RZ, R2, R4;         # [114][000390]
+//     	FFMA.FTZ R7, R2, c[0x10][0x2c], R7; # [115][000398]
+//     	FFMA.FTZ R5, R2, c[0x10][0x28], R5; # [116][0003a0]
+//     	FFMA.FTZ R4, RZ, R1, R4;         # [117][0003a8]
+//     	FFMA.FTZ R7, R1, c[0x10][0x30], R7; # [118][0003b0]
+//     	FFMA.FTZ R5, R1, c[0x10][0x34], R5; # [119][0003b8]
+//     	FADD.FTZ R4, R0, R4;             # [120][0003c0]
+//     	FFMA.FTZ R7, R0, 0x3f534, R7;    # [121][0003c8]
+//     	FMUL32I.FTZ R3, R3, 0xb82f130b;  # [122][0003d0]
+//     	MUFU.RCP R10, R4;                # [123][0003d8]
+//     	FFMA.FTZ R4, R0, 0x3e8d0, R5;    # [124][0003e0]
+//     	FFMA.FTZ R2, R2, c[0x10][0x0], R3; # [125][0003e8]
+//     	FMUL.FTZ R8, R7, R10;            # [126][0003f0]
+//     	FMUL.FTZ R9, R4, R10;            # [127][0003f8]
+//     	FFMA.FTZ R1, R1, c[0x10][0x14], R2; # [128][000400]
+//     	FADD.FTZ R4, R8, -0.75;          # [129][000408]
+//     	FADD.FTZ R3, R9, -0.25;          # [130][000410]
+//     	FFMA.FTZ R0, R0, c[0x10][0x38], R1; # [131][000418]
+//     	FMNMX.FTZ R2, |R3|, |R4|, !PT;   # [132][000420]
+//     	FMUL.FTZ R22, R0, R10;           # [133][000428]
+//     	FSETP.LT.FTZ.AND P0, PT, R2, c[0x10][0x24], PT; # [134][000430]
+//     	@!P0 BRA L0450;                  # [135][000438]
+//     	IPA R19, a[0xd4], R6;            # [136][000440] GENERIC_ATTRIBUTE_05_Y
+//     	MOV.S R10, RZ;                   # [137][000448]
+//     L0450:
+//     	IPA R4, a[0xc4], R6;             # [138][000450] GENERIC_ATTRIBUTE_04_Y
+//     	IPA R1, a[0xc0], R6;             # [139][000458] ATTR4
+//     	IPA R3, a[0xc8], R6;             # [140][000460] GENERIC_ATTRIBUTE_04_Z
+//     	IPA R0, a[0xcc], R6;             # [141][000468] GENERIC_ATTRIBUTE_04_W
+//     	FMUL.FTZ R5, R4, RZ;             # [142][000470]
+//     	FFMA.FTZ R4, RZ, R1, R4;         # [143][000478]
+//     	FFMA.FTZ R2, RZ, R1, R5;         # [144][000480]
+//     	FADD.FTZ R7, R1, R5;             # [145][000488]
+//     	FFMA.FTZ R4, RZ, R3, R4;         # [146][000490]
+//     	FFMA.FTZ R5, RZ, R3, R2;         # [147][000498]
+//     	FFMA.FTZ R7, RZ, R3, R7;         # [148][0004a0]
+//     	FADD.FTZ R1, R0, R5;             # [149][0004a8]
+//     	FFMA.FTZ R5, RZ, R0, R7;         # [150][0004b0]
+//     	MUFU.RCP R7, R1;                 # [151][0004b8]
+//     	FFMA.FTZ R1, RZ, R0, R4;         # [152][0004c0]
+//     	FMUL.FTZ R8, R5, R7;             # [153][0004c8]
+//     	FMUL.FTZ R9, R1, R7;             # [154][0004d0]
+//     	FADD.FTZ R1, R3, R2;             # [155][0004d8]
+//     	FADD.FTZ R5, R8, -0.25;          # [156][0004e0]
+//     	FADD.FTZ R4, R9, -0.75;          # [157][0004e8]
+//     	FFMA.FTZ R0, RZ, R0, R1;         # [158][0004f0]
+//     	FMNMX.FTZ R2, |R4|, |R5|, !PT;   # [159][0004f8]
+//     	FMUL.FTZ R22, R0, R7;            # [160][000500]
+//     	FSETP.LT.FTZ.AND P0, PT, R2, c[0x10][0x24], PT; # [161][000508]
+//     	@!P0 BRA L0528;                  # [162][000510]
+//     	IPA R19, a[0xd8], R6;            # [163][000518] GENERIC_ATTRIBUTE_05_Z
+//     	MOV.S R10, RZ;                   # [164][000520]
+//     L0528:
+//     	IPA R4, a[0xc4], R6;             # [165][000528] GENERIC_ATTRIBUTE_04_Y
+//     	IPA R1, a[0xc0], R6;             # [166][000530] ATTR4
+//     	IPA R3, a[0xc8], R6;             # [167][000538] GENERIC_ATTRIBUTE_04_Z
+//     	IPA R0, a[0xcc], R6;             # [168][000540] GENERIC_ATTRIBUTE_04_W
+//     	FMUL.FTZ R5, R4, RZ;             # [169][000548]
+//     	FFMA.FTZ R4, RZ, R1, R4;         # [170][000550]
+//     	FFMA.FTZ R2, RZ, R1, R5;         # [171][000558]
+//     	FADD.FTZ R7, R1, R5;             # [172][000560]
+//     	FFMA.FTZ R4, RZ, R3, R4;         # [173][000568]
+//     	FFMA.FTZ R5, RZ, R3, R2;         # [174][000570]
+//     	FFMA.FTZ R7, RZ, R3, R7;         # [175][000578]
+//     	FADD.FTZ R1, R0, R5;             # [176][000580]
+//     	FFMA.FTZ R5, RZ, R0, R7;         # [177][000588]
+//     	MUFU.RCP R7, R1;                 # [178][000590]
+//     	FFMA.FTZ R1, RZ, R0, R4;         # [179][000598]
+//     	FMUL.FTZ R8, R5, R7;             # [180][0005a0]
+//     	FMUL.FTZ R9, R1, R7;             # [181][0005a8]
+//     	FADD.FTZ R1, R3, R2;             # [182][0005b0]
+//     	FADD.FTZ R5, R8, -0.75;          # [183][0005b8]
+//     	FADD.FTZ R4, R9, -0.75;          # [184][0005c0]
+//     	FFMA.FTZ R0, RZ, R0, R1;         # [185][0005c8]
+//     	FMNMX.FTZ R2, |R4|, |R5|, !PT;   # [186][0005d0]
+//     	FMUL.FTZ R22, R0, R7;            # [187][0005d8]
+//     	FSETP.LT.FTZ.AND P0, PT, R2, c[0x10][0x24], PT; # [188][0005e0]
+//     	@!P0 BRA.U L0600;                # [189][0005e8]
+//     	@P0 IPA R19, a[0xdc], R6;        # [190][0005f0] GENERIC_ATTRIBUTE_05_W
+//     	@P0 MOV R10, RZ;                 # [191][0005f8]
+//     L0600:
+//     	@!P0 MOV32I R10, 0x3f800000;     # [192][000600]
+//     	@!P0 MOV R19, RZ;                # [193][000608]
+//     	NOP.S;                           # [194][000610]
+//     L0618:
+//     	FSETP.EQ.FTZ.AND P0, PT, R10, RZ, PT; # [195][000618]
+//     	SSY L0cd8;                       # [196][000620]
+//     	@!P0 NOP.S;                      # [197][000628]
+//     	IPA.PASS R1, a[0x74];            # [198][000630] POSITION_Y
+//     	IPA.PASS R0, a[0x70];            # [199][000638] POSITION_X
+//     	MOV R14, RZ;                     # [200][000640]
+//     	FMUL.FTZ R13, R1, 0.0625;        # [201][000648]
+//     	FMUL.FTZ R12, R0, 0.0625;        # [202][000650]
+//     	TEX.LZ.T R0, R12, 0xe, 0xe, 3D;  # [203][000658]
+//     	MOV32I R6, 0x3d800000;           # [204][000660]
+//     	MOV R5, R13;                     # [205][000668]
+//     	MOV R4, R12;                     # [206][000670]
+//     	TEX.LZ.T R4, R4, 0xe, 0xe, 3D;   # [207][000678]
+//     	FADD.FTZ R21, R9, 0xba800;       # [208][000680]
+//     	FADD.FTZ R20, R8, 0xba800;       # [209][000688]
+//     	FFMA.FTZ R1, R1, 0x3b000, R21;   # [210][000690]
+//     	FFMA.FTZ R0, R0, 0x3b000, R20;   # [211][000698]
+//     	TEX.LZ.DC.T R11, R0, R22, 0xd, 0xd, 2D, 0x1; # [212][0006a0]
+//     	FFMA.FTZ R1, R3, 0x3b000, R21;   # [213][0006a8]
+//     	FFMA.FTZ R0, R2, 0x3b000, R20;   # [214][0006b0]
+//     	TEX.LZ.DC.T R23, R0, R22, 0xd, 0xd, 2D, 0x1; # [215][0006b8]
+//     	FFMA.FTZ R1, R5, 0x3b000, R21;   # [216][0006c0]
+//     	FFMA.FTZ R0, R4, 0x3b000, R20;   # [217][0006c8]
+//     	TEX.LZ.DC.T R24, R0, R22, 0xd, 0xd, 2D, 0x1; # [218][0006d0]
+//     	MOV32I R14, 0x3e000000;          # [219][0006d8]
+//     	TEX.LZ.T R0, R12, 0xe, 0xe, 3D;  # [220][0006e0]
+//     	FFMA.FTZ R5, R7, 0x3b000, R21;   # [221][0006e8]
+//     	FFMA.FTZ R4, R6, 0x3b000, R20;   # [222][0006f0]
+//     	TEX.LZ.DC.T R4, R4, R22, 0xd, 0xd, 2D, 0x1; # [223][0006f8]
+//     	FFMA.FTZ R1, R1, 0x3b000, R21;   # [224][000700]
+//     	FFMA.FTZ R0, R0, 0x3b000, R20;   # [225][000708]
+//     	TEX.LZ.DC.T R5, R0, R22, 0xd, 0xd, 2D, 0x1; # [226][000710]
+//     	FFMA.FTZ R1, R3, 0x3b000, R21;   # [227][000718]
+//     	FFMA.FTZ R0, R2, 0x3b000, R20;   # [228][000720]
+//     	TEX.LZ.DC.T R6, R0, R22, 0xd, 0xd, 2D, 0x1; # [229][000728]
+//     	MOV32I R2, 0x3e400000;           # [230][000730]
+//     	MOV R1, R13;                     # [231][000738]
+//     	MOV R0, R12;                     # [232][000740]
+//     	FADD.FTZ R7, R10, R11;           # [233][000748]
+//     	TEX.LZ.T R0, R0, 0xe, 0xe, 3D;   # [234][000750]
+//     	FFMA.FTZ R1, R1, 0x3b000, R21;   # [235][000758]
+//     	FFMA.FTZ R0, R0, 0x3b000, R20;   # [236][000760]
+//     	TEX.LZ.DC.T R25, R0, R22, 0xd, 0xd, 2D, 0x1; # [237][000768]
+//     	FFMA.FTZ R1, R3, 0x3b000, R21;   # [238][000770]
+//     	FFMA.FTZ R0, R2, 0x3b000, R20;   # [239][000778]
+//     	TEX.LZ.DC.T R0, R0, R22, 0xd, 0xd, 2D, 0x1; # [240][000780]
+//     	TEX.LZ.NODEP.T R8, R8, 0xc, 0xc, 2D; # [241][000788]
+//     	FADD.FTZ R1, R7, R23;            # [242][000790]
+//     	FADD.FTZ R1, R1, R24;            # [243][000798]
+//     	FADD.FTZ R1, R1, R4;             # [244][0007a0]
+//     	FADD.FTZ R1, R1, R5;             # [245][0007a8]
+//     	FADD.FTZ R1, R1, R6;             # [246][0007b0]
+//     	FADD.FTZ R1, R1, R25;            # [247][0007b8]
+//     	FADD.FTZ R23, R1, R0;            # [248][0007c0]
+//     	FFMA.FTZ R1, R23, -R14, c[0x10][0x3c]; # [249][0007c8]
+//     	FMUL.FTZ R0, R23, 0.125;         # [250][0007d0]
+//     	FMUL.FTZ R1, R1, R0;             # [251][0007d8]
+//     	FSETP.NEU.FTZ.AND P0, PT, R1, RZ, PT; # [252][0007e0]
+//     	@!P0 BRA.U L0c70;                # [253][0007e8]
+//     	@P0 MOV32I R2, 0x3e800000;       # [254][0007f0]
+//     	@P0 MOV R1, R13;                 # [255][0007f8]
+//     	@P0 MOV R0, R12;                 # [256][000800]
+//     	@P0 TEX.LZ.T R4, R0, 0xe, 0xe, 3D; # [257][000808]
+//     	@P0 MOV32I R2, 0x3ea00000;       # [258][000810]
+//     	@P0 TEX.LZ.T R0, R0, 0xe, 0xe, 3D; # [259][000818]
+//     	@P0 MOV R14, R22;                # [260][000820]
+//     	@P0 FFMA.FTZ R5, R5, 0x3b000, R21; # [261][000828]
+//     	@P0 FFMA.FTZ R4, R4, 0x3b000, R20; # [262][000830]
+//     	@P0 TEX.LZ.DC.NODEP.T R22, R4, R14, 0xd, 0xd, 2D, 0x1; # [263][000838]
+//     	@P0 FFMA.FTZ R5, R7, 0x3b000, R21; # [264][000840]
+//     	@P0 FFMA.FTZ R4, R6, 0x3b000, R20; # [265][000848]
+//     	@P0 TEX.LZ.DC.NODEP.T R6, R4, R14, 0xd, 0xd, 2D, 0x1; # [266][000850]
+//     	@P0 FFMA.FTZ R1, R1, 0x3b000, R21; # [267][000858]
+//     	@P0 FFMA.FTZ R0, R0, 0x3b000, R20; # [268][000860]
+//     	@P0 TEX.LZ.DC.NODEP.T R7, R0, R14, 0xd, 0xd, 2D, 0x1; # [269][000868]
+//     	@P0 FFMA.FTZ R1, R3, 0x3b000, R21; # [270][000870]
+//     	@P0 FFMA.FTZ R0, R2, 0x3b000, R20; # [271][000878]
+//     	@P0 TEX.LZ.DC.NODEP.T R24, R0, R14, 0xd, 0xd, 2D, 0x1; # [272][000880]
+//     	@P0 MOV32I R2, 0x3ec00000;       # [273][000888]
+//     	@P0 MOV R1, R13;                 # [274][000890]
+//     	@P0 MOV R0, R12;                 # [275][000898]
+//     	@P0 TEX.LZ.T R0, R0, 0xe, 0xe, 3D; # [276][0008a0]
+//     	@P0 FFMA.FTZ R1, R1, 0x3b000, R21; # [277][0008a8]
+//     	@P0 FFMA.FTZ R0, R0, 0x3b000, R20; # [278][0008b0]
+//     	@P0 TEX.LZ.DC.NODEP.T R4, R0, R14, 0xd, 0xd, 2D, 0x1; # [279][0008b8]
+//     	@P0 FFMA.FTZ R1, R3, 0x3b000, R21; # [280][0008c0]
+//     	@P0 FFMA.FTZ R0, R2, 0x3b000, R20; # [281][0008c8]
+//     	@P0 TEX.LZ.DC.NODEP.T R5, R0, R14, 0xd, 0xd, 2D, 0x1; # [282][0008d0]
+//     	@P0 FADD.FTZ R3, R23, R22;       # [283][0008d8]
+//     	@P0 MOV32I R2, 0x3ee00000;       # [284][0008e0]
+//     	@P0 MOV R1, R13;                 # [285][0008e8]
+//     	@P0 MOV R0, R12;                 # [286][0008f0]
+//     	@P0 FADD.FTZ R23, R3, R6;        # [287][0008f8]
+//     	@P0 TEX.LZ.T R0, R0, 0xe, 0xe, 3D; # [288][000900]
+//     	@P0 FFMA.FTZ R1, R1, 0x3b000, R21; # [289][000908]
+//     	@P0 FFMA.FTZ R0, R0, 0x3b000, R20; # [290][000910]
+//     	@P0 TEX.LZ.DC.NODEP.T R6, R0, R14, 0xd, 0xd, 2D, 0x1; # [291][000918]
+//     	@P0 FFMA.FTZ R1, R3, 0x3b000, R21; # [292][000920]
+//     	@P0 FFMA.FTZ R0, R2, 0x3b000, R20; # [293][000928]
+//     	@P0 TEX.LZ.DC.NODEP.T R22, R0, R14, 0xd, 0xd, 2D, 0x1; # [294][000930]
+//     	@P0 FADD.FTZ R3, R23, R7;        # [295][000938]
+//     	@P0 MOV32I R2, 0x3f000000;       # [296][000940]
+//     	@P0 MOV R1, R13;                 # [297][000948]
+//     	@P0 MOV R0, R12;                 # [298][000950]
+//     	@P0 FADD.FTZ R24, R3, R24;       # [299][000958]
+//     	@P0 TEX.LZ.T R0, R0, 0xe, 0xe, 3D; # [300][000960]
+//     	@P0 FFMA.FTZ R1, R1, 0x3b000, R21; # [301][000968]
+//     	@P0 FFMA.FTZ R0, R0, 0x3b000, R20; # [302][000970]
+//     	@P0 TEX.LZ.DC.NODEP.T R7, R0, R14, 0xd, 0xd, 2D, 0x1; # [303][000978]
+//     	@P0 FFMA.FTZ R1, R3, 0x3b000, R21; # [304][000980]
+//     	@P0 FFMA.FTZ R0, R2, 0x3b000, R20; # [305][000988]
+//     	@P0 TEX.LZ.DC.NODEP.T R23, R0, R14, 0xd, 0xd, 2D, 0x1; # [306][000990]
+//     	@P0 FADD.FTZ R3, R24, R4;        # [307][000998]
+//     	@P0 MOV32I R2, 0x3f100000;       # [308][0009a0]
+//     	@P0 MOV R1, R13;                 # [309][0009a8]
+//     	@P0 MOV R0, R12;                 # [310][0009b0]
+//     	@P0 FADD.FTZ R24, R3, R5;        # [311][0009b8]
+//     	@P0 TEX.LZ.T R0, R0, 0xe, 0xe, 3D; # [312][0009c0]
+//     	@P0 FFMA.FTZ R1, R1, 0x3b000, R21; # [313][0009c8]
+//     	@P0 FFMA.FTZ R0, R0, 0x3b000, R20; # [314][0009d0]
+//     	@P0 TEX.LZ.DC.NODEP.T R4, R0, R14, 0xd, 0xd, 2D, 0x1; # [315][0009d8]
+//     	@P0 FFMA.FTZ R1, R3, 0x3b000, R21; # [316][0009e0]
+//     	@P0 FFMA.FTZ R0, R2, 0x3b000, R20; # [317][0009e8]
+//     	@P0 TEX.LZ.DC.NODEP.T R5, R0, R14, 0xd, 0xd, 2D, 0x1; # [318][0009f0]
+//     	@P0 FADD.FTZ R3, R24, R6;        # [319][0009f8]
+//     	@P0 MOV32I R2, 0x3f200000;       # [320][000a00]
+//     	@P0 MOV R1, R13;                 # [321][000a08]
+//     	@P0 MOV R0, R12;                 # [322][000a10]
+//     	@P0 FADD.FTZ R24, R3, R22;       # [323][000a18]
+//     	@P0 TEX.LZ.T R0, R0, 0xe, 0xe, 3D; # [324][000a20]
+//     	@P0 FFMA.FTZ R1, R1, 0x3b000, R21; # [325][000a28]
+//     	@P0 FFMA.FTZ R0, R0, 0x3b000, R20; # [326][000a30]
+//     	@P0 TEX.LZ.DC.NODEP.T R6, R0, R14, 0xd, 0xd, 2D, 0x1; # [327][000a38]
+//     	@P0 FFMA.FTZ R1, R3, 0x3b000, R21; # [328][000a40]
+//     	@P0 FFMA.FTZ R0, R2, 0x3b000, R20; # [329][000a48]
+//     	@P0 TEX.LZ.DC.NODEP.T R22, R0, R14, 0xd, 0xd, 2D, 0x1; # [330][000a50]
+//     	@P0 FADD.FTZ R3, R24, R7;        # [331][000a58]
+//     	@P0 MOV32I R2, 0x3f300000;       # [332][000a60]
+//     	@P0 MOV R1, R13;                 # [333][000a68]
+//     	@P0 MOV R0, R12;                 # [334][000a70]
+//     	@P0 FADD.FTZ R24, R3, R23;       # [335][000a78]
+//     	@P0 TEX.LZ.T R0, R0, 0xe, 0xe, 3D; # [336][000a80]
+//     	@P0 FFMA.FTZ R1, R1, 0x3b000, R21; # [337][000a88]
+//     	@P0 FFMA.FTZ R0, R0, 0x3b000, R20; # [338][000a90]
+//     	@P0 TEX.LZ.DC.NODEP.T R7, R0, R14, 0xd, 0xd, 2D, 0x1; # [339][000a98]
+//     	@P0 FFMA.FTZ R1, R3, 0x3b000, R21; # [340][000aa0]
+//     	@P0 FFMA.FTZ R0, R2, 0x3b000, R20; # [341][000aa8]
+//     	@P0 TEX.LZ.DC.NODEP.T R23, R0, R14, 0xd, 0xd, 2D, 0x1; # [342][000ab0]
+//     	@P0 FADD.FTZ R3, R24, R4;        # [343][000ab8]
+//     	@P0 MOV32I R2, 0x3f400000;       # [344][000ac0]
+//     	@P0 MOV R1, R13;                 # [345][000ac8]
+//     	@P0 MOV R0, R12;                 # [346][000ad0]
+//     	@P0 FADD.FTZ R24, R3, R5;        # [347][000ad8]
+//     	@P0 TEX.LZ.T R0, R0, 0xe, 0xe, 3D; # [348][000ae0]
+//     	@P0 FFMA.FTZ R1, R1, 0x3b000, R21; # [349][000ae8]
+//     	@P0 FFMA.FTZ R0, R0, 0x3b000, R20; # [350][000af0]
+//     	@P0 TEX.LZ.DC.NODEP.T R4, R0, R14, 0xd, 0xd, 2D, 0x1; # [351][000af8]
+//     	@P0 FFMA.FTZ R1, R3, 0x3b000, R21; # [352][000b00]
+//     	@P0 FFMA.FTZ R0, R2, 0x3b000, R20; # [353][000b08]
+//     	@P0 TEX.LZ.DC.NODEP.T R5, R0, R14, 0xd, 0xd, 2D, 0x1; # [354][000b10]
+//     	@P0 FADD.FTZ R3, R24, R6;        # [355][000b18]
+//     	@P0 MOV32I R2, 0x3f500000;       # [356][000b20]
+//     	@P0 MOV R1, R13;                 # [357][000b28]
+//     	@P0 MOV R0, R12;                 # [358][000b30]
+//     	@P0 FADD.FTZ R24, R3, R22;       # [359][000b38]
+//     	@P0 TEX.LZ.T R0, R0, 0xe, 0xe, 3D; # [360][000b40]
+//     	@P0 FFMA.FTZ R1, R1, 0x3b000, R21; # [361][000b48]
+//     	@P0 FFMA.FTZ R0, R0, 0x3b000, R20; # [362][000b50]
+//     	@P0 TEX.LZ.DC.NODEP.T R6, R0, R14, 0xd, 0xd, 2D, 0x1; # [363][000b58]
+//     	@P0 FFMA.FTZ R1, R3, 0x3b000, R21; # [364][000b60]
+//     	@P0 FFMA.FTZ R0, R2, 0x3b000, R20; # [365][000b68]
+//     	@P0 TEX.LZ.DC.NODEP.T R22, R0, R14, 0xd, 0xd, 2D, 0x1; # [366][000b70]
+//     	@P0 FADD.FTZ R3, R24, R7;        # [367][000b78]
+//     	@P0 MOV32I R2, 0x3f600000;       # [368][000b80]
+//     	@P0 MOV R1, R13;                 # [369][000b88]
+//     	@P0 MOV R0, R12;                 # [370][000b90]
+//     	@P0 FADD.FTZ R7, R3, R23;        # [371][000b98]
+//     	@P0 TEX.LZ.T R0, R0, 0xe, 0xe, 3D; # [372][000ba0]
+//     	@P0 FFMA.FTZ R1, R1, 0x3b000, R21; # [373][000ba8]
+//     	@P0 FFMA.FTZ R0, R0, 0x3b000, R20; # [374][000bb0]
+//     	@P0 TEX.LZ.DC.NODEP.T R23, R0, R14, 0xd, 0xd, 2D, 0x1; # [375][000bb8]
+//     	@P0 FFMA.FTZ R1, R3, 0x3b000, R21; # [376][000bc0]
+//     	@P0 FFMA.FTZ R0, R2, 0x3b000, R20; # [377][000bc8]
+//     	@P0 TEX.LZ.DC.NODEP.T R24, R0, R14, 0xd, 0xd, 2D, 0x1; # [378][000bd0]
+//     	@P0 MOV R1, R13;                 # [379][000bd8]
+//     	@P0 MOV R0, R12;                 # [380][000be0]
+//     	@P0 MOV32I R2, 0x3f700000;       # [381][000be8]
+//     	@P0 TEX.LZ.T R0, R0, 0xe, 0xe, 3D; # [382][000bf0]
+//     	@P0 FFMA.FTZ R1, R1, 0x3b000, R21; # [383][000bf8]
+//     	@P0 FFMA.FTZ R0, R0, 0x3b000, R20; # [384][000c00]
+//     	@P0 TEX.LZ.DC.NODEP.T R12, R0, R14, 0xd, 0xd, 2D, 0x1; # [385][000c08]
+//     	@P0 FFMA.FTZ R1, R3, 0x3b000, R21; # [386][000c10]
+//     	@P0 FFMA.FTZ R0, R2, 0x3b000, R20; # [387][000c18]
+//     	@P0 TEX.LZ.DC.NODEP.T R0, R0, R14, 0xd, 0xd, 2D, 0x1; # [388][000c20]
+//     	@P0 FADD.FTZ R1, R7, R4;         # [389][000c28]
+//     	@P0 FADD.FTZ R1, R1, R5;         # [390][000c30]
+//     	@P0 FADD.FTZ R1, R1, R6;         # [391][000c38]
+//     	@P0 FADD.FTZ R1, R1, R22;        # [392][000c40]
+//     	@P0 FADD.FTZ R1, R1, R23;        # [393][000c48]
+//     	@P0 FADD.FTZ R1, R1, R24;        # [394][000c50]
+//     	@P0 FADD.FTZ R1, R1, R12;        # [395][000c58]
+//     	@P0 FADD.FTZ R0, R1, R0;         # [396][000c60]
+//     	@P0 FMUL.FTZ R0, R0, 0.03125;    # [397][000c68]
+//     L0c70:
+//     	FSETP.LT.FTZ.AND P0, PT, RZ, R0, PT; # [398][000c70]
+//     	F2F.FTZ.SAT R0, R0;              # [399][000c78]
+//     	F2F.FTZ.SAT R1, R8;              # [400][000c80]
+//     	F2F.FTZ.SAT R3, R9;              # [401][000c88]
+//     	F2F.FTZ.SAT R2, R10;             # [402][000c90]
+//     	FSETP.LT.FTZ.AND P0, PT, R11, R19, P0; # [403][000c98]
+//     	FMUL.FTZ R16, R0, R16;           # [404][000ca0]
+//     	FMUL.FTZ R17, R0, R17;           # [405][000ca8]
+//     	FMUL.FTZ R18, R0, R18;           # [406][000cb0]
+//     	@P0 FMUL.FTZ R16, R16, R1;       # [407][000cb8]
+//     	@P0 FMUL.FTZ R17, R17, R3;       # [408][000cc0]
+//     	@P0 FMUL.FTZ R18, R18, R2;       # [409][000cc8]
+//     	NOP.S;                           # [410][000cd0]
+//     L0cd8:
+//     	FMUL32I.FTZ R0, R16, 2.43219;    # [411][000cd8]
+//     	FMUL32I.FTZ R2, R18, 0x3f9b0cb6; # [412][000ce0]
+//     	FMUL32I.FTZ R1, R17, 0x3fcd1af5; # [413][000ce8]
+//     	F2F.FTZ R3, R15;                 # [414][000cf0]
+//     	FMUL.FTZ R2, R2, c[0x4][0x8];    # [415][000cf8]
+//     	FMUL.FTZ R1, R1, c[0x4][0x4];    # [416][000d00]
+//     	FMUL.FTZ R0, R0, c[0x4][0x0];    # [417][000d08]
+//     	EXIT;                            # [418][000d10]
+//     	END
+//     END_SECTION
+// END_SHADER
+// 

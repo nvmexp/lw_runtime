@@ -1,0 +1,28 @@
+!!LWfp5.0
+TEXTURE textures[] = { texture[0..31] };
+ATTRIB tc = fragment.texcoord[0];
+ATTRIB tc2 = fragment.texcoord[1];
+ATTRIB expected[4] = { fragment.texcoord[2..5] };
+TEMP texval, t, diff;
+MOV.U t, 0;
+MOV.U t.x, 0;
+ROUND.U t.z, tc2.w;
+XOR t.w, t.x, t.z;
+TEMP ddx, ddy;
+MOV ddx, 0;
+EX2 ddx.x, tc.w;
+MOV ddy, 0;
+EX2 ddy.y, tc.w;
+TXD texval, tc, ddx, ddy, textures[t.w], ARRAYLWBE;
+ADD.F diff, texval, -expected[t.x];
+SGT.F.CC diff, |diff|, 0.004;
+IF GT.xyzx;
+MAD result.color, texval, 0.2, {0.8, 0.0, 0.0, 1.0};
+ELSE;
+MAD result.color, texval, 0.2, {0.0, 0.8, 0.0, 1.0};
+ENDIF;
+SNE.F.CC diff.x, expected[t.x].w, 0.0;
+IF NE.x;
+MOV result.color, {0.0, 0.5, 0.0, 0.0};
+ENDIF;
+END

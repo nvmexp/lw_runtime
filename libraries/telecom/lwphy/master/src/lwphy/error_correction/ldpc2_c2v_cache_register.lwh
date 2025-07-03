@@ -1,0 +1,58 @@
+/*
+ * Copyright (c) 2019, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#if !defined(LDPC2_C2V_CACHE_REGISTER_LWH_INCLUDED_)
+#define LDPC2_C2V_CACHE_REGISTER_LWH_INCLUDED_
+
+#include "ldpc2.lwh"
+
+namespace ldpc2
+{
+
+////////////////////////////////////////////////////////////////////////
+// c2v_cache_register
+// Check to variable (C2V) messages are stored in registers. (No loading
+// or storing required, but causes register pressure.) Assumes that all
+// APP values are in shared memory. Useful only for higher code rates.
+template <int          BG,
+          unsigned int NUM_PARITY_NODES,
+          class TC2V>
+struct c2v_cache_register
+{
+    //------------------------------------------------------------------
+    // C2V message type
+    typedef TC2V         c2v_t;
+    typedef typename c2v_t::app_t app_t;
+    //------------------------------------------------------------------
+    template <int CHECK_IDX>
+    __device__
+    void process_row_init(const LDPC_kernel_params& params,
+                          word_t                    (&app)[app_max_words<app_t, BG>::value],
+                          int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        c2v_[CHECK_IDX].process_row_init<CHECK_IDX, NUM_PARITY_NODES>(params, app, app_addr);
+    }
+    //------------------------------------------------------------------
+    template <int CHECK_IDX>
+    __device__
+    void process_row(const LDPC_kernel_params& params,
+                     word_t                    (&app)[app_max_words<app_t, BG>::value],
+                     int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        c2v_[CHECK_IDX].process_row<CHECK_IDX, NUM_PARITY_NODES>(params, app, app_addr);
+    }
+    //------------------------------------------------------------------
+    // Data
+    c2v_t c2v_[NUM_PARITY_NODES];
+};
+
+} // namespace ldpc2
+
+#endif // !defined(LDPC2_C2V_CACHE_REGISTER_LWH_INCLUDED_)

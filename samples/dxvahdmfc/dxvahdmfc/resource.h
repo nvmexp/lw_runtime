@@ -1,0 +1,126 @@
+//{{NO_DEPENDENCIES}}
+// Microsoft Visual C++ generated include file.
+// Used by dxvahdmfc.rc
+//
+#define IDD_ABOUTBOX                    100
+#define IDP_OLE_INIT_FAILED             100
+#define IDR_MAINFRAME                   128
+#define IDR_dxvahdmfcTYPE               129
+#define IDD_DIALOG_CONFIG               130
+#define IDC_NOiSEREDUCTION              1000
+#define IDC_MV_NOiSEREDUCTION           1000
+#define IDC_MV_FRAMEFORMAT              1002
+#define IDC_MV_ALPHALEVEL               1003
+#define IDC_MV_ALPHAENABLE              1004
+#define IDC_MV_BRIGHTNESSENABLE         1005
+#define IDC_MV_BRIGHTNESSLEVEL          1006
+#define IDC_MV_CONTRASTENABLE           1007
+#define IDC_MV_CONTRASTLEVEL            1008
+#define IDC_MV_HUEENABLE                1009
+#define IDC_MV_HUELEVEL                 1010
+#define IDC_MV_SATURATIONENABLE         1011
+#define IDC_MV_SATURATIONLEVEL          1012
+#define IDC_MV_NOISEREDUCTIONENABLE     1013
+#define IDC_MV_NOISEREDUCTIONLEVEL      1014
+#define IDC_MV_EDGEENHANCEMENTENABLE    1015
+#define IDC_MV_EDGEENHANCEMENTLEVEL     1016
+#define IDC_MV_ANAMORPHICSCALINGENABLE  1017
+#define IDC_MV_ANAMORPHICSCALINGLEVEL   1018
+#define IDC_MV_LUMAKEYENABLE            1019
+#define IDC_SV_FRAMEFORMAT              1020
+#define IDC_MV_LUMAKEY_UPPER            1021
+#define IDC_MV_LUMAKEY_LOWER            1022
+#define IDC_SV_ALPHALEVEL               1023
+#define IDC_SV_ALPHAENABLE              1024
+#define IDC_SV_BRIGHTNESSENABLE         1025
+#define IDC_SV_BRIGHTNESSLEVEL          1026
+#define IDC_SV_CONTRASTENABLE           1027
+#define IDC_SV_CONTRASTLEVEL            1028
+#define IDC_SV_HUEENABLE                1029
+#define IDC_SV_HUELEVEL                 1030
+#define IDC_SV_SATURATIONENABLE         1031
+#define IDC_SV_SATURATIONLEVEL          1032
+#define IDC_SV_NOISEREDUCTIONENABLE     1033
+#define IDC_SV_NOISEREDUCTIONLEVEL      1034
+#define IDC_SV_EDGEENHANCEMENTENABLE    1035
+#define IDC_SV_EDGEENHANCEMENTLEVEL     1036
+#define IDC_SV_ANAMORPHICSCALINGENABLE  1037
+#define IDC_SV_ANAMORPHICSCALINGLEVEL   1038
+#define IDC_SV_LUMAKEYENABLE            1039
+#define IDC_SV_LUMAKEY_UPPER            1040
+#define IDC_SV_LUMAKEY_LOWER            1041
+#define IDC_GR_FRAMEFORMAT              1042
+#define IDC_GR_ALPHALEVEL               1043
+#define IDC_GR_ALPHAENABLE              1044
+#define IDC_GR_BRIGHTNESSENABLE         1045
+#define IDC_GR_BRIGHTNESSLEVEL          1046
+#define IDC_GR_CONTRASTENABLE           1047
+#define IDC_GR_CONTRASTLEVEL            1048
+#define IDC_GR_HUEENABLE                1049
+#define IDC_GR_HUELEVEL                 1050
+#define IDC_GR_SATURATIONENABLE         1051
+#define IDC_GR_SATURATIONLEVEL          1052
+#define IDC_GR_NOISEREDUCTIONENABLE     1053
+#define IDC_GR_NOISEREDUCTIONLEVEL      1054
+#define IDC_GR_EDGEENHANCEMENTENABLE    1055
+#define IDC_GR_EDGEENHANCEMENTLEVEL     1056
+#define IDC_GR_ANAMORPHICSCALINGENABLE  1057
+#define IDC_GR_ANAMORPHICSCALINGLEVEL   1058
+#define IDC_GR_LUMAKEYENABLE            1059
+#define IDC_GR_LUMAKEY_UPPER            1060
+#define IDC_GR_LUMAKEY_LOWER            1061
+#define IDC_ST_FRAMEFORMAT              1062
+#define IDC_ST_ALPHALEVEL               1063
+#define IDC_ST_ALPHAENABLE              1064
+#define IDC_ST_BRIGHTNESSENABLE         1065
+#define IDC_ST_BRIGHTNESSLEVEL          1066
+#define IDC_ST_CONTRASTENABLE           1067
+#define IDC_ST_CONTRASTLEVEL            1068
+#define IDC_ST_HUEENABLE                1069
+#define IDC_ST_HUELEVEL                 1070
+#define IDC_ST_SATURATIONENABLE         1071
+#define IDC_ST_SATURATIONLEVEL          1072
+#define IDC_ST_NOISEREDUCTIONENABLE     1073
+#define IDC_ST_NOISEREDUCTIONLEVEL      1074
+#define IDC_ST_EDGEENHANCEMENTENABLE    1075
+#define IDC_ST_EDGEENHANCEMENTLEVEL     1076
+#define IDC_ST_ANAMORPHICSCALINGENABLE  1077
+#define IDC_ST_ANAMORPHICSCALINGLEVEL   1078
+#define IDC_ST_LUMAKEYENABLE            1079
+#define IDC_ST_LUMAKEY_UPPER            1080
+#define IDC_ST_LUMAKEY_LOWER            1081
+#define IDC_BG_FRAMEFORMAT              1082
+#define IDC_BG_ALPHALEVEL               1083
+#define IDC_BG_ALPHAENABLE              1084
+#define IDC_BG_BRIGHTNESSENABLE         1085
+#define IDC_BG_BRIGHTNESSLEVEL          1086
+#define IDC_BG_CONTRASTENABLE           1087
+#define IDC_BG_CONTRASTLEVEL            1088
+#define IDC_BG_HUEENABLE                1089
+#define IDC_BG_HUELEVEL                 1090
+#define IDC_BG_SATURATIONENABLE         1091
+#define IDC_BG_SATURATIONLEVEL          1092
+#define IDC_BG_NOISEREDUCTIONENABLE     1093
+#define IDC_BG_NOISEREDUCTIONLEVEL      1094
+#define IDC_BG_EDGEENHANCEMENTENABLE    1095
+#define IDC_BG_EDGEENHANCEMENTLEVEL     1096
+#define IDC_BG_ANAMORPHICSCALINGENABLE  1097
+#define IDC_BG_ANAMORPHICSCALINGLEVEL   1098
+#define IDC_BG_LUMAKEYENABLE            1099
+#define IDC_BG_LUMAKEY_UPPER            1100
+#define IDC_BG_LUMAKEY_LOWER            1101
+#define IDC_BLT_DOWNSAMPLE              1102
+#define IDC_BLT_DOWNSAMPLEENABLE        1102
+#define IDC_BLT_DOWNSAMPLELEVEL         1103
+#define ID_EDIT_CONFIG                  32771
+
+// Next default values for new objects
+// 
+#ifdef APSTUDIO_ILWOKED
+#ifndef APSTUDIO_READONLY_SYMBOLS
+#define _APS_NEXT_RESOURCE_VALUE        131
+#define _APS_NEXT_COMMAND_VALUE         32772
+#define _APS_NEXT_CONTROL_VALUE         1022
+#define _APS_NEXT_SYMED_VALUE           101
+#endif
+#endif

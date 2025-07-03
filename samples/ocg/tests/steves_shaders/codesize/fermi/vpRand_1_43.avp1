@@ -1,0 +1,57 @@
+!!ARBvp1.0
+OPTION LW_vertex_program3;
+PARAM pgmElw[256] = { program.elw[0..255] };
+TEMP tmpR0;
+TEMP tmpR2;
+TEMP tmpR5;
+TEMP tmpR7;
+TEMP tmpR9;
+TEMP tmpR11;
+TEMP tmpR14;
+sub_always:
+MUL tmpR11, -vertex.attrib[7].xyzw, vertex.attrib[7].yxwz;
+MULC1 tmpR11, vertex.color.secondary.xyzw, -vertex.color.secondary.wyzz;
+SSG_SAT tmpR9, tmpR11.wyww;
+SIN tmpR0.y, vertex.position.y;
+COSC1 tmpR14.w, -vertex.normal.y;
+MULC1 tmpR7, tmpR9.xxzy, vertex.texcoord[6].xywz;
+POWC1_SAT tmpR11.z (LE.y), |vertex.texcoord[5].y|, vertex.texcoord[5].x;
+ABS result.pointsize.x, vertex.attrib[7].wwxz;
+SLEC tmpR2, -tmpR7.wzww, -vertex.texcoord[2].xyzw;
+SUBC result.fogcoord.x, vertex.texcoord[7].yywx, tmpR9.zwxw;
+SSGC1 result.texcoord[3], |vertex.texcoord[1].xyzw|;
+MIN tmpR5, tmpR7.zwyx, vertex.color.secondary.xyzw;
+MINC1 result.color.secondary, vertex.position.wzyx, tmpR9.wyzx;
+XPDC tmpR0, |tmpR5.xyzw|, tmpR2.xyzw;
+MAXC1 result.texcoord[5], tmpR0.xyzw, vertex.texcoord[4].xyzw;
+LOG result.color.back.primary, tmpR7.y;
+MULC1 result.texcoord[1], vertex.normal.wwzw, |tmpR14.zxyw|;
+DST result.texcoord[4], vertex.texcoord[2].xyzw, -|tmpR0.zxyy|;
+STR result.color.back.primary (EQ.yzwx), tmpR7.xyzw, |tmpR11.yzxw|;
+LOGC1 result.texcoord[7], pgmElw[234].z;
+DST result.color.back.secondary, vertex.attrib[7].ywzx, |tmpR2.yxzw|;
+ABS result.texcoord[6], -vertex.attrib[7].xwwx;
+SIN tmpR2.y, tmpR0.z;
+SLT_SAT result.color.secondary.xw (EQ.xyzw), -|tmpR5.xzwy|, tmpR2.xyzw;
+LOGC result.texcoord[2], pgmElw[172].x;
+RET;
+sub_maybe:
+RET;
+main:
+MOV tmpR0, 0;
+MOV tmpR2, 0;
+MOV tmpR5, 0;
+MOV tmpR7, 0;
+MOV tmpR9, 0;
+MOV tmpR11, 0;
+MOV tmpR14, 0;
+DP4 result.position.x, pgmElw[0], vertex.position;
+DP4 result.position.y, pgmElw[1], vertex.position;
+DP4 result.position.z, pgmElw[2], vertex.position;
+DP4 result.position.w, pgmElw[3], vertex.position;
+CAL sub_always;
+CAL sub_maybe  (FL1.y);
+ADDC result.color.primary, -vertex.texcoord[2].xxyz, tmpR11.xyzw;
+SFLC result.texcoord[0], -tmpR5.xyzw, pgmElw[129].ywwz;
+END
+

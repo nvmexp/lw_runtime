@@ -1,0 +1,111 @@
+/*
+ * Copyright (c) 2017, LWPU CORPORATION. All rights reserved.
+ */
+
+
+#include <ExelwtionStrategy/CORTTypes.h>
+#include <KernelUtils/Utility.h>
+#include <KernelUtils/lwda_rti.h>
+#include <o6/optix.h>
+#include <optixu/optixu_aabb.h>
+
+
+rtDeclareVariable( uint2, threadidx, rtLaunchIndex, );
+rtDeclareVariable( uint2, dims, rtLaunchDim, );
+
+
+// simpler version without motion
+RT_PROGRAM void compute_aabb()
+{
+    const unsigned int i = ( threadidx.y * dims.x + threadidx.x );
+
+    cort::AabbRequest req = optix::rtiGetAabbRequest();
+
+    optix::Aabb aabb;
+    if( req.isGroup )
+        optix::rtiComputeGroupChildAabb( req.recordOffset, i, &aabb );
+    else
+        optix::rtiComputeGeometryInstanceAabb( req.recordOffset, i, 0, &aabb );
+
+    optix::Aabb* buildAabbs = (optix::Aabb*)req.aabbOutputPointer;
+    buildAabbs[i]           = aabb;
+}
+
+RT_PROGRAM void compute_motion_aabbs()
+{
+    const unsigned int i = ( threadidx.y * dims.x + threadidx.x );
+
+    cort::AabbRequest req = optix::rtiGetAabbRequest();
+
+    optix::Aabb* buildAabbs = (optix::Aabb*)req.aabbOutputPointer;
+
+    if( req.motionAabbRequests )
+    {
+        // Collect multiple motion requests for a set of group or geometry groups
+        unsigned int recordOffset   = req.motionAabbRequests[i].x;
+        unsigned int outputPosition = req.motionAabbRequests[i].y;
+        optix::rtiGatherMotionAabbs( recordOffset, buildAabbs + outputPosition );
+    }
+    else if( req.isGroup )
+    {
+        // Collect the aabb of a single group or geometry group
+        // child. In the case of motion aabbs, this aabb will be the
+        // union across all timesteps.
+        optix::Aabb aabb;
+        optix::rtiComputeGroupChildAabb( req.recordOffset, i, &aabb );
+        buildAabbs[i] = aabb;
+    }
+    else if( req.computeUnion )
+    {
+        // First compute the union and then spread it to N copies of
+        // the aabbs. Used for two cases:
+        // 1:n : Copy first and only geometry aabb, which is also the union aabb, into every builder motion step.
+        // n:1 : Copy union aabb into first and only builder step.
+        // Both cases can use the same code path.
+        // Loop over input steps
+        optix::Aabb union_aabb;
+#pragma unroll 1
+        for( unsigned motionIndex = 0; motionIndex < req.geometryMotionSteps; ++motionIndex )
+        {
+            optix::Aabb motion_aabb;
+            optix::rtiComputeGeometryInstanceAabb( req.recordOffset, i, motionIndex, &motion_aabb );
+            union_aabb.include( motion_aabb );
+        }
+
+        // Loop over output steps
+        buildAabbs += i * req.buildMotionSteps;
+        for( unsigned motionIndex = 0; motionIndex < req.buildMotionSteps; ++motionIndex )
+        {
+            buildAabbs[motionIndex] = union_aabb;
+        }
+    }
+    else
+    {
+        // Otherwise, gather the individual AABBs from the
+        // geometry. If we find any that are invalid, mark the boxes
+        // invalid for all motion steps for that primitive. These
+        // AABBs may be further resampled by another kernel.
+
+        bool all_aabbs_valid = true;
+        buildAabbs += i * req.geometryMotionSteps;
+#pragma unroll 1
+        for( unsigned motionIndex = 0; motionIndex < req.geometryMotionSteps; ++motionIndex )
+        {
+            optix::Aabb motion_aabb;
+            optix::rtiComputeGeometryInstanceAabb( req.recordOffset, i, motionIndex, &motion_aabb );
+            buildAabbs[motionIndex] = motion_aabb;
+            all_aabbs_valid &= motion_aabb.valid();
+        }
+
+        // One aabb is invalid, ilwalidate all (which should be rare).
+        if( !all_aabbs_valid )
+        {
+            for( unsigned motionIndex = 0; motionIndex < req.buildMotionSteps; ++motionIndex )
+                buildAabbs[motionIndex].ilwalidate();
+        }
+    }
+}
+
+RT_PROGRAM void compute_aabb_exception()
+{
+}

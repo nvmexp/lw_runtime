@@ -1,0 +1,290 @@
+##############################################################################
+# drivers/lwsci/lwscistream/lwscistream.lwmk
+##############################################################################
+
+##############################################################################
+# Identify this module to lwCommon.lwmk so it can decide the build type
+##############################################################################
+
+LW_MODULE_BUILD_TYPE_ALIASES = lwscistream
+
+include $(LW_SOURCE)/drivers/lwsci/lwsci.lwmk
+
+##############################################################################
+# string to prepend in unix builds when exelwting rules in this gmake instance
+##############################################################################
+
+LW_MODULE_LOGGING_NAME = "lwscistream"
+
+##############################################################################
+# Build liblwscistream as position-independent code
+##############################################################################
+
+LW_BUILD_PIC = 1
+
+##############################################################################
+# Enabling the exceptions
+##############################################################################
+
+LW_CXX_EXCEPTIONS = 1
+
+##############################################################################
+# Path shorthands
+##############################################################################
+
+LWSCI_PATH       = $(LW_SOURCE)/drivers/lwsci
+LWSCISTREAM_PATH = $(LWSCI_PATH)/lwscistream
+
+##############################################################################
+# define SOURCES
+##############################################################################
+
+LWSCISTREAM_UTILS   :=
+
+LWSCISTREAM_SOURCES += branch.cpp
+LWSCISTREAM_SOURCES += endinfo.cpp
+LWSCISTREAM_SOURCES += sciwrap.cpp
+LWSCISTREAM_SOURCES += elements.cpp
+LWSCISTREAM_SOURCES += packet.cpp
+LWSCISTREAM_SOURCES += syncwait.cpp
+LWSCISTREAM_SOURCES += syncsignal.cpp
+LWSCISTREAM_SOURCES += lwscistream.cpp
+LWSCISTREAM_SOURCES += block.cpp
+LWSCISTREAM_SOURCES += pool.cpp
+LWSCISTREAM_SOURCES += automaticpool.cpp
+LWSCISTREAM_SOURCES += producer.cpp
+LWSCISTREAM_SOURCES += consumer.cpp
+LWSCISTREAM_SOURCES += queue.cpp
+LWSCISTREAM_SOURCES += multicast.cpp
+LWSCISTREAM_SOURCES += ipcbuffer.cpp
+LWSCISTREAM_SOURCES += ipcbuffer_sciwrap.cpp
+LWSCISTREAM_SOURCES += ipcsrc.cpp
+LWSCISTREAM_SOURCES += ipcsrc_recv.cpp
+LWSCISTREAM_SOURCES += ipcsrc_send.cpp
+LWSCISTREAM_SOURCES += ipcdst.cpp
+LWSCISTREAM_SOURCES += ipcdst_recv.cpp
+LWSCISTREAM_SOURCES += ipcdst_send.cpp
+LWSCISTREAM_SOURCES += limiter.cpp
+LWSCISTREAM_SOURCES += returnsync.cpp
+LWSCISTREAM_SOURCES += presentsync.cpp
+
+# OS specific variants
+ifeq ($(LW_TARGET_OS),QNX)
+LWSCISTREAM_SOURCES += qnx/ipccomm.cpp
+else
+LWSCISTREAM_UTILS   += fdutils.cpp
+LWSCISTREAM_SOURCES += linux/ipccomm.cpp
+endif
+
+ifdef LWCFG_GLOBAL_SAFETY_BUILD
+LWSCISTREAM_SOURCES += safety_panic.cpp
+LWSCISTREAM_SOURCES += lwscistream_safe.cpp
+else
+LWSCISTREAM_SOURCES += c2csrc.cpp
+LWSCISTREAM_SOURCES += c2csrc_send.cpp
+LWSCISTREAM_SOURCES += c2csrc_recv.cpp
+LWSCISTREAM_SOURCES += c2cdst.cpp
+LWSCISTREAM_SOURCES += c2cdst_send.cpp
+LWSCISTREAM_SOURCES += c2cdst_recv.cpp
+LWSCISTREAM_SOURCES += nonsafety_panic.cpp
+LWSCISTREAM_SOURCES += lwscistream_nonsafe.cpp
+endif
+
+SOURCES += $(addprefix $(LWSCISTREAM_PATH)/utils/,$(LWSCISTREAM_UTILS))
+SOURCES += $(addprefix $(LWSCISTREAM_PATH)/src/,$(LWSCISTREAM_SOURCES))
+
+##############################################################################
+# Disable pragma errors in Coverity build
+##############################################################################
+
+# When build is initiated from tmake, COVLKTMPDIR is passed in to lwmake from
+# tmake if LW_BUILD_CONFIGURATION_IS_COVERITY=1 in tmake configuration.
+#
+# The LW_BUILD_CONFIGURATION_IS_COVERITY defined in tmake is not visible in
+# lwmake. User should define environment variable
+# LW_BUILD_CONFIGURATION_IS_COVERITY when locally doing Coverity build using
+# unix-build.
+LW_BUILD_CONFIGURATION_IS_COVERITY ?=
+
+# Automatically set LW_BUILD_CONFIGURATION_IS_COVERITY if Coverity build is
+# initiated from tmake.
+ifdef COVLKTMPDIR
+LW_BUILD_CONFIGURATION_IS_COVERITY = 1
+endif
+
+ifeq ($(LW_BUILD_CONFIGURATION_IS_COVERITY),1)
+$(call BUILD_OBJECT_LIST,$(SOURCES)): LW_WARNINGS_NOERROR += unknown-pragmas
+endif
+
+##############################################################################
+# define LW_INCLUDES
+##############################################################################
+
+#include cheetah headers
+ifeq ($(LW_TEGRA_MIRROR_INCLUDES), 1)
+#get lwrm headers from sdk/inc and RMAPI_TEGRA_MIRROR if we are building
+#perforce tree.
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+else
+ifeq ($(LW_TEGRA_DIRECT_INCLUDES), 1)
+#get lwrm headers directly from core/include
+  LW_INCLUDES += $(TEGRA_TOP)/core/include
+  LW_INCLUDES += $(TEGRA_TOP)/lwscic2c/include/public
+endif
+endif
+
+LW_INCLUDES += $(LWSCISTREAM_PATH)/inc
+
+# OS specific variants
+ifeq ($(LW_TARGET_OS),QNX)
+LW_INCLUDES += $(LWSCISTREAM_PATH)/inc/qnx
+else
+LW_INCLUDES += $(LWSCISTREAM_PATH)/inc/linux
+endif
+
+LW_INCLUDES += $(LWSCISTREAM_PATH)/utils
+LW_INCLUDES += $(LWSCISTREAM_PATH)/utils/generics
+
+# Coverity specific includes
+ifeq ($(LW_BUILD_CONFIGURATION_IS_COVERITY),1)
+LW_INCLUDES += $(LWSCISTREAM_PATH)/utils/covanalysis_enable
+else
+LW_INCLUDES += $(LWSCISTREAM_PATH)/utils/covanalysis_disable
+endif
+
+LW_INCLUDES += $(LWSCI_PATH)/inc/public
+LW_INCLUDES += $(LWSCI_PATH)/inc/internal
+LW_INCLUDES += $(LWSCI_PATH)/lwscicommon/inc
+
+#include x86 headers
+ifeq ($(LW_BACKEND_RESMAN), 1)
+  include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+  LW_INCLUDES += $(LW_SOURCE)/drivers/unix/allocator/include
+endif
+
+LW_INCLUDES += $(OUTPUTDIR)
+
+##############################################################################
+# define LW_DEFINES
+##############################################################################
+
+# For lwmake builds, lwcfg feature flags are available to LWSCI.
+ifdef LWCFG_INITIALIZED
+  LW_DEFINES += LWCFG_ENABLED
+endif
+
+ifeq ($(LW_TEGRA_MIRROR_INCLUDES), 1)
+  LW_DEFINES += LW_SCI_DESKTOP_COMPATIBLE_HEADERS
+endif
+
+# Embedded defines this on the command line for their builds.
+LW_BUILD_EMBEDDED ?= 0
+
+ifeq ($(LW_BUILD_EMBEDDED),1)
+    LW_DEFINES += LW_BUILD_EMBEDDED=1
+endif
+
+ifeq ($(LW_TARGET_OS),QNX)
+  LW_DEFINES += QNX
+  #QOS Safety Manual 2.1 mandates that -DQNXSOURCE has to be added if -std=c++14 is set.
+  LW_DEFINES += QNXSOURCE
+endif
+
+CXX_STD = c++14
+
+# Link in libpthread
+LDFLAGS += $(PTHREAD_LDFLAGS)
+
+ifneq ($(LW_TARGET_OS),QNX)
+  # Link in librt
+  LDFLAGS += -lrt
+  # Link in libstdc++
+  LDFLAGS += -lstdc++
+  # Link in libgcc_s
+  LDFLAGS += -lgcc_s
+else
+  # Link in libc++
+  LDFLAGS += -lc++
+endif
+
+##############################################################################
+# Definitions for the LWID string
+##############################################################################
+
+# Most binaries built as part of the UNIX GPU driver package contain a
+# stamp identifying the binary. This includes a timestamp, and in
+# internal builds, also username and hostname.
+# The info is helpful in triage issues reported by the lwstomers.
+#
+# However the stamp makes the checksum of the binary unique in each build
+# instance, even the codebase doesn't change. It is an undesirable feature
+# in safety product.
+#
+# So only adds the LWID string in non-safety build.
+
+ifndef LWCFG_GLOBAL_SAFETY_BUILD
+  LWID_STRINGNAME = "LW_LWSCISTREAM_ID"
+  LWID_MODULENAME = "LwSciStream Shared Library"
+
+  SOURCES += $(LWIDSTRING)
+endif
+
+##############################################################################
+# Include DSO stub makefile for LwSciBuf, LwSciSync, LwSciIpc and LwSciEvent
+##############################################################################
+include $(LWSCI_PATH)/lwscibuf/lwscibuf-dso-stub.lwmk
+include $(LWSCI_PATH)/lwscisync/lwscisync-dso-stub.lwmk
+include $(LWSCI_PATH)/lwsciipc/lwsciipc-dso-stub.lwmk
+include $(LWSCI_PATH)/lwscicommon/lwscicommon-dso-stub.lwmk
+include $(LWSCI_PATH)/lwscievent/lwscievent-dso-stub.lwmk
+
+##############################################################################
+# Colwert the mobile exports file to the desktop format.
+##############################################################################
+
+LWSCISTREAM_EXPORTS = $(OUTPUTDIR_COMMON)/liblwscistream-exports.txt
+
+LWSCISTREAM_EXPORTS_SOURCES = liblwscistream.export
+
+
+$(LWSCISTREAM_EXPORTS): $(LWSCISTREAM_EXPORTS_SOURCES)
+	$(CAT) $(LWSCISTREAM_EXPORTS_SOURCES) | \
+	$(SORT) | $(UNIQ) | \
+	$(SED) -e 's/@[0-9]\+//' \
+	    -e 's/^\([^#].\+\)$$/\1 func/' > $@
+
+##############################################################################
+# define how to mangle the object files
+##############################################################################
+
+ifeq ($(LW_MANGLE_SYMBOLS),1)
+  # If the component has symbols needing mangling, such as internal API entry
+  # points, generate a mangle list and define the mangling rule here.
+
+  # liblwscistream contains no exposed symbols requiring mangling.
+  LINK_OBJECTS = $(OBJECTS)
+  LWSCISTREAM_MANGLE_FILE =
+else
+  # If symbol mangling is disabled, LINK_OBJECTS == OBJECTS and there is
+  # no mangle file.
+  LINK_OBJECTS = $(OBJECTS)
+  LWSCISTREAM_MANGLE_FILE =
+endif
+
+##############################################################################
+# define how to build the linker script used when linking liblwscistream
+##############################################################################
+
+LWSCISTREAM_LINKER_SCRIPT = $(OUTPUTDIR_COMMON)/liblwscistream.map$(MANGLE_SUFFIX)
+
+$(eval $(call LINKER_SCRIPT_RULE, \
+  $(LWSCISTREAM_LINKER_SCRIPT), \
+  $(LWSCISTREAM_EXPORTS), \
+  $(LWSCISTREAM_MANGLE_FILE)))
+
+##############################################################################
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

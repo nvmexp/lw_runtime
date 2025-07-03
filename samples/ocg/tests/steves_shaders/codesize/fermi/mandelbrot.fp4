@@ -1,0 +1,38 @@
+!!LWfp4.0
+
+# mandelbrot.fp4
+
+# bug 462436
+# bug 524571
+
+# Nested CAL Mandelbrot fractal
+
+FLOAT TEMP c;
+FLOAT TEMP z;
+FLOAT TEMP t;
+INT TEMP n;
+iter:
+  MAD t.x, z.y, -z.y, c.x;
+  MAD t.x, z.x, z.x, t.x;
+  MUL t.y, z.x, z.y;
+  MAD t.y, t.y, 2.0, c.y;
+  MOV z, t;
+  ADD.S n.x, n.x, 1;
+  SUBC.S n.y, n.x, 100;
+  DP2AC t.x, t, t, -4;
+  RET (GT.xyxy);
+  CAL iter;
+  RET;
+main:
+  MOV.S n, 0;
+  MAD c, fragment.texcoord, 4, -2;
+  MOV z, c;
+  CAL iter;
+  I2F t, n;
+  MUL result.color.x, t.x, 0.08;
+  MUL result.color.y, t.x, 0.04;
+  MUL result.color.z, t.x, 0.02;
+  MOV result.color.w, 1.0;
+  END
+
+

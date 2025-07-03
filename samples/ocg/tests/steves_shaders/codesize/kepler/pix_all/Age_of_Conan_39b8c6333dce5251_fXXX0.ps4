@@ -1,0 +1,78 @@
+ps_4_1
+dcl_globalflags refactoringAllowed
+dcl_input_ps v1.xyzw, linear
+dcl_input_ps v2.xy, linear
+dcl_output o0.xyzw
+dcl_constantbuffer cb0[31].xyzw, dynamicindexed
+dcl_constantbuffer cb3[6].xyzw, immediateindexed
+dcl_sampler s0, mode_default
+dcl_sampler s7, mode_comparison
+dcl_resource t0, texture2d, (float, float, float, float)
+dcl_resource t14, texture2darray, (float, float, float, float)
+dcl_temps 6 
+sample_l r0.x, v2.xyxx, t0.xyzw, s0, l(0)
+mad r1.xyzw, cb3[0].xyzw, r0.xxxx, v1.xyzw
+div r0.yzw, r1.xxyz, r1.wwww
+add r0.yzw, r0.yyzw, -cb0[5].xxyz
+dp3 r1.x, r0.yzwy, r0.yzwy
+rsq r1.x, r1.x
+mul r1.xyz, r0.yzwy, r1.xxxx
+dp3 r1.x, r1.xyzx, cb0[6].xyzx
+mad_sat r1.x, r1.x, l(0.50000000), l(0.50000000)
+mul r1.y, r1.x, r1.x
+mul r1.y, r1.y, r1.y
+mad r1.y, r1.y, l(0.92000002), l(0.08000000)
+mad r1.y, r1.y, cb3[5].y, l(1.00000000)
+log r1.x, r1.x
+mul r1.x, r1.y, r1.x
+exp r1.x, r1.x
+sqrt r1.y, cb0[6].y
+mul r1.x, r1.x, r1.y
+eq r1.y, r0.x, l(1.00000000)
+if_nz r1.y
+mov o0.yzw, l(0, 0, 0x3f800000, 0x3f800000)
+mov o0.x, r1.x
+ret 
+else 
+add r2.xyzw, v1.xyzw, cb3[0].xyzw
+div r1.yzw, r2.xxyz, r2.wwww
+add r1.yzw, r1.yyzw, -cb0[5].xxyz
+dp3 r1.y, r1.yzwy, r1.yzwy
+sqrt r1.y, r1.y
+mul r2.xyz, r0.yzwy, l(0.01562500, 0.01562500, 0.01562500, 0.00000000)
+dp3 r1.z, r2.xyzx, r2.xyzx
+sqrt r1.z, r1.z
+mov r2.xyz, cb0[5].xyzx
+mov r1.w, l(0)
+mov r2.w, l(0)
+mov r3.x, l(0)
+loop 
+ige r3.y, r3.x, l(0x40)
+breakc_nz r3.y
+lt r4.xyzw, cb0[14].xyzw, r2.wwww
+and r4.xyzw, r4.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+dp4 r3.y, l(1.00000000, 1.00000000, 1.00000000, 1.00000000), r4.xyzw
+ftoi r3.z, r3.y
+imul null, r3.z, r3.z, l(0x4)
+mad r4.xyzw, r2.xxxx, cb0[r3.z+15].xyzw, cb0[r3.z+18].xyzw
+mad r4.xyzw, r2.yyyy, cb0[r3.z+16].xyzw, r4.xyzw
+mad r4.xyzw, r2.zzzz, cb0[r3.z+17].xyzw, r4.xyzw
+div r4.xyz, r4.xyzx, r4.wwww
+mad r5.xy, r4.xyxx, l(0.50000000, -0.50000000, 0.00000000, 0.00000000), l(0.50000000, 0.50000000, 0.00000000, 0.00000000)
+round_z r5.z, r3.y
+sample_c_lz aoffimmi(1, 1, 0) r3.y, r5.xyzx, t14.xxxx, s7, r4.z
+add r1.w, r1.w, r3.y
+add r2.w, r1.z, r2.w
+mad r2.xyz, r0.yzwy, l(0.01562500, 0.01562500, 0.01562500, 0.00000000), r2.xyzx
+iadd r3.x, r3.x, l(0x1)
+endloop 
+mul r0.y, r1.w, l(0.01562500)
+div o0.w, r2.w, r1.y
+mul o0.x, r1.x, r0.y
+log r0.x, r0.x
+mul r0.x, r0.x, l(32.00000000)
+exp r0.x, r0.x
+add o0.y, -r0.x, l(1.00000000)
+mov o0.z, r0.y
+ret 
+endif 

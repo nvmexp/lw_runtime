@@ -1,0 +1,198 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include <iostream>
+#include <vector>
+#include "lwphy.h"
+#include "lwphy_hdf5.hpp"
+#include "hdf5hpp.hpp"
+
+using namespace std;
+using namespace hdf5hpp;
+using namespace lwphy;
+
+#define K 56  // number of pbch layload + crc bits
+#define E 864 // number of pbch bits, always 864
+#define Nc 1600
+#define N 288 // Desired length of the gold sequence
+
+int main(int argc, char* argv[])
+{
+    if(argc < 2)
+    {
+        std::cerr << "no input file specified" << std::endl;
+        exit(1);
+    }
+
+    uint32_t NID = 0;
+    int16_t  outputPSS[127];
+    int16_t  outputSSS[127];
+
+    lwphyStatus_t status = LWPHY_STATUS_SUCCESS;
+
+    for(; NID < 1008; NID++)
+    {
+        status = lwphyGenerateSyncSignal(NID, outputPSS, outputSSS);
+        // cout << endl << "NID: " << NID << "  " << endl;
+        // cout << "PSS: ";
+        // for (int i = 0; i < 127; i++){
+        // 	cout << outputPSS[i] << ", ";
+        // }
+        // cout << endl;
+        // cout << "SSS: ";
+        // for (int i = 0; i < 127; i++){
+        // 	cout << outputSSS[i] << ", ";
+        // }
+        // cout << endl;
+    }
+
+    hdf5_file    f    = hdf5_file::open(argv[1], H5F_ACC_RDWR);
+    hdf5_dataset dset = f.open_dataset("x_qam");
+
+    hdf5_dataset     dset1 = f.open_dataset("x_scram");
+    hdf5_dataset     dset2 = f.open_dataset("X_tf");
+    hdf5_dataset     dset3 = f.open_dataset("SSTxParams");
+    vector<uint32_t> x_scram(864);
+
+    using tensor_pinned_R_32U = typed_tensor<LWPHY_R_32U, pinned_alloc>;
+    tensor_pinned_R_32U sc    = typed_tensor_from_dataset<LWPHY_R_32U, pinned_alloc>(dset1);
+    // read output tensor
+    using tensor_pinned_C_32F = typed_tensor<LWPHY_C_32F, pinned_alloc>;
+    tensor_pinned_C_32F outp  = typed_tensor_from_dataset<LWPHY_C_32F, pinned_alloc>(dset2);
+    lwphyHDF5_struct    s     = lwphy::get_HDF5_struct_index(dset3, 0);
+
+    for(int i = 0; i < 864; ++i)
+    {
+        x_scram[i] = static_cast<uint32_t>(sc({i}));
+    }
+
+    int n_f = outp.dimensions()[0];
+    int n_t = outp.dimensions()[1];
+    if(argc > 3)
+    {
+        n_f = atoi(argv[2]);
+        n_t = atoi(argv[3]);
+    }
+    else
+    {
+        std::cout << "No n_f and n_t values given, reading from h5 file (n_f = "
+                  << n_f << ", n_t = " << n_t << ")." << std::endl;
+        std::cout << "You can specify n_t and n_t by testSS [h5 file] [n_f] [n_t]" << std::endl;
+    }
+    typed_tensor<LWPHY_C_16F> d_tfSignal(tensor_layout({n_f, n_t}));
+
+    unique_device_ptr<uint32_t> d_x_scram = make_unique_device<uint32_t>(x_scram.size());
+    lwdaMemcpyAsync(d_x_scram.get(), sc.addr(), x_scram.size() * sizeof(uint32_t), lwdaMemcpyHostToDevice);
+
+    SSTxParams param = {0};
+    param.NID        = s.get_value_as<unsigned int>("NID");
+    param.nHF        = s.get_value_as<unsigned int>("nHF");
+    param.Lmax       = s.get_value_as<unsigned int>("Lmax");
+    param.blockIndex = s.get_value_as<unsigned int>("blockIndex");
+    param.f0         = s.get_value_as<unsigned int>("f0");
+    param.t0         = s.get_value_as<unsigned int>("t0");
+    param.nF         = n_f;
+    param.nT         = n_t;
+    param.slotIdx    = s.get_value_as<unsigned int>("ss_slot_idx");
+
+    typedef __half2 fp16_complex_t;
+
+    // allocate device tensors
+    unique_device_ptr<fp16_complex_t> d_xQam       = make_unique_device<fp16_complex_t>(E);
+    unique_device_ptr<int16_t>        d_PSS        = make_unique_device<int16_t>(127);
+    unique_device_ptr<int16_t>        d_SSS        = make_unique_device<int16_t>(127);
+    unique_device_ptr<fp16_complex_t> d_dmrs       = make_unique_device<fp16_complex_t>(N / 2);
+    unique_device_ptr<uint32_t>       d_c          = make_unique_device<uint32_t>(N);
+    unique_device_ptr<uint32_t>       d_dmrsIdx    = make_unique_device<uint32_t>(N / 2);
+    unique_device_ptr<uint32_t>       d_qamIdx     = make_unique_device<uint32_t>(E / 2);
+    unique_device_ptr<uint32_t>       d_pssIdx     = make_unique_device<uint32_t>(128);
+    unique_device_ptr<uint32_t>       d_sssIdx     = make_unique_device<uint32_t>(128);
+    unique_device_ptr<fp16_complex_t> d_tfSignalSS = make_unique_device<fp16_complex_t>(240 * 4);
+    // end allocate device tensors
+
+    void* workspace = nullptr;
+    status          = lwphySSTxPipelinePrepare(&workspace);
+
+    if(LWPHY_STATUS_SUCCESS != status)
+    {
+        fprintf(stderr, "lwphySSTxPipelinePrepare() error: %s\n", lwphyGetErrorString(status));
+        return 1;
+    }
+
+    status = lwphySSTxPipeline(d_xQam.get(),
+                               d_PSS.get(),
+                               d_SSS.get(),
+                               d_dmrs.get(),
+                               d_c.get(),
+                               d_dmrsIdx.get(),
+                               d_qamIdx.get(),
+                               d_pssIdx.get(),
+                               d_sssIdx.get(),
+                               d_tfSignalSS.get(),
+                               d_x_scram.get(),
+                               &param,
+                               d_tfSignal.addr(),
+                               workspace,
+                               0 /* stream */);
+
+    if(LWPHY_STATUS_SUCCESS != status)
+    {
+        fprintf(stderr, "lwphySSTxPipeline() error: %s\n", lwphyGetErrorString(status));
+        return 1;
+    }
+
+    //fp16_complex_t tfSignal[n_f * n_t];
+    //lwdaMemcpy(tfSignal, d_tfSignal.addr(), n_f * n_t * sizeof(half2), lwdaMemcpyDeviceToHost);
+
+    lwdaDeviceSynchronize();
+
+    // Copy result back to host memory
+    typed_tensor<LWPHY_C_16F, pinned_alloc> output(d_tfSignal.layout());
+    output             = d_tfSignal;
+    auto outTensorData = output.addr();
+    auto expTensorData = outp.addr();
+
+    // TODO: verify the output result
+    bool passed = 1;
+    for(int i = 0; i < n_t; i++)
+    {
+        for(int j = 0; j < n_f; j++)
+        {
+            // - HDF5 "truth" data is double, colwerted to float
+            // - lwPHY implementation uses FP16
+            // To compare, we colwert the truth values to fp16 and
+            // back to fp32
+            fp16_complex_t outData      = outTensorData[i * n_f + j];
+            float2         outDataFloat = __half22float2(outData);
+            float2         expDataFloat = expTensorData[i * n_f + j];
+            __half2        expDataHalf  = __float22half2_rn(expDataFloat);
+            float2         expDataCheck = __half22float2(expDataHalf);
+            if(outDataFloat.x != expDataCheck.x ||
+               outDataFloat.y != expDataCheck.y)
+            {
+                printf("output: %f, %fi\n", outDataFloat.x, outDataFloat.y);
+                printf("outp:   %f, %fi\n", expDataCheck.x, expDataCheck.y);
+                printf("Output mismatch at %d %d\n", i, j);
+                passed = false;
+            }
+            if(passed == false)
+                break;
+        }
+        if(passed == false)
+            break;
+    }
+
+    status = lwphySSTxPipelineFinalize(&workspace);
+    if(LWPHY_STATUS_SUCCESS != status)
+    {
+        fprintf(stderr, "lwphySSTxPipelineFinalize() error: %s\n", lwphyGetErrorString(status));
+        return 1;
+    }
+}

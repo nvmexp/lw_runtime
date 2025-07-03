@@ -1,0 +1,245 @@
+#include "utils.h"
+#define WINDOWGATE_THREADS 128
+
+__global__ void lwnnx_WindowGate_updateOutput_kernel(
+  float *output, float *centroids, float *normalizedCentroids, float *outputIndice,
+  const float *input, const float *noise, int inputSize, int outputSize, 
+  int outputWindowSize, float a, float b, int train)
+{
+  __shared__ float buffer[WINDOWGATE_THREADS];
+  unsigned int tx = threadIdx.x;
+  unsigned int k = blockIdx.x;
+  const float *input_k = input + inputSize*k;
+  float *output_k = output + outputWindowSize*k;
+  
+  // get coordinate of centoid
+  buffer[tx] = 0;
+  for (unsigned int i=tx; i<inputSize; i+=blockDim.x)
+    buffer[tx] += input_k[i]*(float)(i+1);
+  
+  // add (reduce)
+  for (unsigned int stride = WINDOWGATE_THREADS >> 1; stride > 0; stride >>= 1)
+  {
+    __syncthreads();
+    if (tx < stride)
+      buffer[tx] += buffer[tx+stride];
+  }
+  
+  if (tx == 0)
+  {
+    float centroid = buffer[0];
+    
+    // make centroid a number between 0 and 1
+    centroid /= (float)(inputSize);
+    
+    normalizedCentroids[k] = centroid;
+    if ( train )
+    {
+      centroid += noise[k];
+      centroid = fminf(fmaxf(0,centroid),1);
+    }
+    // align centroid to output
+    centroid *= (float)(outputSize);
+    
+    float outputIdx = centroid - 0.5*(float)outputWindowSize;
+    
+    // clip indices
+    outputIdx = fminf(outputIdx, outputSize-outputWindowSize+1);
+    outputIdx = fmaxf(outputIdx, 1);
+    
+    outputIdx = ceilf(outputIdx);
+    // align centroid to outputWindow
+    centroid -= (outputIdx-1);
+    
+    outputIndice[k] = (int)outputIdx;
+    centroids[k] = centroid;
+    buffer[0] = centroid;
+  }
+  
+  __syncthreads();
+  
+  float centroid = buffer[0];
+   
+  // gaussian blur 
+  for (int i=tx; i<outputWindowSize; i+=blockDim.x)
+  {
+    float x = (float)(i+1)-centroid;
+    output_k[i] = a*expf(x*x*b);
+  }
+}
+  
+static int lwnnx_WindowGate_updateOutput(lua_State *L)
+{ 
+  THCState *state = getLwtorchState(L);
+  THLwdaTensor *input = (THLwdaTensor*)luaT_checkudata(L, 2, "torch.LwdaTensor");  
+  
+  int inputSize = luaT_getfieldcheckint(L, 1, "inputSize");
+  int outputSize = luaT_getfieldcheckint(L, 1, "outputSize");
+  int outputWindowSize = luaT_getfieldcheckint(L, 1, "outputWindowSize");
+  int batchSize = luaT_getfieldcheckint(L, 1, "batchSize");
+  int train = luaT_getfieldcheckboolean(L, 1, "train");
+  float a = (float)luaT_getfieldchecknumber(L, 1, "a");
+  float b = (float)luaT_getfieldchecknumber(L, 1, "b");
+  
+  THLwdaLongTensor *outputIndiceLwda = (THLwdaLongTensor*)luaT_getfieldcheckudata(L, 1, "outputIndiceLwda", "torch.LwdaLongTensor");
+  THLongTensor *outputIndice = (THLongTensor*)luaT_getfieldcheckudata(L, 1, "outputIndice", "torch.LongTensor");
+  THLwdaTensor *centroid = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "centroid", "torch.LwdaTensor");
+  THLwdaTensor *normalizedCentroid = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "normalizedCentroid", "torch.LwdaTensor");
+  THLwdaTensor *noise = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "noise", "torch.LwdaTensor");
+  THLwdaTensor *output = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "_output", "torch.LwdaTensor");
+  
+  luaL_argcheck(L, input->nDimension == 2, 2, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, input->size[1] == inputSize, 2, "invalid input size"); 
+  
+  THLwdaTensor_resize2d(state, output, batchSize, outputWindowSize);
+  THLwdaLongTensor_resize1d(state, outputIndiceLwda, batchSize);
+  THLongTensor_resize1d(outputIndice, batchSize);
+  THLwdaTensor_resize1d(state, centroid, batchSize);
+  THLwdaTensor_resize1d(state, normalizedCentroid, batchSize);
+  
+  /* call lwdakernel */
+  dim3 blocks(batchSize); // each lwca-block is an example
+  dim3 threads(WINDOWGATE_THREADS);
+  lwnnx_WindowGate_updateOutput_kernel<<<blocks,threads>>>(
+    THLwdaTensor_data(state, output), THLwdaTensor_data(state, centroid),
+    THLwdaTensor_data(state, normalizedCentroid), (float *)THLwdaLongTensor_data(state, outputIndiceLwda),
+    (const float*)THLwdaTensor_data(state, input), (const float*)THLwdaTensor_data(state, noise), 
+    inputSize, outputSize, outputWindowSize, a, b, train
+  );
+  
+  THLongTensor_copyLwda(state, outputIndice, outputIndiceLwda);
+  
+  return 0;
+}
+
+__global__ void lwnnx_WindowGate_updateGradInput_kernel(
+  float *gradInput, float *error, float* targetCentroids, 
+  const float *centroids,const float *input, const float *outputIndice,
+  const float* output, const float* gradOutput, 
+  int inputSize, int outputSize, int outputWindowSize,
+  float c, float d, float e, float lr)
+{
+  __shared__ float buffer[WINDOWGATE_THREADS+1];
+  unsigned int tx = threadIdx.x;
+  unsigned int k = blockIdx.x;
+  const float *gradOutput_k = gradOutput + outputWindowSize*k;
+  const float *output_k = output + outputWindowSize*k;
+  const float *input_k = input + inputSize*k;
+  float *gradInput_k = gradInput + inputSize*k;
+  float centroid = centroids[k];
+
+  // get gradient of centroid
+  buffer[tx] = 0;
+  for (unsigned int i=tx; i<outputWindowSize; i+=blockDim.x)
+  {
+    buffer[tx] += gradOutput_k[i]*output_k[i]*((float)(i+1) - centroid);
+  }
+  
+  // add (reduce)
+  for (unsigned int stride = WINDOWGATE_THREADS >> 1; stride > 0; stride >>= 1)
+  {
+    __syncthreads();
+    if (tx < stride)
+      buffer[tx] += buffer[tx+stride];
+  }
+  
+  if (tx == 0)
+  {
+    int outputIdx = outputIndice[k];
+    float gradCentroid = buffer[0]*c;
+    centroid -= (lr*gradCentroid);
+    centroid += outputIdx-1;
+    centroid /= (float)(outputSize);
+    targetCentroids[k] = centroid;
+    buffer[WINDOWGATE_THREADS] = centroid*(float)(inputSize);
+  }
+  
+  __syncthreads();
+  float targetCentroid = buffer[WINDOWGATE_THREADS];
+   
+  buffer[tx] = 0;
+  // target is a gaussian blur 
+  for (int i=tx; i<inputSize; i+=blockDim.x)
+  {
+    float target = (float)(i+1)-targetCentroid;
+    target = d*expf(target*target*e);
+    float input = input_k[i];
+    // dot product of logProbInput and probTarget (NLL)
+    buffer[tx] -= logf(input + 0.0000001)*target;
+    // grad input w.r.t. NLL
+    gradInput_k[i] = -target/(input + 0.0000001);
+  }
+  
+  // add (reduce)
+  for (unsigned int stride = WINDOWGATE_THREADS >> 1; stride > 0; stride >>= 1)
+  {
+    __syncthreads();
+    if (tx < stride)
+      buffer[tx] += buffer[tx+stride];
+  }
+  
+  if (tx == 0)
+    error[k] = buffer[tx];
+}
+
+  
+static int lwnnx_WindowGate_updateGradInput(lua_State *L)
+{ 
+  THCState *state = getLwtorchState(L);
+  THLwdaTensor *input = (THLwdaTensor*)luaT_checkudata(L, 2, "torch.LwdaTensor");
+  THLwdaTensor *gradOutput = (THLwdaTensor*)luaT_checkudata(L, 3, "torch.LwdaTensor"); 
+  
+  int inputSize = luaT_getfieldcheckint(L, 1, "inputSize");
+  int outputSize = luaT_getfieldcheckint(L, 1, "outputSize");
+  int outputWindowSize = luaT_getfieldcheckint(L, 1, "outputWindowSize");
+  int batchSize = luaT_getfieldcheckint(L, 1, "batchSize");
+  
+  float c = (float)luaT_getfieldchecknumber(L, 1, "c");
+  float d = (float)luaT_getfieldchecknumber(L, 1, "d");
+  float e = (float)luaT_getfieldchecknumber(L, 1, "e");
+  float lr = (float)luaT_getfieldchecknumber(L, 1, "lr");
+  
+  THLwdaTensor *error = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "error", "torch.LwdaTensor");
+  THLwdaTensor *centroid = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "centroid", "torch.LwdaTensor");
+  THLwdaTensor *targetCentroid = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "targetCentroid", "torch.LwdaTensor");
+  THLwdaTensor *output = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "_output", "torch.LwdaTensor");
+  THLwdaTensor *outputIndiceLwda = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "outputIndiceLwda", "torch.LwdaTensor");
+  THLwdaTensor *gradInput = (THLwdaTensor*)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.LwdaTensor");
+  
+  luaL_argcheck(L, input->nDimension == 2, 2, "2D(batch mode) tensor expected");
+  luaL_argcheck(L, input->size[1] == inputSize, 2, "invalid input size"); 
+  
+  THLwdaTensor_resize2d(state, gradInput, batchSize, inputSize);
+  THLwdaTensor_resize1d(state, error, batchSize);
+  THLwdaTensor_resize1d(state, targetCentroid, batchSize);
+    
+  /* call lwdakernel */
+  dim3 blocks(batchSize); // each lwca-block is an example
+  dim3 threads(WINDOWGATE_THREADS);
+  lwnnx_WindowGate_updateGradInput_kernel<<<blocks,threads>>>(
+    THLwdaTensor_data(state, gradInput), THLwdaTensor_data(state, error), 
+    THLwdaTensor_data(state, targetCentroid), 
+    (const float*)THLwdaTensor_data(state, centroid),
+    (const float*)THLwdaTensor_data(state, input), 
+    (const float*)THLwdaTensor_data(state, outputIndiceLwda),
+    (const float*)THLwdaTensor_data(state, output), 
+    (const float*)THLwdaTensor_data(state, gradOutput), 
+    inputSize, outputSize, outputWindowSize, c, d, e, lr
+  );
+  
+  return 1;
+}
+
+
+static const struct luaL_Reg lwnnx_WindowGate__ [] = {
+  {"WindowGate_updateOutput", lwnnx_WindowGate_updateOutput},
+  {"WindowGate_updateGradInput", lwnnx_WindowGate_updateGradInput},
+  {NULL, NULL}
+};
+
+static void lwnnx_WindowGate_init(lua_State *L)
+{
+  luaT_pushmetatable(L, "torch.LwdaTensor");
+  luaT_registeratname(L, lwnnx_WindowGate__, "nn");
+  lua_pop(L,1);
+}

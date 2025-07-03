@@ -1,0 +1,42 @@
+ps_4_0
+dcl_globalflags refactoringAllowed
+dcl_input_ps v1.xy, linear
+dcl_output o0.xyzw
+dcl_temps 3 
+sampleinfo r0.x, rasterizer
+add r0.yz, v1.xxyx, l(0.00000000, -0.53125000, -0.53125000, 0.00000000)
+sampleinfo r0.w, rasterizer
+mov r1.xy, l(0, 0, 0, 0)
+loop 
+  uge r1.z, r1.y, r0.x
+  breakc_nz r1.z
+  samplepos r2.xy, rasterizer, r1.y
+  add r2.x, r2.x, r2.y
+  add r1.zw, r0.yyyz, -r2.xxxy
+  lt r1.zw, |r1.zzzw|, l(0.00000000, 0.00000000, 0.03125000, 0.03125000)
+  and r1.z, r1.w, r1.z
+  utof r1.w, r1.y
+  add r1.w, r1.w, l(1.00000000)
+  div r1.w, r1.w, r0.w
+  add r1.w, r1.x, r1.w
+  movc r1.x, r1.z, r1.w, r1.x
+  iadd r1.y, r1.y, l(0x1)
+endloop 
+mov o0.x, r1.x
+iadd r0.w, r0.x, l(0x2)
+mov r1.x, l(0)
+mov r1.y, r0.x
+loop 
+  uge r1.z, r1.y, r0.w
+  breakc_nz r1.z
+  samplepos r2.xy, rasterizer, r1.y
+  add r1.zw, r0.yyyz, -r2.xxxy
+  lt r1.zw, |r1.zzzw|, l(0.00000000, 0.00000000, 0.03125000, 0.03125000)
+  and r1.z, r1.w, r1.z
+  add r1.w, r1.x, l(0.33333334)
+  movc r1.x, r1.z, r1.w, r1.x
+  iadd r1.y, r1.y, l(0x1)
+endloop 
+mov o0.y, r1.x
+mov o0.zw, l(0, 0, 0, 0x3f800000)
+ret 

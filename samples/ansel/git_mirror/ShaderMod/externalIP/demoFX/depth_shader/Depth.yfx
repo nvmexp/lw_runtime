@@ -1,0 +1,34 @@
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 texcoord: TexCoord;
+};
+
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+}
+
+cbuffer controlBuf
+{
+	float g_sldIntensity;
+}
+
+Texture2D txDiffuse;
+Texture2D txDepth;
+
+SamplerState samLinear;
+SamplerState samLinearWrap;
+SamplerState samNearestClamp;
+
+float4 PS_RedMonochrome( VSOut frag ): SV_Target
+{
+	float4 color = txDiffuse.Sample(samLinear, frag.texcoord);
+	float4 depthVec = txDepth.Sample(samNearestClamp, frag.texcoord);
+	float outDepth = 200.0 * depthVec.r;//(1.0 - depthVec.r);
+	float4 outColor = lerp(color, float4(outDepth, outDepth, outDepth, 1.0), g_sldIntensity);
+
+	return outColor;
+}

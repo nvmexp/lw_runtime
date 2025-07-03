@@ -1,0 +1,92 @@
+#
+# LWIDIA_COPYRIGHT_BEGIN
+#
+# Copyright 2017-2019 by LWPU Corporation.  All rights reserved.  All
+# information contained herein is proprietary and confidential to LWPU
+# Corporation.  Any use, reproduction, or disclosure without the written
+# permission of LWPU Corporation is prohibited.
+#
+# LWIDIA_COPYRIGHT_END
+
+MODS_DIR ?= ../../diag/mods
+
+RM_KERNEL_DIR   = ../resman/kernel
+DRIVERS_DIR     = ..
+
+base_name = liblwswitch
+dll_build = false
+
+include $(MODS_DIR)/makedefs.inc
+
+# Minimal lwmake prerequisites for common.lwmk
+LW_SOURCE = ../..
+OUTPUTDIR = $(o_dir)
+ifneq "$(filter $(BUILD_OS),winmfg winsim)" ""
+    LW_HOST_OS ?= windows
+else ifneq "$(filter $(BUILD_OS),linuxmfg sim)" ""
+    LW_HOST_OS ?= Linux
+endif
+
+include kernel/common.lwmk
+
+################################################
+# user API
+################################################
+
+LWSWITCH_INCLUDES += $(LWSWITCH_DRV_DIR)/user
+LWSWITCH_INCLUDES += $(LWSWITCH_DRV_DIR)/user/MODS
+LWSWITCH_SOURCES += $(LWSWITCH_DRV_DIR)/user/MODS/lwswitch_user_api_mods.c
+
+################################################
+# LWOC
+################################################
+LWOC_DIR       := $(LW_SOURCE)/drivers/resman/src/libraries/lwoc
+LWOC_MKDIR      = $(MKDIR_P)
+LWOC_INCLUDES   = $(LWSWITCH_INCLUDES)
+
+include $(LWOC_DIR)/lwoc.lwmk
+
+LWSWITCH_INCLUDES   += $(LWOC_INCDIRS)
+LWSWITCH_INCLUDES   += $(LWOC_OUTPUTDIR)
+
+################################################
+# LWPORT
+################################################
+LWPORT_ENABLED_MODULES := ALL
+include $(LW_SOURCE)/drivers/resman/src/libraries/lwport/lwport.lwmk
+
+LWSWITCH_INCLUDES   += $(LWPORT_INCLUDES)
+
+################################################
+# LwSwitch
+################################################
+include_dirs += $(LWSWITCH_INCLUDES)
+include_dirs += $(MODS_DIR)/core/include
+include_dirs += $(MODS_DIR)
+include_dirs += $(RM_KERNEL_DIR)/inc
+include_dirs += $(DRIVERS_DIR)/common/shared/inc
+include_dirs += $(DRIVERS_DIR)/resman/inc/libraries
+include_dirs += $(MODS_DIR)/../js1.7
+
+ifeq "$(INCLUDE_LWSWITCH)" "true"
+    c_files += $(LWSWITCH_SOURCES)
+    c_files += kernel/mods/mods_lwswitch.c
+
+    # LWOC -- Append the sources/headers/defines to the main variables
+    gen_h_files += $(LWOC_GEN_HFILES_ALL)
+    gen_c_files += $(LWOC_GEN_CFILES_ALL)
+    c_files     += $(filter-out $(LWOC_GEN_CFILES_ALL),$(LWOC_CFILES_ALL))
+
+    # LWPORT -- Append the sources/defines to the main variables
+    defines += $(addprefix -D,$(LWPORT_DEFINES))
+    c_files += $(LWPORT_SOURCES)
+    LDFLAGS += $(LWPORT_LDFLAGS)
+endif
+
+CFLAGS += -fPIC
+
+include $(MODS_DIR)/makelib.inc
+include $(MODS_DIR)/makerule.inc
+
+# include dependency information
+-include $(depend_files)

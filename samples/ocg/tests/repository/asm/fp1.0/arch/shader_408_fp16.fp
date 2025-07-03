@@ -1,0 +1,35 @@
+!!FP1.0
+MOVH H1.xyz, f[TEX6];
+MOVH H3.w, {0.333333, 0.000000, 0.000000, 0.000000}.x;
+MULH H3.xyz, f[COL0], {0.333333, 0.000000, 0.000000, 0.000000}.x;
+TEX H2, f[TEX2], TEX4, 2D;
+TEX H0, f[TEX0], TEX0, 2D;
+MULH H3.xyz, H0, H3;
+MULH H3.xyz, H3, {0.333333, 0.000000, 0.000000, 0.000000}.x;
+ADDH H3.xyz, H3, H3;
+MADH H0.xyz, {0.333333, 0.000000, 0.000000, 0.000000}.x, H0, -H3;
+MADH H3.xyz, H0.w, H0, H3;
+DP3H H0.x, f[TEX6], f[TEX6];
+RCPH H1.w, H0.x;
+DP3H H0.x, H1, f[TEX3];
+MULH H1.w, H1, H0.x;
+ADDH H1.w, H1, H1;
+MADH H0.xy, H1.w, H1, -f[TEX3];
+TEX H0, H0, TEX7, LWBE;
+MULH H0.xyz, H0, H2;
+MULH H0.xyz, H0, {0.333333, 0.000000, 0.000000, 0.000000}.x;
+MADH H1.xyz, H0, H0, -H0;
+MADH H0.xyz, {0.333333, 0.000000, 0.000000, 0.000000}.x, H1, H0;
+DP3H H0.w, H0, {0.333333, 0.000000, 0.000000, 0.000000}.x;
+MADH H1.xyz, {0.333333, 0, 0, 0}, -H0.w, H0.w;
+MADH H0.xyz, {0.333333, 0, 0, 0}, H0, H1;
+ADDH H3.xyz, H0, H3;
+MOVH H0, H3;
+MOVH o[COLH], H0; 
+END
+
+# Passes = 20 
+
+# Registers = 2 
+
+# Textures = 4 

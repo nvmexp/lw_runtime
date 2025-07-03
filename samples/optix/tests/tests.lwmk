@@ -1,0 +1,126 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+# Common variables used by tests$(LW_TARGET_OS_FAMILY).lwmk
+ROBOT_SUITES = $(addprefix -s$(SPACE),$(filter-out __init__,$(basename $(notdir $(wildcard $(LW_OPTIX)/tests/functional/testlists/*.tsv)))))
+ROBOT_TESTROOTDIR = $(abspath $(LW_OPTIX))/tests/functional
+ROBOT_TESTROOTBINDIR = $(OUTPUTDIR_ABSOLUTE)/tests/functional
+ROBOT_OPTIXLIBDIR = $(OUTPUTDIR_ABSOLUTE)
+ROBOT_OPTIXBINDIR = $(OUTPUTDIR_ABSOLUTE)
+ROBOT_REPORTDIR = report
+
+# Define the following variables that vary by host platform:
+#
+# SCRIPT_SUFFIX
+#   Filename suffix for script files, e.g. .sh
+# OPTIX_MAKE_SCRIPT_EXELWTABLE
+#   Function to generate a command to make a script file exelwtable.
+# ROBOT_PREAMBLE
+#   Script premable before running robot.
+# ROBOT_xxx_CMD
+#   The robot command for script xxx.
+# ROBOT_POSTABLE
+#   Script postamble after running robot.
+# OPTIX_WRITE_ROBOT_SCRIPT
+#   Writes a script file from the contents of a make variable.
+#
+
+# Define before including the os-specific part. Needed there and here when creating OPTIX_ROBOT_SCRIPT
+optix_test_scripts := test_all test_smoke test_regression test_single test_suite test_tag
+
+include $(LW_OPTIX)/tests/tests$(LW_TARGET_OS_FAMILY).lwmk
+
+# OPTIX_ROBOT_SCRIPT
+#
+# Generate rules to create a robot framework colwenience test script.
+#
+# Arguments:
+# $(1)    Script name
+#
+define OPTIX_ROBOT_SCRIPT
+# Phony target for the test script generation
+.PHONY: $(1)_script
+
+# The test-scripts target depends on the generated robot test script.
+test-scripts: $(1)_script
+
+# Define a variable to hold the script contents
+ROBOT_$(1) :=
+define ROBOT_$(1)
+$$(ROBOT_PREAMBLE)
+$$(ROBOT_$(1)_CMD)
+$$(ROBOT_POSTAMBLE)
+endef
+
+# The script name target depends on the generated script file.
+$(1)_script: $$(OUTPUTDIR)/$(1)$$(SCRIPT_SUFFIX)
+
+# The generated script file depends on the tests/tests.lwmk, and
+# tests$(LW_TARGET_OS_FAMILY).lwmk. The two makefiles contain the
+# template and variables used to generate the script file.
+#
+$$(OUTPUTDIR)/$(1)$$(SCRIPT_SUFFIX): $(LW_OPTIX)/tests/tests.lwmk $(LW_OPTIX)/tests/tests$(LW_TARGET_OS_FAMILY).lwmk
+	$$(info Generating robot helper script $(1)$$(SCRIPT_SUFFIX))
+	$$(call OPTIX_WRITE_ROBOT_SCRIPT,$$(@),ROBOT_$(1))
+	$$(call OPTIX_MAKE_SCRIPT_EXELWTABLE,$$(@))
+endef
+
+# Create rules to generate the scripts
+$(foreach script,$(optix_test_scripts),$(eval $(call OPTIX_ROBOT_SCRIPT,$(script))))
+
+# Phony target for generating all test scripts
+.PHONY: test-scripts
+
+# Main test target depends on the test scripts
+test:: test-scripts
+
+# SET_DOXYGEN_GROUPS
+#
+# Helper function to set a variable to a list of doxygen
+# group references in a set of header files.
+#
+# Parameters:
+# $(1)    Variable name to set
+# $(2)    Doxygen directive to look for, e.g. @ingroup or @defgroup
+# $(3)    List of header files to search
+#
+define SET_DOXYGEN_GROUPS
+  $(1) := $(sort $(shell $(SED) -n 's/.*$(2) *\([[:alnum:]_]*\).*/\1/p' $(3)))
+endef
+
+# Phony target for validating doxygen groups
+.PHONY: run-test-doxygen-groups
+
+# Test depends on the timestamp file
+run-test-doxygen-groups: $(OUTPUTDIR)/run-test-doxygen-groups.txt
+
+# Validate every @ingroup has a corresponding @defgroup in include/doxygen/doxygen_hierarchy.h
+# Timestamp file depends on input headers
+$(OUTPUTDIR)/run-test-doxygen-groups.txt: $(wildcard $(LW_OPTIX)/include/*.h $(LW_OPTIX)/include/doxygen/*.h)
+	$(info Checking doxygen function groups)
+	$(eval $(call SET_DOXYGEN_GROUPS,OPTIX_DOXYGEN_INGROUPS,@ingroup,$(wildcard $(LW_OPTIX)/include/*.h)))
+	$(eval $(call SET_DOXYGEN_GROUPS,OPTIX_DOXYGEN_DEFGROUPS,@defgroup,$(wildcard $(LW_OPTIX)/include/doxygen/*.h)))
+	$(foreach group,$(OPTIX_DOXYGEN_INGROUPS),$(if $(findstring $(group),$(OPTIX_DOXYGEN_DEFGROUPS)),,\
+      $(error Doxygen group $(group) is not defined in include/doxygen/doxygen_hierarchy.h.)))
+	$(file >$(@),)

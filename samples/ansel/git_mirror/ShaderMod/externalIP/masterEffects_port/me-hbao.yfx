@@ -1,0 +1,221 @@
+#include "me_header.fxh"
+#include "me_lwdefines.fxh"
+
+SamplerState samplerDepth;
+SamplerState samplerOcclusion1;
+SamplerState samplerOcclusion2;
+SamplerState samplerLDR1;
+
+Texture2D texColor;
+Texture2D texDepth;
+Texture2D texBlurred;
+
+
+/*sampler2D SamplerDepth
+{
+	Texture = texDepth;
+	MinFilter = LINEAR;
+	MagFilter = LINEAR;
+	MipFilter = LINEAR;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};*/
+
+float GetLinearDepth(float depth)
+{
+	return  1 / ((depth * ((zFarPlane - zNearPlane) / (-zFarPlane * zNearPlane)) + zFarPlane / (zFarPlane * zNearPlane)));
+}
+
+float3 GetNormalFromDepth(float fDepth, float2 vTexcoord) {
+  
+  	const float2 offset1 = float2(0.0,0.001);
+  	const float2 offset2 = float2(0.001,0.0);
+  
+  	float depth1 = GetLinearDepth(texDepth.SampleLevel(samplerDepth, vTexcoord + offset1,0).x);
+  	float depth2 = GetLinearDepth(texDepth.SampleLevel(samplerDepth, vTexcoord + offset2,0).x);
+  
+  	float3 p1 = float3(offset1, depth1 - fDepth);
+  	float3 p2 = float3(offset2, depth2 - fDepth);
+  
+  	float3 normal = cross(p1, p2);
+  	normal.z = -normal.z;
+  
+  	return normalize(normal);
+}
+
+float2 getIlwFocalLen()
+{
+	return float2(tan(0.5f*radians(FOV)) / (1.0f / screenSize.y) * (1.0f / screenSize.x), tan(0.5f*radians(FOV)));
+}
+
+
+float3 GetEyePosition(in float2 uv, in float eye_z) {
+	uv = (uv * float2(2.0, -2.0) - float2(1.0, -1.0));
+	float3 pos = float3(uv * getIlwFocalLen() * eye_z, eye_z);
+	return pos;
+}
+
+float2 GetRandom2_10(in float2 uv) {
+	float noiseX = (frac(sin(dot(uv, float2(12.9898,78.233) * 2.0)) * 43758.5453));
+	float noiseY = sqrt(1 - noiseX * noiseX);
+	return float2(noiseX, noiseY);
+}
+
+float4 PS_ME_HBAO(VSOut IN) : SV_Target
+{
+
+	IN.texcoord.xy /= AO_TEXSCALE;
+	if(IN.texcoord.x > 1.0 || IN.texcoord.y > 1.0) discard;
+
+	float depth = GetLinearDepth(texDepth.Sample(samplerDepth, IN.texcoord.xy).x);
+
+#if( AO_SHARPNESS_DETECT == 1)
+	float blurkey = depth;
+#else
+	float blurkey = dot(GetNormalFromDepth(depth, IN.texcoord.xy).xyz,0.333)*0.1;
+#endif
+
+	if(depth > min(0.9999,AO_FADE_END)) return float4(1.0,1.0,1.0,blurkey);
+
+	float2 sample_offset[8] =
+	{
+		float2(1, 0),
+		float2(0.7071f, 0.7071f),
+		float2(0, 1),
+		float2(-0.7071f, 0.7071f),
+		float2(-1, 0),
+		float2(-0.7071f, -0.7071f),
+		float2(0, -1),
+		float2(0.7071f, -0.7071f)
+	};
+
+	float3 pos = GetEyePosition(IN.texcoord.xy, depth);
+	float3 dx = ddx(pos);
+	float3 dy = ddy(pos);
+	float3 norm = normalize(cross(dx,dy));
+ 
+	float sample_depth=0;
+	float3 sample_pos=0;
+ 
+	float ao=0;
+	float s=0.0;
+ 
+	float2 rand_vec = GetRandom2_10(IN.texcoord.xy);
+	float2 sample_vec_divisor = getIlwFocalLen()*depth/(fHBAOSamplingRange*float2(1.0f/screenSize.x, 1.0f/screenSize.y));
+	float2 sample_center = IN.texcoord.xy;
+ 
+	for (int i = 0; i < 8; i++)
+	{
+		float theta,temp_theta,temp_ao,lwrr_ao = 0;
+		float3 occlusion_vector = 0.0;
+ 
+		float2 sample_vec = reflect(sample_offset[i], rand_vec);
+		sample_vec /= sample_vec_divisor;
+		float2 sample_coords = (sample_vec*float2(1,screenSize.x/screenSize.y))/iHBAOSamples;
+ 
+		for (int k = 1; k <= iHBAOSamples; k++)
+		{
+			sample_depth = GetLinearDepth(texDepth.SampleLevel(samplerDepth, sample_center + sample_coords*(k-0.5*(i%2)), 0).x);
+			sample_pos = GetEyePosition(sample_center + sample_coords*(k-0.5*(i%2)), sample_depth);
+			occlusion_vector = sample_pos - pos;
+			temp_theta = dot( norm, normalize(occlusion_vector) );			
+ 
+			if (temp_theta > theta)
+			{
+				theta = temp_theta;
+				temp_ao = 1-sqrt(1 - theta*theta );
+				ao += (1/ (1 + fHBAOAttenuation * pow(length(occlusion_vector)/fHBAOSamplingRange*5000,2)) )*(temp_ao-lwrr_ao);
+				lwrr_ao = temp_ao;
+			}
+		}
+		s += 1;
+	}
+ 
+	ao /= max(0.00001,s);
+ 	ao = 1.0-ao*fHBAOAmount;
+	ao = clamp(ao,fHBAOClamp,1);
+
+	return float4(ao.xxx, blurkey);
+
+}
+
+float4 PS_ME_AOBlurV(VSOut IN) : SV_Target
+{
+	//It's better to do this here, upscaling must produce artifacts and upscale-> blur is better than blur -> upscale
+	//besides: code is easier an I'm very lazy :P
+	IN.texcoord.xy *= AO_TEXSCALE;
+	float  sum,totalweight=0;
+	float4 base = texColor.Sample(samplerOcclusion1, IN.texcoord.xy), temp=0;
+	
+	[loop]
+	for (int r = -AO_BLUR_STEPS; r <= AO_BLUR_STEPS; ++r) 
+	{
+		float2 axis = float2(0.0, 1.0);
+		temp = texColor.Sample(samplerOcclusion1, IN.texcoord.xy + axis * float2(1.0f / screenSize.x, 1.0f / screenSize.y) * r);
+		float weight = AO_BLUR_STEPS-abs(r); 
+		weight *= max(0.0, 1.0 - (1000.0 * AO_SHARPNESS) * abs(temp.w - base.w));
+		sum += temp.x * weight;
+		totalweight += weight;
+	}
+
+	return float4(sum / (totalweight+0.0001),0,0,base.w);
+}
+
+float4 PS_ME_AOBlurH(VSOut IN) : SV_Target
+{
+	float  sum,totalweight=0;
+	float4 base = texColor.Sample(samplerOcclusion2, IN.texcoord.xy), temp=0;
+	
+	[loop]
+	for (int r = -AO_BLUR_STEPS; r <= AO_BLUR_STEPS; ++r) 
+	{
+		float2 axis = float2(1.0, 0.0);
+		temp = texColor.Sample(samplerOcclusion2, IN.texcoord.xy + axis * float2(1.0f / screenSize.x, 1.0f / screenSize.y) * r);
+		float weight = AO_BLUR_STEPS-abs(r); 
+		weight *= max(0.0, 1.0 - (1000.0 * AO_SHARPNESS) * abs(temp.w - base.w));
+		sum += temp.x * weight;
+		totalweight += weight;
+	}
+
+	return float4(sum / (totalweight+0.0001),0,0,base.w);
+}
+
+float4 PS_ME_AOCombine(VSOut IN) : SV_Target
+{
+
+	float4 color = texColor.Sample(samplerLDR1, IN.texcoord.xy);
+	float ao = texBlurred.Sample(samplerOcclusion1, IN.texcoord.xy).x;
+
+#if( AO_METHOD == 1) //SSAO
+	ao -= 0.5;
+	if(ao < 0) ao *= fSSAODarkeningAmount;
+	if(ao > 0) ao *= fSSAOBrighteningAmount;
+	ao = 2 * saturate(ao+0.5);	
+#endif
+
+#if( AO_METHOD == 2)
+	ao = pow(ao, fRayAOPower);
+#endif
+
+#if( AO_DEBUG == 1)
+ #if(AO_METHOD == 1)	
+	ao *= 0.5;
+ #endif
+	return ao;
+#endif
+
+#if(AO_LUMINANCE_CONSIDERATION == 1)
+	float origlum = dot(color.xyz, 0.333);
+	float aomult = smoothstep(AO_LUMINANCE_LOWER, AO_LUMINANCE_UPPER, origlum);
+	ao = lerp(ao, 1.0, aomult);
+#endif	
+
+	float depth = GetLinearDepth(texDepth.Sample(samplerDepth, IN.texcoord.xy).x); 
+	ao = lerp(ao,1.0,smoothstep(AO_FADE_START,AO_FADE_END,depth));
+
+	color.xyz *= ao;
+	return color;
+}
+
+
+

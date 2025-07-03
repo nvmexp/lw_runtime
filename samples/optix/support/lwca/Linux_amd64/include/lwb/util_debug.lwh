@@ -1,0 +1,162 @@
+/******************************************************************************
+ * Copyright (c) 2011, Duane Merrill.  All rights reserved.
+ * Copyright (c) 2011-2018, LWPU CORPORATION.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in the
+ *       documentation and/or other materials provided with the distribution.
+ *     * Neither the name of the LWPU CORPORATION nor the
+ *       names of its contributors may be used to endorse or promote products
+ *       derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL LWPU CORPORATION BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ ******************************************************************************/
+
+/**
+ * \file
+ * Error and event logging routines.
+ *
+ * The following macros definitions are supported:
+ * - \p LWB_LOG.  Simple event messages are printed to \p stdout.
+ */
+
+#pragma once
+
+#include <stdio.h>
+#include "util_namespace.lwh"
+#include "util_arch.lwh"
+
+/// Optional outer namespace(s)
+LWB_NS_PREFIX
+
+/// LWB namespace
+namespace lwb {
+
+
+/**
+ * \addtogroup UtilMgmt
+ * @{
+ */
+
+
+/// LWB error reporting macro (prints error messages to stderr)
+#if (defined(DEBUG) || defined(_DEBUG)) && !defined(LWB_STDERR)
+    #define LWB_STDERR
+#endif
+
+
+
+/**
+ * \brief %If \p LWB_STDERR is defined and \p error is not \p lwdaSuccess, the corresponding error message is printed to \p stderr (or \p stdout in device code) along with the supplied source context.
+ *
+ * \return The LWCA error.
+ */
+__host__ __device__ __forceinline__ lwdaError_t Debug(
+    lwdaError_t     error,
+    const char*     filename,
+    int             line)
+{
+    (void)filename;
+    (void)line;
+
+#ifdef LWB_RUNTIME_ENABLED
+    // Clear the global LWCA error state which may have been set by the last
+    // call. Otherwise, errors may "leak" to unrelated kernel launches.
+    lwdaGetLastError();
+#endif
+
+#ifdef LWB_STDERR
+    if (error)
+    {
+        if (LWB_IS_HOST_CODE) {
+            #if LWB_INCLUDE_HOST_CODE
+                fprintf(stderr, "LWCA error %d [%s, %d]: %s\n", error, filename, line, lwdaGetErrorString(error));
+                fflush(stderr);
+            #endif
+        } else {
+            #if LWB_INCLUDE_DEVICE_CODE
+                printf("LWCA error %d [block (%d,%d,%d) thread (%d,%d,%d), %s, %d]\n", error, blockIdx.z, blockIdx.y, blockIdx.x, threadIdx.z, threadIdx.y, threadIdx.x, filename, line);
+            #endif
+        }
+    }
+#endif
+    return error;
+}
+
+
+/**
+ * \brief Debug macro
+ */
+#ifndef LwbDebug
+    #define LwbDebug(e) lwb::Debug((lwdaError_t) (e), __FILE__, __LINE__)
+#endif
+
+
+/**
+ * \brief Debug macro with exit
+ */
+#ifndef LwbDebugExit
+    #define LwbDebugExit(e) if (lwb::Debug((lwdaError_t) (e), __FILE__, __LINE__)) { exit(1); }
+#endif
+
+
+/**
+ * \brief Log macro for printf statements.
+ */
+#if !defined(_LwbLog)
+    #if defined(__LWCOMPILER_LWDA__)
+        #define _LwbLog(format, ...) (__builtin_is_device_code() \
+            ? printf("[block (%d,%d,%d), thread (%d,%d,%d)]: " format, \
+                     blockIdx.z, blockIdx.y, blockIdx.x, \
+                     threadIdx.z, threadIdx.y, threadIdx.x, __VA_ARGS__) \
+            : printf(format, __VA_ARGS__));
+    #elif !(defined(__clang__) && defined(__LWDA__))
+        #if (LWB_PTX_ARCH == 0)
+            #define _LwbLog(format, ...) printf(format,__VA_ARGS__);
+        #elif (LWB_PTX_ARCH >= 200)
+            #define _LwbLog(format, ...) printf("[block (%d,%d,%d), thread (%d,%d,%d)]: " format, blockIdx.z, blockIdx.y, blockIdx.x, threadIdx.z, threadIdx.y, threadIdx.x, __VA_ARGS__);
+        #endif
+    #else
+        // XXX shameless hack for clang around variadic printf...
+        //     Compilies w/o supplying -std=c++11 but shows warning,
+        //     so we sielence them :)
+        #pragma clang diagnostic ignored "-Wc++11-extensions"
+        #pragma clang diagnostic ignored "-Wunnamed-type-template-args"
+            template <class... Args>
+            inline __host__ __device__ void va_printf(char const* format, Args const&... args)
+            {
+        #ifdef __LWDA_ARCH__
+              printf(format, blockIdx.z, blockIdx.y, blockIdx.x, threadIdx.z, threadIdx.y, threadIdx.x, args...);
+        #else
+              printf(format, args...);
+        #endif
+            }
+        #ifndef __LWDA_ARCH__
+            #define _LwbLog(format, ...) lwb::va_printf(format,__VA_ARGS__);
+        #else
+            #define _LwbLog(format, ...) lwb::va_printf("[block (%d,%d,%d), thread (%d,%d,%d)]: " format, __VA_ARGS__);
+        #endif
+    #endif
+#endif
+
+
+
+
+/** @} */       // end group UtilMgmt
+
+}               // LWB namespace
+LWB_NS_POSTFIX  // Optional outer namespace(s)

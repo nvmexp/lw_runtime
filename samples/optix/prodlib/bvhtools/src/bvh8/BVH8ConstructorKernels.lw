@@ -1,0 +1,230 @@
+// Copyright LWPU Corporation 2016
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "BVH8ConstructorKernels.hpp"
+#include <prodlib/bvhtools/src/common/SharedKernelFunctions.hpp>
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(BVH8CONSTRUCTOR_EXEC_WARPS_PER_BLOCK * 32, BVH8CONSTRUCTOR_EXEC_BLOCKS_PER_SM)
+void BVH8ConstructorExec(BVH8ConstructorExecParams p)
+{
+    INIT_SHUFFLE_EMULATION(BVH8CONSTRUCTOR_EXEC_WARPS_PER_BLOCK)
+
+    // Process one output node by each warp.
+
+    int nodeIdx = threadIdx.y + BVH8CONSTRUCTOR_EXEC_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y);
+    if (nodeIdx >= *p.inNumNodes)
+        return;
+
+    // First warp => initialize aux data for root node.
+
+    BVH8NodeAux aux = {};
+    if (nodeIdx == 0)
+    {
+        aux.numChildNodes = 0;
+        aux.parentNodeIdx = -1;
+        aux.rootPairIdx   = 0;
+        aux.firstRemapIdx = 0;
+
+        if (threadIdx.x == 0)
+            storeCachedAlign16(&p.outNodeAux[nodeIdx], aux);
+    }
+
+    // Remaining warps => wait until another warp has initialized the aux data for this node.
+
+    else
+    {
+        if (threadIdx.x == 0)
+        {
+            while (*(volatile int*)&p.outNodeAux[nodeIdx].numChildNodes == -1)
+                __threadfence_system(); // spin
+            aux = loadUncachedAlign16(&p.outNodeAux[nodeIdx]);
+        }
+        aux = shfl(aux, 0);
+    }
+
+    // Maintain one child of the node by each lane.
+
+    bool childIsValid;
+    int childBinaryNodeIdx;
+    PlannerBinaryNode childBinaryNode = {};
+
+    childBinaryNode.childPairIdx = aux.rootPairIdx;
+    childBinaryNode.afterPlan.subtreePrims += loadCachedAlign4(&p.inBinaryNodes[aux.rootPairIdx + 0].afterPlan.subtreePrims);
+    childBinaryNode.afterPlan.subtreePrims += loadCachedAlign4(&p.inBinaryNodes[aux.rootPairIdx + 1].afterPlan.subtreePrims);
+    int wideNodeSubtreePrims = childBinaryNode.afterPlan.subtreePrims & INT_MAX;
+
+    // Large subtree => use lane index as bit-trail of (BVH8CONSTRUCTOR_EXEC_MAX_DEPTH) levels.
+
+    if (wideNodeSubtreePrims > p.maxBranchingFactor)
+    {
+        int tmpTrail = __brev(threadIdx.x) >> (32 - BVH8CONSTRUCTOR_EXEC_MAX_DEPTH);
+        do
+        {
+            childBinaryNodeIdx = childBinaryNode.childPairIdx + (tmpTrail & 1);
+            childBinaryNode = loadCachedAlign16(&p.inBinaryNodes[childBinaryNodeIdx]);
+            tmpTrail >>= 1;
+        }
+        while (childBinaryNode.childPairIdx >= 0 && childBinaryNode.afterPlan.ownerSubtreePrims >= wideNodeSubtreePrims);
+        childIsValid = (tmpTrail == 0);
+    }
+
+    // Small subtree => node extends all the way to individual primitives => use lane index as primitive index.
+
+    else
+    {
+        int tmpPrimIdx = threadIdx.x;
+        do
+        {
+            childBinaryNodeIdx = childBinaryNode.childPairIdx;
+            int primsOnLeft = loadCachedAlign4(&p.inBinaryNodes[childBinaryNodeIdx].afterPlan.subtreePrims) & INT_MAX;
+            if (tmpPrimIdx >= primsOnLeft) tmpPrimIdx -= primsOnLeft, childBinaryNodeIdx++;
+            childBinaryNode = loadCachedAlign16(&p.inBinaryNodes[childBinaryNodeIdx]);
+        }
+        while (childBinaryNode.childPairIdx >= 0);
+        childIsValid = (tmpPrimIdx == 0);
+    }
+
+    // Child is marked as invalid => ignore.
+
+    if (childBinaryNode.childPairIdx == INT_MIN)
+        childIsValid = false;
+
+    // Count children and callwlate prefix sums.
+
+    unsigned int    childMask       = __ballot(childIsValid);
+    int             childCount      = __popc(childMask);
+    int             childIdx        = __popc(childMask & getLaneMaskLt());
+
+    bool            childIsLeaf     = (childIsValid && childBinaryNode.afterPlan.subtreePrims < 0);
+    bool            childIsInner    = (childIsValid && !childIsLeaf);
+
+    unsigned int    childInnerMask  = __ballot(childIsInner);
+    int             childInnerCount = __popc(childInnerMask);
+    int             childInnerIdx   = __popc(childInnerMask & getLaneMaskLt());
+
+    // Callwlate inclusive prefix sums over leaf node and child node primitive counts.
+
+    int numChildPrims   = childBinaryNode.afterPlan.subtreePrims & INT_MAX;
+    int sumLeafPrims    = (childIsLeaf)  ? numChildPrims : 0;
+    int sumNodePrims    = (childIsInner) ? numChildPrims : 0;
+
+    for (int i = 1; i < 32; i *= 2)
+    {
+        sumLeafPrims = shfl_up_add(sumLeafPrims, i);
+        sumNodePrims = shfl_up_add(sumNodePrims, i);
+    }
+
+    // Callwlate remap begin indices for the children.
+    // Note: We place leaf primitives at the beginning, and distribute the remaining slots among the child nodes.
+
+    int totalLeafPrims = shfl(sumLeafPrims, 31);
+    int remapChildBegin = (childIsLeaf) ? sumLeafPrims : (sumNodePrims + totalLeafPrims);
+    remapChildBegin += aux.firstRemapIdx - numChildPrims;
+
+    // Allocate child node indices.
+
+    int childInnerBase = 0;
+    if (threadIdx.x == 0)
+        childInnerBase = atomicAdd(p.nodeCounter, childInnerCount) + 1; // +1 for root
+    childInnerBase = shfl(childInnerBase, 0);
+    childInnerIdx += childInnerBase;
+
+    // Initialize aux data for child nodes.
+
+    if (childIsInner)
+    {
+        BVH8NodeAux childAux;
+        childAux.numChildNodes = 0; // unblocks the warp waiting to process this node
+        childAux.parentNodeIdx = nodeIdx;
+        childAux.rootPairIdx   = childBinaryNode.childPairIdx;
+        childAux.firstRemapIdx = remapChildBegin;
+        storeUncachedAlign16(&p.outNodeAux[childInnerIdx], childAux);
+    }
+
+    // Initialize node header.
+
+    if (threadIdx.x == 0)
+    {
+        int2 firstChildIdx_firstRemapIdx = make_int2(childInnerBase, aux.firstRemapIdx);
+        storeCachedAlign8((int2*)&p.outNodes[nodeIdx].header.firstChildIdx, firstChildIdx_firstRemapIdx);
+    }
+
+    // Initialize children.
+    {
+        BVH8Meta meta;
+        if (childIsInner)
+            meta.setInner(childIdx);
+        else if (childIsLeaf)
+            meta.setLeaf(remapChildBegin - aux.firstRemapIdx, numChildPrims);
+        else
+        {
+            childIdx = childCount + __popc(__ballot(true) & getLaneMaskLt()); // fill in unused child entries
+            meta.setEmpty();
+        }
+
+        if (childIdx < 8)
+            storeCachedAlign1(&p.outNodes[nodeIdx].header.meta[childIdx], meta);
+    }
+
+    // Output the number of child nodes.
+
+    if (threadIdx.x == 0)
+        storeCachedAlign4(&p.outNodeAux[nodeIdx].numChildNodes, childInnerCount);
+
+    // Callwlate exclusive prefix sum over remap indices.
+
+    int remapBegin = sumLeafPrims;
+    if (childIsLeaf)
+        remapBegin -= numChildPrims;
+
+    // Process each remap entry in parallel by one lane,
+    // and find the source lane whose leaf node references it.
+    // Note: One BVH8Node can reference up to 8 * 3 = 24 remap entries.
+
+    int srcLane = 0;
+    for (int i = 32 / 2; i >= 1; i /= 2)
+        if (shfl(remapBegin, srcLane + i) <= threadIdx.x)
+            srcLane += i;
+
+    // Grab data from the source lane.
+
+    int tmpPrimIdx = threadIdx.x - shfl(remapBegin, srcLane);
+    int tmpBinaryNodeIdx = shfl(childBinaryNode.childPairIdx, srcLane);
+    int tmpNumChildPrims = shfl(numChildPrims, srcLane);
+
+    // Traverse BVH subtree to obtain index to the PrimitiveAABB array.
+
+    if (threadIdx.x < totalLeafPrims)
+    {
+        while (tmpBinaryNodeIdx >= 0)
+        {
+            int primsOnLeft = loadCachedAlign4(&p.inBinaryNodes[tmpBinaryNodeIdx].afterPlan.subtreePrims) & INT_MAX;
+            if (tmpPrimIdx >= primsOnLeft) tmpPrimIdx -= primsOnLeft, tmpBinaryNodeIdx++;
+            tmpBinaryNodeIdx = loadCachedAlign4(&p.inBinaryNodes[tmpBinaryNodeIdx].childPairIdx);
+        }
+        storeCachedAlign4(&p.outRemap[aux.firstRemapIdx + threadIdx.x], ~tmpBinaryNodeIdx);
+    }
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchBVH8ConstructorExec(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const BVH8ConstructorExecParams& p)
+{
+    if (lwdaFuncSetCacheConfig(BVH8ConstructorExec, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    BVH8ConstructorExec<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

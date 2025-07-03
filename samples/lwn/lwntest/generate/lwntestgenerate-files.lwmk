@@ -1,0 +1,48 @@
+#
+# Code generation rules for !.NACT makefiles, generating the sources file.
+#
+# This is a sub-make file that is used to avoid contaminating build the
+# build environment in the main generator makefile ()
+
+# override this to get the proper files for the HOS platform
+override LW_TARGET_OS := wddm
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+LWNGEN_DIR           = $(LWRDIR)/generate
+LWNGEN_NACT          = $(LWNGEN_DIR)/mknact.py
+LWNGEN_NACT_TEMPLATE = $(LWRDIR)/generate/!.nact_template
+LWNGEN_NACT_SUBMAKE  = $(LWRDIR)/generate/lwntestgenerate-files.lwmk
+LWNGEN_SRCLIST       = $(LW_SOURCE)/apps/lwn/lwntest/SrcList.inc
+
+# Run the scripts by launching Python
+LWN_DO_GEN 	= $(PYTHON)
+
+# common dependencies
+LWN_COMMON_DEPS  = $(LWNGEN_SRCLIST)
+LWN_COMMON_DEPS += $(LWNGEN_NACT)
+LWN_COMMON_DEPS += $(LWNGEN_NACT_TEMPLATE)
+LWN_COMMON_DEPS += $(LWNGEN_NACT_SUBMAKE)
+
+# Don't include shaderc sources for !.nact
+LW_LWN_ENABLE_SPIRV = 0
+
+# Explicitly disable LWN/LWCA interop functionality for the nact build of
+# lwntest.  While LWCA interop is enabled on HOS, the nact build might not
+# find the LWCA headers necessary to successfully build that part of lwntest.
+# We need to explicitly set LWNTEST_LWDA_ENABLED here to avoid uninitialized
+# variable warnings from GNU Make for lwmake-based builds that generate
+# !.nact.
+LWNTEST_LWDA_ENABLED = 0
+
+include $(LWNGEN_SRCLIST)
+
+LWNTEST_SRC_FILES = $(LWNTEST_CFILES) $(LWNTEST_CPPFILES) $(LWNTEST_CCFILES)
+
+# !nact build file
+$(OUTPUTDIR)/!.nact.gen: $(LWN_COMMON_DEPS)
+	$(LWN_DO_GEN) $(LWNGEN_NACT) $(LWNGEN_NACT_TEMPLATE) $@ "$(LWNTEST_SRC_FILES)"
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk
+
+build: $(OUTPUTDIR)/!.nact.gen

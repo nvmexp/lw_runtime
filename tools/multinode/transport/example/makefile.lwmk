@@ -1,0 +1,98 @@
+#
+# LWIDIA_COPYRIGHT_BEGIN
+#
+# Copyright 2020 by LWPU Corporation.  All rights reserved.  All
+# information contained herein is proprietary and confidential to LWPU
+# Corporation.  Any use, reproduction, or disclosure without the written
+# permission of LWPU Corporation is prohibited.
+#
+# LWIDIA_COPYRIGHT_END
+#
+
+BUILD_SERVER ?= false
+
+ifeq "$(BUILD_SERVER)" "false"
+    LW_MODS_MODULE := client bin
+else
+    LW_MODS_MODULE := server bin
+endif
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+ifeq "$(BUILD_SERVER)" "false"
+    SOURCES += client.cpp
+else
+    SOURCES += server.cpp
+endif
+SOURCES += $(OUTPUTDIR_ABSOLUTE)/message_handler.cpp
+
+LW_INCLUDES += $(OUTPUTDIR_ABSOLUTE)
+LW_INCLUDES += $(LW_SOURCE)/diag/mods
+LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LW_INCLUDES += $(LW_SOURCE)/diag/utils
+LW_INCLUDES += $(LW_SOURCE)/diag/multinode/transport/inc
+
+ifeq ($(LW_TARGET_OS), Linux)
+    LDFLAGS += -ldl -lpthread -lrt
+endif
+
+ifeq ($(LW_OUTPUT_ROOT),)
+    TRANSPORT_LOCATION = ../$(OUTPUTDIR)
+    LWDIAG_LOCATION    = ../../../utils/$(OUTPUTDIR)
+else
+    TRANSPORT_LOCATION = $(OUTPUTDIR_ABSOLUTE)/..
+    LWDIAG_LOCATION = $(OUTPUTDIR_ABSOLUTE)/../../../utils
+endif
+
+ifeq ($(LW_TARGET_OS_FAMILY), Windows)
+    BIN_LDFLAGS += -LIBPATH:$(TRANSPORT_LOCATION)
+    BIN_LDFLAGS += -LIBPATH:$(LWDIAG_LOCATION)
+else
+    BIN_LDFLAGS += -L$(TRANSPORT_LOCATION)
+    BIN_LDFLAGS += -L$(LWDIAG_LOCATION)
+endif
+
+
+LW_MODS_LIBS += multinode_transport lwdiag_utils
+
+$(MODS_FULL_TARGET_PATH): $(TRANSPORT_LOCATION)/libmultinode_transport$$(LIBSUFFIX)
+$(MODS_FULL_TARGET_PATH): $(LWDIAG_LOCATION)/liblwdiag_utils$$(LIBSUFFIX)
+
+$(TRANSPORT_LOCATION)/libmultinode_transport$$(LIBSUFFIX):
+	$(MAKE) -C .. -f makefile.lwmk $*
+
+$(LWDIAG_LOCATION)/liblwdiag_utils$$(LIBSUFFIX):
+	$(MAKE) -C ../../../utils -f makefile.lwmk $*
+
+protobuf_gen_files  = $(OUTPUTDIR_ABSOLUTE)/message_reader.h
+protobuf_gen_files += $(OUTPUTDIR_ABSOLUTE)/message_writer.h
+protobuf_gen_files += $(OUTPUTDIR_ABSOLUTE)/message_structs.h
+protobuf_gen_files += $(OUTPUTDIR_ABSOLUTE)/messages_gen.h
+protobuf_gen_files += $(OUTPUTDIR_ABSOLUTE)/message_handler.h
+protobuf_gen_files += $(OUTPUTDIR_ABSOLUTE)/message_handler.cpp
+
+$(OBJECTS) : $(protobuf_gen_files)
+
+$(protobuf_gen_files): messages.proto $(LW_SOURCE)/diag/utils/protobuf/protobuf.py
+	@$(ECHO) $(TRANSPORT_LOCATION)
+	@$(ECHO) $@
+	@$(PYTHON) $(LW_SOURCE)/diag/utils/protobuf/protobuf.py        \
+            --reader_filename=$(OUTPUTDIR_ABSOLUTE)/message_reader.h   \
+            --reader_namespace=MessageReader                           \
+            --writer_filename=$(OUTPUTDIR_ABSOLUTE)/message_writer.h   \
+            --writer_namespace=MessageWriter                           \
+            --struct_filename=$(OUTPUTDIR_ABSOLUTE)/message_structs.h  \
+            --struct_namespace=Messages                                \
+            --header_filename=$(OUTPUTDIR_ABSOLUTE)/message_gen.h      \
+            --handler_basename=$(OUTPUTDIR_ABSOLUTE)/message_handler   \
+            --handler_namespace=MessageHandler                         \
+            messages.proto
+
+LW_WARNINGS_AS_ERRORS  := 1
+LW_AGGRESSIVE_WARNINGS := 1
+
+ifeq ($(LW_TARGET_OS_FAMILY), Unix)
+    CFLAGS += -Wno-switch
+endif
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

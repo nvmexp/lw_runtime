@@ -1,0 +1,67 @@
+// Copyright LWPU Corporation 2017
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include <prodlib/bvhtools/src/common/SharedKernelFunctions.hpp>
+#include "InputArrayIndexerKernels.hpp"
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(INPUT_ARRAY_INDEXER_EXEC_WARPS_PER_BLOCK * 32, INPUT_ARRAY_INDEXER_EXEC_BLOCKS_PER_SM)
+void InputArrayIndexerExec(InputArrayIndexerExecParams p)
+{
+    int idx = threadIdx.x + 32 * (threadIdx.y + INPUT_ARRAY_INDEXER_EXEC_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+
+    // Mark transitions in bit blocks
+
+    if( idx < p.numInputs )
+    {
+        int loc = p.outArrayBaseGlobalIndex[idx + 1] - 1;
+        int block = loc / 32;
+        atomicOr(&p.outArrayTransitionBits[block], 1 << (loc & 31));
+    }
+
+    // Binary search to assign block indices
+    // TODO: May want to optimize this.
+    // From OP-1408: "As a performance optimization it might be better for each thread to process a block of input array indices."
+
+    if( idx >= p.numBlocks )
+        return;
+
+    int offset = INPUT_ARRAY_INDEXER_BLOCK_SIZE * idx;
+    int start = 0;
+    int end = p.numInputs;
+    int arrayIndex = 0;
+
+    for (;;)
+    {
+        arrayIndex = (end + start) >> 1;
+        if (offset < p.outArrayBaseGlobalIndex[arrayIndex])
+            end = arrayIndex;
+        else if (offset >= p.outArrayBaseGlobalIndex[arrayIndex + 1])
+            start = arrayIndex + 1;
+        else
+            break;
+    }
+    p.outBlockStartArrayIndex[idx] = arrayIndex;
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchInputArrayIndexerExec(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const InputArrayIndexerExecParams& p)
+{
+    if (lwdaFuncSetCacheConfig(InputArrayIndexerExec, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    InputArrayIndexerExec<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

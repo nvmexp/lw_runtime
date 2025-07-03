@@ -1,0 +1,170 @@
+#include <optix_world.h>
+
+using namespace optix;
+
+rtBuffer<int, 1>  inputInt1D;
+rtBuffer<int3, 1> inputInt31D;
+rtBuffer<int, 1>  outputInt;
+
+rtDeclareVariable( int, buffer_index_1d, , );
+rtDeclareVariable( int, control, , );
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void normalAccessInt1D()
+{
+    outputInt[0] = 0;
+    outputInt[0] = inputInt1D[buffer_index_1d];
+}
+
+RT_PROGRAM void pointerArithmeticsInt1D()
+{
+    outputInt[0]     = 0;
+    int* basePointer = &inputInt1D[0];
+    int  value       = *( basePointer + buffer_index_1d );
+    outputInt[0]     = value;
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void normalAccessInt31D()
+{
+    outputInt[0] = 0;
+    outputInt[0] = inputInt31D[buffer_index_1d].y;
+}
+
+RT_PROGRAM void pointerArithmeticsInt31D()
+{
+    outputInt[0]                 = 0;
+    int3*         basePointer    = &inputInt31D[buffer_index_1d];
+    long long int basePointerInt = (long long int)basePointer;
+    // Access the y coordinate of the element.
+    long long int elementPointerInt = basePointerInt + 4;
+    int*          elementPointer    = (int*)elementPointerInt;
+    outputInt[0]                    = *elementPointer;
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void normalAccessNextInt31D()
+{
+    outputInt[0] = 0;
+    outputInt[0] = inputInt31D[buffer_index_1d + 1].y;
+}
+
+RT_PROGRAM void pointerArithmeticsAccessNextInt31D()
+{
+    outputInt[0]                 = 0;
+    int3*         basePointer    = &inputInt31D[buffer_index_1d];
+    long long int basePointerInt = (long long int)basePointer;
+    // Access the y coordinate of the element.
+    long long int elementPointerInt = basePointerInt + sizeof( int3 ) + 4;
+    int*          elementPointer    = (int*)elementPointerInt;
+    outputInt[0]                    = *elementPointer;
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void normalAccessPreviousInt31D()
+{
+    outputInt[0] = 0;
+    outputInt[0] = inputInt31D[buffer_index_1d - 1].z;
+}
+
+RT_PROGRAM void pointerArithmeticsAccessPreviousInt31D()
+{
+    outputInt[0]                 = 0;
+    int*          basePointer    = &inputInt31D[buffer_index_1d].y;
+    long long int basePointerInt = (long long int)basePointer;
+    // Access the y coordinate of the element.
+    long long int elementPointerInt = basePointerInt - sizeof( int3 ) + 4;
+    int*          elementPointer    = (int*)elementPointerInt;
+    outputInt[0]                    = *elementPointer;
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void normalAccessOverflowingOffsetInt31D()
+{
+    outputInt[0] = 0;
+    outputInt[0] = inputInt31D[buffer_index_1d + 2].y;
+}
+
+RT_PROGRAM void pointerArithmeticsAccessOverflowingOffsetInt31D()
+{
+    outputInt[0]                 = 0;
+    int*          basePointer    = &inputInt31D[buffer_index_1d].z;
+    long long int basePointerInt = (long long int)basePointer;
+    // Access the y coordinate of the element.
+    long long int elementPointerInt = basePointerInt + 20;
+    int*          elementPointer    = (int*)elementPointerInt;
+    outputInt[0]                    = *elementPointer;
+}
+
+rtBuffer<int, 1> offsetBuffer;
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void normalAccessNonConstantOffsetInt1D()
+{
+    outputInt[0] = 0;
+    int offset   = offsetBuffer[0];
+    outputInt[0] = inputInt1D[buffer_index_1d + offset];
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void pointerArithmeticsAccessNonConstantOffsetInt1D()
+{
+    outputInt[0]                    = 0;
+    int           offset            = offsetBuffer[0];
+    int*          basePointer       = &inputInt1D[buffer_index_1d];
+    long long int elementPointerInt = (long long int)basePointer;
+    elementPointerInt += offset * 4;
+    int* elementPointer = (int*)elementPointerInt;
+    outputInt[0]        = *elementPointer;
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void normalAccessNegativeNonConstantOffsetInt1D()
+{
+    outputInt[0] = 0;
+    int offset   = offsetBuffer[0];
+    outputInt[0] = inputInt1D[buffer_index_1d - offset];
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void pointerArithmeticsAccessNegativeNonConstantOffsetInt1D()
+{
+    outputInt[0]                    = 0;
+    int           offset            = offsetBuffer[0];
+    int*          basePointer       = &inputInt1D[buffer_index_1d];
+    long long int elementPointerInt = (long long int)basePointer;
+    elementPointerInt -= offset * 4;
+    int* elementPointer = (int*)elementPointerInt;
+    outputInt[0]        = *elementPointer;
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void diffPointers()
+{
+    outputInt[0] = 0;
+    int* first   = &inputInt1D[buffer_index_1d];
+    int* second  = &inputInt1D[buffer_index_1d + 2];
+
+    int diff     = second - first;
+    outputInt[0] = diff;
+}
+
+// -----------------------------------------------------------------------------
+RT_PROGRAM void pointerArithmeticsAfterPhiBufferBuffer()
+{
+    outputInt[0]                    = 0;
+    long long int elementPointerInt = 0;
+    if( control < 10 )
+    {
+        elementPointerInt = (long long int)&inputInt1D[buffer_index_1d];
+    }
+    else
+    {
+        elementPointerInt = (long long int)&inputInt31D[buffer_index_1d];
+    }
+
+    // Access the third element of the int3 or the second element of the int buffer after buffer_index_1d.
+    elementPointerInt += 8;
+    int* ptr     = (int*)elementPointerInt;
+    outputInt[0] = *ptr;
+}

@@ -1,0 +1,143 @@
+#pragma once
+
+#include <stdio.h>
+#include <stdint.h>
+#include <iostream>
+#include <g_lwconfig.h>
+
+#define STATUS_SUCCESS 0
+#define STATUS_FAILED  1
+#define WAIT_BETWEEN_PARELLEL_LINK_TRAINING_STEPS 5
+
+enum message_type {
+	MSG_GET_DEVICES_INFO_REQ  					= 1,
+	MSG_GET_DEVICES_INFO_RESP 					= 2,
+	MSG_SET_INIT_PHASE1_REQ   					= 3,
+	MSG_SET_INIT_PHASE1_RESP  					= 4,
+	MSG_SET_RX_INIT_TERM_REQ  					= 5,
+	MSG_SET_RX_DETECT_REQ     					= 6,
+	MSG_GET_RX_DETECT_REQ     					= 7,
+	MSG_SET_RX_INIT_TERM_RESP 					= 8,
+	MSG_SET_RX_DETECT_RESP    					= 9,
+	MSG_GET_RX_DETECT_RESP    					= 10,
+	MSG_ENABLE_COMMON_MODE_REQ  				= 11,
+	MSG_ENABLE_COMMON_MODE_RESP 				= 12,
+	MSG_CALIBRATE_DEVICES_REQ  					= 13,
+	MSG_CALIBRATE_DEVICES_RESP 					= 14,
+	MSG_DISABLE_COMMON_MODE_REQ 				= 15,
+	MSG_DISABLE_COMMON_MODE_RESP 				= 16,
+	MSG_ENABLE_DEVICES_DATA_REQ 				= 17,
+	MSG_ENABLE_DEVICES_DATA_RESP 				= 18,
+	MSG_DO_LINK_INIT_REQ   						= 19,
+	MSG_DO_LINK_INIT_RESP						= 20,
+	MSG_DO_INITNEGOTIATE_REQ					= 21,
+	MSG_DO_INITNEGOTIATE_RESP					= 22,
+	MSG_DISCOVER_INTRA_CONNECTIONS_REQ  		= 23,
+	MSG_DISCOVER_INTRA_CONNECTIONS_RESP 		= 24,
+	MSG_WRITE_DISCOVERY_TOKENS_REQ  			= 25,
+	MSG_WRITE_DISCOVERY_TOKENS_RESP 			= 26,
+	MSG_READ_DISCOVERY_TOKENS_REQ  				= 27,
+	MSG_READ_DISCOVERY_TOKENS_RESP 				= 28,
+	MSG_ADD_INTERNODE_CONNS_REQ  				= 29,
+	MSG_ADD_INTERNODE_CONNS_RESP 				= 30,
+	MSG_DISPLAY_INTRA_NODE_CONNS_REQ  			= 31,
+	MSG_DISPLAY_INTRA_NODE_CONNS_RESP 			= 32,
+	MSG_READ_SIDs_REQ  							= 33,
+	MSG_READ_SIDs_RESP 							= 34,
+	MSG_GET_INTRANODE_CONNS_REQ  				= 35,
+	MSG_GET_INTRANODE_CONNS_RESP 				= 36,
+	MSG_INTRA_NODE_CONNS_TRAIN_REQ 				= 37,
+	MSG_INTRA_NODE_CONNS_TRAIN_RESP 			= 38,
+	MSG_SUBLINK_INTERNODE_CONN_TRAIN_MASTER_REQ = 39,
+	MSG_SUBLINK_INTERNODE_CONN_TRAIN_SLAVE_RESP = 40,
+	MSG_MAINLINK_INTERNODE_CONN_TRAIN_MASTER_REQ= 41,
+	MSG_MAINLINK_INTERNODE_CONN_TRAIN_SLAVE_RESP= 42,
+	MSG_START_INTERNODE_TRAIN_REQ 				= 43,
+	MSG_INTERNODE_CONN_TRAIN_REQ_COMPLETE 		= 44,
+	MSG_PARALLEL_LINK_TRAIN_REQ 				= 45,
+	MSG_PARALLEL_LINK_TRAIN_RESP 				= 46,
+	MSG_SUBLINK_INTERNODE_CONN_TRAIN_REQ 		= 47,
+	MSG_SUBLINK_INTERNODE_CONN_TRAIN_RESP 		= 48,
+	MSG_MAINLINK_INTERNODE_CONN_TRAIN_REQ 		= 49,
+	MSG_MAINLINK_INTERNODE_CONN_TRAIN_RESP 		= 50,
+	MSG_PARALLEL_LINK_TRAIN_OPTIMIZE_REQ 		= 51,
+	MSG_PARALLEL_LINK_TRAIN_OPTIMIZE_RESP 		= 52,
+	MSG_SINGLE_INTRANODE_CONN_TRAIN_REQ 		= 53,
+	MSG_SINGLE_INTRANODE_CONN_TRAIN_RESP 		= 54,
+	MSG_APP_EXIT_REQ                            = 55,
+	MSG_SET_INIT_PHASE5_REQ                     = 56,
+	MSG_SET_INIT_PHASE5_RESP                    = 57
+};
+
+enum init_action {
+	GET_DEVICE_INFO                     = 1,
+	INIT_PHASE1                         = 2,
+	RX_INIT_TERM                        = 3,
+	SET_RX_DETECT                       = 4,
+	GET_RX_DETECT                       = 5,
+	ENABLE_COMMON_MODE                  = 6,
+	CALIBRATE_DEVICES                   = 7,
+	DISABLE_COMMON_MODE                 = 8,
+	ENABLE_DEVICES_DATA                 = 9,
+	INIT_PHASE5                         = 10,
+	DO_LINK_INIT                        = 11,
+	DO_INITNEGOTIATE                    = 12,
+	DISCOVER_INTRA_CONNECTIONS          = 13,
+	WRITE_DISCOVERY_TOKENS              = 14,
+	READ_DISCOVERY_TOKENS               = 15,
+	ADD_INTERNODE_CONNS                 = 16,
+	DISPLAY_INTRA_NODE_CONNS            = 17,
+	READ_SIDs                           = 18,
+	GET_INTRANODE_CONNS                 = 19,
+	INTRA_NODE_CONNS_TRAIN              = 20,
+	SUBLINK_INTERNODE_CONN_TRAIN_SLAVE  = 21,
+	MAINLINK_INTERNODE_CONN_TRAIN_SLAVE = 22,
+	INTERNODE_CONN_TRAIN_REQ_COMPLETE   = 23,
+	INTRA_CONN_PARALLEL_TRAINING        = 24,
+	SUBLINK_INTERNODE_CONN_TRAIN        = 25,
+	MAINLINK_INTERNODE_CONN_TRAIN       = 26,
+	OPTIMIZE_CONN_TRAIN                 = 27,
+	SINGLE_INTRANODE_CONN_TRAIN         = 28,
+	APP_EXIT                            = 29
+};
+
+typedef enum {
+    LWSWITCH_ARCH_TYPE_ILWALID = 0,
+    LWSWITCH_ARCH_TYPE_SV10    = 0x01,
+    LWSWITCH_ARCH_TYPE_LR10    = 0x02,
+
+#if LWCFG(GLOBAL_LWSWITCH_IMPL_LS10)
+    LWSWITCH_ARCH_TYPE_LS10    = 0x03,
+#endif
+    LWSWITCH_ARCH_TYPE_MAX
+} LWSWITCH_ARCH_TYPE;
+
+typedef struct
+{
+    int domain;
+    int  bus;
+    int  device;
+    int  function;
+    int nodeId;
+    int linkIndex;
+    uint64_t tokelwalue;
+    int phyId;
+    int devType;
+} DiscoveryTokenInfo;
+
+typedef struct 
+{
+    int nodeId;
+    uint64_t gpuOrSwitchId;
+    uint64_t nearSid;
+    int nearLinkIndex;
+    uint64_t farSid;
+    int farLinkIndex;
+    int domain;
+    int  bus;
+    int  device;
+    int  function;
+    int phyId;
+    int devType;
+} SidNodeConnectionInfo;
+

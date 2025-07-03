@@ -1,0 +1,493 @@
+[
+  {
+    "Type": "Control",
+    "OutputDirectory": "Initialization",
+    "ResolutionLookup": {
+      "default": "3840x2160",
+      "ausvrl761": "1920x1080"
+    },
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryList": [ "vcrt2015-9", "Vulkan-SDK-1.2.135.0" ],
+    "TestDefinitions": [
+      {
+        "Command": "[Netapp]\\vcrt2015-9\\VC_redist.x64.exe",
+        "Arguments": "/install /quiet /norestart /log [OutputDirectory]\\VC_redist.x64.log"
+      },
+      {
+        "Command": "[Netapp]\\vcrt2015-9\\VC_redist.x86.exe",
+        "Arguments": "/install /quiet /norestart /log [OutputDirectory]\\VC_redist.x86.log"
+      },
+      {
+        "Command": "SetVulkanExplicitLayers",
+        "Arguments": "[Netapp]\\Vulkan-SDK-1.2.135.0"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "OGL_DEFAULT_SWAP_INTERVAL=DISABLE"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VSYNCMODE=FORCEOFF"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VK_ABORT_ON_DEVICE_LOST=ENABLED"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "VK_HIDE_UNUSED_MEMORY_TYPES=DISABLE"
+      },
+      {
+        "Command": "[bin]\\ModeSet.exe",
+        "Arguments": "-d 0 -w [ScreenWidth] -h [ScreenHeight] -b 32"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:head;q -o:[OutputDirectory]\\swak-display.txt"
+      },
+      {
+        "Command": "Verify",
+        "Arguments": "[OutputDirectory]\\swak-display.txt:[ScreenWidth]x[ScreenHeight]x32"
+      },
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-l"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:gpuclk;pstate;q -o:[OutputDirectory]\\swak-clocks.txt"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:nodeinfo;q -o:[OutputDirectory]\\swak-nodeinfo.txt"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "OGL_LOAD_MONITOR_OUTPUT_LOGGING_FLAGS=GPU_TIME"
+      },
+      {
+        "Comment": "Place load monitor file in output directory of Nsight runs",
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "PS_FILE_PATH=[RootOutputDirectory]\\Nsight"
+      },
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:all;q -o:[OutputDirectory]\\swak-all.txt"
+      },
+      {
+        "Command": "C:\\Windows\\System32\\cmd.exe",
+        "Arguments": "/C C:\\Windows\\System32\\vulkaninfo.exe > [OutputDirectory]\\VulkanInfo.txt 2> [OutputDirectory]\\VulkanInfo-stderr.txt",
+        "ElwironmentVariable": "VK_LOADER_DEBUG=all"
+      }
+    ]
+  },
+  {
+    "Type": "Nsight",
+    "SessionName": "Nsight",
+    "TestCase": "Nsight",
+    "OutputDirectory": "Nsight",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryLookup": {
+      "ImageMagick": "[Netapp]\\ImageMagick",
+      "PerfDebug": "[Netapp]\\perfdebug_3.21"
+    },
+    "Server": "hqlwoglsql01:8211",
+    "ElwironmentVariables": {
+      "VK_INSTANCE_LAYERS": "VK_LAYER_LUNARG_screenshot",
+      "VK_SCREENSHOT_FRAMES": "0,999"
+    },
+    "PerfDebug": "--poll 500 --graphEff --tj --csv --pollend",
+    "LoadMonitor": "Enabled",
+    "TestDefinitions": [
+      {
+        "Title": "3DMark Attan",
+        "Name": "3DMark_Attan01301rc0_NsightTrace_2080S_1440p",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\3DMark_Attan01301rc0_NsightTrace_2080S_1440p",
+        "CompressedFile": "3DMark_Attan01301rc0_NsightTrace_2080S_1440p.zip",
+        "FileName": "dev_player.exe",
+        "GRT": "8D220B2A-8F6E-4FC4-B0BD-BAFAB8C06F54",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "AshesEscalation",
+        "Name": "AshesEscalation_2021_10_11_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\AshesEscalation\\AshesEscalation_2021_10_11_4K",
+        "CompressedFile": "AshesEscalation_2021_10_11_4K.zip",
+        "FileName": "AshesEscalation_Vulkan.exe",
+        "Source": "\\\\netapp-hq04\\opengl\\traces\\nsightApic\\AshesEscalation_Vulkan__4K_2021_10_11__02_39_39",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "ga*"
+      },
+      {
+        "Title": "BaldursGate3",
+        "Name": "BaldursGate3_2021_09_24_Shipping_Cave_Ultra_1440p_FSRUltraQuality",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\BaldursGate3\\BaldursGate3_2021_09_24_Shipping_Cave_Ultra_1440p_FSRUltraQuality",
+        "CompressedFile": "BaldursGate3_2021_09_24_Shipping_Cave_Ultra_1440p_FSRUltraQuality.zip",
+        "FileName": "bg3_Shipping.exe",
+        "Source": "http://lwgtl/fileinfo/BD0B49E5-FE2C-41C0-B910-435B022D9562",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "DetroitBecomeHuman",
+        "Name": "DetroitBecomeHuman_2021_09_24_Chapter1Hostage_1440p_Ultra_CAS",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\DetroitBecomeHuman\\DetroitBecomeHuman_2021_09_24_Chapter1Hostage_1440p_Ultra_CAS",
+        "CompressedFile": "DetroitBecomeHuman_2021_09_24_Chapter1Hostage_1440p_Ultra_CAS.zip",
+        "FileName": "DetroitBecomeHuman.exe",
+        "Source": "http://lwgtl/fileinfo/74C00A2B-8E82-4FDA-ACDE-3D1C42FA08A5",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh -no-multithreaded-record",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Dxgperf": "GpuTime"
+      },
+      {
+        "Title": "DoomEternal",
+        "Name": "DOOMEternalx64vk_20200107_UltraNightmare_1440p_SuperGoreNest",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\DoomEternal\\DOOMEternalx64vk_20200107_UltraNightmare_1440p_SuperGoreNest",
+        "FileName": "DOOMEternalx64vk.exe",
+        "GTL": "466A590D-9A1A-46AC-9A36-086175FDF225",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated"
+      },
+      {
+        "Title": "DoomEternal_AncientGods",
+        "Name": "AncientGods_2020_10_06_Hell_Swamp",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\DoomEternal_AncientGods\\DoomEternal_AncientGods_2020_10_06_Hell_Swamp",
+        "CompressedFile": "DoomEternal_AncientGods_2020_10_06_Hell_Swamp.zip",
+        "FileName": "DOOMEternalx64vk.exe",
+        "Source": "8433C1CF-59E4-4A77-ABE5-F64BDC17C61F",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "ScreenshotComment": "Requires screenshot after frame 0 to avoid compeltely black image.",
+        "ScreenshotFrames": "2,999"
+      },
+      {
+        "Title": "DoomEternal_AncientGods2",
+        "Name": "AncientGods2_2021_03_25_E5M1Spear_1440p",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\DoomEternal_AncientGods2\\DoomEternal_AncientGods2_2021_03_25_E5M1Spear_1440p",
+        "CompressedFile": "DLC2_2021_03_25_E5M1Spear_1440p.zip",
+        "FileName": "DOOMEternalx64vk.exe",
+        "Source": "http://lwgtl/fileinfo/7105D19A-E922-45E0-887C-07D0AC64001D",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "ScreenshotComment": "Requires screenshot after frame 0 to avoid compeltely black image.",
+        "ScreenshotComment2": "Do not capture last frame as varies by 2% run to run.",
+        "ScreenshotFrames": "2"
+      },
+      {
+        "Title": "DoomEternal_RT",
+        "Name": "DOOMEternal_2021_07_01_E4M1UACRig_RT_1440p_UltraNightmare",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\DoomEternal_RT\\DOOMEternal_2021_07_01_E4M1UACRig_RT_1440p_UltraNightmare",
+        "CompressedFile": "DOOMEternal_2021_07_01_E4M1UACRig_RT_1440p_UltraNightmare.zip",
+        "FileName": "DOOMEternalx64vk.exe",
+        "Source": "http://lwgtl/fileinfo/DBEC4BE5-09A3-48FC-9565-566BAD204266",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "ga*"
+      },
+      {
+        "Title": "EvilGenius2",
+        "Name": "EvilGenius2_2021_01_20_Ultra_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\EvilGenius2\\EvilGenius2_2021_01_20_Ultra_4K",
+        "CompressedFile": "EvilGenius2_2021_01_20_Ultra_4K.zip",
+        "FileName": "evilgenius_profile_vulkan.exe",
+        "Source": "http://lwgtl/fileinfo/062A4568-BF3C-433A-A576-10B830050AF9",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "Hades",
+        "Name": "Hades_VK_4K__2021_01_06",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\Hades\\Hades_VK_4K__2021_01_06",
+        "CompressedFile": "Hades_VK_4K__2021_01_06.zip",
+        "FileName": "Hades.exe",
+        "Source": "http://lwgtl/fileinfo/79219648-DBC4-47F7-A0CF-14AD2EE2E237",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "Hyperscape",
+        "Name": "Hyperscape_2020_07_21_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\Hyperscape_4K__2020_07_21\\Hyperscape_4K__2020_07_21",
+        "FileName": "Hyperscape.exe",
+        "GRT": "B8CA8B9A-B308-4AAF-88D7-F24B4BA391C5",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "Incursion",
+        "Name": "Inlwrsion_2021_06_10",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\Incursion\\Inlwrsion_2021_06_10",
+        "CompressedFile": "Inlwrsion_2021_06_10.zip",
+        "FileName": "scimitar_engine_win64_p_vulkan.exe",
+        "Source": "http://lwgtl/fileinfo/35FFB81A-2917-4047-A52C-19405320BD35",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, ga*"
+      },
+      {
+        "Title": "KnockoutCity",
+        "Name": "KnockoutCity_2021_03_23_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\KnockoutCity\\KnockoutCity_2021_03_23_4K",
+        "CompressedFile": "KnockoutCity_2021_03_23_4K.zip",
+        "FileName": "vcatch-win64-release.exe",
+        "Source": "http://lwgtl/fileinfo/95FDE17B-C963-4463-9AD7-D89AE509042D",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, ga*"
+      },
+      {
+        "Title": "MetroExodus",
+        "Name": "MetroExodus_2021_04_22_VKRT_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\MetroExodus\\MetroExodus_2021_04_22_VKRT_4K",
+        "CompressedFile": "MetroExodus_2021_04_22_VKRT_4K.zip",
+        "FileName": "MetroExodus.exe",
+        "Source": "http://lwgtl/fileinfo/A093B6F9-413E-4212-A767-BD3FA6F63C7F",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "NoMansSky",
+        "Name": "NoMansSky_2020_08_25",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\NoMansSky\\NoMansSky_2020_08_25",
+        "CompressedFile": "NoMansSky_2020_08_25.zip",
+        "FileName": "NMS.exe",
+        "GRT": "22DD27C4-9F7B-4ADC-A78F-B24917564167",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh"
+      },
+      {
+        "Title": "PathOfExile",
+        "Name": "PathOfExile_2020_06_11_x64Steam_4k_Max_Beach",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\PathOfExile_x64Steam_4k_Max_Beach_2020_06_11__16_09_40",
+        "CompressedFile": "PathOfExile_x64Steam_4k_Max_Beach_2020_06_11__16_09_40.zip",
+        "FileName": "PathOfExile_x64Steam.exe",
+        "GRT": "C0B6498A-0FAD-4A64-9F69-DF00332E07B9",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "PortalKnights",
+        "Name": "PortalKnights_2020_08_25",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\PortalKnights\\PortalKnights_2020_08_28",
+        "CompressedFile": "PortalKnights_2020_08_28.zip",
+        "FileName": "WindowsLaunchPy3.exe",
+        "GRT": "84E41E69-C88E-4D47-B6E9-8E131BECE670",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh"
+      },
+      {
+        "Title": "Quake2RTX",
+        "Name": "q2rtx_2019_10_01",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\Quake2RTX\\q2rtx__2019_10_01__19_02_45",
+        "FileName": "q2rtx__2019_10_01__19_02_45.exe",
+        "ProfileName": "q2rtx.exe",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "ScreenshotComment": "Do not capture last frame as varies from run to run.",
+        "ScreenshotFrames": "0"
+      },
+      {
+        "Title": "Rage2",
+        "Name": "Rage2_Build_042419_Vineland_1440p_TU10x",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\Rage2\\Rage2_Build_042419_Vineland_1440p_TU10x",
+        "FileName": "Rage2__2019_04_26__14_10_07.exe",
+        "ProfileName": "Rage2.exe",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated"
+      },
+      {
+        "Title": "RainbowSix-Siege",
+        "Name": "r6_siege_2019_11_18_NoScale_NoSharpening_Async",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\RainbowSix-Siege\\r6_siege_101118_NoScale_NoSharpening_Async",
+        "FileName": "RainbowSix_Vulkan.exe",
+        "ProfileName": "RainbowSix_Vulkan.exe",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated"
+      },
+      {
+        "Title": "RedDeadRedemption2",
+        "Name": "[RDR2][Vulkan][2560x1440][2080Ti][BenchmarkPass8]",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\RedDeadRedemption2\\[RDR2][Vulkan][2560x1440][2080Ti][BenchmarkPass8]",
+        "FileName": "RDR2.exe",
+        "ProfileName": "RDR2.exe",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated"
+      },
+      {
+        "Title": "SecondExtinction",
+        "Name": "SecondExtinction_2021_03_11_Jeannot_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\SecondExtinction\\SecondExtinction_2021_03_11_Jeannot_4K",
+        "CompressedFile": "SecondExtinction_2021_03_11_Jeannot_4K.zip",
+        "FileName": "SecondExtinction_F.exe",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Comment": "Provided by Jeannot Breton"
+      },
+      {
+        "Title": "SeriousSam4",
+        "Name": "SeriousSam4_2020_08_14_4K",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\SeriousSam4_4K__2020_08_14",
+        "FileName": "Sam4.exe",
+        "GRT": "ED050529-24D8-4D75-9DC0-47F1709DB32A",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "tu10*, ga*",
+        "ScreenshotComment": "Do not capture last frame as varies from run to run.",
+        "ScreenshotFrames": "0"
+      },
+      {
+        "Title": "StrangeBrigade",
+        "Name": "StrangeBrigade_4k_SCG_Ultra",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\StrangeBrigade\\StrangeBrigade_4k_SCG_Ultra",
+        "FileName": "StrangeBrigade_Vulkan__2018_08_28__11_30_16.exe",
+        "ProfileName": "StrangeBrigade_Vulkan.exe",
+        "Arguments": "-log -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "TheSurge2",
+        "Name": "TheSurge2_2019_09_30",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\TheSurge2\\TheSurge2__2019_09_30__19_32_52",
+        "FileName": "TheSurge2__2019_09_30__19_32_52.exe",
+        "ProfileName": "TheSurge2.exe",
+        "AllowGPU": "tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "ScreenshotComment": "Do not capture last frame as varies from run to run.",
+        "ScreenshotFrames": "0"
+      },
+      {
+        "Title": "TCGR-Breakpoint",
+        "Name": "TCGR_Breakpoint_1440p_SCG_TU10x_Benchmark",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\TCGR-Breakpoint\\TC_GR_Breakpoint_1440p_SCG_TU10x_Benchmark",
+        "FileName": "scimitar_engine_win64_p_vulkan.exe",
+        "GTL": "A1D63E1C-F035-420C-A3AD-A225562F1379",
+        "AllowGPU": "gp*, gv*, tu10*, tu11*, ga*",
+        "Arguments": "-dumpframetimes -log -wb -automated"
+      },
+      {
+        "Title": "TransportFever2",
+        "Name": "TransportFever2_2021_10_20_VeryHigh_1440p",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\TransportFever2\\TransportFever2_2021_10_20_VeryHigh_1440p",
+        "CompressedFile": "TransportFever2_2021_10_20_VeryHigh_1440p.zip",
+        "FileName": "TransportFever2.exe",
+        "Source": "https://gtl-ui.lwpu.com/file/D29AA3FE-2DC6-4632-A9C4-C349FFA5C231",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "ga*"
+      },
+      {
+        "Title": "Valheim",
+        "Name": "Valheim_2021_03_01",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\Valheim\\Valheim_2021_03_01",
+        "CompressedFile": "Valheim_2021_03_01.zip",
+        "FileName": "valheim.exe",
+        "Source": "http://lwgtl/fileinfo/054AE438-5256-4E0B-A341-69DF9CB701A6",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "WorldWarZ",
+        "Name": "WWZ_2021_07_16_VK_1440p_Ultra",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\WorldWarZ\\WWZ_2021_07_16_VK_1440p_Ultra",
+        "CompressedFile": "WWZ_2021_07_16_VK_1440p_Ultra.zip",
+        "FileName": "wwzRetail.exe",
+        "Source": "http://lwgtl/fileinfo/F916708A-A85E-48F3-B777-86CA53BBE42",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "WWZ_Aftermath",
+        "Name": "WWZ_Aftermath_2021_10_11_4K_Trace1",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\WWZ_Aftermath\\WWZ_Aftermath_2021_10_11_4K_Trace1",
+        "CompressedFile": "WWZ_Aftermath_2021_10_11_4K_Trace1.zip",
+        "FileName": "wwzRetail.exe",
+        "Source": "\\\\netapp-hq04\\opengl\\traces\\nsightApic\\wwzAftermath__4K_2021_10_11__02_47_01",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "ga*"
+      },
+      {
+        "Title": "X4-Foundations",
+        "Name": "X4-Foundations_2021_03_17_1440p_Ultra",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\X4-Foundations\\X4-Foundations_2021_03_17_1440p_Ultra",
+        "CompressedFile": "X4-Foundations_2021_03_17_1440p_Ultra.zip",
+        "FileName": "X4.exe",
+        "Source": "http://lwgtl/fileinfo/7D550DB1-C0FD-4B07-9FC1-15F2080EB16E",
+        "Arguments": "-dumpframetimes -log -wb -automated",
+        "AllowGPU": "tu10*, tu11*, ga*"
+      },
+      {
+        "Title": "Youngblood",
+        "Name": "Youngblood_2021_10_21_LabX_MeinLeben_RTOn",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\Youngblood\\Youngblood_2021_10_21_LabX_MeinLeben_RTOn",
+        "CompressedFile": "Youngblood_2021_10_21_LabX_MeinLeben_RTOn.zip",
+        "FileName": "Youngblood_x64vk.exe",
+        "Source": "https://gtl-ui.lwpu.com/file/2B88A677-577F-42C4-B9D7-3621A958D088",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "ga*"
+      },
+      {
+        "Title": "Youngblood",
+        "Name": "Youngblood_2021_10_21_Riverside_MeinLeben_RTOn_3840x2160_DLSSPerf",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\Youngblood\\Youngblood_2021_10_21_Riverside_MeinLeben_RTOn_3840x2160_DLSSPerf",
+        "CompressedFile": "Youngblood_2021_10_21_Riverside_MeinLeben_RTOn_3840x2160_DLSSPerf.zip",
+        "FileName": "Youngblood_x64vk.exe",
+        "Source": "https://gtl-ui.lwpu.com/file/9FD03A98-565A-4DDF-A0B9-802D117A77D",
+        "Arguments": "-dumpframetimes -log -wb -automated -noseh",
+        "AllowGPU": "ga*"
+      },
+      {
+        "Title": "ZombieArmy4",
+        "Name": "za4_vulkan_2019_11_14_Ultra_1440p_SCGon_Benchmark",
+        "Directory": "[Netapp]\\OGLPerf\\nsight\\vulkan\\ZombieArmy4\\za4_vulkan_2019_11_14_Ultra_1440p_SCGon_Benchmark",
+        "FileName": "za4_vulkan.exe",
+        "Arguments": "-dumpframetimes -log -wb -automated"
+      }
+    ],
+    "SkipList": {
+    },
+    "Arguments": "-noreset -repeat 1000",
+    "AllowedRMSE": 0.02
+  },
+  {
+    "Type": "Control",
+    "OutputDirectory": "Restore",
+    "TestDefinitions": [
+      {
+        "Command": "[bin]\\swak.exe",
+        "Arguments": "-c:head;q -o:[OutputDirectory]\\swak-display.txt"
+      },
+      {
+        "Command": "Verify",
+        "Arguments": "[OutputDirectory]\\swak-display.txt:[ScreenWidth]x[ScreenHeight]x32"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dOGL_DEFAULT_SWAP_INTERVAL"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVSYNCMODE"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVK_ABORT_ON_DEVICE_LOST"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVK_HIDE_UNUSED_MEMORY_TYPES"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dVK_HOST_VISIBLE_VIDMEM"
+      },
+      {
+        "Command": "[bin]\\LockToRatedTdp.exe",
+        "Arguments": "-u"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dOGL_LOAD_MONITOR_OUTPUT_LOGGING_FLAGS"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dPS_FILE_PATH"
+      }
+    ]
+  }
+]

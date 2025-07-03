@@ -1,0 +1,36 @@
+DRF_SOURCE_FILES =  drf_index.c
+DRF_SOURCE_FILES += drf_manual.c
+DRF_SOURCE_FILES += drf_parser.c
+DRF_SOURCE_FILES += drf_mcpp.c
+DRF_SOURCE_FILES += drf_state.c
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+  DRF_SOURCE_FILES += drf_windows.c
+endif
+
+DRF_SOURCES = $(addprefix $(LW_SOURCE)/apps/lwwatch/manual-parser/libdrf-lwpu/,$(DRF_SOURCE_FILES))
+
+DRF_INCLUDES = $(LW_SOURCE)/apps/lwwatch/manual-parser/mcpp-2.7.2/src
+DRF_DEFINES =
+DRF_CFLAGS =
+
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+  DRF_INCLUDES += $(LW_SOURCE)/apps/lwwatch/regex
+  DRF_DEFINES += _CRT_SELWRE_NO_WARNINGS
+  DRF_DEFINES += _CRT_NONSTDC_NO_DEPRECATE
+  DRF_DEFINES += DRF_WINDOWS
+  DRF_CFLAGS += -FI $(LW_SOURCE)/apps/lwwatch/manual-parser/libdrf-lwpu/drf_windows.h
+  # Disable warning "colwersion from 'size_t' to 'unsigned int', possible loss of data"
+  DRF_CFLAGS += -wd4267
+  # Disable warning "colwersion from '__int64' to 'uint32_t', possible loss of data"
+  DRF_CFLAGS += -wd4244
+endif
+
+$(call BUILD_OBJECT_LIST,$(DRF_SOURCES)): LW_INCLUDES += $(DRF_INCLUDES)
+$(call BUILD_OBJECT_LIST,$(DRF_SOURCES)): LW_DEFINES += $(DRF_DEFINES)
+$(call BUILD_OBJECT_LIST,$(DRF_SOURCES)): CFLAGS += $(DRF_CFLAGS)
+
+
+SOURCES += $(DRF_SOURCES)
+
+# libdrf-lwpu depends on mcpp
+include $(LW_SOURCE)/apps/lwwatch/manual-parser/mcpp-2.7.2/mcpp.lwmk

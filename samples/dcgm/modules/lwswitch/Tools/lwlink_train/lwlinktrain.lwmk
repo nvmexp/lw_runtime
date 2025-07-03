@@ -1,0 +1,116 @@
+##############################################################################
+#
+# lwmk for the lwswitch-audit tool
+#
+##############################################################################
+
+##############################################################################
+# define SOURCES
+##############################################################################
+LW_MODULE_LOGGING_NAME = "lwlink-train"
+
+LWML_DIR := $(LW_SOURCE)/apps/lwml/
+FM_DIR := $(DCGM_DIR)/modules/lwswitch/
+
+LWRRENT_DIR = $(LW_SOURCE)/apps/dcgm/modules/lwswitch/Tools/lwlink_train
+LWMLCOMMON_DIR = $(LW_SOURCE)/apps/lwml/common
+
+include $(LWML_DIR)/lwml_headers.lwmk
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += lwlink_train_steps.cpp
+LOCAL_SOURCES += helper.cpp  
+LOCAL_SOURCES += lwlink_train_main.cpp  
+LOCAL_SOURCES += lwlink_train_cmd_parser.cpp  
+LOCAL_SOURCES += multi_node_tests.cpp
+LOCAL_SOURCES += socket_interface.cpp
+LOCAL_SOURCES += LocalFMGpuMgr.cpp
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_SOURCES += $(FM_DIR)/Tools/explorer16common.cpp
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/src/libraries/commandline/commandline.c
+
+include $(LW_SOURCE)/drivers/lwswitch/user/lwswitchapi.lwmk
+LOCAL_SOURCES += $(LWSWITCHAPI_SOURCES)
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/Linux/lwosLinux.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/lwos_common_posix.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/logging.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/simple_encryption.c
+
+
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi.c
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi-numa.c
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi-mmap.c
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi-control-device.c
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi-control-device-unix.c
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/utils/mem-sysfs.c
+LOCAL_SOURCES += $(LW_SOURCE)/drivers/common/shared/lwstatus/lwstatus.c
+
+
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+##############################################################################
+## define LOCAL_CFLAGS
+###############################################################################
+LOCAL_INCLUDES :=
+LOCAL_INCLUDES += $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(LWRRENT_DIR)/../Tools/
+LOCAL_INCLUDES += $(DCGM_DIR)/$(OUTPUTDIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/common/
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/resman/inc/libraries
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(LW_INCLUDES)
+LOCAL_INCLUDES += $(DCGM_DIR)/modules
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc/ctrl/
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc/ctrl/ctrl0000/
+
+
+LOCAL_INCLUDES += $(LWSWITCHAPI_INCLUDES)
+LOCAL_INCLUDES += $(DCGM_DIR)/common/transport
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/lwswitch
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+    LOCAL_CFLAGS += /EHsc -D_SCL_SELWRE_NO_WARNINGS
+endif
+LOCAL_CFLAGS += -Wno-write-strings
+LOCAL_CFLAGS += -DDRIVER_MAJOR_VERSION=\"$(DRIVER_VERSION)\"
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+LOCAL_CFLAGS += -DDCGM_BUILD_LWSWITCH_MODULE
+
+##############################################################################
+## define LOCAL_LDFLAGS
+###############################################################################
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+    LOCAL_LDFLAGS += $(LWML_DIR)/$(OUTPUTDIR)/lwml.lib $(LWML_DIR)/$(OUTPUTDIR)/zlib.lib
+else
+    LOCAL_LDFLAGS += -L $(LWML_DIR)/$(OUTPUTDIR) -rdynamic
+    LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+    LOCAL_LDFLAGS += -lstdc++ -lgcc_s 
+endif
+
+##############################################################################
+# build
+##############################################################################
+lwlink-train_TARGET  := $(OUTPUTDIR)/lwlink-train$(BINSUFFIX)
+lwlink-train_OBJECTS := $(LOCAL_OBJECTS)
+lwlink-train_CFLAGS  := $(LOCAL_CFLAGS)
+lwlink-train_LDFLAGS := $(LOCAL_LDFLAGS)
+lwlink-train_DEPENDS ?= $(lwml_loader_TARGET) $(dcgm_TARGET) $(LWML_H_OUT) $(LWML_GRID_H_OUT)
+
+build: $(lwlink-train_TARGET) $(LW_VER_H)
+dcgmbuildsyncpoint:: $(lwlink-train_TARGET) $(LW_VER_H) 
+
+$(eval $(call MAKE_EXELWTABLE,lwlink-train))
+build: $(lwlink-train_TARGET).guardwords
+
+#################################################################################
+## End of nested lwmk
+##################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

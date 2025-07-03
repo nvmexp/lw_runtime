@@ -1,0 +1,67 @@
+# -*- mode: perl; -*-
+
+# DPU Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $dpuHal = [
+
+    # per-GPU defaults for DPU engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+        GET_FALCON_BASE => [
+            DESCRIPTION     => "dpuGetFalconBase, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE     => "LwU32",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => ZERO,
+
+            _v02_00         => [ GF11X_and_later, ],
+            _STUB           => [ pre_TESLA, LW50, G84, G86, G9X, TESLA, GF10X, ],
+        ],
+
+        GET_FALCON_ENGINE_IFACE => [
+            DESCRIPTION     => "dpuGetFalconEngineIFace, it returns FLCN_ENGINE_IFACES*",
+            INTERFACE_TAG   => "dpuGetFalconEngineIFace",  #IFace instead of Iface
+            RETURN_TYPE     => "const FLCN_ENGINE_IFACES *",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => NULL,
+            
+            _v02_00         => [ GF11X, GF110F, ],
+            _v02_01         => [ dKEPLER, GF110F2, GF110F3, dMAXWELL_and_later, ],
+            _STUB           => [ pre_TESLA, LW50, G84, G86, G9X, TESLA, GF10X, ],
+        ],
+
+        FLCNGDB_GET_REG_MAP => [
+            DESCRIPTION   => "Provides dpu register mapping for Falcon GDB",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "FLCNGDB_REGISTER_MAP* ",
+
+            _v02_00       => [dKEPLER_and_later, ],
+            _STUB         => [ pre_KEPLER, ],
+        ],
+
+        FLCNGDB_MAX_BREAKPOINTS_GET => [
+            DESCRIPTION   => "Gets the number of breakpoint registers",
+            RETURN_TYPE   => "LwU32",
+            ARGUMENTS     => "void",
+            STUB_RETURNS    => ZERO,
+
+            _v02_00       => [ KEPLER_thru_GM10X, tKEPLER, ],
+            _v02_05       => [ GM20X_and_later, tMAXWELL_and_later, ], 
+            _STUB         => [ pre_KEPLER, ],
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $dpuHal;

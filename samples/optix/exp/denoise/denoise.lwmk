@@ -1,0 +1,187 @@
+#
+#  Copyright 2020 LWPU Corporation. All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *Objects IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HObjects BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+exp_denoise_DEFINES = LWDA_BLOCK=32
+# workaround for old c++ library in toolchain, it does not define LLONG_MIN, it is required for thrust in
+# luminance
+ifeq ($(LW_HOST_OS_FAMILY),Unix)
+  exp_denoise_DEFINES += \
+    LLONG_MIN=0 \
+    LLONG_MAX=0 \
+    ULLONG_MAX=0
+endif
+
+# exp/denoise for training_load.cpp
+exp_denoise_INCLUDES = \
+  $(LW_OPTIX)/exp/denoise \
+  $(LW_OPTIX_OUTPUTDIR)/exp
+
+LW_INCLUDES += \
+  $(LW_OPTIX)/support/ \
+  $(LW_OPTIX)/support/xmma \
+  $(LW_OPTIX)/support/xmma/jetfire \
+  $(LW_OPTIX)/exp/denoise/ \
+  $(LW_OPTIX)/exp/denoise/implicit_gemm
+
+exp_denoise_SOURCES += $(addprefix $(LW_OPTIX)/exp/denoise/, \
+  Denoise.cpp \
+  layerdata_load.cpp \
+  fp16_emu.cpp \
+  training_load.cpp \
+)
+
+# Determine whether we are embedding the weights
+ifeq ($(LW_HOST_OS_FAMILY),Windows)
+  ifeq ($(LW_TARGET_ARCH),aarch64)
+    LW_OPTIX_EMBED_DENOISER_WEIGHTS ?= 1
+  else
+    LW_OPTIX_EMBED_DENOISER_WEIGHTS ?= 0
+  endif
+else
+  LW_OPTIX_EMBED_DENOISER_WEIGHTS ?= 1
+endif
+# Configure the header file
+CMAKE_CONFIGURED_FILES += $(LW_OPTIX)/exp/denoise/embed_weights.h.in
+
+# Determine which weights file to use
+ifeq ($(LW_TARGET_ARCH),aarch64)
+  DENOISE_FILE := $(LW_OPTIX)/exp/denoise/models/optixDenoiserWeights_noUpscale2x.bin
+else
+  DENOISE_FILE := $(LW_OPTIX)/exp/denoise/models/optixDenoiserWeights.bin
+endif
+
+# Determine where to put the weight file
+ifeq ($(LW_OPTIX_EMBED_DENOISER_WEIGHTS),1)
+  exp_denoise_BINARY_FILES := $(DENOISE_FILE)
+else
+  # Add denoiser to the output and installer
+  $(eval $(call add_file_to_output,$(DENOISE_FILE),lwoptix.bin))
+endif
+
+exp_denoise_LW_SOURCES += $(addprefix $(LW_OPTIX)/exp/denoise/, \
+  luminance.lw \
+  rgbaverage.lw \
+  inference.lw \
+  layers.lw \
+  layers_in.lw \
+  layers_out.lw \
+  layers_colw.lw \
+  layers_folding.lw \
+  layers_scale.lw \
+  layers_pool.lw \
+  layers_kp.lw \
+  layers_temporal.lw \
+  winograd.lw \
+  implicit_gemm/colw_fused.lw \
+)
+
+$(LW_OPTIX_OUTPUTDIR)/exp/denoise/%.lwbin: $(LW_OPTIX)/exp/denoise/maxwell_asm/%.lwasm
+	$(ECHO) "Generate LWBIN $(subst $(LW_OPTIX)/,,$(<))"
+	$(MKDIR) $(dir $(@))
+	$(LWASM) -gen-opext no -o $@ $<
+
+$(LW_OPTIX_OUTPUTDIR)/exp/denoise/maxwell_fp32.lw.obj: $(LW_OPTIX_OUTPUTDIR)/exp/denoise/maxwell_slwdnn_winograd_fp32.lwbin
+	$(LWCC) $(filter-out $(SUPPORTED_GPU_ARCHS),$(LWCC_FLAGS)) -c -o $(LW_OPTIX_OUTPUTDIR)/exp/denoise/maxwell_fp32.lw.obj -gencode=arch=compute_50,code=sm_50 \
+	-use-lwbin code=sm_50,lwbin=$(LW_OPTIX_OUTPUTDIR)/exp/denoise/maxwell_slwdnn_winograd_fp32.lwbin \
+	$(LW_OPTIX)/exp/denoise/maxwell_asm/maxwell_fp32.lw
+
+$(LW_OPTIX_OUTPUTDIR)/exp/denoise/maxwell_fp16.lw.obj: $(LW_OPTIX_OUTPUTDIR)/exp/denoise/maxwell_slwdnn_winograd_fp16.lwbin
+	$(LWCC) $(filter-out $(SUPPORTED_GPU_ARCHS),$(LWCC_FLAGS)) -c -o $(LW_OPTIX_OUTPUTDIR)/exp/denoise/maxwell_fp16.lw.obj -gencode=arch=compute_60,code=sm_60 \
+	-use-lwbin code=sm_60,lwbin=$(LW_OPTIX_OUTPUTDIR)/exp/denoise/maxwell_slwdnn_winograd_fp16.lwbin \
+	$(LW_OPTIX)/exp/denoise/maxwell_asm/maxwell_fp16.lw
+
+XMMA_SM70_LW_SOURCES := \
+    $(addprefix $(LW_OPTIX)/exp/denoise/implicit_gemm/, \
+    colw_volta_064_032_064.sm70.lw  \
+    colw_volta_128_064_064.sm70.lw  \
+    colw_volta_128_128_032.sm70.lw  \
+    colw_volta_128_128_064.sm70.lw  \
+    colw_volta_256_064_032.sm70.lw  \
+    colw_volta_256_064_064.sm70.lw  \
+    colw_volta_256_128_032.sm70.lw  \
+    colwpool_volta_128_128_032.sm70.lw \
+    colwpool_volta_256_064_032.sm70.lw )
+
+XMMA_SM75_LW_SOURCES := \
+    $(addprefix $(LW_OPTIX)/exp/denoise/implicit_gemm/, \
+    colw_turing_064_032_064.sm75.lw  \
+    colw_turing_128_064_064.sm75.lw  \
+    colw_turing_128_128_032.sm75.lw  \
+    colw_turing_128_128_064.sm75.lw  \
+    colw_turing_256_064_032.sm75.lw  \
+    colw_turing_256_064_064.sm75.lw  \
+    colw_turing_256_128_032.sm75.lw  \
+    colwpool_turing_128_128_032.sm75.lw \
+    colwpool_turing_256_064_032.sm75.lw )
+
+XMMA_SM80_LW_SOURCES := \
+    $(addprefix $(LW_OPTIX)/exp/denoise/implicit_gemm/, \
+    colw_ampere_064_032_064.sm80.lw  \
+    colw_ampere_128_064_064.sm80.lw  \
+    colw_ampere_128_128_032.sm80.lw  \
+    colw_ampere_128_128_064.sm80.lw  \
+    colw_ampere_256_064_032.sm80.lw  \
+    colw_ampere_256_064_064.sm80.lw  \
+    colw_ampere_256_128_032.sm80.lw  \
+    colwpool_ampere_128_128_032.sm80.lw \
+    colwpool_ampere_256_064_032.sm80.lw )
+
+LWCC_FLAGS += -DJETFIRE_ENABLED=1 -Xptxas="-knob SchedReadSBBaseLatency=24" -Xcicc --uumn -Xptxas -uumn
+
+# ---------------------------------------
+# compile Volta
+$(LW_OPTIX_OUTPUTDIR)/exp/denoise/%.sm70.lw.o: $(LW_OPTIX)/exp/denoise/implicit_gemm/%.sm70.lw
+	$(LWCC) $(filter-out $(SUPPORTED_GPU_ARCHS),$(LWCC_FLAGS)) -arch=compute_70 -code="sm_70" -c -o $@ $<
+
+# compile Turing + Ampere
+ifeq ($(LWCFG_GLOBAL_ARCH_AMPERE),1)
+$(LW_OPTIX_OUTPUTDIR)/exp/denoise/%.sm75.lw.o: $(LW_OPTIX)/exp/denoise/implicit_gemm/%.sm75.lw
+	$(LWCC) $(filter-out $(SUPPORTED_GPU_ARCHS),$(LWCC_FLAGS)) -arch=compute_75 -code="sm_75,sm_80" -c -o $@ $<
+else
+$(LW_OPTIX_OUTPUTDIR)/exp/denoise/%.sm75.lw.o: $(LW_OPTIX)/exp/denoise/implicit_gemm/%.sm75.lw
+	$(LWCC) $(filter-out $(SUPPORTED_GPU_ARCHS),$(LWCC_FLAGS)) -arch=compute_75 -code="sm_75" -c -o $@ $<
+endif
+
+# compile Ampere
+$(LW_OPTIX_OUTPUTDIR)/exp/denoise/%.sm80.lw.o: $(LW_OPTIX)/exp/denoise/implicit_gemm/%.sm80.lw
+	$(LWCC) $(filter-out $(SUPPORTED_GPU_ARCHS),$(LWCC_FLAGS)) -arch=compute_80 -code="sm_80" -c -o $@ $<
+
+# ---------------------------------------
+# add objects
+LW_OPTIX_XMMA_OBJ := $(subst .lw,.lw.o, \
+    $(subst $(LW_OPTIX)/exp/denoise/implicit_gemm/,$(LW_OPTIX_OUTPUTDIR)/exp/denoise/,$(XMMA_SM70_LW_SOURCES) ) )
+
+LW_OPTIX_XMMA_OBJ += $(subst .lw,.lw.o, \
+    $(subst $(LW_OPTIX)/exp/denoise/implicit_gemm/,$(LW_OPTIX_OUTPUTDIR)/exp/denoise/,$(XMMA_SM75_LW_SOURCES) ) )
+
+ifeq ($(LWCFG_GLOBAL_ARCH_AMPERE),1)
+LW_OPTIX_XMMA_OBJ += $(subst .lw,.lw.o, \
+    $(subst $(LW_OPTIX)/exp/denoise/implicit_gemm/,$(LW_OPTIX_OUTPUTDIR)/exp/denoise/,$(XMMA_SM80_LW_SOURCES) ) )
+endif
+
+# ---------------------------------------
+
+$(call optix_module,exp_denoise)
+
+exp_denoise_ALL_OBJECTS += $(LW_OPTIX_OUTPUTDIR)/exp/denoise/maxwell_fp32.lw.obj $(LW_OPTIX_OUTPUTDIR)/exp/denoise/maxwell_fp16.lw.obj $(LW_OPTIX_XMMA_OBJ)

@@ -1,0 +1,94 @@
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 texcoord: TexCoord;
+};
+
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+}
+
+cbuffer controlBuf
+{
+	float g_sldDepth;
+	float g_sldMultiPart;
+	float g_sldScreenSize;
+}
+
+// This should move to a centralized file but not appropriate to make that change now.
+#ifndef LW_COMMON
+#define LW_COMMON
+
+#define CAPTURE_STATE_NOT_STARTED		0
+#define CAPTURE_STATE_REGULAR			1
+#define CAPTURE_STATE_REGULARSTEREO		2
+#define CAPTURE_STATE_HIGHRES			3
+#define CAPTURE_STATE_360				4
+#define CAPTURE_STATE_360STEREO			5
+
+#endif 
+
+Texture2D txDiffuse;
+Texture2D txDepth;
+
+SamplerState samLinear;
+SamplerState samNearestClamp;
+
+float linearizeDepthTestApp(float depth)
+{
+	// Special function to linearize depth for TestApp
+	//	values received from g_fCameraClipNear / g_fCameraClipFar
+	const float zNear = 0.5;
+	const float zFar  = 1000.0;
+	const float zf_zn = zFar / zNear;	// 2000
+	return 1.0 / ((1.0 - zf_zn) * depth + zf_zn);
+}
+
+float4 PS_Testing( VSOut frag ): SV_Target
+{
+	float4 color = txDiffuse.Sample(samLinear, frag.texcoord);
+
+	// Depth testing
+	float4 depthVec = txDepth.Sample(samNearestClamp, frag.texcoord);
+	float outDepth = linearizeDepthTestApp(depthVec.r);
+	color = lerp(color, float4(outDepth, outDepth, outDepth, 1.0), g_sldDepth);
+
+	// Multipart testing
+	float4 multiPartColor = color;
+	if (captureState == CAPTURE_STATE_REGULAR)
+	{
+		multiPartColor = float4(1.0, 0.0, 0.0, 1.0);
+	}
+	else if (captureState == CAPTURE_STATE_REGULAR)
+	{
+		multiPartColor = float4(0.0, 1.0, 0.0, 1.0);
+	}
+	else if (captureState == CAPTURE_STATE_REGULARSTEREO)
+	{
+		multiPartColor = float4(0.0, 0.0, 1.0, 1.0);
+	}
+	else if (captureState == CAPTURE_STATE_HIGHRES)
+	{
+		multiPartColor = float4(1.0, 1.0, 0.0, 1.0);
+	}
+	else if (captureState == CAPTURE_STATE_360)
+	{
+		multiPartColor = float4(1.0, 0.0, 1.0, 1.0);
+	}
+	else if (captureState == CAPTURE_STATE_360STEREO)
+	{
+		multiPartColor = float4(0.0, 1.0, 1.0, 1.0);
+	}	
+	color = lerp(color, multiPartColor, g_sldMultiPart);
+	
+	// Depth testing
+	int txDiffuseSizeX, txDiffuseSizeY;
+	txDiffuse.GetDimensions(txDiffuseSizeX, txDiffuseSizeY);
+	float2 outScreenSize = float2(frag.texcoord.x * (screenSize.x / txDiffuseSizeX), frag.texcoord.y * (screenSize.y / txDiffuseSizeY));
+	color = lerp(color, float4(outScreenSize, 0.0, 1.0), g_sldScreenSize);
+	
+	return color;
+}

@@ -1,0 +1,158 @@
+From 8c6fd278e98c3d6a943d5f6153b01177bbb77232 Mon Sep 17 00:00:00 2001
+From: Daniel Koch <dkoch@lwpu.com>
+Date: Wed, 1 Apr 2020 18:24:53 -0400
+Subject: [PATCH 1/2] changes to avoid use of spirv-tools in shaderc
+
+Change-Id: I26daa1206fc599fef9b5e8780d943f6813207529
+---
+ .../thirdparty/shaderc/libshaderc/src/shaderc.cc   |  6 ++++++
+ .../shaderc/libshaderc/src/shaderc_private.h       |  4 ++++
+ .../shaderc/libshaderc_util/src/compiler.cc        | 24 ++++++++++++++++++++++
+ 3 files changed, 34 insertions(+)
+
+diff --git a/gpu/drivers/opengl/lwogtest/thirdparty/shaderc/libshaderc/src/shaderc.cc b/gpu/drivers/opengl/lwogtest/thirdparty/shaderc/libshaderc/src/shaderc.cc
+index 0421656..2f1cce8 100644
+--- a/gpu/drivers/opengl/lwogtest/thirdparty/shaderc/libshaderc/src/shaderc.cc
++++ b/gpu/drivers/opengl/lwogtest/thirdparty/shaderc/libshaderc/src/shaderc.cc
+@@ -685,6 +685,7 @@ shaderc_compilation_result_t shaderc_assemble_into_spv(
+   TRY_IF_EXCEPTIONS_ENABLED {
+     spv_binary assembling_output_data = nullptr;
+     std::string errors;
++#if defined(LW_USE_SPIRV_TOOLS)
+     const auto target_elw = additional_options ? additional_options->target_elw
+                                                : shaderc_target_elw_default;
+     const uint32_t target_elw_version =
+@@ -694,6 +695,11 @@ shaderc_compilation_result_t shaderc_assemble_into_spv(
+         GetCompilerTargetElwVersion(target_elw_version),
+         {source_assembly, source_assembly + source_assembly_size},
+         &assembling_output_data, &errors);
++#else
++    const bool assembling_succeeded = false;
++    errors += "shaderc: internal error: SpirvToolsAssemble "
++              "disabled (LW_USE_SPIRV_TOOLS not enabled)\n";
++#endif
+     result->num_errors = !assembling_succeeded;
+     if (assembling_succeeded) {
+       result->SetOutputData(assembling_output_data);
+diff --git a/gpu/drivers/opengl/lwogtest/thirdparty/shaderc/libshaderc/src/shaderc_private.h b/gpu/drivers/opengl/lwogtest/thirdparty/shaderc/libshaderc/src/shaderc_private.h
+index 87c41a2..e332857 100644
+--- a/gpu/drivers/opengl/lwogtest/thirdparty/shaderc/libshaderc/src/shaderc_private.h
++++ b/gpu/drivers/opengl/lwogtest/thirdparty/shaderc/libshaderc/src/shaderc_private.h
+@@ -73,7 +73,11 @@ class shaderc_compilation_result_vector : public shaderc_compilation_result {
+ class shaderc_compilation_result_spv_binary
+     : public shaderc_compilation_result {
+  public:
++#if defined(LW_USE_SPIRV_TOOLS)
+   ~shaderc_compilation_result_spv_binary() { spvBinaryDestroy(output_data_); }
++#else
++  ~shaderc_compilation_result_spv_binary() { }
++#endif
+ 
+   void SetOutputData(spv_binary data) { output_data_ = data; }
+ 
+diff --git a/gpu/drivers/opengl/lwogtest/thirdparty/shaderc/libshaderc_util/src/compiler.cc b/gpu/drivers/opengl/lwogtest/thirdparty/shaderc/libshaderc_util/src/compiler.cc
+index d347091..e798371 100644
+--- a/gpu/drivers/opengl/lwogtest/thirdparty/shaderc/libshaderc_util/src/compiler.cc
++++ b/gpu/drivers/opengl/lwogtest/thirdparty/shaderc/libshaderc_util/src/compiler.cc
+@@ -25,7 +25,9 @@
+ #include "libshaderc_util/message.h"
+ #include "libshaderc_util/resources.h"
+ #include "libshaderc_util/shader_stage.h"
++#if defined(LW_USE_SPIRV_TOOLS)
+ #include "libshaderc_util/spirv_tools_wrapper.h"
++#endif
+ #include "libshaderc_util/string_piece.h"
+ #include "libshaderc_util/version_profile.h"
+ 
+@@ -299,21 +301,26 @@ std::tuple<bool, std::vector<uint32_t>, size_t> Compiler::Compile(
+ 
+   std::vector<PassId> opt_passes;
+ 
++#if defined(LW_USE_SPIRV_TOOLS)
+   if (hlsl_legalization_enabled_ && source_language_ == SourceLanguage::HLSL) {
+     // If from HLSL, run this passes to "legalize" the SPIR-V for Vulkan
+     // eg. forward and remove memory writes of opaque types.
+     opt_passes.push_back(PassId::kLegalizationPasses);
+   }
++#endif
+ 
+   opt_passes.insert(opt_passes.end(), enabled_opt_passes_.begin(),
+                     enabled_opt_passes_.end());
+ 
++#if defined(LW_USE_SPIRV_TOOLS)
+   // WebGPU goes last, since it is colwerting the elw.
+   if (is_webgpu) {
+     opt_passes.push_back(PassId::kVulkanToWebGPUPasses);
+   }
++#endif
+ 
+   if (!opt_passes.empty()) {
++#if defined(LW_USE_SPIRV_TOOLS)
+     std::string opt_errors;
+     if (!SpirvToolsOptimize(internal_target_elw, internal_target_elw_version,
+                             opt_passes, &spirv, &opt_errors)) {
+@@ -322,10 +329,16 @@ std::tuple<bool, std::vector<uint32_t>, size_t> Compiler::Compile(
+                     << opt_errors << "\n";
+       return result_tuple;
+     }
++#else
++    *error_stream << "shaderc: internal error: compilation succeeded but "
++                     "optimization disabled (LW_USE_SPIRV_TOOLS not enabled)\n";
++    return result_tuple;
++#endif
+   }
+ 
+   if (output_type == OutputType::SpirvAssemblyText) {
+     std::string text_or_error;
++#if defined(LW_USE_SPIRV_TOOLS)
+     // spirv-tools does know about WebGPU, so don't need to punt to Vulkan1.1
+     // here.
+     if (!SpirvToolsDisassemble(target_elw_, target_elw_version_, spirv,
+@@ -335,6 +348,11 @@ std::tuple<bool, std::vector<uint32_t>, size_t> Compiler::Compile(
+                     << text_or_error << "\n";
+       return result_tuple;
+     }
++#else
++    *error_stream << "shaderc: internal error: compilation succeeded but "
++                     "disassembly disabled (LW_USE_SPIRV_TOOLS not enabled)\n";
++    return result_tuple;
++#endif
+     succeeded = true;
+     compilation_output_data = ColwertStringToVector(text_or_error);
+     compilation_output_data_size_in_bytes = text_or_error.size();
+@@ -380,9 +398,11 @@ void Compiler::SetWarningsAsErrors() { warnings_as_errors_ = true; }
+ void Compiler::SetGenerateDebugInfo() {
+   generate_debug_info_ = true;
+   for (size_t i = 0; i < enabled_opt_passes_.size(); ++i) {
++#if defined(LW_USE_SPIRV_TOOLS)
+     if (enabled_opt_passes_[i] == PassId::kStripDebugInfo) {
+       enabled_opt_passes_[i] = PassId::kNullPass;
+     }
++#endif
+   }
+ }
+ 
+@@ -392,16 +412,20 @@ void Compiler::SetOptimizationLevel(Compiler::OptimizationLevel level) {
+ 
+   switch (level) {
+     case OptimizationLevel::Size:
++#if defined(LW_USE_SPIRV_TOOLS)
+       if (!generate_debug_info_) {
+         enabled_opt_passes_.push_back(PassId::kStripDebugInfo);
+       }
+       enabled_opt_passes_.push_back(PassId::kSizePasses);
++#endif
+       break;
+     case OptimizationLevel::Performance:
++#if defined(LW_USE_SPIRV_TOOLS)
+       if (!generate_debug_info_) {
+         enabled_opt_passes_.push_back(PassId::kStripDebugInfo);
+       }
+       enabled_opt_passes_.push_back(PassId::kPerformancePasses);
++#endif
+       break;
+     default:
+       break;
+-- 
+2.7.4
+

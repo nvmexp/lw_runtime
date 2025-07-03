@@ -1,0 +1,305 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+
+/**
+ * @brief Compute code rate for downlink based on the appropriate
+ *        Modulation and Coding Scheme (MCS) table Id and index.
+ * @param[in] mcs_table_index: MCS table Id. Values  [0, 3); tb_pars.mcsTableIndex starts from 1.
+ * @param[in] mcs_index: MCS index within the mcs_table_index table.
+ * @return code rate
+ */
+float derive_pdsch_code_rate(uint32_t mcs_table_index, uint32_t mcs_index) {
+    float pdsch_code_rate_mcs_table[3][29] = {
+        /* MCS index Table 1 for PDSCH */
+        {120, 157, 193, 251, 308, 379, 449, 526, 602, 679, /* end of Qm=2 */
+         340, 378, 434, 490, 553, 616, 658, /* end of Qm=4 */
+         438, 466, 517, 567, 616, 666, 719, 772, 822, 873, 910, 948}, /* end of Qm=6 */
+
+        /* MCS index Table 2 for PDSCH */
+        {120, 193, 308, 449, 602, /* end of Qm=2 */
+         378, 434, 490, 553, 616, 658, /* end of Qm=4 */
+         466, 517, 567, 616, 666, 719, 772, 822, 873, /* end of Qm=6 */
+         682.5, 711, 754, 797, 841, 885, 916.5, 948}, /* end of Qm=8 */
+
+        /* MCS index Table 3 for PDSCH */
+        {30, 40, 50, 64, 78, 99, 120, 157, 193, 251, 308, 379, 449, 526, 602, /* end of Qm=2 */
+         340, 378, 434, 490, 553, 616, /* end of Qm=4 */
+         438, 466, 517, 567, 616, 666, 719, 772} /* end of Qm=6 */
+        };
+
+    if ((mcs_table_index >= 3) || (mcs_index >= 29)) {
+        throw std::runtime_error("Invalid MCS index.");
+    }
+    return  (pdsch_code_rate_mcs_table[mcs_table_index][mcs_index] / 1024.0f);
+}
+
+/**
+ * @brief Compute modulation order Qm for downlink based on the appropriate
+ *        Modulation and Coding Scheme (MCS) table Id and index.
+ * @param[in] mcs_table_index: MCS table Id. Values  [0, 3); tb_pars.mcsTableIndex starts from 1.
+ * @param[in] mcs_index: MCS index within the mcs_table_index table.
+ * @return modulation order
+ */
+int derive_pdsch_modulation_order(uint32_t mcs_table_index, uint32_t mcs_index) {
+
+    /* MCS index Tables 1 to 3 for PDSCH */
+    uint32_t pdsch_qm_mcs_table[3][29] = {
+        {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6},
+        {2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8, 8, 8, 8, 8, 8, 8, 0},
+        {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6}
+    };
+    if ((mcs_table_index >= 3) || (mcs_index >= 29)) {
+        throw std::runtime_error("Invalid MCS index.");
+    }
+    return  pdsch_qm_mcs_table[mcs_table_index][mcs_index];
+}
+
+
+/**
+ * @brief Return base graph (BG) number based on code rate and transport block size.
+ * @param[in] code_rate: code rate
+ * @param[in] transport_block_size: Transport Block (TB) size in bits
+ * @return base graph number
+ */
+int get_base_graph(float code_rate, uint32_t transport_block_size) {
+
+    int base_graph_number = ((transport_block_size <= 292) || (code_rate <= 0.25f) ||
+        ((transport_block_size <= 3824) && (code_rate <= 0.67f))) ? 2 : 1;
+    return base_graph_number;
+}
+
+/**
+ * @brief Return TB CRC size in bits based on transport block size.
+ * @param[in] transport_block_size: Transport Block (TB) size in bits before TB-CRC attachment.
+ * @return TB CRC size (24 or 16)
+ */
+uint32_t compute_TB_CRC(uint32_t transport_block_size) {
+    return (transport_block_size > 3824) ? 24 : 16;
+}
+
+
+/**
+ * @brief Compute TB size, in bytes, and number of Code Blocks (CBs) for this TB.
+ * @param[in] tb_params: pointer to Per-TB tb_pars struct.
+ * @param[in] gnb_params: pointer to next generation NodeB (gNB) gnb_pars struct.
+ * @param[in] code_rate: code rate
+ * @param[in] Qm: modulation order
+ * @param[in, out] num_CBs: numbers of CBs.
+ * @param[in, out] tb_size: transport block size in bytes.
+ */
+void get_TB_size_and_num_CBs(const tb_pars * tb_params, const gnb_pars * gnb_params, float code_rate, uint32_t Qm, uint32_t & num_CBs, uint32_t & tb_size) {
+
+     uint32_t TBS_table[93] = {24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, 184, 192, 208, 224, 240, 256, 272, 288, 304, 320, 336, 352, 368, 384, 408, 432, 456, 480, 504, 528, 552, 576, 608, 640, 672, 704, 736, 768, 808, 848, 888, 928, 984, 1032, 1064, 1128, 1160, 1192, 1224, 1256, 1288, 1320, 1352, 1416, 1480, 1544, 1608, 1672, 1736, 1800, 1864, 1928, 2024, 2088, 2152, 2216, 2280, 2408, 2472, 2536, 2600, 2664, 2728, 2792, 2856, 2976, 3104, 3240, 3368, 3496, 3624, 3752, 3824};
+
+    // Compute number of REs
+    int num_dmrs_symbols = (1 + tb_params->dmrsAddlPosition) * tb_params->dmrsMaxLength;
+    int Nre_prime = 12 * (tb_params->numSym - num_dmrs_symbols);
+    uint32_t Nre = std::min(156, Nre_prime) * tb_params->numPrb;
+
+    // Compute number of info bits
+    uint32_t Ninfo = ceil(Nre * code_rate * Qm * tb_params->numLayers); //unclear if it should be ceil or floor
+    uint32_t Ninfo_prime;
+    tb_size = 0; // needed for the TBS_table case below
+
+    if (Ninfo <= 3824) {
+        // For "small" sizes, look up TBS in a table. First round the
+        // number of information bits.
+        uint32_t n  = std::max(3, int(floor(log2(static_cast<float>(Ninfo)))) - 6);
+        Ninfo_prime = std::max(24, int(pow(2, n) * floor(Ninfo * 1.0f / pow(2, n))));
+
+        // Pick the smallest TB from TBS_table which is not smaller than Ninfo_prime
+        for (int j = 0; ((j < 93) && (tb_size == 0)); j++) {
+            if (TBS_table[j] >= Ninfo_prime) {
+                tb_size = TBS_table[j];
+            }
+        }
+        num_CBs = 1;
+    } else {
+
+        // For "large" sizes, compute TBS. First round the number of
+        // information bits to a power of two.
+        uint32_t n  = floor(log2(static_cast<float>(Ninfo - 24))) - 5;
+        Ninfo_prime = std::max(3840, int(pow(2, n) * round((double(Ninfo - 24.0) / pow(2, n)))));
+
+        // Next, compute the number of code words. For large code rates,
+        // use base-graph 1. For small code rate use base-graph 2.
+        if (code_rate <= 0.25) {
+            num_CBs = ceil((Ninfo_prime + 24) * 1.0f / 3816.0);
+        } else {
+            num_CBs = (Ninfo_prime > 8424) ?  ceil((Ninfo_prime + 24) * 1.0f/ 8424.0) : 1;
+        }
+        tb_size = 8 * num_CBs * ceil((Ninfo_prime + 24) * 1.0f / (8.0 * num_CBs)) - 24;
+    }
+}
+
+
+/**
+ * @brief Compute number of information nodes based on base graph and transport block size.
+ * @param[in] transport_block_size: TB size in bits before TB-CRC attachment.
+ * @param[in] base_graph: base graph number
+ * @return number of information nodes (Kb)
+ */
+uint32_t get_Kb(uint32_t transport_block_size, uint32_t base_graph) {
+    uint32_t Kb;
+    if (base_graph == 1) {
+        Kb = 22;
+    } else {
+        if (transport_block_size > 640) {
+            Kb = 10;
+        } else if (transport_block_size > 560) {
+            Kb = 9;
+        } else if (transport_block_size > 192) {
+            Kb = 8;
+        } else {
+            Kb = 6;
+        }
+    }
+    return Kb;
+}
+
+/**
+ * @brief Compute number of per-CB bits K_prime, which includes per-CB CRC bits but not filler bits,
+ *        based on base graph and transport block size.
+ * @param[in] transport_block_size: TB size in bits before TB-CRC attachment
+ * @param[in] base_graph: base graph number
+ * @param[in] num_CBs: number of code blocks (extra check - could remove)
+ * @return K_prime
+ */
+uint32_t get_K_prime(uint32_t transport_block_size, uint32_t base_graph, uint32_t num_CBs) {
+    uint32_t  K_cb = (base_graph == 1) ? 8448 : 3840;
+    uint32_t transport_block_size_w_CRC = transport_block_size + compute_TB_CRC(transport_block_size);
+    uint32_t B_prime = transport_block_size_w_CRC;
+    uint32_t C = 1;
+
+    if (transport_block_size_w_CRC >= K_cb) { // The TB will be segmented into multiple CBs.
+        uint32_t L = 24;
+        C = ceil((transport_block_size_w_CRC * 1.0f) / (K_cb - L));
+        B_prime = transport_block_size_w_CRC + C * L;
+    }
+    // extra check to ensure C is the same as num_CBs computed in get_TB_size_and_num_CBs.
+    if (C != num_CBs) {
+        throw std::runtime_error("Mismatch in number of CBs computation.");
+    }
+    return floor(B_prime * 1.0f / C);
+}
+
+/**
+ * @brief Return lifting size (Zc).
+ * @param[in] B: transport block size
+ * @param[in] base_graph: base graph number
+ * @param[in] K_prime: number of per-CB bits including CRC but not filler bits.
+ * @return lifting size
+ */
+uint32_t get_lifting_size(uint32_t B, uint32_t base_graph, uint32_t K_prime) {
+
+    uint32_t K_b = get_Kb(B, base_graph);
+
+    uint32_t Z[51] = {2, 4, 8, 16, 32, 64, 128, 256,
+                      3, 6, 12, 24, 48, 96, 192, 384,
+                      5, 10, 20, 40, 80, 160, 320,
+                      7, 14, 28, 56, 112, 224,
+                      9, 18, 36, 72, 144, 288,
+                      11, 22, 44, 88, 176, 352,
+                      13, 26, 52, 104, 208,
+                      15, 30, 60, 120, 240};
+
+    // Derive ZcArray (from derive_lifting.m)
+    // find smallest Zc such that Zc*K_b >= K_prime:
+    uint32_t Zc = 384; // max possible
+    for (int j = 0; j < 51; j++) {
+        uint32_t temp = Z[j] * K_b;
+        if ((temp >= K_prime) && (Z[j] < Zc)) {
+            Zc = Z[j];
+        }
+    }
+    return Zc;
+}
+
+/**
+ * @brief Populate PerTbParams struct based on the tb_pars array and gnb_pars struct.
+ * @param[in, out] tb_params_struct: pointer to # TBs PerTbParams array to be populated
+ * @param[in] tb_params: pointer to array of per-TB tb_params structs.
+ * @param[in] gnb_params: pointer to a gnb_pars struct.
+ * @return LWPHY_STATUS_SUCCESS or LWPHY_STATUS_ILWALID_ARGUMENT.
+ */
+lwphyStatus_t lwphySetTBParamsFromStructs(PerTbParams * tb_params_struct, const tb_pars * tb_params, const gnb_pars * gnb_params) {
+
+    int num_TBs = gnb_params->numTb;
+    int total_layers_cnt = 0;
+
+    for (int TB_id = 0; TB_id < num_TBs; TB_id++) {
+        tb_params_struct[TB_id].firstCodeBlockIndex = 0; //Is this always zero?
+
+        tb_params_struct[TB_id].rv = tb_params[TB_id].rv;
+        if (tb_params_struct[TB_id].rv > 3) {
+            fprintf(stderr, "tb_pars rv %d has to be <= 3.\n", tb_params_struct[TB_id].rv);
+            return LWPHY_STATUS_ILWALID_ARGUMENT;
+        }
+
+        tb_params_struct[TB_id].cinit = (tb_params[TB_id].nRnti << 15) + /*(q << 14)*/ + gnb_params->cellId;
+        tb_params_struct[TB_id].Qm = derive_pdsch_modulation_order(tb_params[TB_id].mcsTableIndex - 1, tb_params[TB_id].mcsIndex);
+        if ((tb_params_struct[TB_id].Qm != LWPHY_QAM_4) && (tb_params_struct[TB_id].Qm != LWPHY_QAM_16) &&
+            (tb_params_struct[TB_id].Qm != LWPHY_QAM_64) && (tb_params_struct[TB_id].Qm != LWPHY_QAM_256)) {
+            fprintf(stderr, "tb_pars Qm %d is invalid!\n", tb_params_struct[TB_id].Qm);
+            return LWPHY_STATUS_ILWALID_ARGUMENT;
+        }
+
+
+        uint32_t num_dmrs_symbols = (1 + tb_params[TB_id].dmrsAddlPosition) * tb_params[TB_id].dmrsMaxLength;
+        uint32_t num_symbols = tb_params[TB_id].numSym -  num_dmrs_symbols;
+        tb_params_struct[TB_id].G = num_symbols * 12 * tb_params[TB_id].numPrb * tb_params_struct[TB_id].Qm * tb_params[TB_id].numLayers;
+
+        float code_rate = derive_pdsch_code_rate(tb_params[TB_id].mcsTableIndex - 1, tb_params[TB_id].mcsIndex);
+
+        uint32_t transport_block_size = 0;
+        uint32_t num_CBs = 0;
+        get_TB_size_and_num_CBs(&tb_params[TB_id], gnb_params, code_rate, tb_params_struct[TB_id].Qm, num_CBs, transport_block_size);
+        tb_params_struct[TB_id].num_CBs = num_CBs;
+        tb_params_struct[TB_id].bg = get_base_graph(code_rate, transport_block_size);
+
+        uint32_t K_prime = get_K_prime(transport_block_size, tb_params_struct[TB_id].bg, num_CBs);
+        uint32_t Zc = get_lifting_size(transport_block_size, tb_params_struct[TB_id].bg, K_prime);
+
+        tb_params_struct[TB_id].Zc = Zc;
+
+        tb_params_struct[TB_id].N = (tb_params_struct[TB_id].bg == 1) ? LWPHY_LDPC_MAX_BG1_UNPUNCTURED_VAR_NODES * Zc : LWPHY_LDPC_MAX_BG2_UNPUNCTURED_VAR_NODES * Zc;
+        tb_params_struct[TB_id].Ncb = tb_params_struct[TB_id].N;
+        tb_params_struct[TB_id].K = (tb_params_struct[TB_id].bg == 1) ? LWPHY_LDPC_BG1_INFO_NODES * Zc : LWPHY_LDPC_MAX_BG2_INFO_NODES * Zc;
+        tb_params_struct[TB_id].F = tb_params_struct[TB_id].K - K_prime; // number of filler bits
+
+        //Set layers and update layer map
+        tb_params_struct[TB_id].Nl = tb_params[TB_id].numLayers;
+        if ((tb_params_struct[TB_id].Nl < 1) || (tb_params_struct[TB_id].Nl > MAX_DL_LAYERS_PER_TB)) {
+            fprintf(stderr, "tb_pars Nl %d has to be in [1, %d].\n", tb_params_struct[TB_id].Nl, MAX_DL_LAYERS_PER_TB);
+            return LWPHY_STATUS_ILWALID_ARGUMENT;
+        }
+
+        int TB_layer_cnt = tb_params[TB_id].numLayers;
+        uint32_t n_port_index = tb_params[TB_id].nPortIndex; // Up to 8 layers encoded per TB, 4 bits at a time
+        for (unsigned int layer_cnt = 0; layer_cnt < TB_layer_cnt; layer_cnt += 1) {
+            int port_id = ((n_port_index >> (28 - 4 * layer_cnt)) & 0x0FU);
+            int layer_id = port_id + 8 * tb_params[TB_id].nSCID;
+            tb_params_struct[TB_id].layer_map_array[layer_cnt] = layer_id;
+        }
+        // Set unused layers to some fixed value.
+        for (int layer_cnt = TB_layer_cnt; layer_cnt < MAX_DL_LAYERS_PER_TB; layer_cnt += 1) {
+            tb_params_struct[TB_id].layer_map_array[layer_cnt] = 0;
+        }
+        total_layers_cnt += TB_layer_cnt;
+    }
+
+    if (total_layers_cnt != gnb_params->numBbuLayers) {
+        fprintf(stderr, "Layer count inferred from per-TB Port Ids does not match gnb_pars numBbuLayers");
+        return LWPHY_STATUS_ILWALID_ARGUMENT;
+    }
+
+    return LWPHY_STATUS_SUCCESS;
+}

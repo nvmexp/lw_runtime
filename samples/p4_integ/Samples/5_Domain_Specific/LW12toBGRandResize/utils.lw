@@ -1,0 +1,152 @@
+/* Copyright (c) 2022, LWPU CORPORATION. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *  * Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  * Neither the name of LWPU CORPORATION nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <fstream>
+#include <iostream>
+
+#include <lwca.h>
+#include <lwda_runtime.h>
+
+#include "resize_colwert.h"
+#include "utils.h"
+
+__global__ void floatToChar(float *src, unsigned char *dst, int height,
+                            int width, int batchSize) {
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+
+  if (x >= height * width) return;
+
+  int offset = height * width * 3;
+
+  for (int j = 0; j < batchSize; j++) {
+    // b
+    *(dst + j * offset + x * 3 + 0) =
+        (unsigned char)*(src + j * offset + height * width * 0 + x);
+    // g
+    *(dst + j * offset + x * 3 + 1) =
+        (unsigned char)*(src + j * offset + height * width * 1 + x);
+    // r
+    *(dst + j * offset + x * 3 + 2) =
+        (unsigned char)*(src + j * offset + height * width * 2 + x);
+  }
+}
+
+void floatPlanarToChar(float *src, unsigned char *dst, int height, int width,
+                       int batchSize) {
+  floatToChar<<<(height * width - 1) / 1024 + 1, 1024, 0, NULL>>>(
+      src, dst, height, width, batchSize);
+}
+
+void dumpRawBGR(float *d_srcBGR, int pitch, int width, int height,
+                int batchSize, char *folder, char *tag) {
+  float *bgr, *d_bgr;
+  int frameSize;
+  char directory[120];
+  char mkdir_cmd[256];
+#if !defined(_WIN32)
+  sprintf(directory, "output/%s", folder);
+  sprintf(mkdir_cmd, "mkdir -p %s 2> /dev/null", directory);
+#else
+  sprintf(directory, "output\\%s", folder);
+  sprintf(mkdir_cmd, "mkdir %s 2> nul", directory);
+#endif
+
+  int ret = system(mkdir_cmd);
+
+  frameSize = width * height * 3 * sizeof(float);
+  bgr = (float *)malloc(frameSize);
+  if (bgr == NULL) {
+    std::cerr << "Failed malloc for bgr\n";
+    return;
+  }
+
+  d_bgr = d_srcBGR;
+  for (int i = 0; i < batchSize; i++) {
+    char filename[120];
+    std::ofstream *outputFile;
+
+    checkLwdaErrors(lwdaMemcpy((void *)bgr, (void *)d_bgr, frameSize,
+                               lwdaMemcpyDeviceToHost));
+    sprintf(filename, "%s/%s_%d.raw", directory, tag, (i + 1));
+
+    outputFile = new std::ofstream(filename);
+    if (outputFile) {
+      outputFile->write((char *)bgr, frameSize);
+      delete outputFile;
+    }
+
+    d_bgr += pitch * height * 3;
+  }
+
+  free(bgr);
+}
+
+void dumpBGR(float *d_srcBGR, int pitch, int width, int height, int batchSize,
+             char *folder, char *tag) {
+  dumpRawBGR(d_srcBGR, pitch, width, height, batchSize, folder, tag);
+}
+
+void dumpYUV(unsigned char *d_lw12, int size, char *folder, char *tag) {
+  unsigned char *lw12Data;
+  std::ofstream *lw12File;
+  char filename[120];
+  char directory[60];
+  char mkdir_cmd[256];
+#if !defined(_WIN32)
+  sprintf(directory, "output/%s", folder);
+  sprintf(mkdir_cmd, "mkdir -p %s 2> /dev/null", directory);
+#else
+  sprintf(directory, "output\\%s", folder);
+  sprintf(mkdir_cmd, "mkdir %s 2> nul", directory);
+#endif
+
+  int ret = system(mkdir_cmd);
+
+  sprintf(filename, "%s/%s.lw12", directory, tag);
+
+  lw12File = new std::ofstream(filename);
+  if (lw12File == NULL) {
+    std::cerr << "Failed to new " << filename;
+    return;
+  }
+
+  lw12Data = (unsigned char *)malloc(size * (sizeof(char)));
+  if (lw12Data == NULL) {
+    std::cerr << "Failed to allcoate memory\n";
+    return;
+  }
+
+  lwdaMemcpy((void *)lw12Data, (void *)d_lw12, size, lwdaMemcpyDeviceToHost);
+
+  lw12File->write((const char *)lw12Data, size);
+
+  free(lw12Data);
+  delete lw12File;
+}

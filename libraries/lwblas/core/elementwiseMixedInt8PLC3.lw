@@ -1,0 +1,55 @@
+#include<lwtensor/internal/elementwiseInstancePLC3.h>
+#include <lwtensor/internal/operatorsPLC3.h>
+#include <lwtensor/internal/vectorized_elementwise.h>
+#include <lwtensor/internal/elementwiseDispatchPLC3.h>
+
+namespace LWTENSOR_NAMESPACE
+{
+lwtensorStatus_t elementwiseMixedInt8PLC3(
+    const bool checkInstanceAvailability,
+    const ElementwiseParameters & params,
+    const ElementwiseTypePack & typePack,
+    const ElementwiseOpPack & opPack,
+    const void * const alpha, const void * const A,
+    const void * const beta,  const void * const B,
+    const void * const gamma, const void * const C,
+                                    void * const D,
+    const lwdaStream_t stream)
+{
+    constexpr int32_t numInputTensors = 3;
+    /* INT8-FP16 and INT8-FP32 mixed precision */
+    return elementwiseDispatchTypePLC3<
+        numInputTensors, 
+        /* ======================================================================================= */
+        /* ("LWDA_R_8I",  "LWDA_R_32F", "LWDA_R_16F", "LWDA_R_32F", 256, 32, 16, 64, 256, 256, 1), */
+        /* ======================================================================================= */
+        ElementwiseStaticTypePack<int8_t, float, half, float>,
+        ElementwiseConfig<1, 256,  64, 1>,
+        ElementwiseConfig<2,  16, 256, 1>,
+        ElementwiseConfig<2,  32, 256, 1>,
+        /* ======================================================================================= */
+        /* ("LWDA_R_16F", "LWDA_R_32F", "LWDA_R_8I",  "LWDA_R_32F", 256, 32, 16, 64, 256, 256, 1), */
+        /* ======================================================================================= */
+        ElementwiseStaticTypePack<half, float, int8_t, float>,
+        ElementwiseConfig<1, 256,  64, 1>,
+        ElementwiseConfig<2,  16, 256, 1>,
+        ElementwiseConfig<2,  32, 256, 1>,
+        /* ======================================================================================= */
+        /* ("LWDA_R_8I",  "LWDA_R_32F", "LWDA_R_32F", "LWDA_R_32F", 256, 32, 16, 64, 256, 256, 1), */
+        /* ======================================================================================= */
+        ElementwiseStaticTypePack<int8_t, float, float, float>,
+        ElementwiseConfig<1, 256,  64, 1>,
+        ElementwiseConfig<2,  16, 256, 1>,
+        ElementwiseConfig<2,  32, 256, 1>,
+        /* ======================================================================================= */
+        /* ("LWDA_R_32F", "LWDA_R_32F", "LWDA_R_8I",  "LWDA_R_32F", 256, 32, 16, 64, 256, 256, 1), */
+        /* ======================================================================================= */
+        ElementwiseStaticTypePack<float, float, int8_t, float>,
+        ElementwiseConfig<1, 256,  64, 1>,
+        ElementwiseConfig<2,  16, 256, 1>,
+        ElementwiseConfig<2,  32, 256, 1>,
+        /* ======================================================================================= */
+        ElementwiseStaticTypePack<void, void, void, void>>(
+                checkInstanceAvailability, params, typePack, opPack, alpha, A, beta, B, gamma, C, D, stream);
+}
+}

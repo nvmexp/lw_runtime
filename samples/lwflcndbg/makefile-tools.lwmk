@@ -1,0 +1,104 @@
+##############################################################################
+# windows-specific lwmake fragment used for building lwwatch.
+#
+# This file should contain only definitions of compiler tools, ddk and
+# sdk, and the include and lib paths associated with them. Only the
+# compiler-generic bits belong in this makefile.
+#
+# Other include and lib paths belong in other makefiles. Do not add
+# defines or includes here which are specific to your component
+# build. Other componts might not want them. For example, do not
+# disable compiler warnings here.
+##############################################################################
+
+##############################################################################
+# Must include this file after overriding LW_DDK_SUBVER. It includes
+# LddmCommon.lwmk, which initializes LW_DDK_SUBVER (with ?=).
+##############################################################################
+include $(LW_SOURCE)/drivers/common/build/LddmCommon.lwmk
+
+##############################################################################
+# Compiler selection
+##############################################################################
+# Override the default compiler choice. Enables easy testing of new
+# compiler versions.
+#
+# Use like this to force msvc100
+#     compilerOverride = msvc100
+#
+# The override can be added to the lwmake command line like this:
+#     lwmake opengl compilerOverride=msvc100 ...
+#
+# Using compilerOverride = msvc100sp1 here as XP still needs the old compiler.
+#
+
+ifndef compilerOverride
+    compilerOverride = msvc100sp1
+else
+  # compilerOverride was specified. Use it.
+  ifneq ($(findstring $(compilerOverride),"msvc100 msvc100sp1 msvc110 msvc120ctp"),)
+    $(error invalid compiler override)
+  endif
+endif
+
+LW_COMPILER ?= msvc100sp1
+
+##############################################################################
+# Select a tool chain after selecting a DDK. The DDK version number
+# must be known because some of the tools are pulled from the
+# DDK. Therefore, including a toolchain makefile fragment must be done
+# after including $(LW_OPENGL_OS_ARCH).lwmk
+#
+# After including the _tools_ makefile, $(MSVC_COMPILER) indicates the
+# selected compiler. Use it instead of compilerOverride.
+##############################################################################
+include $(LW_SOURCE)/drivers/common/build/$(LW_COMPILER)_tools_$(LW_TARGET_ARCH).lwmk
+
+##############################################################################
+# SDK selection
+##############################################################################
+LW_LWWATCH_SDK_DIR ?= $(LW_TOOLS)/sdk/WinSDK/7.0a
+
+########################################
+# (SDK, compiler) includes and library paths.
+#
+########################################
+LW_INCLUDES += $(MSVC_COMPILER_DIR)/include
+LW_INCLUDES += $(LW_LWWATCH_SDK_DIR)/Include
+LW_INCLUDES += $(LW_TOOLS)/sdk/DbgEng/inc
+
+##############################################################################
+# SDK and compiler library paths
+##############################################################################
+ifeq ($(LW_TARGET_ARCH),x86)
+  libraryDirs += $(MSVC_COMPILER_DIR)/lib
+  libraryDirs += $(LW_LWWATCH_SDK_DIR)/Lib
+  lib_sdk_path += $(LW_LWWATCH_SDK_DIR)/Lib
+  LFLAGS += $(LW_TOOLS)/sdk/DbgEng/lib/i386/dbgeng.lib
+else ifeq ($(LW_TARGET_ARCH),amd64)
+  libraryDirs += $(MSVC_COMPILER_DIR)/lib/amd64
+  libraryDirs += $(LW_LWWATCH_SDK_DIR)/Lib/x64
+  lib_sdk_path += $(LW_LWWATCH_SDK_DIR)/Lib/x64
+  LFLAGS += $(LW_TOOLS)/sdk/DbgEng/lib/amd64/dbgeng.lib
+else
+  libraryDirs += $(MSVC_COMPILER_DIR)/lib/arm
+endif
+
+########################################
+# Summarize for debugging
+########################################
+
+ifneq ($(findstring $(LW_TARGET_OS),"winnext"),)
+  # For 'winnext', always emit the DDK/compiler info since it changes
+  # frequently.
+  $(info Using tools: ($(LW_DDK_SUBVER), $(LW_DDK_BUILD), $(MSVC_COMPILER_DIR), $(lib_sdk_path)))
+else ifneq ($(LW_VERBOSE),0)
+  # For other configurations, only emit information if verbose.
+  ifneq ($(findstring $(LW_TARGET_OS),"win7 win8 wddm"),)
+    $(info Using tools: ($(LW_DDK_SUBVER), $(LW_DDK_BUILD), $(MSVC_COMPILER_DIR), $(lib_sdk_path)))
+  else
+    # It would be good to make winXP config more like the other OS's
+    $(info Using tools: (?, ?, $(MSVC_COMPILER_DIR), $(lib_sdk_path)))
+    $(info Using tools: winxp TARGET_OS uses a mixture of old compiler and pre-RTM DDK)
+  endif
+endif

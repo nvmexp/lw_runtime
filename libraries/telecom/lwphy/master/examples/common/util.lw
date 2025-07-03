@@ -1,0 +1,72 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include <stdio.h>
+#include <cstdint>
+#include "util.hpp"
+
+__global__ void sleep_kernel(uint32_t sleep_ms)
+{
+#if __LWDA_ARCH__ >= 700 // __nanosleep supportd in sm_70 or higher
+    constexpr uint32_t NS_PER_MS = 1000000UL;
+    for(uint32_t i = 0; i < sleep_ms; ++i) __nanosleep(NS_PER_MS);
+#else
+    if((0 == blockIdx.x) && (0 == blockIdx.y) && (0 == blockIdx.z) &&
+       (0 == threadIdx.x) && (0 == threadIdx.y) && (0 == threadIdx.z))
+    {
+        printf("Sleep not supported\n");
+    }
+#endif // __LWDA_ARCH__
+}
+
+void gpu_ms_sleep(uint32_t sleep_ms, int gpuId, lwdaStream_t lwStrm)
+{
+    lwdaDeviceProp deviceProp;
+    LWDA_CHECK(lwdaGetDeviceProperties(&deviceProp, gpuId));
+
+    const uint32_t N_THRD_BLKS_PER_SM       = deviceProp.maxThreadsPerMultiProcessor/deviceProp.maxThreadsPerBlock;
+    const uint32_t N_THRD_BLKS              = deviceProp.multiProcessorCount*N_THRD_BLKS_PER_SM;
+    const uint32_t N_MAX_THRDS_PER_THRD_BLK = deviceProp.maxThreadsPerBlock;
+    sleep_kernel<<<dim3(N_THRD_BLKS), dim3(N_MAX_THRDS_PER_THRD_BLK), 0, lwStrm>>>(sleep_ms);
+}
+
+__device__ __forceinline__ unsigned long long __globaltimer()
+{
+    unsigned long long globaltimer;
+    // 64-bit global nanosecond timer
+    asm volatile("mov.u64 %0, %globaltimer;"
+                 : "=l"(globaltimer));
+    return globaltimer;
+}
+
+__global__ void delay_kernel(uint32_t delay_ms)
+{
+    // 64-bit global nanosecond timer
+    constexpr uint64_t NS_PER_MS = 1000000UL;
+
+    uint64_t start_time = __globaltimer();
+    uint64_t end_time   = start_time + (delay_ms * NS_PER_MS);
+
+    // 64-bit timer has a long range so skipping wrap around check
+    while(__globaltimer() < end_time)
+    {
+    };
+}
+
+void gpu_ms_delay(uint32_t delay_ms, int gpuId, lwdaStream_t lwStrm)
+{
+    lwdaDeviceProp deviceProp;
+    LWDA_CHECK(lwdaGetDeviceProperties(&deviceProp, gpuId));
+
+    // constexpr uint32_t N_MAX_THRD_BLK_PER_SM = 32;
+    const uint32_t N_THRD_BLKS              = deviceProp.multiProcessorCount;
+    const uint32_t N_MAX_THRDS_PER_THRD_BLK = deviceProp.maxThreadsPerBlock;
+    delay_kernel<<<dim3(N_THRD_BLKS), dim3(N_MAX_THRDS_PER_THRD_BLK), 0, lwStrm>>>(delay_ms);
+}

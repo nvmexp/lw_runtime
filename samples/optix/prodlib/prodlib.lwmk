@@ -1,0 +1,84 @@
+#
+#  Copyright (c) 2017 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *Device IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HDevice BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+Prodlib_CFLAGS ?=
+ifeq ($(LW_HOST_OS_FAMILY),Windows)
+  # Warnings
+  Prodlib_CFLAGS += \
+    /wd4577 \
+    /wd4530 \
+    /wd4267 \
+    /wd4244
+endif # Windows
+
+Prodlib_NEEDS_LWVM_HEADERS = 1
+
+Prodlib_INCLUDES = $(LWVM_LW_SDK_INCLUDES) 
+
+Prodlib_SOURCES += $(addprefix $(LW_OPTIX)/prodlib/, \
+  compiler/ModuleCache.cpp \
+  exceptions/AssertionFailure.cpp \
+  exceptions/BasicException.cpp \
+  exceptions/Backtrace.cpp \
+  exceptions/CompileError.cpp \
+  exceptions/LwdaError.cpp \
+  exceptions/Exception.cpp \
+  exceptions/IlwalidDevice.cpp \
+  exceptions/IlwalidSource.cpp \
+  exceptions/RTCoreError.cpp \
+  exceptions/ValidationError.cpp \
+  exceptions/ValueOutOfRange.cpp \
+  misc/CPUFeatures.cpp \
+  misc/LwdaStopwatch.cpp \
+  misc/lwpti/Lwpti.cpp \
+  misc/lwpti/LwptiProfiler.cpp \
+  misc/lwpti/LwPerfHost.cpp \
+  misc/lwpti/LwPerfTarget.cpp \
+  misc/Encryption.cpp \
+  misc/HostStopwatch.cpp \
+  misc/GLFunctions.cpp \
+  misc/LWTXProfiler.cpp \
+  misc/RTFormatUtil.cpp \
+  misc/String.cpp \
+  misc/TimeViz.cpp \
+  system/Knobs.cpp \
+  system/Logger.cpp \
+  system/System.cpp \
+  system/Thread.cpp \
+  )
+
+$(call optix_module,Prodlib)
+
+CMAKE_CONFIGURED_FILES += $(LW_OPTIX)/prodlib/exceptions/enableBacktrace.h.in
+
+LW_WIN_USES_VCRT = 1
+
+ifeq ($(OPTIX_ENABLE_STACK_TRACE),1)
+  ifeq ($(LW_HOST_OS_FAMILY),Windows)
+    # On Windows, we need dbghelp functions to get symbol names for the stack dump
+    OPTIX_LFLAGS += dbghelp.lib
+  endif
+endif
+
+include $(LW_OPTIX)/prodlib/tests/tests.lwmk

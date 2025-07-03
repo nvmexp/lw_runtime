@@ -1,0 +1,47 @@
+ps_4_0
+dcl_input v0.xyw, linear
+dcl_input v1.xyw, linear
+dcl_output o0.xyzw
+dcl_constantbuffer cb0[24].xyzw, immediateindexed
+dcl_sampler s0, mode_default
+dcl_sampler s1, mode_comparison
+dcl_resource t0, texture2d, (float, float, float, float)
+dcl_sampler s2, mode_default
+dcl_resource t1, texture2d, (float, float, float, float)
+dcl_resource t2, texture2d, (float, float, float, float)
+dcl_temps 4 
+div r0.xy, v1.xyxx, v1.wwww
+sample r0.xyzw, r0.xyxx, t1.xyzw, s0
+add r0.x, r0.x, -cb0[6].x
+div r0.z, cb0[6].y, r0.x
+div r1.xy, v0.xyxx, v0.wwww
+mul r0.xy, r0.zzzz, r1.xyxx
+mov r0.w, l(0x3f800000)
+dp4 r1.x, r0.xyzw, cb0[16].xyzw
+dp4 r1.y, r0.xyzw, cb0[17].xyzw
+dp4 r1.z, r0.xyzw, cb0[18].xyzw
+dp4 r0.x, r0.xyzw, cb0[19].xyzw
+div r0.xyz, r1.zxyz, r0.xxxx
+mov_sat r0.x, r0.x
+sample r1.xyzw, r0.yzyy, t2.xyzw, s2
+lt r0.w, l(0.00000000), r1.x
+if_nz r0.w
+sample_c_lz aoffimmi(-1, -1, 0) r1.x, r0.yzyy, t0.xxxx, s1, r0.x
+sample_c_lz aoffimmi(0, -1, 0) r1.y, r0.yzyy, t0.xxxx, s1, r0.x
+sample_c_lz aoffimmi(1, -1, 0) r1.z, r0.yzyy, t0.xxxx, s1, r0.x
+sample_c_lz aoffimmi(-1, 0, 0) r2.x, r0.yzyy, t0.xxxx, s1, r0.x
+sample_c_lz r2.y, r0.yzyy, t0.xxxx, s1, r0.x
+sample_c_lz aoffimmi(1, 0, 0) r2.z, r0.yzyy, t0.xxxx, s1, r0.x
+sample_c_lz aoffimmi(-1, 1, 0) r3.x, r0.yzyy, t0.xxxx, s1, r0.x
+sample_c_lz aoffimmi(0, 1, 0) r3.y, r0.yzyy, t0.xxxx, s1, r0.x
+sample_c_lz aoffimmi(1, 1, 0) r3.z, r0.yzyy, t0.xxxx, s1, r0.x
+dp3 r1.x, r1.xzyx, l(0.25000000, 0.25000000, 0.50000000, 0.00000000)
+dp3 r1.y, r2.xzyx, l(0.25000000, 0.25000000, 0.50000000, 0.00000000)
+dp3 r1.z, r3.xzyx, l(0.25000000, 0.25000000, 0.50000000, 0.00000000)
+dp3 r0.w, r1.xzyx, l(0.25000000, 0.25000000, 0.50000000, 0.00000000)
+else 
+sample_c_lz aoffimmi(-1, -1, 0) r0.w, r0.yzyy, t0.xxxx, s1, r0.x
+endif 
+mul r0.x, r0.w, cb0[21].x
+mul o0.xyzw, r0.xxxx, cb0[20].xyzw
+ret 

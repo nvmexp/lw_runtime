@@ -1,0 +1,1 @@
+../../stubs/src/consumer.cpp

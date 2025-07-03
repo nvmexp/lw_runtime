@@ -1,0 +1,3563 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#if !defined(LDPC2_LWH_INCLUDED_)
+#define LDPC2_LWH_INCLUDED_
+
+#include <stdint.h>
+#include "nrLDPC_templates.lwh"
+#include "lwphy_kernel_util.lwh"
+#include "ldpc2.hpp"
+
+namespace ldpc2
+{
+
+union half_word_t
+{
+    uint16_t u16;
+    __half   f16;
+};
+
+////////////////////////////////////////////////////////////////////////
+// round_up
+template< int M, int N >
+struct round_up
+{
+  enum { value = (M + N-1) / N * N };
+};
+
+////////////////////////////////////////////////////////////////////////
+// div_round_up
+template< int M, int N >
+struct div_round_up
+{
+  enum { value = (M + N-1) / N };
+};
+
+////////////////////////////////////////////////////////////////////////
+// div_round_down
+template< int M, int N >
+struct div_round_down
+{
+  enum { value = (M / N) };
+};
+
+
+////////////////////////////////////////////////////////////////////////
+// app_max_words
+// Provides the number of words (register) required to store APP
+// variables as a function of APP type (fp32 or fp16) and base graph
+// base graph index (1 or 2)
+template <typename T, int BG> struct app_max_words;
+template <int BG>
+struct app_max_words<float, BG>  { static const int value = max_row_degree<BG>::value; };
+template <int BG>
+struct app_max_words<__half, BG> { static const int value = round_up<max_row_degree<BG>::value, 2>::value; };
+
+
+////////////////////////////////////////////////////////////////////////
+// shmem_llr_buffer_size()
+// Returns the size required to store LLR/APP values in shared memory
+inline
+uint32_t shmem_llr_buffer_size(uint32_t vnodes, uint32_t Z, uint32_t elem_size)
+{
+    return (vnodes * Z * elem_size);
+}
+
+////////////////////////////////////////////////////////////////////////
+// signbit
+__device__ inline
+int signbit(__half h)
+{
+    half_word_t hw;
+    hw.f16 = h;
+    return ((hw.u16 & 0x00008000) >> 15);
+}
+
+////////////////////////////////////////////////////////////////////////
+// word_sign_mask()
+// Returns a word with the sign bit of the input value, and all other
+// bits 0.
+__device__ inline
+word_t word_sign_mask(word_t w)
+{
+    word_t out;
+    out.u32 = w.u32 & 0x80000000;
+    return out;
+}
+
+////////////////////////////////////////////////////////////////////////
+// word_pair_sign_mask()
+// Returns a word with the sign bits of the two fp16 input values, and
+// all other bits 0.
+__device__ inline
+word_t word_pair_sign_mask(word_t w)
+{
+    word_t out;
+    out.u32 = w.u32 & 0x80008000;
+    return out;
+}
+
+////////////////////////////////////////////////////////////////////////
+// word_pair_abs()
+__device__ inline
+word_t word_pair_abs(word_t w)
+{
+    word_t out;
+    out.u32 = w.u32 & 0x7FFF7FFF;
+    return out;
+}
+
+////////////////////////////////////////////////////////////////////////
+// half_word_sign_mask()
+// Returns a word with the sign bit of the input value, and all other
+// bits 0.
+__device__ inline
+half_word_t half_word_sign_mask(half_word_t w)
+{
+    half_word_t out;
+    out.u16 = w.u16 & 0x00008000;
+    return out;
+}
+
+////////////////////////////////////////////////////////////////////////
+// half_word_sign_mask()
+// Returns a word with the sign bit of the input value, and all other
+// bits 0.
+__device__ inline
+word_t half_word_sign_mask(word_t w)
+{
+    word_t out;
+    out.u32 = (w.u32 & 0x00008000);
+    return out;
+}
+
+////////////////////////////////////////////////////////////////////////
+// set_high_zero()
+__device__ inline
+word_t set_high_zero(word_t win)
+{
+    word_t out;
+    asm volatile("prmt.b32 %0, %1, 0, 0x5410;\n"
+                 : "=r"(out.u32)
+                 : "r"(win.u32));
+    return out;
+}
+
+////////////////////////////////////////////////////////////////////////
+// write_shared_int2()
+__device__ inline
+void write_shared_int2(int2 i2, int offset)
+{
+    union u
+    {
+        int2     i2;
+        uint64_t u64;
+    };
+    u val;
+    val.i2 = i2;
+    asm volatile("st.shared.b64 [%0], %1;\n" :: "r"(offset), "l"(val.u64));
+}
+
+////////////////////////////////////////////////////////////////////////
+// write_shared_int4()
+__device__ inline
+void write_shared_int4(int4 i4, int offset)
+{
+    asm volatile("st.shared.v4.s32 [%0], { %1, %2, %3, %4 };\n" :: "r"(offset), "r"(i4.x), "r"(i4.y), "r"(i4.z), "r"(i4.w));
+}
+
+////////////////////////////////////////////////////////////////////////
+// write_shared_word()
+__device__ inline
+void write_shared_word(word_t w, int offset)
+{
+    asm volatile("st.shared.b32 [%0], %1;\n" :: "r"(offset), "r"(w.u32));
+}
+
+////////////////////////////////////////////////////////////////////////
+// write_shared_word_low()
+__device__ inline
+void write_shared_word_low(word_t w, int offset)
+{
+    half_word_t wh;
+    wh.u16 = w.u32;
+    asm volatile("st.shared.b16 [%0], %1;\n" :: "r"(offset), "h"(wh.u16));
+}
+
+////////////////////////////////////////////////////////////////////////
+// write_shared_word_high()
+__device__ inline
+void write_shared_word_high(word_t w, int offset)
+{
+    half_word_t wh;
+    wh.u16 = w.u32 >> 16;
+    asm volatile("st.shared.b16 [%0], %1;\n" :: "r"(offset), "h"(wh.u16));
+}
+
+////////////////////////////////////////////////////////////////////////
+// h0_h0()
+// Utility function to attempt to coerce the compiler into using the
+// .H0_H0 swizzle on instructions that support it (HSET2, HSETP2, ...)
+__device__ inline
+word_t h0_h0(word_t w_in)
+{
+    word_t w_out;
+    w_out.f16x2 = __low2half2(w_in.f16x2);
+    return w_out;
+}
+
+////////////////////////////////////////////////////////////////////////
+// h1_h1()
+// Utility function to attempt to coerce the compiler into using the
+// .H1_H1 swizzle on instructions that support it (HSET2, HSETP2, ...)
+__device__ inline
+word_t h1_h1(word_t w_in)
+{
+    word_t w_out;
+    w_out.f16x2 = __high2half2(w_in.f16x2);
+    return w_out;
+}
+
+////////////////////////////////////////////////////////////////////////
+// hset2_bf_lt()
+// fp16 pairwise 'less than' comparison, with (fp16)1.0 output for true
+// and (fp16)0.0 output for false.
+__device__ inline
+word_t hset2_bf_lt(word_t inA, word_t inB)
+{
+    word_t ret;
+    asm volatile("set.lt.f16x2.f16x2 %0, %1, %2;"
+                 : "=r"(ret.u32)                // outputs
+                 : "r"(inA.u32), "r"(inB.u32)); // inputs
+    return ret;
+}
+
+////////////////////////////////////////////////////////////////////////
+// hset2_bf_ge()
+// fp16 pairwise 'greater than or equal' comparison, with (fp16)1.0
+// output for true and (fp16)0.0 output for false.
+__device__ inline
+word_t hset2_bf_ge(word_t inA, word_t inB)
+{
+    word_t ret;
+    asm volatile("set.ge.f16x2.f16x2 %0, %1, %2;"
+                 : "=r"(ret.u32)                // outputs
+                 : "r"(inA.u32), "r"(inB.u32)); // inputs
+    return ret;
+}
+
+////////////////////////////////////////////////////////////////////////
+// hfma2()
+// (A * B) + c
+// Denormalized number support is maintained (i.e. no FTZ)
+__device__ inline
+word_t hfma2(word_t inA, word_t inB, word_t inC)
+{
+    word_t ret;
+    asm volatile("fma.rn.f16x2 %0, %1, %2, %3;"
+                 : "=r"(ret.u32)                              // outputs
+                 : "r"(inA.u32), "r"(inB.u32), "r"(inC.u32)); // inputs
+    return ret;
+}
+
+////////////////////////////////////////////////////////////////////////
+// hneg2()
+// Negates both fp16 values of a half2
+__device__ inline
+word_t hneg2(word_t inA)
+{
+    word_t ret;
+    asm volatile("neg.f16x2 %0, %1;"
+                 : "=r"(ret.u32)     // outputs
+                 : "r"(inA.u32));    // inputs
+    return ret;
+}
+
+////////////////////////////////////////////////////////////////////////
+// hadd2()
+__device__ inline
+word_t hadd2(word_t inA, word_t inB)
+{
+    word_t ret;
+    asm volatile("add.f16x2 %0, %1, %2;"
+                 : "=r"(ret.u32)                // outputs
+                 : "r"(inA.u32), "r"(inB.u32)); // inputs
+    return ret;
+}
+
+////////////////////////////////////////////////////////////////////////
+// u16x2_to_u32
+template <unsigned short u0, unsigned short u1>
+struct u16x2_to_u32
+{
+    static const unsigned int value = u0 + (u1 << 16);
+};
+
+////////////////////////////////////////////////////////////////////////
+// half2_has_inf()
+inline __device__
+bool half2_has_inf(const __half2 h)
+{
+    __half low = __low2half(h);
+    __half high = __high2half(h);
+    return (__hisinf(low) | __hisinf(high));
+}
+
+////////////////////////////////////////////////////////////////////////
+// half2_has_nan()
+inline __device__
+bool half2_has_nan(const __half2 h)
+{
+    __half low = __low2half(h);
+    __half high = __high2half(h);
+    return (__hisnan(low) | __hisnan(high));
+}
+
+////////////////////////////////////////////////////////////////////////
+// hltu_bm()
+// Performs unordered less than comparison of two halves of input half2
+// words. The output is 0x0000 0000, 0xFFFF 0000, 0x0000 FFFF, or
+// 0xFFFF FFFF, where 0xFFFF represents "less than" and 0x0000
+// represents "not less than."
+static inline __device__ word_t hltu_bm(word_t a, word_t b)
+{
+    word_t wOut;
+#if (__LWDACC_VER_MAJOR__ >= 10) && (__LWDACC_VER_MINOR__ >= 2)
+    asm volatile("{\n"
+                 "set.ltu.u32.f16x2 %0, %1, %2;\n" // compare [a_hi|a_lo] to [b_hi|b_lo]
+                 "}\n"
+               : "=r"(wOut.u32)
+               : "r"(a.u32), "r"(b.u32));
+#else
+    asm volatile("{\n"
+                 ".reg .pred a0_lt_b0, a1_lt_b1;\n\t\t"
+                 "mov.u32 %0, 0xFFFFFFFF;\n\t\t"                    // initializing assuming true for both comparisons
+                 "setp.ltu.f16x2 a0_lt_b0|a1_lt_b1, %1, %2;\n\t\t"  // compare [a1 a0] to [b1 b0] --> [a1_lt_b1 a0_lt_b1]
+                 "@!a0_lt_b0 prmt.b32 %0, %0, 0, 0x3254;\n\t"       // set out0 to 0 if the comparison was false
+                 "@!a1_lt_b1 prmt.b32 %0, %0, 0, 0x5410;\n\t"       // set out1 to 0 if the comparison was false
+                 "}\n"
+               : "=r"(wOut.u32)
+               : "r"(a.u32), "r"(b.u32));
+#endif
+    return wOut;
+}
+
+////////////////////////////////////////////////////////////////////////
+// hequ_bm()
+// Performs (unordered) equality comparison of two halves of input half2
+// words. The output is 0x0000 0000, 0xFFFF 0000, 0x0000 FFFF, or
+// 0xFFFF FFFF, where 0xFFFF represents "equal" and 0x0000
+// represents "not equal."
+static inline __device__ word_t hequ_bm(word_t a, word_t b)
+{
+    word_t wOut;
+#if (__LWDACC_VER_MAJOR__ >= 10) && (__LWDACC_VER_MINOR__ >= 2)
+    asm volatile("{\n"
+                 "set.equ.u32.f16x2 %0, %1, %2;\n" // compare [a_hi|a_lo] to [b_hi|b_lo]
+                 "}\n"
+               : "=r"(wOut.u32)
+               : "r"(a.u32), "r"(b.u32));
+#else
+    asm volatile("{\n"
+                 ".reg .pred a0_lt_b0, a1_lt_b1;\n\t\t"
+                 "mov.u32 %0, 0xFFFFFFFF;\n\t\t"                    // initializing assuming true for both comparisons
+                 "setp.equ.f16x2 a0_lt_b0|a1_lt_b1, %1, %2;\n\t\t"  // compare [a1 a0] to [b1 b0] --> [a1_lt_b1 a0_lt_b1]
+                 "@!a0_lt_b0 prmt.b32 %0, %0, 0, 0x3254;\n\t"       // set out0 to 0 if the comparison was false
+                 "@!a1_lt_b1 prmt.b32 %0, %0, 0, 0x5410;\n\t"       // set out1 to 0 if the comparison was false
+                 "}\n"
+               : "=r"(wOut.u32)
+               : "r"(a.u32), "r"(b.u32));
+#endif
+    return wOut;
+}
+
+////////////////////////////////////////////////////////////////////////
+// select_from_mask()
+static inline __device__ word_t select_from_mask(word_t mask, word_t a, word_t b)
+{
+    word_t wOut;
+    wOut.u32 = (a.u32 & mask.u32) | (b.u32 & ~mask.u32);
+    return wOut;
+}
+
+////////////////////////////////////////////////////////////////////////
+// clamp_pos_to_half_max()
+// Clamps a each value of a pair of fp16 values to the maximum fp16
+// value. (In other words, if a value is +Inf it is colwerted to
+// fp16_max.) Assumes input values are positive.
+static inline __device__ word_t clamp_pos_to_half_max(word_t wIn)
+{
+    //bool hasInf = half2_has_inf(wIn.f16x2);
+    word_t wOut, hmax_hmax, bmask;
+    hmax_hmax.u32 = 0x7BFF7BFF;
+    bmask         = hltu_bm(wIn, hmax_hmax);
+    // expecting single LOP3 instruction here...
+    wOut.u32      = (wIn.u32 & bmask.u32) | (hmax_hmax.u32 & ~bmask.u32);
+
+    //if(hasInf)
+    //{
+    //     float2 in = __half22float2(wIn.f16x2);
+    //     float2 out = __half22float2(wOut.f16x2);
+    //     printf("threadIdx.x = %u: in = (%f, %f), out = (%f, %f)\n", threadIdx.x, in.x, in.y, out.x, out.y);
+    //}
+
+    return wOut;
+}
+
+////////////////////////////////////////////////////////////////////////
+// fp16x2_abs()
+__device__ inline
+word_t fp16x2_abs(word_t w)
+{
+    word_t out;
+    // abs.f16x2 not in PTX until v6.5 (LWCA 10.2)
+    // The compiler will (hopefully) fuse abs calls on f16x2 values into
+    // the instruction modifier for those instructions that support
+    // it.
+#if (__LWDACC_VER_MAJOR__ >= 10) && (__LWDACC_VER_MINOR__ >= 2)
+    asm volatile("abs.f16x2 %0, %1;\n\t\t"
+                 : "=r"(out.u32)
+                 : "r"(w.u32));
+#else
+    out.u32 = w.u32 & 0x7FFF7FFF;
+#endif
+    return out;
+}
+
+////////////////////////////////////////////////////////////////////////
+// fp16x2_sign_mask()
+// Returns a word with the sign bits of the two fp16 input values, and
+// all other bits 0.
+__device__ inline
+word_t fp16x2_sign_mask(word_t w)
+{
+    word_t out;
+    out.u32 = w.u32 & 0x80008000;
+    return out;
+}
+
+////////////////////////////////////////////////////////////////////////
+// uint32_permute()
+template <unsigned int PRMT_BYTES>
+__device__ inline
+uint32_t uint32_permute(uint32_t a, uint32_t b)
+{
+    uint32_t wOut;
+    asm volatile("prmt.b32 %0, %1, %2, %3;\n" : "=r"(wOut) : "r"(a), "r"(b), "n"(PRMT_BYTES));
+    return wOut;
+}
+
+////////////////////////////////////////////////////////////////////////
+// extract_low_high()
+// Ouput will have the low 16 bits from a and the high 16 bits from b
+// [a.hi, a.lo], [b.hi, b.lo] --> [b.hi, a.lo]
+__device__ inline
+word_t extract_low_high(word_t a, word_t b)
+{
+    word_t wOut;
+    asm volatile("prmt.b32 %0, %1, %2, 0x7610;\n" : "=r"(wOut.u32) : "r"(a.u32), "r"(b.u32));
+    return wOut;
+}
+
+////////////////////////////////////////////////////////////////////////
+// extract_high_low()
+// Ouput will have the low 16 bits from a and the high 16 bits from b
+// [a.hi, a.lo], [b.hi, b.lo] --> [b.lo, a.hi]
+__device__ inline
+word_t extract_high_low(word_t a, word_t b)
+{
+    word_t wOut;
+    asm volatile("prmt.b32 %0, %1, %2, 0x3254;\n" : "=r"(wOut.u32) : "r"(a.u32), "r"(b.u32));
+    return wOut;
+}
+
+////////////////////////////////////////////////////////////////////////
+// clamp_to_half_max()
+// Clamps a each value of a pair of fp16 values to the maximum fp16
+// value, preserving the sign of the input. (In other words, if a value
+// is +Inf it is colwerted to +fp16_max, and if it is -Inf it is
+// colwerted to -fp16_max.)
+static inline __device__ word_t clamp_to_half_max(word_t wIn)
+{
+    //bool hasInf = half2_has_inf(wIn.f16x2);
+
+    word_t wOut, hmax_hmax, ltmask, signMask;
+    //uint32_t inf_inf = 0x7C007C00;
+    hmax_hmax.u32      = 0x7BFF7BFF;
+    ltmask             = hltu_bm(fp16x2_abs(wIn), hmax_hmax);
+    // expecting single LOP3 instruction here...
+    wOut.u32           = (wIn.u32 & ltmask.u32) | (hmax_hmax.u32 & ~ltmask.u32);
+    // +/-Inf values will have the hmax value, but WITHOUT the correct
+    // sign. Correct that here.
+    // (Finite values will already have the correct sign, but the or
+    // operation below will not disturb that.)
+    signMask           = fp16x2_sign_mask(wIn);
+    wOut.u32           |= signMask.u32;
+
+    //if(hasInf)
+    //{
+    //     float2 in = __half22float2(wIn.f16x2);
+    //     float2 out = __half22float2(wOut.f16x2);
+    //     printf("threadIdx.x = %u: in = (%f, %f), out = (%f, %f)\n", threadIdx.x, in.x, in.y, out.x, out.y);
+    //}
+
+    return wOut;
+}
+
+////////////////////////////////////////////////////////////////////////
+// half2_sort()
+// Compare two half-words in v1_v0 (loword = v0, hiword = v1) and
+// optionally swap values so that on return, abs(loword(v0_v1)) < abs(hiword(v0_v1))
+// and set min0_index to indicate whether the low word (0) or high word
+// (1) was smaller in absolute value.
+__device__ inline
+void half2_sort(word_t& v1_v0, int& min0_index)
+{
+    // Duplicate the high word - expecting generated code to use swizzle
+    word_t v1_v1 = h1_h1(v1_v0);
+    
+#if (__LWDACC_VER_MAJOR__ >= 10) && (__LWDACC_VER_MINOR__ >= 2)
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred h0_lt_h1, q;\n\t\t"
+                 ".reg .f16x2 abs_v1_v0, abs_v1_v1;\n\t\t"
+                 "abs.f16x2 abs_v1_v0, %0;\n\t\t"                         // abs_v1_v0 = [abs(v1)  abs(v0) ] (expecting |value| modifier in setp)
+                 "abs.f16x2 abs_v1_v1, %2;\n\t\t"                         // abs_v1_v1 = [abs(v1)  abs(v1) ] (expecting |value| modifier in setp)
+                 
+                 "setp.ltu.f16x2 h0_lt_h1|q, abs_v1_v0, abs_v1_v1;\n\t\t" // compare [v1 v0] to [v1 v1] --> [q h0_lt_h1]
+                 "selp.b32 %1, 0, 1, h0_lt_h1;\n\t\t"                     // min0_index = (h0_lt_h1) ? 0 : 1
+                 "@!h0_lt_h1 prmt.b32 %0, %0, %0, 0x5432;\n\t\t"          // if(!h0_lt_h1) swap(v0, v1)
+                 "}\n"
+                 : "+r"(v1_v0.u32), "=r"(min0_index)
+                 : "r"(v1_v1.u32));
+#else
+    // abs.f16x2 not in PTX until v6.5 (LWCA 10.2)
+    word_t abs_v1_v0, abs_v1_v1;
+    abs_v1_v0 = word_pair_abs(v1_v0);
+    abs_v1_v1 = word_pair_abs(v1_v1);
+
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred h0_lt_h1, q;\n\t\t"
+                 "setp.ltu.f16x2 h0_lt_h1|q, %3, %2;\n\t\t"      // compare [v1 v0] to [v1 v1] --> [q h0_lt_h1]
+                 "selp.b32 %1, 0, 1, h0_lt_h1;\n\t\t"            // min0_index = (h0_lt_h1) ? 0 : 1
+                 "@!h0_lt_h1 prmt.b32 %0, %0, %0, 0x5432;\n\t\t" // if(!h0_lt_h1) swap(v0, v1)
+                 "}\n"
+                 : "+r"(v1_v0.u32), "=r"(min0_index)
+                 : "r"(abs_v1_v1.u32), "r"(abs_v1_v0.u32));
+#endif
+}
+
+////////////////////////////////////////////////////////////////////////
+// half2_min_sum_update_low_prmt()
+//
+// Updating min0, min1, and min0_index for fp16 (single codeword at a time):
+// ------------------------------------------------------------------------
+// Partition the positive real numbers into 3  possible regions for an
+// incoming value (assuming that min0 and min1 have been initialized
+// correctly based on the first two values):
+//
+//       A                 B                    C
+// -|----------|-------------------------|--------------
+//  0       abs(min0)                 abs(min1)
+// Output     min1          min0        abs(value) < abs(min0)    abs(value) < abs(min1)
+//            ---------  ----------     ----------------------    ----------------------
+// case A:    min0       new_value                T                        T
+// case B:    new_value  min0                     F                        T
+// case C:    min1       min0                     F                        F
+//
+// Furthermore, assume that we have a register with min0 in the lo word
+// and min1 in the hi word, and that the new value used to update is
+// in the lo word of the 'value' register. (The approach can be modified
+// to work with a value in the hi word by modifying the indices.) If we
+// view these two registers with byte numbering as used by the PRMT
+// instruction in index mode, we have:
+//      7   6   5   4      3  2  1  0
+//    [   _     value ] [  min1  min0]
+//
+// case A:  0x 1 0 5 4
+// case B:  0x 5 4 1 0
+// case C:  0x 3 2 1 0    (no change to input min1/min0 register)
+//
+// Assume: registers with [min1 min0], [idx], [min0_idx], [value]
+//         .reg .pred ltmin0, ltmin1
+//         .reg b32 prmt_idx;
+//         setp.ltu.f16x2 ltmin0|ltmin1, |value|, min0_min1;  // Compare abs(value) to min0 and min1, setting predicates ltmin0 and ltmin1
+// @ltmin0  mov.b32 min0_idx, idx;                            // if abs(value) < min0, replace min0_idx
+// @ltmin1  selp.u32 prmt_idx, 0x1054, 0x5410, ltmin0;        // select between A, B permutations based on ltmin0 (only if abs(value) < abs(min1))
+// @ltmin1  prmt.b32 min0_min1, min0_min1, value, prmt_idx; 
+//
+__device__ inline
+void half2_min_sum_update_low_prmt(word_t& min1_min0, int& min0_index, word_t new_value, int idx)
+{
+    // Duplicate the low word (expecting instruction swizzle to avoid an explicit instruction)
+    word_t v = h0_h0(new_value);
+#if (__LWDACC_VER_MAJOR__ < 10) || (__LWDA_CC_VER_MINOR__ < 2)
+    // abs.f16x2 not in PTX until v6.5 (LWCA 10.2)
+    word_t abs_min1_min0, abs_v;
+    abs_min1_min0 = word_pair_abs(min1_min0);
+    abs_v         = word_pair_abs(v);
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred ltmin0, ltmin1;\n\t\t"
+                 ".reg .u32 prmt_idx;\n\t\t"
+                 "setp.ltu.f16x2 ltmin0|ltmin1, %4, %5;\n\t\t"               // ltmin0 = abs(v) < abs(min0)
+                                                                             // ltmin1 = abs(v) < abs(min1)
+                 "@ltmin0  mov.b32 %1, %3;\n\t\t"                            // if abs(v) < min0, replace min0_idx
+                 "@ltmin1  selp.u32 prmt_idx, 0x1054, 0x5410, ltmin0;\n\t\t" // select between A, B permutations based on ltmin0 (only if abs(v) < abs(min1))
+                 "@ltmin1  prmt.b32 %0, %0, %2, prmt_idx;\n\t"               //  
+                 "}\n"
+                 : "+r"(min1_min0.u32),
+                   "+r"(min0_index)
+                 : "r"(v.u32),
+                   "r"(idx),
+                   "r"(abs_v.u32),
+                   "r"(abs_min1_min0.u32));
+#else
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred ltmin0, ltmin1;\n\t\t"
+                 ".reg .f16x2 abs_min1_min0, abs_v;\n\t\t"
+                 ".reg .u32 prmt_idx;\n\t\t"
+                 "abs.f16x2 abs_min1_min0, %0;\n\t\t"                        // abs_min1_min0 = [abs(min1)  abs(min0) ] (expect |value| modifier in setp)
+                 "abs.f16x2 abs_v, %2;\n\t\t"                                // abs_v         = [abs(v)     abs(v)    ] (expect |value| modifier in setp)
+                 "setp.ltu.f16x2 ltmin0|ltmin1, abs_v, abs_min1_min0;\n\t\t" // ltmin0 = abs(v) < abs(min0)
+                                                                             // ltmin1 = abs(v) < abs(min1)
+                 "@ltmin0  mov.b32 %1, %3;\n\t\t"                            // if abs(v) < min0, replace min0_idx
+                 "@ltmin1  selp.u32 prmt_idx, 0x1054, 0x5410, ltmin0;\n\t\t" // select between A, B permutations based on ltmin0 (only if abs(v) < abs(min1))
+                 "@ltmin1  prmt.b32 %0, %0, %2, prmt_idx;\n\t"               //  
+                 "}\n"
+                 : "+r"(min1_min0.u32),
+                   "+r"(min0_index)
+                 : "r"(v.u32),
+                   "r"(idx));
+#endif
+}
+
+////////////////////////////////////////////////////////////////////////
+// half2_min_sum_update_high_prmt()
+// See the description above for half2_min_sum_update_low_prmt(), but replace
+// the source with this pair of registers:
+//      7   6  5   4      3  2  1  0
+//    [ value    -  ]  [  min1  min0]
+//
+// case A:  0x 1 0 7 6
+// case B:  0x 7 6 1 0
+// case C:  0x 3 2 1 0    (no change to input min1/min0 register)
+__device__ inline
+void half2_min_sum_update_high_prmt(word_t& min1_min0, int& min0_index, word_t new_value, int idx)
+{
+    // Duplicate the high word (expecting instruction swizzle)
+    word_t v = h1_h1(new_value);
+
+#if (__LWDACC_VER_MAJOR__ >= 10) && (__LWDACC_VER_MINOR__ >= 2)
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred ltmin0, ltmin1;\n\t\t"
+                 ".reg .f16x2 abs_min1_min0, abs_v;\n\t\t"
+                 ".reg .u32 prmt_idx;\n\t\t"
+                 "abs.f16x2 abs_min1_min0, %0;\n\t\t"                        // abs_min1_min0 = [abs(min1)  abs(min0) ] (expect |value| modifier in setp)
+                 "abs.f16x2 abs_v, %2;\n\t\t"                                // abs_v         = [abs(v)     abs(v)    ] (expect |value| modifier in setp)
+                 "setp.ltu.f16x2 ltmin0|ltmin1, abs_v, abs_min1_min0;\n\t\t" // ltmin0 = abs(v) < abs(min0)
+                                                                             // ltmin1 = abs(v) < abs(min1)
+                 "@ltmin0  mov.b32 %1, %3;\n\t\t"                            // if abs(v) < min0, replace min0_idx
+                 "@ltmin1  selp.u32 prmt_idx, 0x1076, 0x7610, ltmin0;\n\t\t" // select between A, B permutations based on ltmin0 (only if abs(v) < abs(min1))
+                 "@ltmin1  prmt.b32 %0, %0, %2, prmt_idx;\n\t"               //  
+                 "}\n"
+                 : "+r"(min1_min0.u32),  // 0
+                   "+r"(min0_index)      // 1
+                 : "r"(v.u32),           // 2
+                   "r"(idx));            // 3
+#else
+    // abs.f16x2 not in PTX until v6.5 (LWCA 10.2)
+    word_t abs_min1_min0, abs_v;
+    abs_min1_min0 = word_pair_abs(min1_min0);
+    abs_v         = word_pair_abs(v);
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred ltmin0, ltmin1;\n\t\t"
+                 ".reg .u32 prmt_idx;\n\t\t"
+                 "setp.ltu.f16x2 ltmin0|ltmin1, %4, %5;\n\t\t"               // ltmin0 = abs(v) < abs(min0)
+                                                                             // ltmin1 = abs(v) < abs(min1)
+                 "@ltmin0  mov.b32 %1, %3;\n\t\t"                            // if abs(v) < min0, replace min0_idx
+                 "@ltmin1  selp.u32 prmt_idx, 0x1076, 0x7610, ltmin0;\n\t\t" // select between A, B permutations based on ltmin0 (only if abs(v) < abs(min1))
+                 "@ltmin1  prmt.b32 %0, %0, %2, prmt_idx;\n\t"               //  
+                 "}\n"
+                 : "+r"(min1_min0.u32),
+                   "+r"(min0_index)
+                 : "r"(v.u32),
+                   "r"(idx),
+                   "r"(abs_v.u32),
+                   "r"(abs_min1_min0.u32));
+#endif
+}
+
+////////////////////////////////////////////////////////////////////////
+// half2_min_sum_update_low()
+// Update the min-sum representation using the low fp16 value in an
+// input pair.
+__device__ inline
+void half2_min_sum_update_low(word_t& min1_min0, int& min0_index, word_t new_value, int idx)
+{
+    // Duplicate the low word (expecting instruction swizzle to avoid an explicit instruction)
+    word_t v = h0_h0(new_value);
+    
+#if (__LWDACC_VER_MAJOR__ >= 10) && (__LWDACC_VER_MINOR__ >= 2)
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred ltmin0, ltmin1;\n\t\t"
+                 ".reg .f16x2 abs_min1_min0, abs_v;\n\t\t"
+                 "abs.f16x2 abs_min1_min0, %0;\n\t\t"                        // abs_min1_min0 = [abs(min1)  abs(min0) ] (expect |value| modifier in setp)
+                 "abs.f16x2 abs_v, %2;\n\t\t"                                // abs_v         = [abs(v)     abs(v)    ] (expect |value| modifier in setp)
+                 "setp.ltu.f16x2 ltmin0|ltmin1, abs_v, abs_min1_min0;\n\t\t" // ltmin0 = abs(v) < abs(min0)
+                                                                             // ltmin1 = abs(v) < abs(min1)
+                 "selp.s32 %1, %3, %1, ltmin0;\n\t\t"                        // if abs(v) < min0, replace min0_idx
+                 "@ltmin1  prmt.b32 %0, %0, %4, 0x5410;\n\t"                 // if abs(v) < min1, select to have [ new_value  original_min0 ]
+                 "@ltmin0  prmt.b32 %0, %0, %0, 0x1032;\n\t"                 // if abs(v) < min0, select to have [ original_min0  new_value]
+                 "}\n"
+                 : "+r"(min1_min0.u32),
+                   "+r"(min0_index)
+                 : "r"(v.u32),
+                   "r"(idx),
+                   "r"(new_value.u32));
+#else
+    // abs.f16x2 not in PTX until v6.5 (LWCA 10.2)
+    word_t abs_min1_min0, abs_v;
+    abs_min1_min0 = word_pair_abs(min1_min0);
+    abs_v         = word_pair_abs(v);
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred ltmin0, ltmin1;\n\t\t"
+                 "setp.ltu.f16x2 ltmin0|ltmin1, %2, %3;\n\t\t" // ltmin0 = abs(v) < abs(min0)
+                                                               // ltmin1 = abs(v) < abs(min1)
+                 "selp.s32 %1, %5, %1, ltmin0;\n\t\t"              // if abs(v) < min0, replace min0_idx
+                 "@ltmin1  prmt.b32 %0, %0, %4, 0x5410;\n\t"   // if abs(v) < min1, permute to get [ new_value  original_min0 ]
+                 "@ltmin0  prmt.b32 %0, %0, %0, 0x1032;\n\t"   // if abs(v) < min0, permute to get [ original_min0  new_value]
+                 "}\n"
+                 : "+r"(min1_min0.u32),
+                   "+r"(min0_index)
+                 : "r"(abs_v.u32),
+                   "r"(abs_min1_min0.u32),
+                   "r"(new_value.u32),
+                   "r"(idx));
+#endif
+}
+
+////////////////////////////////////////////////////////////////////////
+// half2_min_sum_update_high()
+// Update the min-sum representation using the high fp16 value in an
+// input pair.
+__device__ inline
+void half2_min_sum_update_high(word_t& min1_min0, int& min0_index, word_t new_value, int idx)
+{
+    // Duplicate the high word (expecting instruction swizzle to avoid an explicit instruction)
+    word_t v = h1_h1(new_value);
+    
+#if (__LWDACC_VER_MAJOR__ >= 10) && (__LWDACC_VER_MINOR__ >= 2)
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred ltmin0, ltmin1;\n\t\t"
+                 ".reg .f16x2 abs_min1_min0, abs_v;\n\t\t"
+                 "abs.f16x2 abs_min1_min0, %0;\n\t\t"                        // abs_min1_min0 = [abs(min1)  abs(min0) ] (expect |value| modifier in setp)
+                 "abs.f16x2 abs_v, %2;\n\t\t"                                // abs_v         = [abs(v)     abs(v)    ] (expect |value| modifier in setp)
+                 "setp.ltu.f16x2 ltmin0|ltmin1, abs_v, abs_min1_min0;\n\t\t" // ltmin0 = abs(v) < abs(min0)
+                                                                             // ltmin1 = abs(v) < abs(min1)
+                 "selp.s32 %1, %3, %1, ltmin0;\n\t\t"                        // if abs(v) < min0, replace min0_idx
+                 "@ltmin1  prmt.b32 %0, %0, %4, 0x7610;\n\t"                 // if abs(v) < min1, select to have [ new_value  original_min0 ]
+                 "@ltmin0  prmt.b32 %0, %0, %0, 0x1032;\n\t"                 // if abs(v) < min0, select to have [ original_min0  new_value]
+                 "}\n"
+                 : "+r"(min1_min0.u32),
+                   "+r"(min0_index)
+                 : "r"(v.u32),
+                   "r"(idx),
+                   "r"(new_value.u32));
+#else
+    // abs.f16x2 not in PTX until v6.5 (LWCA 10.2)
+    word_t abs_min1_min0, abs_v;
+    abs_min1_min0 = word_pair_abs(min1_min0);
+    abs_v         = word_pair_abs(v);
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred ltmin0, ltmin1;\n\t\t"
+                 "setp.ltu.f16x2 ltmin0|ltmin1, %2, %3;\n\t\t" // ltmin0 = abs(v) < abs(min0)
+                                                               // ltmin1 = abs(v) < abs(min1)
+                 "selp.s32 %1, %5, %1, ltmin0;\n\t\t"              // if abs(v) < min0, replace min0_idx
+                 "@ltmin1  prmt.b32 %0, %0, %4, 0x7610;\n\t"   // if abs(v) < min1, permute to get [ new_value  original_min0 ]
+                 "@ltmin0  prmt.b32 %0, %0, %0, 0x1032;\n\t"   // if abs(v) < min0, permute to get [ original_min0  new_value]
+                 "}\n"
+                 : "+r"(min1_min0.u32),
+                   "+r"(min0_index)
+                 : "r"(abs_v.u32),
+                   "r"(abs_min1_min0.u32),
+                   "r"(new_value.u32),
+                   "r"(idx));
+#endif
+}
+
+////////////////////////////////////////////////////////////////////////
+// half2_min_sum_update_low_sel_prmt()
+// Update the min-sum representation using the low fp16 value in an
+// input pair.
+// 3 possible intervals for an input value: A, B, & C:
+//       A             B             C
+// |------------|-------------|-------------
+// 0          min0          min1
+//
+//  input range     output [HI LO] = [new_min1 new_min0]
+//       A          [ min0      new_value ]
+//       B          [ new_value min0      ]
+//       C          [ min1      min0      ]
+// This implementation uses conditionals to set a permute control value
+// which is then used to extract the appropriate bytes from the inputs.
+// If we assume a pair of input registers:
+//
+// [ 0   new_value] [min1  min0]
+//
+// we arrive at the following mapping:
+//  input range     output [HI LO] = [new_min1 new_min0]   prmt_idx
+//       A          [ min0      new_value ]                0x1054
+//       B          [ new_value min0      ]                0x5410
+//       C          [ min1      min0      ]                0x3210
+__device__ inline
+void half2_min_sum_update_low_sel_prmt(word_t& min1_min0, int& min0_index, word_t new_value, int idx)
+{
+    // Duplicate the low word (expecting instruction swizzle to avoid an explicit instruction)
+    word_t v = h0_h0(new_value);
+   
+#if (__LWDACC_VER_MAJOR__ >= 10) && (__LWDACC_VER_MINOR__ >= 2)
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred ltmin0, ltmin1;\n\t\t"
+                 ".reg .f16x2 abs_min1_min0, abs_v;\n\t\t"
+                 ".reg .u32 prmt_idx;\n\t\t"
+                 "abs.f16x2 abs_min1_min0, %0;\n\t\t"                        // abs_min1_min0 = [abs(min1)  abs(min0) ] (expect |value| modifier in setp)
+                 "abs.f16x2 abs_v, %2;\n\t\t"                                // abs_v         = [abs(v)     abs(v)    ] (expect |value| modifier in setp)
+                 "setp.ltu.f16x2 ltmin0|ltmin1, abs_v, abs_min1_min0;\n\t\t" // ltmin0 = abs(v) < abs(min0)
+                                                                             // ltmin1 = abs(v) < abs(min1)
+                 "selp.u32 prmt_idx, 0x1054, 0x5410, ltmin0;\n\t\t"          // select between A, B permutations based on ltmin0
+                 "selp.s32 %1, %3, %1, ltmin0;\n\t\t"                        // if abs(v) < min0, replace min0_idx
+                 "selp.u32 prmt_idx, prmt_idx, 0x3210, ltmin1;\n\t\t"        // select between [A or B] and C permutations based on ltmin1
+                 "prmt.b32 %0, %0, %4, prmt_idx;\n\t"                        // Extract values using permutation index
+                 "}\n"
+                 : "+r"(min1_min0.u32),
+                   "+r"(min0_index)
+                 : "r"(v.u32),
+                   "r"(idx),
+                   "r"(new_value.u32));
+#else
+    // abs.f16x2 not in PTX until v6.5 (LWCA 10.2)
+    word_t abs_min1_min0, abs_v;
+    abs_min1_min0 = word_pair_abs(min1_min0);
+    abs_v         = word_pair_abs(v);
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred ltmin0, ltmin1;\n\t\t"
+                 ".reg .u32 prmt_idx;\n\t\t"
+                 "setp.ltu.f16x2 ltmin0|ltmin1, %4, %5;\n\t\t"        // ltmin0 = abs(v) < abs(min0)
+                                                                      // ltmin1 = abs(v) < abs(min1)
+                 "selp.u32 prmt_idx, 0x1054, 0x5410, ltmin0;\n\t\t"   // select between A, B permutations based on ltmin0
+                 "selp.s32 %1, %3, %1, ltmin0;\n\t\t"                 // if abs(v) < min0, replace min0_idx
+                 "selp.u32 prmt_idx, prmt_idx, 0x3210, ltmin1;\n\t\t" // select between [A or B] and C permutations based on ltmin1
+                 "prmt.b32 %0, %0, %4, prmt_idx;\n\t"                 // Extract values using permutation index
+                 "}\n"
+                 : "+r"(min1_min0.u32),
+                   "+r"(min0_index)
+                 : "r"(v.u32),
+                   "r"(idx),
+                   "r"(abs_v.u32),
+                   "r"(abs_min1_min0.u32));
+#endif
+}
+
+////////////////////////////////////////////////////////////////////////
+// half2_min_sum_update_high_sel_prmt()
+// Update the min-sum representation using the high fp16 value in an
+// input pair.
+// 3 possible intervals for an input value: A, B, & C:
+//       A             B             C
+// |------------|-------------|-------------
+// 0          min0          min1
+//
+//  input range     output [HI LO] = [new_min1 new_min0]
+//       A          [ min0      new_value ]
+//       B          [ new_value min0      ]
+//       C          [ min1      min0      ]
+// This implementation uses conditionals to set a permute control value
+// which is then used to extract the appropriate bytes from the inputs.
+// If we assume a pair of input registers:
+//
+// [ new_value   xxx] [min1  min0]
+//
+// we arrive at the following mapping:
+//  input range     output [HI LO] = [new_min1 new_min0]   prmt_idx
+//       A          [ min0      new_value ]                0x1076
+//       B          [ new_value min0      ]                0x7610
+//       C          [ min1      min0      ]                0x3210
+__device__ inline
+void half2_min_sum_update_high_sel_prmt(word_t& min1_min0, int& min0_index, word_t new_value, int idx)
+{
+    // Duplicate the high word (expecting instruction swizzle to avoid an explicit instruction)
+    word_t v = h1_h1(new_value);
+    
+#if (__LWDACC_VER_MAJOR__ >= 10) && (__LWDACC_VER_MINOR__ >= 2)
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred ltmin0, ltmin1;\n\t\t"
+                 ".reg .f16x2 abs_min1_min0, abs_v;\n\t\t"
+                 ".reg .u32 prmt_idx;\n\t\t"
+                 "abs.f16x2 abs_min1_min0, %0;\n\t\t"                        // abs_min1_min0 = [abs(min1)  abs(min0) ] (expect |value| modifier in setp)
+                 "abs.f16x2 abs_v, %2;\n\t\t"                                // abs_v         = [abs(v)     abs(v)    ] (expect |value| modifier in setp)
+                 "setp.ltu.f16x2 ltmin0|ltmin1, abs_v, abs_min1_min0;\n\t\t" // ltmin0 = abs(v) < abs(min0)
+                                                                             // ltmin1 = abs(v) < abs(min1)
+                 "selp.u32 prmt_idx, 0x1076, 0x7610, ltmin0;\n\t\t"          // select between A, B permutations based on ltmin0
+                 "selp.s32 %1, %3, %1, ltmin0;\n\t\t"                        // if abs(v) < min0, replace min0_idx
+                 "selp.u32 prmt_idx, prmt_idx, 0x3210, ltmin1; \n\t\t"       // select between [A or B] and C permutations based on ltmin1
+                 "prmt.b32 %0, %0, %4, prmt_idx;\n\t"                        // Extract values using permutation index
+                 "}\n"
+                 : "+r"(min1_min0.u32),
+                   "+r"(min0_index)
+                 : "r"(v.u32),
+                   "r"(idx),
+                   "r"(new_value.u32));
+#else
+    // abs.f16x2 not in PTX until v6.5 (LWCA 10.2)
+    word_t abs_min1_min0, abs_v;
+    abs_min1_min0 = word_pair_abs(min1_min0);
+    abs_v         = word_pair_abs(v);
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .pred ltmin0, ltmin1;\n\t\t"
+                 ".reg .u32 prmt_idx;\n\t\t"
+                 "setp.ltu.f16x2 ltmin0|ltmin1, %4, %5;\n\t\t"         // ltmin0 = abs(v) < abs(min0)
+                                                                       // ltmin1 = abs(v) < abs(min1)
+                 "selp.u32 prmt_idx, 0x1076, 0x7610, ltmin0;\n\t\t"    // select between A, B permutations based on ltmin0
+                 "selp.s32 %1, %3, %1, ltmin0;\n\t\t"                  // if abs(v) < min0, replace min0_idx
+                 "selp.u32 prmt_idx, prmt_idx, 0x3210, ltmin1; \n\t\t" // select between [A or B] and C permutations based on ltmin1
+                 "prmt.b32 %0, %0, %4, prmt_idx;\n\t"                  // Extract values using permutation index
+                 "}\n"
+                 : "+r"(min1_min0.u32),
+                   "+r"(min0_index)
+                 : "r"(v.u32),
+                   "r"(idx),
+                   "r"(abs_v.u32),
+                   "r"(abs_min1_min0.u32));
+#endif
+}
+
+////////////////////////////////////////////////////////////////////////
+// smem_address_as()
+// Returns a typed value obtained by loading an element of the template
+// type at the given address in shared memory. (Note that the address is
+// not the same as an array index - the address would be obtained by
+// multiplying the index by the size of the element.)
+template <typename T> inline __device__ T smem_address_as(int oset);
+template <>           inline __device__ int2 smem_address_as(int oset)
+{
+    union u
+    {
+        int2     i2;
+        uint64_t u64;
+    };
+    u val;
+    asm volatile("ld.shared.b64 %0, [%1];\n" : "=l"(val.u64) : "r"(oset));
+    return val.i2;
+}
+template <>           inline __device__ float smem_address_as(int oset)
+{
+    float f;
+    asm volatile("ld.shared.f32 %0, [%1];\n" : "=f"(f) : "r"(oset));
+    return f;
+}
+template <>           inline __device__ word_t smem_address_as(int oset)
+{
+    word_t w;
+    asm volatile("ld.shared.u32 %0, [%1];\n" : "=r"(w.u32) : "r"(oset));
+    return w;
+}
+template <>           inline __device__ half_word_t smem_address_as(int oset)
+{
+    half_word_t w;
+    asm volatile("ld.shared.b16 %0, [%1];\n" : "=h"(w.u16) : "r"(oset));
+    return w;
+}
+template <>           inline __device__ int4 smem_address_as(int oset)
+{
+    int4     i4;
+    asm volatile("ld.shared.b64 {%0, %1, %2, %3}, [%4];\n"      :
+                 "=r"(i4.x), "=r"(i4.y), "=r"(i4.z), "=r"(i4.w) :
+                 "r"(oset));
+    return i4;
+}
+
+////////////////////////////////////////////////////////////////////////
+// gmem_address_as()
+// Returns a typed value obtained by loading an element of the template
+// type at the given address in global memory.
+template <typename T> inline __device__ T gmem_address_as(const char* base, int oset);
+template <>           inline __device__ float gmem_address_as(const char* base, int oset)
+{
+    float f;
+    asm volatile("ld.global.f32 %0, [%1];\n" : "=f"(f) : "l"(base + oset));
+    return f;
+}
+template <>           inline __device__ word_t gmem_address_as(const char* base, int oset)
+{
+    word_t w;
+    asm volatile("ld.global.u32 %0, [%1];\n" : "=r"(w.u32) : "l"(base + oset));
+    return w;
+}
+template <>           inline __device__ half_word_t gmem_address_as(const char* base, int oset)
+{
+    half_word_t w;
+    asm volatile("ld.global.u16 %0, [%1];\n" : "=h"(w.u16) : "l"(base + oset));
+    return w;
+}
+
+////////////////////////////////////////////////////////////////////////
+// smem_increment()
+// Increase the value at the given shmem address by the given increment
+template <typename T> inline __device__ void smem_increment(int oset, T value);
+template <>           inline __device__ void smem_increment(int oset, float inc)
+{
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .f32 smem_value;\n\t\t"
+                 "ld.shared.f32 smem_value, [%0];\n\t\t"
+                 "add.f32 smem_value, smem_value, %1;\n\t\t"
+                 "st.shared.f32 [%0], smem_value;\n\t"
+                 "}\n"
+                 : 
+                 : "r"(oset), "f"(inc));
+}
+
+////////////////////////////////////////////////////////////////////////
+// smem_decrement()
+// Decrease the value at the given shmem address by the given decrement
+template <typename T> inline __device__ void smem_decrement(int oset, T value);
+template <>           inline __device__ void smem_decrement(int oset, float value)
+{
+    asm volatile("\t"
+                 "{\n\t\t"
+                 ".reg .f32 smem_value;\n\t\t"
+                 "ld.shared.f32 smem_value, [%0];\n\t\t"
+                 "sub.f32 smem_value, smem_value, %1;\n\t\t"
+                 "st.shared.f32 [%0], smem_value;\n\t"
+                 "}\n"
+                 : 
+                 : "r"(oset), "f"(value));
+}
+
+template <typename T> struct ldpc_traits;
+template <>           struct ldpc_traits<float>
+{
+    typedef float4 llr_ldg_t; // The type to load LLR.
+    typedef float4 llr_sts_t; // The type to store LLR.
+    typedef float  app_buf_t; // The type to do the math.
+};
+
+template <>           struct ldpc_traits<__half>
+{
+    typedef  float4 llr_ldg_t; // The type to load LLR.
+    typedef  float4 llr_sts_t; // The type to store LLR.
+    typedef __half  app_buf_t; // The type to do the math.
+};
+
+////////////////////////////////////////////////////////////////////////
+// llr_loader_fixed
+// Structure to load data from global to shared memory using a fixed (at
+// compile time) number of variable nodes
+// T:      LLR Type
+// Z:      Lifting factor (LDPC)
+// VNODES: Number of variable/bit nodes to load
+//
+// Example use:
+//
+// typedef llr_loader_fixed<T, Z, V>        llr_loader_t;
+// typedef typename llr_loader_t::app_buf_t app_buf_t;
+//
+// __shared__ char smem[llr_loader_t::LLR_BUFFER_SIZE];
+// or
+// extern __shared__ char smem[];
+//
+// app_buf_t*   app_smem = reinterpret_cast<app_buf_t*>(smem);
+// llr_loader_t loader;
+// loader.load_sync(params, smem);
+//
+template <typename T, int Z, int VNODES>
+struct llr_loader_fixed
+{
+    // clang-format off
+    typedef typename ldpc_traits<T>::llr_ldg_t llr_ldg_t;  // The type to load LLR.
+    typedef typename ldpc_traits<T>::llr_sts_t llr_sts_t;  // The type to store LLR to shared memory.
+    typedef typename ldpc_traits<T>::app_buf_t app_buf_t;  // The type to store APP in shared memory.
+    enum { THREADS_PER_WARP = 32 };                                                             // Number of threads per warp
+    enum { THREADS_PER_CTA = Z };                                                               // Number of threads per CTA.
+    enum { LLR_ELEMENTS = VNODES * Z };                                                         // Number of LLR elements.
+    enum { LLR_BYTES_PER_THREAD_PER_LDG = sizeof(llr_ldg_t) };                                  // Number of bytes loaded by each thread per LDG -- we use LDG.128.
+    enum { LLR_ELEM_PER_THREAD_PER_LDG = LLR_BYTES_PER_THREAD_PER_LDG / sizeof(T) };            // Number of elements loaded by each thread per LDG.
+    enum { LLR_BYTES_PER_CTA_PER_LDG = LLR_BYTES_PER_THREAD_PER_LDG * THREADS_PER_CTA };        // Number of bytes loaded by the CTA per LDG.
+    enum { LLR_ELEM_PER_CTA_PER_LDG = LLR_ELEM_PER_THREAD_PER_LDG * THREADS_PER_CTA };          // Number of elements loaded by the CTA per LDG.
+    enum { LLR_LDGS = (LLR_ELEMENTS + LLR_ELEM_PER_CTA_PER_LDG-1) / LLR_ELEM_PER_CTA_PER_LDG }; // Number of LDGs needed to load the LLR array.
+    enum { LLR_REMAINING_ELEM = LLR_ELEMENTS - (LLR_LDGS-1) * LLR_ELEM_PER_CTA_PER_LDG };       // Number of elements for the last load.
+    enum { LLR_BYTES_PER_THREAD_PER_STS = sizeof(llr_sts_t) };                                  // Number of bytes loaded by each thread per STS.
+    enum { LLR_ELEM_PER_THREAD_PER_STS = LLR_BYTES_PER_THREAD_PER_STS / sizeof(T) };            // Number of elements loaded by each thread per STS.
+    enum { LLR_BYTES_PER_CTA_PER_STS = LLR_BYTES_PER_THREAD_PER_STS * THREADS_PER_CTA };        // Number of bytes loaded by the CTA per STS.
+    enum { LLR_ELEM_PER_CTA_PER_STS = LLR_ELEM_PER_THREAD_PER_STS * THREADS_PER_CTA };          // Number of elements loaded by the CTA per STS.
+    enum { LLR_BUFFER_SIZE = LLR_ELEMENTS * sizeof(app_buf_t) };
+    // clang-format on
+    //------------------------------------------------------------------
+    __device__
+    void load_sync(const LDPC_kernel_params& params,
+                   char*                     smem_buf)
+    {
+        // The offset in global memory for LLR elements.
+        //int llr_gmem_offset = blockIdx.x*VNODES*Z + threadIdx.x*LLR_ELEM_PER_THREAD_PER_LDG;
+        int llr_gmem_offset = (blockIdx.x * params.input_llr_stride_elements) +
+                              (threadIdx.x * LLR_ELEM_PER_THREAD_PER_LDG);
+
+        // Issue the loads to read LLR elements from global memory. Stage data in registers.
+        #pragma unroll
+        for(int ii = 0; ii < LLR_LDGS - 1; ++ii)
+        {
+            const int imm    = ii * LLR_BYTES_PER_CTA_PER_LDG;
+            int       offset = llr_gmem_offset * sizeof(app_buf_t) + imm;
+            llr_[ii]         = *reinterpret_cast<const llr_ldg_t*>(&params.input_llr[offset]);
+        }
+
+        // Deal with the last (possibly) incomplete LDG.
+        if(threadIdx.x * LLR_ELEM_PER_THREAD_PER_LDG < LLR_REMAINING_ELEM)
+        {
+            const int imm     = (LLR_LDGS - 1) * LLR_BYTES_PER_CTA_PER_LDG;
+            int       offset  = llr_gmem_offset * sizeof(app_buf_t) + imm;
+            llr_[LLR_LDGS - 1] = *reinterpret_cast<const llr_ldg_t*>(&params.input_llr[offset]);
+        }
+
+        // The offset in shared memory for LLR elements.
+        int llr_smem_offset = threadIdx.x * LLR_ELEM_PER_THREAD_PER_STS;
+
+        // Copy the LLR elements to shared memory.
+        #pragma unroll
+        for(int ii = 0; ii < LLR_LDGS - 1; ++ii)
+        {
+            const int imm                                                                    = ii * LLR_BYTES_PER_CTA_PER_STS;
+            reinterpret_cast<llr_sts_t*>(&smem_buf[llr_smem_offset * sizeof(T) + imm])[0] = llr_[ii];
+        }
+
+        // Deal with the last (possibly) incomplete LDG.
+        if(threadIdx.x * LLR_ELEM_PER_THREAD_PER_LDG < LLR_REMAINING_ELEM)
+        {
+            const int imm                                                                    = (LLR_LDGS - 1) * LLR_BYTES_PER_CTA_PER_STS;
+            reinterpret_cast<llr_sts_t*>(&smem_buf[llr_smem_offset * sizeof(T) + imm])[0] = llr_[LLR_LDGS - 1];
+        }
+
+        // Make sure the data is in shared memory.
+        __syncthreads();
+    }
+    //------------------------------------------------------------------
+    // Data
+    llr_sts_t llr_[LLR_LDGS]; // Register storage (GLOBAL --> REG --> SHMEM)
+};
+
+////////////////////////////////////////////////////////////////////////
+// llr_loader_variable
+// Structure to load data from global to shared memory, when the number
+// of variable nodes is not known until runtime.
+// T:          LLR Type
+// Z:          Lifting factor (LDPC)
+// MAX_VNODES: Maximum number of variable/bit nodes that could be loaded
+//             (Fewer may be loaded at runtime, but registers are
+//             allocated for the maximum.)
+//
+// Example use:
+//
+// typedef llr_loader_variable<T, Z, MAX_V> llr_loader_t;
+// typedef typename llr_loader_t::app_buf_t app_buf_t;
+// extern __shared__ char smem[];
+// app_buf_t*             app_smem = reinterpret_cast<app_buf_t*>(smem);
+// llr_loader_t loader;
+// loader.load_sync(params, smem);
+//
+// If we assume that the number of threads in the CTA is Z, then the
+// number of LLR values to load will be between 26 and 68 values per
+// thread for BG1, and 14 and 52 values per thread for BG2. (These
+// values are approximate in that the number of threads in the CTA
+// will likely be rounded up to the next multiple of 32.) Since we
+// may be performing vectorized loads, the number of read instructions
+// may be a factor of 2, 4, or 8 smaller (depending on the APP type
+// and the ldg type).
+// This means that for fp32, a maximum of 68 (32-bit) registers could
+// be used if the implementation fully unrolls, and for fp16 the
+// maximum is 34 (32-bit) registers. (Those values are for BG1 - the
+// values for BG2 are 52 and 26 respectively.)
+template <typename T, int Z, int MAX_VNODES>
+struct llr_loader_variable
+{
+    // clang-format off
+    typedef typename ldpc_traits<T>::llr_ldg_t llr_ldg_t;  // The type to load LLR.
+    typedef typename ldpc_traits<T>::llr_sts_t llr_sts_t;  // The type to store LLR to shared memory.
+    typedef typename ldpc_traits<T>::app_buf_t app_buf_t;      // The type to store APP in shared memory.
+    enum { THREADS_PER_WARP = 32 };                                                                 // Number of threads per warp
+    enum { THREADS_PER_CTA = Z };                                                                   // Number of threads per CTA.
+    enum { LLR_ELEMENTS = MAX_VNODES * Z };                                                         // Maximum number of LLR elements.
+    enum { LLR_BYTES_PER_THREAD_PER_LDG = sizeof(llr_ldg_t) };                                      // Number of bytes loaded by each thread per LDG -- we use LDG.128.
+    enum { LLR_ELEM_PER_THREAD_PER_LDG = LLR_BYTES_PER_THREAD_PER_LDG / sizeof(T) };                // Number of elements loaded by each thread per LDG.
+    enum { LLR_BYTES_PER_CTA_PER_LDG = LLR_BYTES_PER_THREAD_PER_LDG * THREADS_PER_CTA };            // Number of bytes loaded by the CTA per LDG.
+    enum { LLR_ELEM_PER_CTA_PER_LDG = LLR_ELEM_PER_THREAD_PER_LDG * THREADS_PER_CTA };              // Number of elements loaded by the CTA per LDG.
+    enum { LLR_MAX_LDGS = (LLR_ELEMENTS + LLR_ELEM_PER_CTA_PER_LDG-1) / LLR_ELEM_PER_CTA_PER_LDG }; // Number of LDGs needed to load the LLR array.
+    enum { LLR_BYTES_PER_THREAD_PER_STS = sizeof(llr_sts_t) };                                      // Number of bytes loaded by each thread per STS.
+    enum { LLR_ELEM_PER_THREAD_PER_STS = LLR_BYTES_PER_THREAD_PER_STS / sizeof(T) };                // Number of elements loaded by each thread per STS.
+    enum { LLR_BYTES_PER_CTA_PER_STS = LLR_BYTES_PER_THREAD_PER_STS * THREADS_PER_CTA };            // Number of bytes loaded by the CTA per STS.
+    enum { LLR_ELEM_PER_CTA_PER_STS = LLR_ELEM_PER_THREAD_PER_STS * THREADS_PER_CTA };              // Number of elements loaded by the CTA per STS.
+    enum { LLR_BUFFER_SIZE = LLR_ELEMENTS * sizeof(app_buf_t) };
+    // clang-format on
+    //------------------------------------------------------------------
+    __device__
+    void load_sync(const LDPC_kernel_params& params,
+                   char*                     smem_buf)
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Callwlate the number of "active" warp-wide LDGs, based on the
+        // number of nodes.
+        const int LLR_ACTIVE_LDG     = (params.Z_var + LLR_ELEM_PER_CTA_PER_LDG - 1) / LLR_ELEM_PER_CTA_PER_LDG;
+        const int LLR_REMAINING_ELEM = params.Z_var - ((LLR_ACTIVE_LDG-1) * LLR_ELEM_PER_CTA_PER_LDG); // Number of elements for the last load.
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // The starting offset in global memory for this thread
+        int llr_gmem_offset = (blockIdx.x * params.input_llr_stride_elements) +
+                              (threadIdx.x * LLR_ELEM_PER_THREAD_PER_LDG);
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Issue the loads to read LLR elements from global memory. Stage data in registers.
+        #pragma unroll
+        for(int ii = 0; ii < (LLR_MAX_LDGS - 1); ++ii)
+        {
+            const int imm    = ii * LLR_BYTES_PER_CTA_PER_LDG;
+            int       offset = llr_gmem_offset * sizeof(app_buf_t) + imm;
+            if(ii < (LLR_ACTIVE_LDG - 1))
+            {
+                llr_[ii] = *reinterpret_cast<const llr_ldg_t*>(&params.input_llr[offset]);
+            }
+        }
+
+        // Deal with the last (possibly) incomplete LDG.
+        if(threadIdx.x * LLR_ELEM_PER_THREAD_PER_LDG < LLR_REMAINING_ELEM)
+        {
+            const int imm            = (LLR_ACTIVE_LDG - 1) * LLR_BYTES_PER_CTA_PER_LDG;
+            int       offset         = llr_gmem_offset * sizeof(app_buf_t) + imm;
+            llr_[LLR_ACTIVE_LDG - 1] = *reinterpret_cast<const llr_ldg_t*>(&params.input_llr[offset]);
+        }
+
+        // The offset in shared memory for LLR elements.
+        int llr_smem_offset = threadIdx.x * LLR_ELEM_PER_THREAD_PER_STS;
+
+        // Copy the LLR elements to shared memory.
+        for(int ii = 0; ii < (LLR_ACTIVE_LDG - 1); ++ii)
+        {
+            const int imm                                                                 = ii * LLR_BYTES_PER_CTA_PER_STS;
+            reinterpret_cast<llr_sts_t*>(&smem_buf[llr_smem_offset * sizeof(T) + imm])[0] = llr_[ii];
+        }
+
+        // Deal with the last (possibly) incomplete LDG.
+        if(threadIdx.x * LLR_ELEM_PER_THREAD_PER_LDG < LLR_REMAINING_ELEM)
+        {
+            const int imm                                                                 = (LLR_ACTIVE_LDG - 1) * LLR_BYTES_PER_CTA_PER_STS;
+            reinterpret_cast<llr_sts_t*>(&smem_buf[llr_smem_offset * sizeof(T) + imm])[0] = llr_[LLR_ACTIVE_LDG - 1];
+        }
+
+        // Make sure the data is in shared memory.
+        __syncthreads();
+    }
+    //------------------------------------------------------------------
+    // Data
+    llr_sts_t llr_[LLR_MAX_LDGS]; // Register storage (GLOBAL --> REG --> SHMEM)
+};
+
+////////////////////////////////////////////////////////////////////////
+// ldpc_output_fixed()
+template <int NODES, int Z>
+static inline __device__ void ldpc_output_fixed(const LDPC_kernel_params& params, const float* app_smem, int offset)
+{
+    // The number of threads per warp.
+    enum
+    {
+        THREADS_PER_WARP = 32
+    };
+
+    // Decompose the thread indices into warp/lane.
+    int warp = threadIdx.x / THREADS_PER_WARP;
+    int lane = threadIdx.x % THREADS_PER_WARP;
+
+    // The output per thread.
+    int output = 0;
+
+    // Each warp reads 32*THREADS_PER_WARP elements.
+    int idx = warp * 32 * THREADS_PER_WARP + lane;
+    for(int ii = 0; ii < 32; ++ii)
+    {
+        float app = 0.f;
+        if(idx + ii * THREADS_PER_WARP < NODES * Z)
+        {
+            app = app_smem[idx + ii * THREADS_PER_WARP];
+        }
+
+        int vote = __ballot_sync(0xffffffff, signbit(app));
+        if(lane == ii)
+        {
+            output = vote;
+        }
+    }
+
+    // Output the result.
+    //int gmem_out_offset = blockIdx.x*params.outputs_per_codeword + offset;
+    int gmem_out_offset = blockIdx.x * params.output_stride_words + offset;
+    if(offset < params.outputs_per_codeword)
+    {
+        //KERNEL_PRINT_BLOCK_ONCE("blockIdx.x = %u, threadIdx.x = %u, offset = %i, gmem_out_offset = %i, output = 0x%X\n",
+        //                        blockIdx.x, threadIdx.x, offset, gmem_out_offset, output);
+        reinterpret_cast<int*>(params.out)[gmem_out_offset] = output;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// ldpc_output_fixed()
+template <int NODES, int Z>
+static inline __device__ void ldpc_output_fixed(const LDPC_kernel_params& params, const __half* app_smem, int offset)
+{
+    // The number of threads per warp.
+    enum
+    {
+        THREADS_PER_WARP = 32
+    };
+
+    // Decompose the thread indices into warp/lane.
+    int warp = threadIdx.x / THREADS_PER_WARP;
+    int lane = threadIdx.x % THREADS_PER_WARP;
+
+    // The output per thread.
+    int output = 0;
+
+    // Each warp reads 32*THREADS_PER_WARP elements.
+    int idx = warp * 32 * THREADS_PER_WARP + lane;
+    for(int ii = 0; ii < 32; ++ii)
+    {
+        __half app = __float2half(0.0f);
+        if(idx + ii * THREADS_PER_WARP < NODES * Z)
+        {
+            app = app_smem[idx + ii * THREADS_PER_WARP];
+        }
+
+        int vote = __ballot_sync(0xffffffff, signbit(app));
+        if(lane == ii)
+        {
+            output = vote;
+        }
+    }
+
+    // Output the result.
+    //int gmem_out_offset = blockIdx.x*params.outputs_per_codeword + offset;
+    int gmem_out_offset = blockIdx.x * params.output_stride_words + offset;
+    if(offset < params.outputs_per_codeword)
+    {
+        //KERNEL_PRINT_BLOCK_ONCE("blockIdx.x = %u, threadIdx.x = %u, offset = %i, gmem_out_offset = %i, output = 0x%X\n",
+        //                        blockIdx.x, threadIdx.x, offset, gmem_out_offset, output);
+        reinterpret_cast<int*>(params.out)[gmem_out_offset] = output;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// ldpc_output_variable()
+static inline __device__ void ldpc_output_variable(const LDPC_kernel_params& params, const float* app_smem, int offset)
+{
+    // The number of threads per warp.
+    enum
+    {
+        THREADS_PER_WARP = 32
+    };
+
+    // Decompose the thread indices into warp/lane.
+    int warp = threadIdx.x / THREADS_PER_WARP;
+    int lane = threadIdx.x % THREADS_PER_WARP;
+
+    // The output per thread.
+    int output = 0;
+
+    // Each warp reads 32*THREADS_PER_WARP elements.
+    int idx = warp * 32 * THREADS_PER_WARP + lane;
+    for(int ii = 0; ii < 32; ++ii)
+    {
+        float app = 0.f;
+        if(idx + ii * THREADS_PER_WARP < params.KbZ)
+        {
+            app = app_smem[idx + ii * THREADS_PER_WARP];
+        }
+
+        int vote = __ballot_sync(0xffffffff, signbit(app));
+        if(lane == ii)
+        {
+            output = vote;
+        }
+    }
+
+    // Output the result.
+    //int gmem_out_offset = blockIdx.x*params.outputs_per_codeword + offset;
+    int gmem_out_offset = blockIdx.x * params.output_stride_words + offset;
+    if(offset < params.outputs_per_codeword)
+    {
+        //KERNEL_PRINT_BLOCK_ONCE("blockIdx.x = %u, threadIdx.x = %u, offset = %i, gmem_out_offset = %i, output = 0x%X\n",
+        //                        blockIdx.x, threadIdx.x, offset, gmem_out_offset, output);
+        reinterpret_cast<int*>(params.out)[gmem_out_offset] = output;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// ldpc_output_variable()
+static inline __device__ void ldpc_output_variable(const LDPC_kernel_params& params, const __half* app_smem, int offset)
+{
+    // The number of threads per warp.
+    enum
+    {
+        THREADS_PER_WARP = 32
+    };
+
+    // Decompose the thread indices into warp/lane.
+    int warp = threadIdx.x / THREADS_PER_WARP;
+    int lane = threadIdx.x % THREADS_PER_WARP;
+
+    // The output per thread.
+    int output = 0;
+
+    // Each warp reads 32*THREADS_PER_WARP elements.
+    int idx = warp * 32 * THREADS_PER_WARP + lane;
+    for(int ii = 0; ii < 32; ++ii)
+    {
+        __half app = __float2half(0.0f);
+        if(idx + ii * THREADS_PER_WARP < params.KbZ)
+        {
+            app = app_smem[idx + ii * THREADS_PER_WARP];
+        }
+
+        int vote = __ballot_sync(0xffffffff, signbit(app));
+        if(lane == ii)
+        {
+            output = vote;
+        }
+    }
+
+    // Output the result.
+    //int gmem_out_offset = blockIdx.x*params.outputs_per_codeword + offset;
+    int gmem_out_offset = blockIdx.x * params.output_stride_words + offset;
+    if(offset < params.outputs_per_codeword)
+    {
+        //KERNEL_PRINT_BLOCK_ONCE("blockIdx.x = %u, threadIdx.x = %u, offset = %i, gmem_out_offset = %i, output = 0x%X\n",
+        //                        blockIdx.x, threadIdx.x, offset, gmem_out_offset, output);
+        reinterpret_cast<int*>(params.out)[gmem_out_offset] = output;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+template <typename T> struct cC2V_storage_t;
+
+template <> struct cC2V_storage_t<__half>
+{
+    struct c2v_t
+    {
+        word_t    min1_min0;
+        uint32_t  signs_index;
+    };
+    union value
+    {
+        int2  i2;
+        c2v_t c2v;
+    };
+    cC2V_storage_t() = default;
+
+    __device__
+    cC2V_storage_t(word_t m1_m0, uint32_t s_i)
+    {
+        v.c2v.min1_min0 = m1_m0;
+        v.c2v.signs_index = s_i;
+    }
+    __device__
+    void set(word_t m1_m0, uint32_t s_i)
+    {
+        v.c2v.min1_min0 = m1_m0;
+        v.c2v.signs_index = s_i;
+    }
+    //------------------------------------------------------------------
+    // store()
+    __device__
+    void store(char* addr)
+    {
+        *(reinterpret_cast<int2*>(addr)) = v.i2;
+    }
+    //------------------------------------------------------------------
+    // load()
+    __device__
+    void load(const char* addr)
+    {
+        v.i2 = *(reinterpret_cast<const int2*>(addr));
+    }
+    //------------------------------------------------------------------
+    // store_shared()
+    __device__
+    void store_shared(int sh_offset)
+    {
+        write_shared_int2(v.i2, sh_offset);
+    }
+    //------------------------------------------------------------------
+    // load_shared()
+    __device__
+    void load_shared(int sh_offset)
+    {
+        v.i2 = smem_address_as<int2>(sh_offset);
+    }
+    //------------------------------------------------------------------
+    // Data
+    value v;
+};
+
+template <> struct cC2V_storage_t<float>
+{
+    float     min0;
+    float     min1;
+    uint32_t  signs_index;
+};
+
+template <typename T> struct sign_mgr_le;
+
+////////////////////////////////////////////////////////////////////////
+// sign_mgr_le<float>
+// Little endian sign manager: Bit 0 indicates the sign of index 0
+template <>
+struct sign_mgr_le<float>
+{
+#if 0
+    //------------------------------------------------------------------
+    // init()
+    __device__
+    static void init(uint32_t& s)
+    {
+        s = 0;
+    }
+#endif
+    //------------------------------------------------------------------
+    // init()
+    __device__
+    static void init(uint32_t& s, word_t v0, word_t v1)
+    {
+        word_t smask0 = word_sign_mask(v0);
+        word_t smask1 = word_sign_mask(v1);
+        s             = (smask0.u32 >> 31) | (smask1.u32 >> 30);
+    }
+    //------------------------------------------------------------------
+    // pop_count()
+    // Returns the number of negative sign bits
+    __device__
+    static int pop_count(const uint32_t& s)
+    {
+        return __popc(s);
+    }
+    //------------------------------------------------------------------
+    // sign_mask()
+    // Returns 0x80000000 or 0x00000000, based on the sign bit for the
+    // given index.
+    __device__
+    static uint32_t sign_mask(const uint32_t& s, int index)
+    {
+        const uint32_t smask = s << (31 - index);
+        return (smask & 0x80000000);
+    }
+    //------------------------------------------------------------------
+    // sign_product_mask()
+    // Returns 0x80000000 or 0x00000000, based on whether the product
+    // of all signs is negative(0x80000000) or positive (0x00000000).
+    __device__
+    static uint32_t sign_product_mask(const uint32_t& s)
+    {
+        return (((uint32_t)pop_count(s)) << 31);
+    }
+    //------------------------------------------------------------------
+    // sign_product()
+    // Returns 0 or 1, based on whether the product of all signs is
+    // negative(1) or positive (0).
+    __device__
+    static uint32_t sign_product(const uint32_t& s)
+    {
+        return (uint32_t)(pop_count(s) & 0x1);
+    }
+    //------------------------------------------------------------------
+    // update()
+    __device__
+    static void update(uint32_t& s, word_t v, int index)
+    {
+        word_t smask = word_sign_mask(v);
+        s |= (smask.u32 >> (31 - index));
+    }
+    //------------------------------------------------------------------
+    // signs_xor()
+    // xor() sign bits in s with `value`, which should be either 0 or 1.
+    // `count` indicates how many bits are valid in `s`.
+    __device__
+    static void signs_xor(uint32_t& s, uint32_t value, int count)
+    {
+        uint32_t even_odd_mask = 0;
+        if(value != 0)
+        {
+            even_odd_mask = (1 << count) - 1;
+        }
+        s ^= even_odd_mask;
+    }
+};
+
+template <typename T> struct sign_store_policy_split_base;
+
+////////////////////////////////////////////////////////////////////////
+// sign_store_policy_split_base<__half>
+// Sign manager for fp16. Signs are maintained "pairwise" - they are
+// extracted from a pair of fp16 values and shifted together.
+//
+//  31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+//   s  s  s  s  s    17 16 15 13 11  9  7  5  3  1                   18 16 14 12 10  8  6  4  2  0
+//
+// Since the maximum row degree is 19 for BG1 and BG2, we will assume
+// below that the most significant 5 bits are used for storing the
+// index when the signs and indices are stored in a 32-bit word.
+template <> struct sign_store_policy_split_base<__half>
+{
+    //------------------------------------------------------------------
+    // from_packed_word()
+    __device__
+    static uint32_t from_packed_word(uint32_t s)
+    {
+        return (s & 0x07FFFFFF);
+    }
+    //------------------------------------------------------------------
+    // to_packed_word()
+    __device__
+    static uint32_t to_packed_word(uint32_t s, int idx)
+    {
+        return (s & 0x07FFFFFF) | ((uint32_t)idx << 27);
+    }
+    //------------------------------------------------------------------
+    // non_sign_bits()
+    __device__
+    static uint32_t non_sign_bits(uint32_t s)
+    {
+        return (s >> 27);
+    }
+
+    //------------------------------------------------------------------
+    // init()
+    __device__
+    static void init(uint32_t& s, word_t v0_v1)
+    {
+        word_t smask = word_pair_sign_mask(v0_v1);
+        s            = (smask.u32 >> 15);
+    }
+    //------------------------------------------------------------------
+    // pop_count()
+    // Returns the number of negative sign bits. Assumes that most
+    // significant bits (typically used for min0_index) are zero.
+    __device__
+    static int pop_count(const uint32_t& s)
+    {
+        return __popc(s);
+    }
+    //------------------------------------------------------------------
+    // sign_mask()
+    // Returns a mask with the appropriate sign bits set at bits 15 and
+    // 31, based on the stored sign bits for the given index pair.
+    // (Index pair 0 represents values 0 and 1, pair 1 represents values
+    // 2 and 3, etc.)
+    __device__
+    static uint32_t sign_mask(const uint32_t& s, int pair_index)
+    {
+        const uint32_t smask = (s << (15 - pair_index));
+        return (smask & 0x80008000);
+    }
+    //------------------------------------------------------------------
+    // sign_product_mask()
+    // Returns 0x80008000 or 0x00000000, based on whether the product
+    // of all signs is negative(0x80008000) or positive (0x00000000).
+    // Assumes that the most significant bits (sometimes used for
+    // storage of an index value) are 0.
+    __device__
+    static uint32_t sign_product_mask(const uint32_t& s)
+    {
+        uint32_t sprod = (uint32_t)pop_count(s) & 0x1;
+        return ((sprod << 15) | (sprod << 31));
+    }
+    //------------------------------------------------------------------
+    // sign_product()
+    // Returns 0 or 1, based on whether the product of all signs is
+    // negative(1) or positive (0).
+    __device__
+    static uint32_t sign_product(const uint32_t& s)
+    {
+        return (uint32_t)(pop_count(s) & 0x1);
+    }
+    //------------------------------------------------------------------
+    // update()
+    // Updates the given signs storage word with signs from the given
+    // pair of values.
+    // (Index pair 0 represents values 0 and 1, pair 1 represents values
+    // 2 and 3, etc.)
+    __device__
+    static void update(uint32_t& s, word_t value_pair, int pair_index)
+    {
+        word_t smask = word_pair_sign_mask(value_pair);
+        s |= (smask.u32 >> (15 - pair_index));
+    }
+    //------------------------------------------------------------------
+    // update()
+    // Updates the given signs storage word with signs from the given
+    // pair of values.
+    // (Index pair 0 represents values 0 and 1, pair 1 represents values
+    // 2 and 3, etc.)
+    __device__
+    static void update_low(uint32_t& s, word_t value, int pair_index)
+    {
+        word_t smask = half_word_sign_mask(value);
+        s |= (smask.u32 >> (15 - pair_index));
+    }
+    //------------------------------------------------------------------
+    // signs_xor()
+    // xor() sign bits in s with the product of the signs.
+    // `pair_count` indicates how many value pairs have sign bits set in
+    // `s`.
+    // This can be used to store the "destination" sign bits: what the
+    // output will be when the compressed C2V is extracted.
+    __device__
+    static void signs_xor(uint32_t& s, int pair_count)
+    {
+        uint32_t even_odd_mask = 0;
+        if(0 != ((unsigned int)pop_count(s) & 0x1))
+        {
+            // This way maintains zeros in the gap between the valid
+            // sign regions. We may not need to do so, but popc()
+            // will be wrong with 1s in those positions, so we make
+            // sure they are 0 here.
+            even_odd_mask = (1 << pair_count) - 1;
+            even_odd_mask |= (even_odd_mask << 16);
+        }
+        s ^= even_odd_mask;
+    }
+};
+
+template <typename T> struct sign_store_policy_split_src;
+
+////////////////////////////////////////////////////////////////////////
+// sign_store_policy_split_src<__half>
+// This class assumes that the signs word will, after the finalize()
+// function is called, store the "source" signs (e.g. the sign of the
+// input value to the compressed C2V update function). In general,
+// this requires that the product of the signs be stored in the min0
+// and min1 values, and the output sign can be obtained via the xor
+// of the "src" sign and the sign product.
+template <>
+struct sign_store_policy_split_src<__half> : public sign_store_policy_split_base<__half>
+{
+    //------------------------------------------------------------------
+    // finalize()
+    __device__
+    static void finalize(word_t& min1_min0, uint32_t& signs, int /*pair_count_unused*/)
+    {
+        // We will store the product of all signs in the sign bits of
+        // min0 and min1. When retrieving the value, we can then take
+        // the xor of the desired input sign bit (retrieved from the
+        // signs field) with the min0 sign to get the desired output sign.
+        uint32_t min1_min0_mask = sign_product_mask(signs);
+        min1_min0.u32 = (min1_min0.u32 & 0x7FFF7FFF) | min1_min0_mask;
+
+        // Clamp to +/- FP16_max to avoid subtracting +/-Inf during
+        // the next iteration. (-Inf - (-Inf) = NaN, Inf - Inf = NaN.)
+        // In this case, min1 and min0 are signed values, so we must
+        // clamp to +/- FP16_max.
+        min1_min0 = clamp_to_half_max(min1_min0);
+    }
+    //------------------------------------------------------------------
+    // apply_sign()
+    __device__
+    static word_t apply_sign(word_t v1_v0, uint32_t signs, int pair_index)
+    {
+        word_t out;
+        out.u32 = sign_mask(signs, pair_index) ^ v1_v0.u32;
+        return out;
+    }
+};
+
+template <typename T> struct sign_store_policy_split_dst;
+
+////////////////////////////////////////////////////////////////////////
+// sign_store_policy_split_dst<__half>
+// This class assumes that the signs word will, after the finalize()
+// function is called, store the "destination" signs (e.g. the sign of
+// the output value from the extract() function). In general,
+// this requires that the source signs be optionally modified using
+// the product of the signs, and the min0/min1 values are stored in
+// absolute value form (e.g. the positive values are stored).
+template <>
+struct sign_store_policy_split_dst<__half> : public sign_store_policy_split_base<__half>
+{
+    //------------------------------------------------------------------
+    // finalize()
+    __device__
+    static void finalize(word_t& min1_min0, uint32_t& signs, int pair_count)
+    {
+        // Before this function is called, the signs value has the
+        // current signs of each input in the row. When we expand,
+        // we want the product of signs, but without the sign
+        // contribution of a specific index. We colwert here
+        // to what the actual output sign will be, to simplify that
+        // operation, by taking the XOR with a bitmask that has
+        // each bit set to the overall parity (1s if odd, 0s if even).
+        signs_xor(signs, pair_count);
+
+        // Store the absolute value of min0 and min1
+        min1_min0.u32 = (min1_min0.u32 & 0x7FFF7FFF);
+        
+        // Clamp to +FP16_max to avoid subtracting Inf during the next
+        // iteration. (Inf - Inf = NaN.)
+        // In this case, min1 and min0 are stored as positive values,
+        // so we only need to clamp to +FP16_max.
+        min1_min0 = clamp_pos_to_half_max(min1_min0);
+    }
+    //------------------------------------------------------------------
+    // apply_sign()
+    __device__
+    static word_t apply_sign(word_t v1_v0, uint32_t signs, int pair_index)
+    {
+        word_t out;
+        out.u32 = sign_mask(signs, pair_index) | v1_v0.u32;
+        return out;
+    }
+};
+
+template <typename T> struct sign_mgr_be;
+
+////////////////////////////////////////////////////////////////////////
+// sign_mgr_be<float>
+// Big endian sign manager: Bit 31 indicates the sign of index 0
+template <>
+struct sign_mgr_be<float>
+{
+    //------------------------------------------------------------------
+    // init()
+    __device__
+    static void init(uint32_t& s)
+    {
+        s = 0;
+    }
+    //------------------------------------------------------------------
+    // init()
+    __device__
+    static void init(uint32_t& s, word_t v0, word_t v1)
+    {
+        word_t smask0 = word_sign_mask(v0);
+        word_t smask1 = word_sign_mask(v1);
+        s             = (smask0.u32) | (smask1.u32 >> 1);
+    }
+    //------------------------------------------------------------------
+    // pop_count()
+    // Returns the number of negative sign bits
+    __device__
+    static int pop_count(const uint32_t& s)
+    {
+        return __popc(s);
+    }
+    //------------------------------------------------------------------
+    // sign_mask()
+    // Returns 0x80000000 or 0x00000000, based on the sign bit for the
+    // given index.
+    __device__
+    static uint32_t sign_mask(const uint32_t& s, int index)
+    {
+        const uint32_t smask = s << index;
+        return (smask & 0x80000000);
+    }
+    //------------------------------------------------------------------
+    // sign_product()
+    // Returns 0 or 1, based on whether the product of all signs is
+    // negative(1) or positive (0).
+    __device__
+    static uint32_t sign_product(const uint32_t& s)
+    {
+        return (uint32_t)(pop_count(s) & 0x1);
+    }
+    //------------------------------------------------------------------
+    // sign_product_mask()
+    // Returns 0x80000000 or 0x00000000, based on whether the product
+    // of all signs is negative(0x80000000) or positive (0x00000000).
+    __device__
+    static uint32_t sign_product_mask(const uint32_t& s)
+    {
+        return (((uint32_t)pop_count(s)) << 31);
+    }
+    //------------------------------------------------------------------
+    // update()
+    __device__
+    static void update(uint32_t& s, word_t v, int index)
+    {
+        word_t smask = word_sign_mask(v);
+        s |= (smask.u32 >> index);
+    }
+    //------------------------------------------------------------------
+    // signs_xor()
+    // xor() sign bits in s with `value`, which should be either 0 or 1.
+    // `count` indicates how many bits are valid in `s`.
+    __device__
+    static void signs_xor(uint32_t& s, uint32_t value, int count)
+    {
+        uint32_t xor_mask = 0;
+        if(value != 0)
+        {
+            xor_mask = ((1 << count) - 1) << (32 - count);
+        }
+        s ^= xor_mask;
+    }
+};
+
+////////////////////////////////////////////////////////////////////////
+// sign_store_policy_src
+// This policy stores the "source" sign of the input values in the
+// signs member of the cC2V struct. (In contrast, it is possible to
+// modify the signs that were encountered, based on the product of all
+// signs - see sign_policy_store_dst.)
+// Usage: 
+//     - Store min0 with a sign the same as the product of all signs.
+//     - In the apply_sign() function, since the min0 value will have a
+//       sign bit equal to the product of the signs, set the sign of
+//       the result using the bitwise xor operator (^).
+template <typename T> struct sign_store_policy_src;
+
+template <>
+struct sign_store_policy_src<float>
+{
+    //------------------------------------------------------------------
+    // finalize()
+    template <class TC2V>
+    static __device__
+    void finalize(TC2V& c2v, int /*unused_row_count*/, uint32_t sign_prod, bool set_min1)
+    {
+        // We will store the product of all signs in the sign bit of
+        // min0 and min1. When retrieving the value, we can then take
+        // the xor of the desired input sign bit (retrieved from the
+        // signs field) with the min0 sign to get the desired output sign.
+        c2v.min0.u32          = (c2v.min0.u32          & 0x7FFFFFFF) | (sign_prod << 31);
+        if(set_min1)
+        {
+            c2v.min1_or_delta.u32 = (c2v.min1_or_delta.u32 & 0x7FFFFFFF) | (sign_prod << 31);
+        }
+    }
+    //------------------------------------------------------------------
+    // apply_sign()
+    template <class TC2V>
+    static __device__
+    word_t apply_sign(const TC2V& c2v, int index, word_t value)
+    {
+        word_t         out;
+        out.u32 = c2v.sign_mask(index) ^ value.u32;
+        return out;
+    }
+};
+
+
+////////////////////////////////////////////////////////////////////////
+// sign_store_policy_dst
+// This policy stores the "destination" sign of the input values in the
+// signs member of the cC2V struct. (In contrast, it is possible to
+// store the original signs that were encountered - see
+// sign_store_policy_src.). The destination sign takes into account the
+// product of all signs.
+// Usage:
+//     - Store min0 as a positive value.
+//     - In the finalize function, change bits to reflect the desired
+//       sign of the output.
+//     - In the apply_sign() function, since the min0 value will be
+//       stored as a positive value (using the absolute value), set the
+//       sign using the bitwise or operator (|).
+template <typename T> struct sign_store_policy_dst;
+
+template <>
+struct sign_store_policy_dst<float>
+{
+    //------------------------------------------------------------------
+    // finalize()
+    template <class TC2V>
+    static __device__ __inline__
+    void finalize(TC2V& c2v, int row_count, uint32_t sign_prod, bool set_min1)
+    {
+        // The signs member has the current signs of each index
+        // in the row. When we expand, we want the product of
+        // signs, but without a specific index. We colwert here
+        // to what the actual sign will be, to simplify that
+        // operation, by taking the XOR with a bitmask that has
+        // each bit set to the overall parity (1s if odd, 0s if even).
+        // For example, consider a row with 19 elements and the
+        // following signs:
+        //  18  16        12         8         4         0
+        // x 0 0 1 | 1 0 1 0 | 1 0 1 0 | 0 0 0 0 | 1 1 1 1
+        // The number of 1s is odd, so popc(signs) & 0x1 = 1,
+        // and after shifting and subtracting we get:
+        //  18  16        12         8         4         0
+        // x 1 1 1 | 1 1 1 1 | 1 1 1 1 | 1 1 1 1 | 1 1 1 1
+        // Taking the XOR with the original signs provides the
+        // product of signs that will occur WITHOUT that specific
+        // value:
+        //  18  16        12         8         4         0
+        // x 1 1 0 | 0 1 0 1 | 0 1 0 1 | 1 1 1 1 | 0 0 0 0
+        c2v.signs_xor(sign_prod, row_count);
+
+        // Store the absolute value of min0 and min1
+        c2v.min0.f32          = fabsf(c2v.min0.f32);
+        if(set_min1)
+        {
+            c2v.min1_or_delta.f32 = fabsf(c2v.min1_or_delta.f32);
+        }
+    }
+    template <class TC2V>
+    static __device__ __inline__
+    word_t apply_sign(const TC2V& c2v, int index, word_t value)
+    {
+        word_t         out;
+        out.u32 = c2v.sign_mask(index) | value.u32;
+        return out;
+    }
+};
+
+template <>
+struct sign_store_policy_dst<__half>
+{
+    //------------------------------------------------------------------
+    // finalize()
+    template <class TC2V>
+    static __device__ __inline__
+    void finalize(TC2V& c2v, int row_count, uint32_t sign_prod, bool set_min1)
+    {
+        // The signs member has the current signs of each index
+        // in the row. When we expand, we want the product of
+        // signs, but without a specific index. We colwert here
+        // to what the actual sign will be, to simplify that
+        // operation, by taking the XOR with a bitmask that has
+        // each bit set to the overall parity (1s if odd, 0s if even).
+        // For example, consider a row with 19 elements and the
+        // following signs:
+        //  18  16        12         8         4         0
+        // x 0 0 1 | 1 0 1 0 | 1 0 1 0 | 0 0 0 0 | 1 1 1 1
+        // The number of 1s is odd, so popc(signs) & 0x1 = 1,
+        // and after shifting and subtracting we get:
+        //  18  16        12         8         4         0
+        // x 1 1 1 | 1 1 1 1 | 1 1 1 1 | 1 1 1 1 | 1 1 1 1
+        // Taking the XOR with the original signs provides the
+        // product of signs that will occur WITHOUT that specific
+        // value:
+        //  18  16        12         8         4         0
+        // x 1 1 0 | 0 1 0 1 | 0 1 0 1 | 1 1 1 1 | 0 0 0 0
+        c2v.signs_xor(sign_prod, row_count);
+
+        if(set_min1)
+        {
+            // Clear sign bits for both values
+            c2v.min0_min1.u32 |= 0x7FFF7FFF;
+        }
+        else
+        {
+            // Clear the sign bit for min0
+            c2v.min0_min1.u32 |= 0xFFFF7FFF;
+        }
+    }
+    template <class TC2V>
+    static __device__ __inline__
+    half_word_t apply_sign(const TC2V& c2v, int index, half_word_t value)
+    {
+        half_word_t         out;
+        out.u16 = c2v.sign_mask(index) | value.u16;
+        return out;
+    }
+};
+
+////////////////////////////////////////////////////////////////////////
+// min1_policy_delta
+// The difference between min0 and min1 is stored in the min1_or_delta
+// field. When retrieving values from a compressed c2v structure, the
+// min0 value is used - even for the index that provided min0. After
+// updating with the min0 value, a scattered update with (min1 - min0)
+// is performed. The advantage is that a per-output comparison with the
+// min0 location is not required. However, the read-modify-write of the
+// shared memory location for min0 may induce stalls.
+template <typename T> struct min1_policy_delta;
+
+template <> struct min1_policy_delta<float>
+{
+    //------------------------------------------------------------------
+    // The min1_or_delta value is added via a write to shared memory,
+    // so the min1_or_delta_value does not use the stored signs. We
+    // indicate that no other class should set the sign of the min1
+    // field.
+    static const bool min1_sign_set = true;
+    //------------------------------------------------------------------
+    // finalize()
+    // Update c2v.min1_or_delta to have the delta between min1 and min0,
+    // taking the destination sign into account. (For a min1_delta
+    // approach, the sign application will not be performed.)
+    // sign_prod = 0 or 1, can be obtained via popc() & 0x1
+    // Note that this function relies on min0 having sign that it should
+    // have after the compressed c2V is expanded.
+    template <class TC2V>
+    static __device__ __inline__
+    void finalize(TC2V& c2v, uint32_t sign_prod)
+    {
+        // We want to determine what to add to min0 to get min1,
+        // taking the sign into account.
+        // min0 + delta = min1
+        // At this point, the sign of min0 is the "correct"
+        // sign, i.e. the sign that we want when we expand the
+        // compressed C2V value.
+        // Note that at this point, min1 may be negative
+        // or positive - it will be whatever the value was
+        // when encountered during the update() function.
+        // If min0 > 0:
+        // <------------|---------|------|------->
+        //              0       min0  abs(min1)
+        //     delta = abs(min1) - min0
+        // If min0 < 0:
+        // <------------|---------|------|------->
+        //        -abs(min1)     min0    0
+        //     delta = -abs(min1) - min0
+        //           = -(abs(min1) + min0)
+        //           = -(abs(min1) - abs(min0))
+        // So to handle both cases:
+        // delta = [abs(min1) - abs(min0)] * sign(min0)
+        //     where sign(min0) = +1 or -1
+        c2v.min1_or_delta.f32 = fabsf(c2v.min1_or_delta.f32) - fabsf(c2v.min0.f32);
+        c2v.min1_or_delta.u32 |= ((sign_prod << 31) ^ word_sign_mask(c2v.min0).u32);
+    }
+    //------------------------------------------------------------------
+    // process_row_begin()
+    template <class TC2V>
+    static __device__ __inline__
+    void process_row_begin(const TC2V& c2v)
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Scatter an update to the min0 value so that it is now min1
+        smem_decrement(c2v.min0_loc, c2v.min1_or_delta.f32);
+    }
+    //------------------------------------------------------------------
+    // process_row_end()
+    template <class TC2V>
+    static __device__ __inline__
+    void process_row_end(const TC2V& c2v)
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Scatter an update to the min0 value so that it is now min1
+        smem_increment(c2v.min0_loc, c2v.min1_or_delta.f32);
+    }
+    //------------------------------------------------------------------
+    // get_update_value()
+    template <class TC2V>
+    static __device__ __inline__
+    word_t get_update_value(const TC2V& c2v, int index, int /*loc_unused*/)
+    {
+        // With min1 delta processing, we always use min0 for the update.
+        // We will update the min0 value with the difference as a separate
+        // step.
+        return c2v.apply_sign(index, c2v.min0);
+    }
+};
+
+////////////////////////////////////////////////////////////////////////
+// min1_policy_default
+// min1 value determined through normal min search is stored unmodified.
+// When expanding the compressed c2V, the location is compared to the
+// min0 location, and if they are equal min1 is used. (This approach
+// requires comparison to the min0 location at each value.)
+template <typename T> struct min1_policy_default;
+
+template <> struct min1_policy_default<float>
+{
+    static const bool min1_sign_set = false;
+    //------------------------------------------------------------------
+    // finalize()
+    template <class TC2V>
+    static __device__ __inline__
+    void finalize(TC2V& c2v, uint32_t sign_prod)
+    {
+    }
+    //------------------------------------------------------------------
+    // process_row_begin()
+    template <class TC2V>
+    static __device__ __inline__
+    void process_row_begin(const TC2V& c2v) { }
+    //------------------------------------------------------------------
+    // process_row_end()
+    template <class TC2V>
+    static __device__ __inline__
+    void process_row_end(const TC2V& c2v) { }
+    //------------------------------------------------------------------
+    // get_update_value()
+    template <class TC2V>
+    static __device__ __inline__
+    word_t get_update_value(const TC2V& c2v, int index, int loc)
+    {
+        return c2v.apply_sign(index, (loc == c2v.min0_loc) ? c2v.min1_or_delta : c2v.min0);
+    }
+};
+
+template <> struct min1_policy_default<__half>
+{
+    static const bool min1_sign_set = false;
+    //------------------------------------------------------------------
+    // finalize()
+    template <class TC2V>
+    static __device__ __inline__
+    void finalize(TC2V& c2v, uint32_t sign_prod)
+    {
+    }
+    //------------------------------------------------------------------
+    // process_row_begin()
+    template <class TC2V>
+    static __device__ __inline__
+    void process_row_begin(const TC2V& c2v) { }
+    //------------------------------------------------------------------
+    // process_row_end()
+    template <class TC2V>
+    static __device__ __inline__
+    void process_row_end(const TC2V& c2v) { }
+    //------------------------------------------------------------------
+    // get_update_value()
+    template <class TC2V>
+    static __device__ __inline__
+    half_word_t get_update_value(const TC2V& c2v, int lwr_index, int min0_index)
+    {
+        return c2v.apply_sign(index, (lwr_index == min0_index) ? c2v.min0_min1.f16x2.x : c2v.min0_min1.f16x2.y);
+    }
+};
+
+////////////////////////////////////////////////////////////////////////
+// Structure with expanded, in-register C2V representation (as opposed
+// to one compressed for storage to global/shared memory), for temporary
+// use in processing a single parity node.
+template <typename T,
+          template<typename> class TSignMgr> struct row_context;
+
+template <template<typename> class TSignMgr>
+struct row_context<__half, TSignMgr>
+{
+    struct extract_context
+    {
+        word_t    min0_min0;
+        int       min0_pair_index;
+        word_t    min0_pair_value;
+    };
+    //------------------------------------------------------------------
+    typedef TSignMgr<__half>       sign_mgr_t;
+    typedef cC2V_storage_t<__half> storage_t;
+    //------------------------------------------------------------------
+    __device__
+    row_context() {}
+    //------------------------------------------------------------------
+    // Constructor
+    __device__
+    row_context(word_t m1m0, uint32_t s_i) :
+        min1_min0(m1m0),
+        signs(sign_mgr_t::from_packed_word(s_i)),
+        min0_index(sign_mgr_t::non_sign_bits(s_i))
+    {
+    }
+    __device__
+    row_context(const storage_t& s) :
+        min1_min0(s.v.c2v.min1_min0),
+        signs(sign_mgr_t::from_packed_word(s.v.c2v.signs_index)),
+        min0_index(sign_mgr_t::non_sign_bits(s.v.c2v.signs_index))
+    {
+    }
+    template <int ROW_DEGREE, int MAX_WORDS>
+    __device__
+    explicit row_context(const LDPC_kernel_params&               params,
+                         word_t                                  (&app)[MAX_WORDS],
+                         std::integral_constant<int, ROW_DEGREE>)
+    {
+        // Initialize with first two values
+        init(app[0]);
+        // Update with "full" words
+        #pragma unroll
+        for(int i = 1; i < div_round_down<ROW_DEGREE, 2>::value; ++i)
+        {
+            update(app[i], i);
+        }
+        // Optional odd entry at the end
+        if(0 != (ROW_DEGREE % 2))
+        {
+            update_low(app[div_round_down<ROW_DEGREE, 2>::value],
+                       div_round_down<ROW_DEGREE, 2>::value);
+        }
+        // Post-process row context to prepare for extraction
+        finalize(params, div_round_up<ROW_DEGREE, 2>::value);
+    }
+    //------------------------------------------------------------------
+    __device__
+    storage_t get_storage() const
+    {
+        return storage_t(min1_min0, sign_mgr_t::to_packed_word(signs, min0_index));
+    }
+    //------------------------------------------------------------------
+    // init()
+    __device__
+    void init(word_t v1_v0)
+    {
+        min1_min0 = v1_v0;
+        half2_sort(min1_min0, min0_index);
+        sign_mgr_t::init(signs, v1_v0);
+    }
+    //------------------------------------------------------------------
+    // update()
+    // Update the internal representation with a new pair of values
+    __device__
+    void update(word_t v1_v0, int pair_idx)
+    {
+        half2_min_sum_update_low (min1_min0, min0_index, v1_v0, pair_idx * 2);
+        half2_min_sum_update_high(min1_min0, min0_index, v1_v0, pair_idx * 2 + 1);
+        sign_mgr_t::update(signs, v1_v0, pair_idx);
+    }
+    //------------------------------------------------------------------
+    // update_low()
+    // Update the internal representation with a single value
+    __device__
+    void update_low(word_t vx_v0, int pair_idx)
+    {
+        half2_min_sum_update_low(min1_min0, min0_index, vx_v0, pair_idx * 2);
+        sign_mgr_t::update_low(signs, vx_v0, pair_idx);
+    }
+    //------------------------------------------------------------------
+    // extract()
+    // Extract a pair of values using the internal representation. The
+    // returned word will contain two values, with the low word having
+    // the sequence value with the lower index.
+    __device__
+    word_t extract(const extract_context& ec, int pair_idx) const
+    {
+        word_t w = (pair_idx == ec.min0_pair_index) ? ec.min0_pair_value : ec.min0_min0;
+        return sign_mgr_t::apply_sign(w, signs, pair_idx);
+    }
+    //------------------------------------------------------------------
+    // finalize()
+    __device__
+    void finalize(const LDPC_kernel_params& params, int pair_count)
+    {
+        // Apply normalization to both values (min1 and min 0)
+        // TODO: fuse with add of update to APP value
+        min1_min0.f16x2 = __hmul2(min1_min0.f16x2, params.norm.f16x2);
+
+        finalize_no_normalize(pair_count);
+    }
+    //------------------------------------------------------------------
+    // finalize_no_normalize()
+    __device__
+    void finalize_no_normalize(int pair_count)
+    {
+        // Adjust signs of min0, min1 values (optionally)
+        sign_mgr_t::finalize(min1_min0, signs, pair_count);
+    }
+    //------------------------------------------------------------------
+    // get_extract_context()
+    // Populate a data structure in preparation for extraction of a
+    // sequence of values from the compressed representation.
+    __device__
+    extract_context get_extract_context() const
+    {
+        extract_context ec;
+        ec.min0_pair_index  = min0_index >> 1;
+        ec.min0_min0.f16x2 = __low2half2(min1_min0.f16x2);
+        // If the min0 index is even, the low fp16 value for the
+        // min0_pair_index will have min1 and the high order value will
+        // be min0. Vice versa if the min0 index is odd.
+        ec.min0_pair_value.f16x2  = (0 == (min0_index % 2))             ?
+                                    __lowhigh2highlow(min1_min0.f16x2) :
+                                    __half2(min1_min0.f16x2);
+        return ec;
+    }
+    //------------------------------------------------------------------
+    // Data
+    word_t    min1_min0;
+    uint32_t  signs;
+    int       min0_index;
+};
+
+////////////////////////////////////////////////////////////////////////
+// Structure with expanded, in-register C2V representation (as opposed
+// to one compressed for storage to global/shared memory), for temporary
+// use in processing a single parity node.
+template <typename T,
+          template<typename> class TSignMgr> struct row_context_sel_prmt;
+
+template <template<typename> class TSignMgr>
+struct row_context_sel_prmt<__half, TSignMgr>
+{
+    struct extract_context
+    {
+        word_t    min0_min0;
+        int       min0_pair_index;
+        word_t    min0_pair_value;
+    };
+    //------------------------------------------------------------------
+    typedef TSignMgr<__half>       sign_mgr_t;
+    typedef cC2V_storage_t<__half> storage_t;
+    //------------------------------------------------------------------
+    __device__
+    row_context_sel_prmt() {}
+    //------------------------------------------------------------------
+    // Constructor
+    __device__
+    row_context_sel_prmt(word_t m1m0, uint32_t s_i) :
+        min1_min0(m1m0),
+        signs(sign_mgr_t::from_packed_word(s_i)),
+        min0_index(sign_mgr_t::non_sign_bits(s_i))
+    {
+    }
+    __device__
+    row_context_sel_prmt(const storage_t& s) :
+        min1_min0(s.v.c2v.min1_min0),
+        signs(sign_mgr_t::from_packed_word(s.v.c2v.signs_index)),
+        min0_index(sign_mgr_t::non_sign_bits(s.v.c2v.signs_index))
+    {
+    }
+    template <int ROW_DEGREE, int MAX_WORDS>
+    __device__
+    explicit row_context_sel_prmt(const LDPC_kernel_params&               params,
+                                  word_t                                  (&app)[MAX_WORDS],
+                                  std::integral_constant<int, ROW_DEGREE>)
+    {
+        // Initialize with first two values
+        init(app[0]);
+        // Update with "full" words
+        #pragma unroll
+        for(int i = 1; i < div_round_down<ROW_DEGREE, 2>::value; ++i)
+        {
+            update(app[i], i);
+        }
+        // Optional odd entry at the end
+        if(0 != (ROW_DEGREE % 2))
+        {
+            update_low(app[div_round_down<ROW_DEGREE, 2>::value],
+                       div_round_down<ROW_DEGREE, 2>::value);
+        }
+        // Post-process row context to prepare for extraction
+        finalize(params, div_round_up<ROW_DEGREE, 2>::value);
+    }
+    //------------------------------------------------------------------
+    __device__
+    storage_t get_storage() const
+    {
+        return storage_t(min1_min0, sign_mgr_t::to_packed_word(signs, min0_index));
+    }
+    //------------------------------------------------------------------
+    // init()
+    __device__
+    void init(word_t v1_v0)
+    {
+        min1_min0 = v1_v0;
+        half2_sort(min1_min0, min0_index);
+        sign_mgr_t::init(signs, v1_v0);
+    }
+    //------------------------------------------------------------------
+    // update()
+    // Update the internal representation with a new pair of values
+    __device__
+    void update(word_t v1_v0, int pair_idx)
+    {
+        half2_min_sum_update_low_sel_prmt (min1_min0, min0_index, v1_v0, pair_idx * 2);
+        half2_min_sum_update_high_sel_prmt(min1_min0, min0_index, v1_v0, pair_idx * 2 + 1);
+        sign_mgr_t::update(signs, v1_v0, pair_idx);
+    }
+    //------------------------------------------------------------------
+    // update_low()
+    // Update the internal representation with a single value
+    __device__
+    void update_low(word_t vx_v0, int pair_idx)
+    {
+        half2_min_sum_update_low_sel_prmt(min1_min0, min0_index, vx_v0, pair_idx * 2);
+        sign_mgr_t::update_low(signs, vx_v0, pair_idx);
+    }
+    //------------------------------------------------------------------
+    // extract()
+    // Extract a pair of values using the internal representation. The
+    // returned word will contain two values, with the low word having
+    // the sequence value with the lower index.
+    __device__
+    word_t extract(const extract_context& ec, int pair_idx) const
+    {
+        word_t w = (pair_idx == ec.min0_pair_index) ? ec.min0_pair_value : ec.min0_min0;
+        return sign_mgr_t::apply_sign(w, signs, pair_idx);
+    }
+    //------------------------------------------------------------------
+    // finalize()
+    __device__
+    void finalize(const LDPC_kernel_params& params, int pair_count)
+    {
+        // Apply normalization to both values (min1 and min 0)
+        // TODO: fuse with add of update to APP value
+        min1_min0.f16x2 = __hmul2(min1_min0.f16x2, params.norm.f16x2);
+
+        finalize_no_normalize(pair_count);
+    }
+    //------------------------------------------------------------------
+    // finalize_no_normalize()
+    __device__
+    void finalize_no_normalize(int pair_count)
+    {
+        // Adjust signs of min0, min1 values (optionally)
+        sign_mgr_t::finalize(min1_min0, signs, pair_count);
+    }
+    //------------------------------------------------------------------
+    // get_extract_context()
+    // Populate a data structure in preparation for extraction of a
+    // sequence of values from the compressed representation.
+    __device__
+    extract_context get_extract_context() const
+    {
+        extract_context ec;
+        ec.min0_pair_index  = min0_index >> 1;
+        ec.min0_min0.f16x2 = __low2half2(min1_min0.f16x2);
+        // If the min0 index is even, the low fp16 value for the
+        // min0_pair_index will have min1 and the high order value will
+        // be min0. Vice versa if the min0 index is odd.
+        ec.min0_pair_value.f16x2  = (0 == (min0_index % 2))             ?
+                                    __lowhigh2highlow(min1_min0.f16x2) :
+                                    __half2(min1_min0.f16x2);
+        return ec;
+    }
+    //------------------------------------------------------------------
+    // Data
+    word_t    min1_min0;
+    uint32_t  signs;
+    int       min0_index;
+};
+
+template <typename> class unused {};
+
+template <typename T,
+          int BG,
+          template <typename> class TSignStorePolicy,
+          template <typename> class TSignManager> struct cC2V_index;
+          
+template <int BG,
+          template <typename> class TSignStorePolicy,
+          template <typename> class TSignManager>
+struct cC2V_index<float, BG, TSignStorePolicy, TSignManager>
+{
+    typedef TSignManager<float>        sign_mgr_t;
+    typedef TSignStorePolicy<float>    sign_store_t;
+    typedef min1_policy_default<float> min1_t;
+    typedef float                      app_t;
+    //------------------------------------------------------------------
+    // init()
+    // Initialization function using first two input values
+    __device__
+    void init(word_t v0, int /*address0*/, word_t v1, int /*address1*/)
+    {
+        min0          = (fabsf(v0.f32) <= fabsf(v1.f32)) ? v0 : v1;
+        min1_or_delta = (fabsf(v0.f32) <= fabsf(v1.f32)) ? v1 : v0;
+        min0_loc      = (fabsf(v0.f32) <= fabsf(v1.f32)) ? 0  : 1;
+        sign_mgr_t::init(signs, v0, v1);
+    }
+    //------------------------------------------------------------------
+    // Returns a word with the sign bit (bit 31) set to 1 (negative) or 0
+    // (positive), based on the bitmap stored in the 'signs' member
+    // variable.
+    __device__
+    uint32_t sign_mask(int index) const
+    {
+        return sign_mgr_t::sign_mask(signs, index);
+    }
+    //------------------------------------------------------------------
+    // Returns a word with the sign bit (bit 31) set to 1 (negative) or 0
+    // (positive), based on the bitmap stored in the 'signs' member
+    // variable.
+    __device__
+    uint32_t sign_product_mask() const
+    {
+        return sign_mgr_t::sign_product_mask(signs);
+    }
+    //------------------------------------------------------------------
+    // Returns the number of bits set in the signs bitmap
+    __device__
+    int sign_pop_count() const
+    {
+        return sign_mgr_t::pop_count(signs);
+    }
+    //------------------------------------------------------------------
+    // Returns the xor of the bits in the signs bitmap with a word
+    // that consists of 'value' (0 or 1) repeated 'count' times.
+    __device__
+    void signs_xor(uint32_t value, int count)
+    {
+        return sign_mgr_t::signs_xor(signs, value, count);
+    }
+    //------------------------------------------------------------------
+    // update()
+    __device__
+    void update(word_t v, int /*address*/, int index)
+    {
+        if(fabsf(v.f32) < fabsf(min0.f32))
+        {
+            // Note: storing values for min0 and min1, instead of
+            // absolute values
+            min1_or_delta = min0;
+            min0          = v;
+            min0_loc      = index;
+        }
+        else if(fabsf(v.f32) < fabsf(min1_or_delta.f32))
+        {
+            // Note: storing encountered value for min1, instead of
+            // absolute value
+            min1_or_delta = v;
+        }
+        sign_mgr_t::update(signs, v, index);
+    }
+    //------------------------------------------------------------------
+    // finalize()
+    __device__
+    void finalize(const LDPC_kernel_params& params, int row_count)
+    {
+        // Apply normalization
+        min0.f32          *= params.norm.f32;
+        min1_or_delta.f32 *= params.norm.f32;
+        // Callwlate the product of signs
+        uint32_t sign_prod = sign_mgr_t::sign_product(signs);
+        // Adjust min0, min1 values
+        sign_store_t::finalize(*this, row_count, sign_prod, !min1_t::min1_sign_set);
+    }
+    //------------------------------------------------------------------
+    // process_row_init()
+    // CHECK_IDX: Index of check (parity) node
+    // NUM_SMEM_APP_CHECK_NODES: Number of check nodes for which APP
+    //                           data is stored in shared memory. (For
+    //                           check nodes >= this value, the APP data
+    //                           will be fetched from global memory.
+    template <int CHECK_IDX, int NUM_SMEM_APP_CHECK_NODES>
+    __device__
+    void process_row_init(const LDPC_kernel_params& params,
+                          word_t                    (&app)[app_max_words<float, BG>::value],
+                          int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Fetch app values and update the min0/min1/address fields
+        #pragma unroll
+        for(int i = 0; i < row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            // Load channel APP from given address
+            if((CHECK_IDX < NUM_SMEM_APP_CHECK_NODES) ||
+               (i < (row_degree<BG, CHECK_IDX>::value - 1)))
+            {
+                app[i]  = smem_address_as<word_t>(app_addr[i]);
+            }
+            else
+            {
+                app[i]  = gmem_address_as<word_t>(params.input_llr + (blockIdx.x * params.input_llr_stride_elements * sizeof(float)),
+                                                  app_addr[i]);
+            }
+#if 0
+            if((0 == threadIdx.x) && (i == 3))
+            {
+                printf("CHECK_IDX = %i, app[0] = %f, app[1] = %f, app[2] = %f\n", CHECK_IDX, app[0].f32, app[1].f32, app[2].f32);
+            }
+#endif
+
+            if(1 == i)
+            {
+                // Initialize with first two values [0, 1]
+                init(app[0], app_addr[0], app[1], app_addr[1]);
+            }
+            else if(i > 1)
+            {
+                // Update with subsequent values
+                update(app[i], app_addr[i], i);
+            }
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Post-process min0/min1/address fields
+        finalize(params, row_degree<BG, CHECK_IDX>::value);
+#if 0
+        if(0 == threadIdx.x)
+        {
+            printf("CHECK_IDX = %i, min0 = %f, min1 = %f, signs = 0x%X, index = %i\n", CHECK_IDX, min0.f32, min1_or_delta.f32, signs, min0_loc);
+        }
+#endif
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // The upper loop bound is the update_row_degree - we don't need
+        // to update extension APP values that are used by only one node
+        #pragma unroll
+        for(int i = 0; i < update_row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            // Note: passing the index for both args to get_update_value(),
+            // since indexed C2Vs use the index for min0 comparisons
+            word_t inc = min1_t::get_update_value(*this, i, i /*app_addr[i]*/);
+            app[i].f32 += inc.f32;
+            write_shared_word(app[i], app_addr[i]);
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // min1 policy processing
+        min1_t::process_row_end(*this);
+    }
+    //------------------------------------------------------------------
+    // process_row()
+    template <int CHECK_IDX, int NUM_SMEM_CHECK_NODES>
+    __device__
+    void process_row(const LDPC_kernel_params& params,
+                     word_t                    (&app)[app_max_words<float, BG>::value],
+                     int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // min1 policy processing
+        min1_t::process_row_begin(*this);
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Retrieve the APP value and subtract the value from the
+        // previous iteration. (We don't subtract the previous value
+        // for isolated edges since they are not modified.)
+        #pragma unroll
+        for(int i = 0; i < update_row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            // Load from shared memory
+            app[i]  = smem_address_as<word_t>(app_addr[i]);
+            // Subtract the contribution from this check node, from the
+            // previous iteration
+            // Note: passing the index for both args to get_update_value(),
+            // since indexed C2Vs use the index for min0 comparisons
+            word_t dec = min1_t::get_update_value(*this, i, i /*app_addr[i]*/);
+            app[i].f32 -= dec.f32;
+        }
+        for(int i = update_row_degree<BG, CHECK_IDX>::value; i < row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            if(CHECK_IDX < NUM_SMEM_CHECK_NODES)
+            {
+                // Load from shared memory
+                app[i]  = smem_address_as<word_t>(app_addr[i]);
+            }
+            else
+            {
+                // Load from global memory
+                app[i]  = gmem_address_as<word_t>(params.input_llr + (blockIdx.x * params.input_llr_stride_elements * sizeof(float)),
+                                                  app_addr[i]);
+            }
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Update the C2V structure with the sequence of values
+        #pragma unroll
+        for(int i = 0; i < row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            //-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
+            // Use the APP value to update the new C2V
+            if(1 == i)
+            {
+                // Initialize with first two values [0, 1]
+                init(app[0], app_addr[0], app[1], app_addr[1]);
+            }
+            else if(i > 1)
+            {
+                // Update with subsequent values
+                update(app[i], app_addr[i], i);
+            }
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Post-process min0/min1/address fields
+        finalize(params, row_degree<BG, CHECK_IDX>::value);
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // The upper loop bound is the update_row_degree - we don't need
+        // to update extension APP values that are used by only one node
+        #pragma unroll
+        for(int i = 0; i < update_row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            // Note: passing the index for both args to get_update_value(),
+            // since indexed C2Vs use the index for min0 comparisons
+            word_t inc = min1_t::get_update_value(*this, i, i/*app_addr[i]*/);
+            app[i].f32 += inc.f32;
+            write_shared_word(app[i], app_addr[i]);
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // min1 policy processing
+        min1_t::process_row_end(*this);
+    }
+    //------------------------------------------------------------------
+    // apply_sign()
+    // Must only be called after finalize() function.
+    __device__
+    word_t apply_sign(int index, word_t value) const
+    {
+        return sign_store_t::apply_sign(*this, index, value);
+    }
+#if 0
+    //------------------------------------------------------------------
+    // load_global()
+    template <int CHECK_NODE_IDX>
+    __device__
+    void load_global(const LDPC_kernel_params& params)
+    {
+        static_assert(sizeof(*this) == sizeof(int4), "c2v load assuming int4 size");
+        // Each block decodes a different codeword
+        // Number of stored c2v messages for each block: mb * Z
+        // Size of each c2v message: 16
+        const int gmem_offset    = (blockIdx.x * params.mbz16) + (CHECK_NODE_IDX * params.z16) + (threadIdx.x * sizeof(int4));
+        char*     load_address   = static_cast<char*>(params.workspace) + gmem_offset;
+        int4      load_value     = *(reinterpret_cast<const int4*>(load_address));
+        min0.i32                 = load_value.x;
+        min1_or_delta.i32        = load_value.y;
+        signs                    = static_cast<uint32_t>(load_value.z);
+        min0_loc                 = load_value.w;
+    }
+    //------------------------------------------------------------------
+    // store_global()
+    template <int CHECK_NODE_IDX>
+    __device__
+    void store_global(const LDPC_kernel_params& params)
+    {
+        static_assert(sizeof(*this) == sizeof(int4), "c2v load assuming int4 size");
+        // Each block decodes a different codeword
+        // Number of stored c2v messages for each block: mb * Z
+        // Size of each c2v message: 16
+        const int gmem_offset    = (blockIdx.x * params.mbz16) + (CHECK_NODE_IDX * params.z16) + (threadIdx.x * sizeof(int4));
+        char*     store_address  = static_cast<char*>(params.workspace) + gmem_offset;
+        int4      store_value    = {min0.i32, min1_or_delta.i32, static_cast<int32_t>(signs), min0_loc};
+        *(reinterpret_cast<int4*>(store_address)) = store_value;
+    }
+#endif
+    //------------------------------------------------------------------
+    // load_global()
+    __device__
+    void load_global(const LDPC_kernel_params& params, int checkIndex)
+    {
+        static_assert(sizeof(*this) == sizeof(int4), "c2v load assuming int4 size");
+        // Each block decodes a different codeword
+        // Number of stored c2v messages for each block: mb * Z
+        // Size of each c2v message: 16
+        const int gmem_offset    = (blockIdx.x * params.mbz16) + (checkIndex * params.z16) + (threadIdx.x * sizeof(int4));
+        char*     load_address   = static_cast<char*>(params.workspace) + gmem_offset;
+        int4      load_value     = *(reinterpret_cast<const int4*>(load_address));
+        min0.i32                 = load_value.x;
+        min1_or_delta.i32        = load_value.y;
+        signs                    = static_cast<uint32_t>(load_value.z);
+        min0_loc                 = load_value.w;
+    }
+    //------------------------------------------------------------------
+    // store_global()
+    __device__
+    void store_global(const LDPC_kernel_params& params, int checkIndex)
+    {
+        static_assert(sizeof(*this) == sizeof(int4), "c2v load assuming int4 size");
+        // Each block decodes a different codeword
+        // Number of stored c2v messages for each block: mb * Z
+        // Size of each c2v message: 16
+        const int gmem_offset    = (blockIdx.x * params.mbz16) + (checkIndex * params.z16) + (threadIdx.x * sizeof(int4));
+        char*     store_address  = static_cast<char*>(params.workspace) + gmem_offset;
+        int4      store_value    = {min0.i32, min1_or_delta.i32, static_cast<int32_t>(signs), min0_loc};
+        *(reinterpret_cast<int4*>(store_address)) = store_value;
+    }
+    //------------------------------------------------------------------
+    // Data
+    word_t    min0;
+    word_t    min1_or_delta;
+    uint32_t  signs;
+    int       min0_loc; // location is an index in this case (not an address)
+};
+
+template <int BG,
+          template <typename> class TSignStorePolicy,
+          template <typename> class TSignManager>
+struct cC2V_index<__half, BG, TSignStorePolicy, TSignManager>
+{
+    typedef TSignManager<__half>                    sign_mgr_t;
+    typedef TSignStorePolicy<__half>                sign_store_t;
+    typedef min1_policy_default<__half>             min1_t;
+#if 1
+    typedef row_context<__half, TSignManager>       row_context_t;
+#else
+    typedef row_context_sel_prmt<__half, TSignManager> row_context_t;
+#endif
+    typedef __half                                  app_t;
+    typedef cC2V_storage_t<__half>                  c2v_storage_t;
+    typedef typename row_context_t::extract_context extract_context_t;
+    //------------------------------------------------------------------
+    // load_app()
+    // Load shared memory APP values to registers
+    template <int CHECK_IDX, int NUM_SMEM_APP_CHECK_NODES>
+    __device__
+    void load_app(const LDPC_kernel_params& params,
+                  word_t                    (&app)[app_max_words<__half, BG>::value],
+                  int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Fetch app values and update the min0/min1/address fields
+        #pragma unroll
+        for(int i = 0; i < round_up<row_degree<BG, CHECK_IDX>::value, 2>::value; ++i)
+        {
+            half_word_t happ;
+            //-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
+            // Load channel APP from given address
+            if(i >= row_degree<BG, CHECK_IDX>::value)
+            {
+                happ.u16 = 0x7C00; /* load inf(fp16) for the last pair high word when row degree is odd*/
+            }
+            else if((CHECK_IDX < NUM_SMEM_APP_CHECK_NODES) ||
+                    (i < (row_degree<BG, CHECK_IDX>::value - 1)))
+            {
+                happ  = smem_address_as<half_word_t>(app_addr[i]);
+            }
+            else
+            {
+                happ  = gmem_address_as<half_word_t>(params.input_llr + (blockIdx.x * params.input_llr_stride_elements * sizeof(__half)),
+                                                      app_addr[i]);
+            }
+            //-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
+            // Load half word into lo or hi part of the APP word
+            if(0 == (i%2))
+            {
+                app[i >> 1].f16x2.x = happ.u16;
+            }
+            else
+            {
+                app[i >> 1].f16x2.y = happ.u16;
+            }
+        }
+    }
+    //------------------------------------------------------------------
+    // store_non_ext_app()
+    // Store register APP array values to shared memory
+    template <int CHECK_IDX>
+    __device__
+    void store_non_ext_app(word_t (&app)[app_max_words<__half, BG>::value],
+                           int    (&app_addr)[max_row_degree<BG>::value])
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Write output values
+        #pragma unroll
+        for(int i = 0; i < update_row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            if(0 == (i % 2))
+            {
+                write_shared_word_low(app[i >> 1], app_addr[i]);
+            }
+            else
+            {
+                write_shared_word_high(app[i >> 1], app_addr[i]);
+            }
+        }
+    }
+    //------------------------------------------------------------------
+    // app_sub_prev_iter()
+    template <int CHECK_IDX>
+    __device__
+    void app_sub_prev_iter(word_t               (&app)[app_max_words<__half, BG>::value],
+                           const row_context_t& rc)
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Update the APP values with the decrement from the previous
+        // iteration. We don't need to update APP values for extension
+        // nodes.
+        // We need to handle the extension values, which are not updated,
+        // specially here. Specifically, for odd update row degrees,
+        // the low value needs have the value from the previous iteration
+        // subtracted, but the high value does not.
+        extract_context_t ec = rc.get_extract_context();
+        #pragma unroll
+        for(int i = 0; i < div_round_up<update_row_degree<BG, CHECK_IDX>::value, 2>::value; ++i)
+        {
+            // Operate on a pair of values at a time
+            word_t dec = rc.extract(ec, i);
+
+            // For extension nodes with an odd update row degree, zero
+            // the high word before modifying the APP value.
+            if((update_row_degree<BG, CHECK_IDX>::value != row_degree<BG, CHECK_IDX>::value) &&
+               (0 != (update_row_degree<BG, CHECK_IDX>::value % 2))                          &&
+               (i == div_round_down<update_row_degree<BG, CHECK_IDX>::value, 2>::value))
+            {
+                dec = set_high_zero(dec);
+            }
+
+            // TODO: Fuse normalization from prev iteration?
+            app[i].f16x2 = __hsub2(app[i].f16x2, dec.f16x2);
+        }
+    }
+    //------------------------------------------------------------------
+    // app_update()
+    template <int CHECK_IDX>
+    __device__
+    void app_update(word_t               (&app)[app_max_words<__half, BG>::value],
+                    const row_context_t& rc)
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Extract values from the new row context and update the APP
+        // values.
+        extract_context_t ec = rc.get_extract_context();
+        #pragma unroll
+        for(int i = 0; i < div_round_up<update_row_degree<BG, CHECK_IDX>::value, 2>::value; ++i)
+        {
+            word_t inc = rc.extract(ec, i);
+            // OK to modify the APP value for the extension nodes - it
+            // won't be written to shared memory below
+            
+            // TODO: Fuse multiply-add of normalization in finalize()
+            // here
+            app[i].f16x2 = __hadd2(app[i].f16x2, inc.f16x2);
+        }
+    }
+    //------------------------------------------------------------------
+    // process_row_init()
+    // CHECK_IDX: Index of check (parity) node
+    // NUM_SMEM_APP_CHECK_NODES: Number of check nodes for which APP
+    //                           data is stored in shared memory. (For
+    //                           check nodes >= this value, the APP data
+    //                           will be fetched from global memory.
+    template <int CHECK_IDX, int NUM_SMEM_APP_CHECK_NODES>
+    __device__
+    void process_row_init(const LDPC_kernel_params& params,
+                          word_t                    (&app)[app_max_words<__half, BG>::value],
+                          int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Load APP values into registers
+        load_app<CHECK_IDX, NUM_SMEM_APP_CHECK_NODES>(params, app, app_addr);
+#if 0
+        if(0 == threadIdx.x)
+        {
+            printf("CHECK_IDX = %i, app[0] = %f, app[1] = %f, app[2] = %f\n", CHECK_IDX, __low2float(app[0].f16x2), __high2float(app[0].f16x2), __low2float(app[1].f16x2));
+        }
+#endif
+        
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Construct a row context using the current APP values for the
+        // first iteration - no previous iteration to load. This will
+        // create a min-sum representation of the input values.
+        row_context_t rc(params,
+                         app,
+                         std::integral_constant<int, row_degree<BG, CHECK_IDX>::value>{});
+
+#if 0
+        if(0 == threadIdx.x)
+        {
+            printf("CHECK_IDX = %i, min0 = %f, min1 = %f, signs = 0x%X, index = %i\n", CHECK_IDX, __low2float(rc.min1_min0.f16x2), __high2float(rc.min1_min0.f16x2), rc.signs, rc.min0_index);
+        }
+#endif
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Store compressed representation in member variable, to be
+        // used during a future iteration. It may (or may not)
+        // separately be saved to global memory.
+        c2v_storage = rc.get_storage();
+
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Extract values from the new row context and update the APP
+        // values.
+        app_update<CHECK_IDX>(app, rc);
+
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Write output values
+        store_non_ext_app<CHECK_IDX>(app, app_addr);
+    }
+    //------------------------------------------------------------------
+    // process_row()
+    template <int CHECK_IDX, int NUM_SMEM_APP_CHECK_NODES>
+    __device__
+    void process_row(const LDPC_kernel_params& params,
+                     word_t                    (&app)[app_max_words<__half, BG>::value],
+                     int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Load APP values into registers
+        load_app<CHECK_IDX, NUM_SMEM_APP_CHECK_NODES>(params, app, app_addr);
+        {
+            //- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Initialize a row processing context using data from the
+            // previous iteration (which may be stored in registers or
+            // global memory).
+            row_context_t rc(c2v_storage);
+
+            //- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Update the APP values with the decrement from the previous
+            // iteration.
+            app_sub_prev_iter<CHECK_IDX>(app, rc);
+        }
+        {
+            //- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Construct a row context using the updated APP values (with
+            // values from the previous iteration subtracted). This will
+            // create a min-sum representation of the APP values.
+            row_context_t rcNew(params,
+                                app,
+                                std::integral_constant<int, row_degree<BG, CHECK_IDX>::value>{});
+
+            //- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Store compressed representation in member variable. It may
+            // (or may not) separately be saved to global memory.
+            c2v_storage = rcNew.get_storage();
+
+            //- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            // Extract values from the new row context and update the APP
+            // values.
+            app_update<CHECK_IDX>(app, rcNew);
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Write output values to shared_memory
+        store_non_ext_app<CHECK_IDX>(app, app_addr);
+    }
+#if 0
+    //------------------------------------------------------------------
+    // load_global()
+    template <int CHECK_NODE_IDX>
+    __device__
+    void load_global(const LDPC_kernel_params& params)
+    {
+        // Each block decodes a different codeword
+        // Number of stored c2v messages for each block: mb * Z
+        const int gmem_offset    = (blockIdx.x * params.mbz8) + (CHECK_NODE_IDX * params.z8) + (threadIdx.x * sizeof(c2v_storage));
+        char*     load_address   = static_cast<char*>(params.workspace) + gmem_offset;
+        c2v_storage.load(load_address);
+    }
+    //------------------------------------------------------------------
+    // store_global()
+    template <int CHECK_NODE_IDX>
+    __device__
+    void store_global(const LDPC_kernel_params& params)
+    {
+        // Each block decodes a different codeword
+        // Number of stored c2v messages for each block: mb * Z
+        const int gmem_offset    = (blockIdx.x * params.mbz8) + (CHECK_NODE_IDX * params.z8) + (threadIdx.x * sizeof(c2v_storage));
+        char*     store_address  = static_cast<char*>(params.workspace) + gmem_offset;
+        c2v_storage.store(store_address);
+    }
+#endif
+    //------------------------------------------------------------------
+    // load_global()
+    __device__
+    void load_global(const LDPC_kernel_params& params, int checkIdx)
+    {
+        // Each block decodes a different codeword
+        // Number of stored c2v messages for each block: mb * Z
+        const int gmem_offset    = (blockIdx.x * params.mbz8) + (checkIdx * params.z8) + (threadIdx.x * sizeof(c2v_storage));
+        char*     load_address   = static_cast<char*>(params.workspace) + gmem_offset;
+        c2v_storage.load(load_address);
+    }
+    //------------------------------------------------------------------
+    // store_global()
+    __device__
+    void store_global(const LDPC_kernel_params& params, int checkIdx)
+    {
+        // Each block decodes a different codeword
+        // Number of stored c2v messages for each block: mb * Z
+        const int gmem_offset    = (blockIdx.x * params.mbz8) + (checkIdx * params.z8) + (threadIdx.x * sizeof(c2v_storage));
+        char*     store_address  = static_cast<char*>(params.workspace) + gmem_offset;
+        c2v_storage.store(store_address);
+    }
+    //------------------------------------------------------------------
+    // load_shared()
+    __device__
+    void load_shared(const LDPC_kernel_params& params, int checkIdx, int startOffset)
+    {
+        // Number of stored c2v messages for each block: mb * Z
+        const int smem_offset = startOffset + (checkIdx * params.z8) + (threadIdx.x * sizeof(c2v_storage));
+        c2v_storage.load_shared(smem_offset);
+    }
+    //------------------------------------------------------------------
+    // store_shared()
+    __device__
+    void store_shared(const LDPC_kernel_params& params, int checkIdx, int startOffset)
+    {
+        const int smem_offset = startOffset + (checkIdx * params.z8) + (threadIdx.x * sizeof(c2v_storage));
+        c2v_storage.store_shared(smem_offset);
+    }
+    //------------------------------------------------------------------
+    // Data
+    c2v_storage_t c2v_storage;
+};
+
+template <typename T,
+          int BG,
+          template <typename> class TSignStorePolicy,
+          template <typename> class TMin1Policy,
+          template <typename> class TSignManager> struct cC2V_address;
+////////////////////////////////////////////////////////////////////////
+// cC2V_address
+// Compressed "check to variable" representation using APP addresses
+// instead of index values.
+// The APP address for the min0 value is used to write an increment
+// to shared memory, instead of checking whether each index matches the
+// min0 index.
+template <int BG,
+          template <typename> class TSignStorePolicy,
+          template <typename> class TMin1Policy,
+          template <typename> class TSignManager>
+struct cC2V_address<float, BG, TSignStorePolicy, TMin1Policy, TSignManager>
+{
+    typedef TSignManager<float>     sign_mgr_t;
+    typedef TMin1Policy<float>      min1_t;
+    typedef TSignStorePolicy<float> sign_store_t;
+    typedef float                   app_t;
+    //------------------------------------------------------------------
+    // init()
+    // Initialization function using first two input values
+    __device__
+    void init(word_t v0, int address0, word_t v1, int address1)
+    {
+        min0          = (fabsf(v0.f32) <= fabsf(v1.f32)) ? v0       : v1;
+        min1_or_delta = (fabsf(v0.f32) <= fabsf(v1.f32)) ? v1       : v0;
+        min0_loc      = (fabsf(v0.f32) <= fabsf(v1.f32)) ? address0 : address1;
+        sign_mgr_t::init(signs, v0, v1);
+    }
+    //------------------------------------------------------------------
+    // init()
+    // Initialization function for no-op first iteration 
+    __device__
+    void init()
+    {
+        min0.f32          = 0.0f;
+        min1_or_delta.f32 = 0.0f;
+        min0_loc          = 0;
+        sign_mgr_t::init(signs);
+    }
+    //------------------------------------------------------------------
+    // Returns a word with the sign bit (bit 31) set to 1 (negative) or 0
+    // (positive), based on the bitmap stored in the 'signs' member
+    // variable.
+    __device__
+    uint32_t sign_mask(int index) const
+    {
+        return sign_mgr_t::sign_mask(signs, index);
+    }
+    //------------------------------------------------------------------
+    // Returns a word with the sign bit (bit 31) set to 1 (negative) or 0
+    // (positive), based on the bitmap stored in the 'signs' member
+    // variable.
+    __device__
+    uint32_t sign_product_mask() const
+    {
+        return sign_mgr_t::sign_product_mask(signs);
+    }
+    //------------------------------------------------------------------
+    // Returns the number of bits set in the signs bitmap
+    __device__
+    int sign_pop_count() const
+    {
+        return sign_mgr_t::pop_count(signs);
+    }
+    //------------------------------------------------------------------
+    // Returns the xor of the bits in the signs bitmap with a word
+    // that consists of 'value' (0 or 1) repeated 'count' times.
+    __device__
+    void signs_xor(uint32_t value, int count)
+    {
+        return sign_mgr_t::signs_xor(signs, value, count);
+    }
+    //------------------------------------------------------------------
+    // update()
+    __device__
+    void update(word_t v, int address, int index)
+    {
+        if(fabsf(v.f32) < fabsf(min0.f32))
+        {
+            // Note: storing values for min0 and min1, instead of
+            // absolute values
+            min1_or_delta = min0;
+            min0          = v;
+            min0_loc      = address;
+        }
+        else if(fabsf(v.f32) < fabsf(min1_or_delta.f32))
+        {
+            // Note: storing value for min1, instead of
+            // absolute value
+            min1_or_delta = v;
+        }
+        sign_mgr_t::update(signs, v, index);
+    }
+    //------------------------------------------------------------------
+    // finalize()
+    __device__
+    void finalize(const LDPC_kernel_params& params, int row_count)
+    {
+        // Apply normalization
+        min0.f32 *= params.norm.f32;
+        min1_or_delta.f32 *= params.norm.f32;
+        // Callwlate the product of the signs
+        uint32_t sign_prod = sign_mgr_t::sign_product(signs);
+        // Note: sign_store_t::finalize() may change sign of min0, so
+        // we call the min1 finalizer first.
+        min1_t::finalize(*this, sign_prod);
+        sign_store_t::finalize(*this, row_count, sign_prod, !min1_t::min1_sign_set);
+    }
+    //------------------------------------------------------------------
+    // process_row_init()
+    template <int CHECK_IDX, int NUM_SMEM_APP_CHECK_NODES>
+    __device__
+    void process_row_init(const LDPC_kernel_params& params,
+                          word_t                    (&app)[app_max_words<float, BG>::value],
+                          int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Fetch app values and update the min0/min1/address fields
+        #pragma unroll
+        for(int i = 0; i < row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            // Load channel APP from given address
+            if((CHECK_IDX < NUM_SMEM_APP_CHECK_NODES)  ||
+               (i < (row_degree<BG, CHECK_IDX>::value - 1)))
+            {
+                app[i]  = smem_address_as<word_t>(app_addr[i]);
+            }
+            else
+            {
+                app[i]  = gmem_address_as<word_t>(params.input_llr + (blockIdx.x * params.input_llr_stride_elements * sizeof(float)),
+                                                  app_addr[i]);
+            }
+            if(1 == i)
+            {
+                // Initialize with first two values [0, 1]
+                init(app[0], app_addr[0], app[1], app_addr[1]);
+            }
+            else if(i > 1)
+            {
+                // Update with subsequent values
+                update(app[i], app_addr[i], i);
+            }
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Post-process min0/min1/address fields
+        finalize(params, row_degree<BG, CHECK_IDX>::value);
+#if 0
+        if(0 == threadIdx.x)
+        {
+            printf("CHECK_IDX = %i, min0 = %f, min1 = %f, signs = 0x%X, index = %i\n", CHECK_IDX, min0.f32, min1_or_delta.f32, signs, min0_loc);
+        }
+#endif
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        #pragma unroll
+        for(int i = 0; i < row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            // Get the value, assuming that this isn't the min0 value.
+            // (We'll account for that case below.)
+            word_t inc = min1_t::get_update_value(*this, i, app_addr[i]);
+            app[i].f32 += inc.f32;
+            write_shared_word(app[i], app_addr[i]);
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // min1 policy processing
+        min1_t::process_row_end(*this);
+    }
+    //------------------------------------------------------------------
+    // process_row()
+    template <int CHECK_IDX, int NUM_SMEM_APP_CHECK_NODES>
+    __device__
+    void process_row(const LDPC_kernel_params& params,
+                     word_t                    (&app)[app_max_words<float, BG>::value],
+                     int                       (&app_addr)[max_row_degree<BG>::value])
+    {
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // min1 policy processing
+        min1_t::process_row_begin(*this);
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        #pragma unroll
+        for(int i = 0; i < row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            //-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
+            // Load channel APP from given address
+            if(CHECK_IDX <= NUM_SMEM_APP_CHECK_NODES)
+            {
+                app[i]  = smem_address_as<word_t>(app_addr[i]);
+            }
+            else
+            {
+                app[i]  = gmem_address_as<word_t>(params.input_llr + (blockIdx.x * params.input_llr_stride_elements * sizeof(float)),
+                                                  app_addr[i]);
+            }
+            // Subtract the contribution from this check node, from the
+            // previous iteration
+            word_t dec = min1_t::get_update_value(*this, i, app_addr[i]);
+            app[i].f32 -= dec.f32;
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        #pragma unroll
+        for(int i = 0; i < row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            //-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
+            // Use the APP value to update the new C2V
+            if(1 == i)
+            {
+                // Initialize with first two values [0, 1]
+                init(app[0], app_addr[0], app[1], app_addr[1]);
+            }
+            else if(i > 1)
+            {
+                // Update with subsequent values
+                update(app[i], app_addr[i], i);
+            }
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Post-process min0/min1/address fields
+        finalize(params, row_degree<BG, CHECK_IDX>::value);
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        #pragma unroll
+        for(int i = 0; i < row_degree<BG, CHECK_IDX>::value; ++i)
+        {
+            // Get the value, assuming that this isn't the min0 value.
+            // (We'll account for that case below.)
+            word_t inc = min1_t::get_update_value(*this, i, app_addr[i]);
+            app[i].f32 += inc.f32;
+            write_shared_word(app[i], app_addr[i]);
+        }
+        //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // min1 policy processing
+        min1_t::process_row_end(*this);
+    }
+    //------------------------------------------------------------------
+    // apply_sign()
+    // Must only be called after finalize() function.
+    __device__
+    word_t apply_sign(int index, word_t value) const
+    {
+        return sign_store_t::apply_sign(*this, index, value);
+    }
+#if 0
+    //------------------------------------------------------------------
+    // load_global()
+    template <int CHECK_NODE_IDX>
+    __device__
+    void load_global(const LDPC_kernel_params& params)
+    {
+        static_assert(sizeof(*this) == sizeof(int4), "c2v load assuming int4 size");
+        // Each block decodes a different codeword
+        // Number of stored c2v messages for each block: mb * Z
+        // Size of each c2v message: 16
+        const int gmem_offset    = (blockIdx.x * params.mbz16) + (CHECK_NODE_IDX * params.z16) + (threadIdx.x * sizeof(int4));
+        char*     load_address   = static_cast<char*>(params.workspace) + gmem_offset;
+        int4      load_value     = *(reinterpret_cast<const int4*>(load_address));
+        min0.i32                 = load_value.x;
+        min1_or_delta.i32        = load_value.y;
+        signs                    = static_cast<uint32_t>(load_value.z);
+        min0_loc                 = load_value.w;
+    }
+    //------------------------------------------------------------------
+    // store_global()
+    template <int CHECK_NODE_IDX>
+    __device__
+    void store_global(const LDPC_kernel_params& params)
+    {
+        static_assert(sizeof(*this) == sizeof(int4), "c2v load assuming int4 size");
+        // Each block decodes a different codeword
+        // Number of stored c2v messages for each block: mb * Z
+        // Size of each c2v message: 16
+        const int gmem_offset    = (blockIdx.x * params.mbz16) + (CHECK_NODE_IDX * params.z16) + (threadIdx.x * sizeof(int4));
+        char*     store_address  = static_cast<char*>(params.workspace) + gmem_offset;
+        int4      store_value    = {min0.i32, min1_or_delta.i32, static_cast<int32_t>(signs), min0_loc};
+        *(reinterpret_cast<int4*>(store_address)) = store_value;
+    }
+#endif
+    //------------------------------------------------------------------
+    // load_global()
+    __device__
+    void load_global(const LDPC_kernel_params& params, int checkIdx)
+    {
+        static_assert(sizeof(*this) == sizeof(int4), "c2v load assuming int4 size");
+        // Each block decodes a different codeword
+        // Number of stored c2v messages for each block: mb * Z
+        // Size of each c2v message: 16
+        const int gmem_offset    = (blockIdx.x * params.mbz16) + (checkIdx * params.z16) + (threadIdx.x * sizeof(int4));
+        char*     load_address   = static_cast<char*>(params.workspace) + gmem_offset;
+        int4      load_value     = *(reinterpret_cast<const int4*>(load_address));
+        min0.i32                 = load_value.x;
+        min1_or_delta.i32        = load_value.y;
+        signs                    = static_cast<uint32_t>(load_value.z);
+        min0_loc                 = load_value.w;
+    }
+    //------------------------------------------------------------------
+    // store_global()
+    __device__
+    void store_global(const LDPC_kernel_params& params, int checkIdx)
+    {
+        static_assert(sizeof(*this) == sizeof(int4), "c2v load assuming int4 size");
+        // Each block decodes a different codeword
+        // Number of stored c2v messages for each block: mb * Z
+        // Size of each c2v message: 16
+        const int gmem_offset    = (blockIdx.x * params.mbz16) + (checkIdx * params.z16) + (threadIdx.x * sizeof(int4));
+        char*     store_address  = static_cast<char*>(params.workspace) + gmem_offset;
+        int4      store_value    = {min0.i32, min1_or_delta.i32, static_cast<int32_t>(signs), min0_loc};
+        *(reinterpret_cast<int4*>(store_address)) = store_value;
+    }
+    //------------------------------------------------------------------
+    // Data
+    word_t    min0;
+    word_t    min1_or_delta;
+    uint32_t  signs;
+    int       min0_loc; // location refers to shmem address here
+};
+
+////////////////////////////////////////////////////////////////////////
+// thread_is_active
+// Struct to mask threads when doing row processing
+template <int Z> struct thread_is_active
+{
+    __device__
+    static bool value()
+    {
+        if(0 == (Z % 32))
+            return true;
+        else
+            return (threadIdx.x < Z);
+    }
+};
+
+template <typename T,        // LLR data type (float, __half, ...)
+          int BG,            // Base graph (1 or 2>
+          int Kb,            // Number of information nodes (22 for BG1, 6/8/9/10 for BG2)
+          int Z,             // Lifting size
+          class TSched,      // Schedule
+          class TLoader,     // LLR loader
+          int BLOCKS_PER_SM>
+__global__ __launch_bounds__(round_up<Z, 32>::value, BLOCKS_PER_SM)
+void ldpc2_kernel(LDPC_kernel_params params)
+{
+    static_assert(Kb <= max_info_nodes<BG>::value,
+                  "Number of info nodes greater than maximum");
+    //static_assert(V_SHARED <= (C + Kb),
+    //              "Number of APP variables nodes greater than expected");
+
+    TSched ldpc_sched;
+
+    //------------------------------------------------------------------
+    // LLR loader (used to load input from global to shared memory)
+    typedef TLoader  llr_loader_t;
+    typedef typename llr_loader_t::app_buf_t  app_buf_t;
+    //------------------------------------------------------------------
+    // Shared memory
+    extern __shared__ char smem[];
+    app_buf_t*             app_smem = reinterpret_cast<app_buf_t*>(smem);
+    //------------------------------------------------------------------
+    // Load LLR data from global to shared memory
+    llr_loader_t loader;
+    loader.load_sync(params, smem);
+
+    int         app_addr[max_row_degree<BG>::value];  // shared memory (byte) addresses
+    word_t      app[app_max_words<T, BG>::value];     // APP values
+
+    //------------------------------------------------------------------
+    // First iteration (no previous C2V values)
+    ldpc_sched.do_first_iteration(params, app_addr, app);
+    //------------------------------------------------------------------
+    // Iterations 1 through (N-1)
+    for(int iter = 1; iter < params.max_iterations; ++iter)
+    {
+        ldpc_sched.do_iteration(params, app_addr, app);
+    }
+
+#if 0
+    print_array_sync("APP", app_smem, params.num_var_nodes * Z);
+#endif
+    //------------------------------------------------------------------
+    // Write output based on APP values
+    //ldpc_output_fixed<Kb, Z>(params, app_smem, threadIdx.x);
+    ldpc_output_variable(params, app_smem, threadIdx.x);
+}
+
+} // namespace ldpc2
+
+#endif // !defined(LDPC2_LWH_INCLUDED_)

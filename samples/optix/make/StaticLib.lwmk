@@ -1,0 +1,66 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+# Defines link_static_library for us to use.
+include $(LW_OPTIX)/make/StaticLib$(LW_HOST_OS_FAMILY).lwmk
+
+# create_static_library
+#
+# Helper function for defining auxiliary support static libraries
+# whose source files reside outside of $(LW_OPTIX).
+#
+# Arguments:
+# $(1)
+#   Library name (e.g. gmock)
+#
+# Related variables:
+# $(1)_CFLAGS
+#   Any additional CFLAGS for compiling the sources.
+# $(1)_DEFINES
+#   Any additional preprocessor defines for compiling the sources.
+# $(1)_INCLUDES
+#   Any additional include directories for compiling the sources.
+# $(1)_SOURCES
+#   Source files to be compiled into the library
+#
+define create_static_library_impl
+  # Initialize some variables for this target's object files
+  # Extra CFLAGS
+  $(1)_CFLAGS ?=
+  # Extra DEFINES
+  $(1)_DEFINES ?=
+  # Extra INCLUDES
+  $(1)_INCLUDES ?=
+
+  # Create list of object files for target
+  $(1)_OBJECTS := $$(call BUILD_OPTIX_OBJECT_LIST,$(1),$$($(1)_SOURCES))
+
+  # Forward target specific flags to object files
+  $$($(1)_OBJECTS): CFLAGS += $$($(1)_CFLAGS)
+  $$($(1)_OBJECTS): LW_DEFINES += $$($(1)_DEFINES)
+  $$($(1)_OBJECTS): LW_INCLUDES += $$($(1)_INCLUDES)
+
+  # Create rules to compile sources to target objects
+  $$(foreach f,$$(sort $$($(1)_SOURCES)),$$(eval $$(call LW_OBJECT_FROM_SOURCE_RULE,$$(f),$$(call BUILD_OPTIX_OBJECT_LIST,$(1),$$(f)))))
+
+  # Create rules to generate library
+  $$(eval $$(call link_static_library,$(1),$$($(1)_OBJECTS)))
+endef
+create_static_library = $(eval $(call create_static_library_impl,$(1)))

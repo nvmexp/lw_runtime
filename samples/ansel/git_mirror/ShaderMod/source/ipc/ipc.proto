@@ -1,0 +1,1071 @@
+// Status enumeration used in several response messages
+
+// Update version every time you make the change!
+// In case the change is not backward compatible, bump major version
+
+package AnselIpc;
+
+message IpcVersionRequest {}
+message IpcVersionResponse
+{
+	required uint32 major = 1 [default = 7];
+	required uint32 minor = 2 [default = 8];
+	required uint32 patch = 3 [default = 0];
+}
+
+enum ErrorType
+{
+	kFatal = 1;
+	kNonFatal = 2;
+}
+
+enum Status
+{
+	kOk = 1;
+	kFailed = 2;
+	kStarted = 3;
+	kFailedToStart = 4;
+	kNoSpaceLeft = 5;
+	kPermissionDenied = 6;
+	kIlwalidRequest = 7;
+	kFailedToProcess = 8;
+	kProcessDeclined = 9;
+	kAlreadyEnabled = 10;
+	kAlreadyDisabled = 11;
+	kOutOfRange = 12;
+	kAlreadySet = 13;
+	kIncompatibleVersion = 14;
+	kDisabled = 15;
+	kOkAnsel = 16;
+	kOkModsOnly = 17;
+	kEffectRequiresDepth = 18;
+	kErrorParsingFile = 19;
+	kCouldntSaveFile = 20;
+	kShotWithUISaved = 21;
+	kUnableToSaveShotWithUI = 22;
+	kFailedToFinishCapture = 23;
+	kFailedToSaveShotFailedCreateDiretory = 24;
+	kFailedToSaveShotNoSpaceLeft = 25;
+	kProcessingCompleted = 26;
+	kNFilesRemainingToProcess = 27;
+	kShotSaved = 28;
+	kProcessingFile = 29;
+	kFailedToSaveShot = 30;
+	kStyleCantStartDownload = 31;
+	kStyleDownloading = 32;
+	kStyleInstallSuccess = 33;
+	kStyleInstallFailed = 34;
+	kStyleComputeCapTooLow = 35;
+	kStyleCouldntLoadLibrestyle = 36;
+	kStyleNoModelFound = 37;
+	kStyleNotEnoughVRAM = 38;
+	kStyleFailedToLoadStyle = 39;
+	kStyleFailedToInitalizeStyleTransfer = 40;
+	kStyleUnspecifiedNetwork = 41;
+	kStyleUnspecifiedStyle = 42;
+	kStyleAnselSessionRequired = 43;
+}
+
+// Filter control type
+enum ControlType
+{
+	kControlSlider = 1;
+	kControlBoolean = 2;
+	kControlButton = 3;
+	kControlList = 4;
+	kControlEdit = 5;
+	kControlLabel = 6;
+	kControlPulldown = 7;
+	kControlColorPicker = 8;
+	kControlRadioButton = 9;
+}
+
+enum SideloadChoice
+{
+	kYes = 1;
+	kNo = 2;
+}
+
+enum SideloadProgress
+{
+	kSideloadProgressIdle = 1;
+	kSideloadProgressDownloading = 2;
+	kSideloadProgressInstalling = 3;
+	kSideloadProgressOk = 4;
+	kSideloadProgressFailed = 5;
+}
+
+enum State
+{
+	kStateUp = 1;
+	kStateDown = 2;
+}
+
+enum ShotTypeIPC
+{
+	kRegular = 0;
+	kRegularStereo = 1;
+	kHighres = 2;
+	kPanorama360Mono = 3;
+	kPanorama360Stereo = 4;
+}
+
+enum EditAllowedType
+{
+	kInt = 0;
+	kUint = 1;
+	kFloat = 2;
+	kAlphaonly = 3;
+	kAny = 4;
+}
+
+enum ListSelectionType
+{
+	kFlyout = 1;
+	kCombobox = 2;
+}
+
+// this is for Ansel to notify GFE that Ansel/Freestyle is ready
+// sent every time device is created (not every time, LwCamera is loaded)
+message AnselReadyRequest 
+{
+	required uint32 creationCounter = 1;
+}
+message AnselReadyResponse 
+{
+	required Status status = 1;
+}
+
+message AnselStatusReportRequest
+{
+	message OneofOptionalData
+	{
+		oneof data
+		{
+			int32 integerValue = 1;
+			string stringValue = 2;
+			float floatValue = 3;
+			bool boolValue = 4;
+		}		
+	}
+	required Status status = 1;
+	repeated OneofOptionalData data = 2;
+}
+message AnselStatusReportResponse
+{
+	required Status status = 1;
+}
+
+// Style Transfer messages
+message SetStyleTransferEnabledRequest
+{
+	required bool enabled = 1;
+}
+message SetStyleTransferEnabledResponse
+{
+	required Status status = 1;
+}
+
+message SetStyleTransferStyleRequest
+{
+	required string fullyQualifiedPath = 1;
+}
+message SetStyleTransferStyleResponse
+{
+	required Status status = 1;
+}
+
+message GetStyleTransferModelListRequest
+{
+}
+message GetStyleTransferModelListResponse
+{
+	message ModelDescription
+	{
+		required string id = 1;
+		required string localizedName = 2;
+	}
+	repeated ModelDescription models = 1;
+}
+
+message SetStyleTransferModelRequest
+{
+	required string modelId = 1;
+}
+message SetStyleTransferModelResponse
+{
+	required Status status = 1;
+}
+
+message StyleTransferStatusRequest
+{
+	required Status status = 1;
+}
+message StyleTransferStatusResponse
+{
+}
+
+message StyleTransferSideloadChoiceRequest
+{
+	required uint32 packageSizeInBytes = 1;
+}
+message StyleTransferSideloadChoiceResponse
+{
+	required SideloadChoice choice = 1; 
+}
+
+message StyleTransferSideloadProgressRequest
+{
+}
+message StyleTransferSideloadProgressResponse
+{
+	required SideloadProgress status = 1; 
+	optional int32 progress = 2; 
+}
+
+
+message UIReadyRequest { required Status status = 1; }
+message UIReadyResponse {}
+
+// UI control descriptions here
+message UIDescButton
+{
+	optional int32 id = 1;
+	optional string text = 2;
+}
+
+message UIDescSlider
+{
+	optional int32 id = 1;
+	optional string text = 2;
+	optional float milwalue = 3;
+	optional float maxValue = 4;
+	optional float value = 5;
+	optional float interval = 6;
+}
+
+message UIDescEdit
+{
+	optional int32 id = 1;
+	optional string text = 2;
+	optional EditAllowedType allowedType = 3;
+	optional string data = 4;
+}
+
+message UIDescBoolean
+{
+	optional int32 id = 1;
+	optional string text = 2;
+	optional bool set = 3;
+}
+
+message UIDescLabel
+{
+	optional int32 id = 1;
+	optional string text = 2;
+}
+
+message MapFieldEntry {
+	required int32 key = 1;
+	required string value = 2;
+}
+
+message UIDescList
+{
+	optional int32 id = 1;
+	optional string text = 2;
+	repeated MapFieldEntry values = 3;
+	optional int32 selected = 4;
+	optional ListSelectionType type = 5;
+}
+
+message UIDescPulldown
+{
+	optional int32 id = 1;
+	optional string text = 2;
+	repeated int32 controlIdList = 3;
+}
+
+message AddUIElementRequest
+{
+	required int32 requestId = 1;
+	required ControlType controlType = 2;
+	optional bool visible = 3;
+	oneof controlDescription
+	{
+		UIDescButton uiDescButton = 4;
+		UIDescSlider uiDescSlider = 5;
+		UIDescEdit uiDescEdit = 6;
+		UIDescBoolean uiDescBoolean = 7;
+		UIDescLabel uiDescLabel = 8;
+		UIDescList uiDescList = 9;
+		UIDescPulldown uiDescPulldown = 10;
+	}
+}
+
+message AddUIElementResponse
+{
+	required int32 requestId = 1;
+	required Status status = 2;
+	oneof controlDescription
+	{
+		UIDescButton uiDescButton = 3;
+		UIDescSlider uiDescSlider = 4;
+		UIDescEdit uiDescEdit = 5;
+		UIDescBoolean uiDescBoolean = 6;
+		UIDescLabel uiDescLabel = 7;
+		UIDescList uiDescList = 8;
+		UIDescPulldown uiDescPulldown = 9;
+	}
+}
+
+message UIControlChangedRequest
+{
+	oneof controlDescription
+	{
+		UIDescButton uiDescButton = 3;
+		UIDescSlider uiDescSlider = 4;
+		UIDescEdit uiDescEdit = 5;
+		UIDescBoolean uiDescBoolean = 6;
+		UIDescLabel uiDescLabel = 7;
+		UIDescList uiDescList = 8;
+	}
+}
+
+message UIControlChangedResponse
+{
+	required Status status = 1;
+}
+
+message UIControlRemoveAllRequest
+{
+}
+message UIControlRemoveAllResponse
+{
+	required Status status = 1;
+}
+
+message UIControlRemoveRequest
+{
+	repeated int32 id = 1;
+}
+
+message UIControlRemoveResponse
+{
+	required Status status = 1;
+}
+
+message UIControlSetVisibilityRequest
+{
+	required int32 id = 1;
+	required bool visible = 2;
+}
+
+message UIControlSetVisibilityResponse
+{
+	required Status status = 1;
+}
+
+message UIControlGetVisibilityRequest
+{
+	required int32 id = 1;
+}
+
+message UIControlGetVisibilityResponse
+{
+	required bool visible = 1;
+}
+
+message GetGameSpecificControlsRequest {}
+
+message GetSettingsRequest {}
+message GetSettingsResponse
+{
+	message Setting
+	{
+		required string name = 1;
+		required string value = 2;
+	}
+	repeated Setting settings = 1;
+}
+
+message GetFeatureSetRequest
+{
+	optional IpcVersionResponse requestorsIPCVersion = 1;
+}
+message GetFeatureSetResponse
+{
+	required bool sdkDetected = 1;
+	required bool modsAvailable = 2;
+	required bool restyleAvailable = 3;
+	optional bool allowOffline = 4;
+}
+
+// This is info GFE asynchronously gets from ShadowPlay and then passes to LwCamera
+message SetCMSInfoRequest
+{
+	optional string cmsid = 1;
+	optional string shortName = 2;
+}
+message SetCMSInfoResponse { required Status status = 1; }
+
+// this one comes from Ansel to GFE to ensure that the feature is enabled in the settings
+// If it's not LwCamera will unload itself, unless the game is also Ansel integrated
+message GetEnabledFeatureSetRequest {}
+message GetEnabledFeatureSetResponse
+{
+	required bool modsAvailable = 1;
+}
+
+message IsAnselModdingAvailableRequest {}
+message IsAnselModdingAvailableResponse { required Status status = 1; }
+
+message IsAnselSDKIntegrationAvailableRequest {}
+message IsAnselSDKIntegrationAvailableResponse { required Status status = 1; }
+
+message ScreenResolutionChangedRequest {}
+message ScreenResolutionChangedResponse {}
+
+message SetGridOfThirdsEnabledRequest { required bool enabled = 1; }
+message SetGridOfThirdsEnabledResponse { required Status status = 1; }
+
+message GetProcessInfoRequest {}
+message GetProcessInfoResponse
+{
+	required Status status = 1;
+	required uint32 processId = 2;
+	required string processPath = 3;
+}
+
+// enables Ansel mode
+message SetAnselEnabledRequest {
+	required uint32 major = 1;
+	required uint32 minor = 2;
+	required uint32 patch = 3;
+	required bool enabled = 4;
+	optional bool leaveFiltersEnabled = 5;
+	// this one is true by default
+	optional bool pauseApplication = 6;
+}
+// return values:
+// OK - Ansel was successfully enabled
+// PROCESS_DECLINED - the game refused to accept the Ansel session
+// ALREADY_ENABLED - Ansel is already enabled
+// FAILED - Failed to enable the Ansel session for other reasons
+message SetAnselEnabledResponse { required Status status = 1; }
+
+
+// Get current Ansel mode
+message GetAnselEnabledRequest {}
+// returns:
+// true in case Ansel mode is active lwrrently
+// false otherwise
+// This message can be initiated without request in case Ansel mode changes internally
+// (game explicitly requested to close the Ansel session)
+message GetAnselEnabledResponse { required bool enabled = 1; }
+
+// Get current Ansel shot permissions
+message GetAnselShotPermissionsRequest {}
+// returns:
+// array of boolean variables, one for each shot type:
+// true if shot type permitted,
+// false otherwise
+message GetAnselShotPermissionsResponse
+{
+	required bool isIntegrationDetected = 1;
+	required bool isHDRAllowed = 2;
+	repeated bool isShotAllowed = 3;
+}
+
+message SetLangIdRequest
+{
+	required int32 lang = 1;
+	required int32 subLang = 2;
+}
+message SetLangIdResponse
+{
+	required Status status = 1;
+}
+// request a valid range for setting the FOV angle in degrees
+message GetFOVRangeRequest {}
+// return a valid range for setting the FOV angle in degrees
+message GetFOVRangeResponse
+{
+	required float minFov = 1;
+	required float maxFov = 2;
+}
+
+// set FOV angle in degrees
+message SetFOVRequest {	required float fov = 1; }
+// returns:
+// OK - successfuly set the angle
+// OUT_OF_RANGE - the requested value is of the range
+// FAILED - failed for other reasons
+message SetFOVResponse { required Status status = 1; }
+
+// set FOV angle in degrees
+message GetLwrrentFOVRequest { }
+// returns:
+// value within GetFOVRange or 0.0 (in case any kind of failures - no Ansel integration, or session active, etc)
+message GetLwrrentFOVResponse { required float fov = 1; }
+
+// request a valid range for setting the roll angle in degrees
+message GetRollRangeRequest {}
+// return a valid range for setting the roll angle in degrees
+message GetRollRangeResponse
+{
+	required float minRoll = 1;
+	required float maxRoll = 2;
+}
+
+// set roll angle in degrees
+message SetRollRequest { required float roll = 1; }
+// returns:
+// OK - successfuly set the angle
+// OUT_OF_RANGE - the requested value is of the range
+// FAILED - failed for other reasons
+message SetRollResponse { required Status status = 1; }
+
+message UpdateRollRequest { required float roll = 1; }
+message UpdateRollResponse { required Status status = 1; }
+
+message UpdateFovRequest { required float fov = 1; }
+message UpdateFovResponse { required Status status = 1; }
+
+// request current screen resolution
+message GetScreenResolutionRequest {}
+message GetScreenResolutionResponse
+{
+	required Status status = 1;
+	required int32 xResolution = 2;
+	required int32 yResolution = 3;
+}
+
+
+// Ideal scenario example:
+// Ansel receives CaptureShotRequest(type = HIGHRES, highresMultiplier = 16, horizontal360Resolution = <not set>)
+// Ansel sends CaptureShotResponse(status = OK, absoluteFilePath="c:\pictures\resultname.jpg", totalShotCount = 961)
+// Ansel sends 961 CaptureShotProgressResponse (lwrrentShot = 1..961) as it captures all of the intermediate images
+// Ansel sends CaptureShotProcessingFinishedResponse (status = OK, absoluteFilePath="c:\pictures\resultname.jpg")
+
+// request starting the capture
+message CaptureShotRequest
+{
+	required ShotTypeIPC type = 1;
+	optional int32 highresMultiplier = 2;
+	optional int32 horizontal360Resolution = 3;
+	optional bool generateThumbnail = 4;
+	optional bool isExr = 5;
+	optional bool highresEnhance = 6;
+	optional bool isJxr = 7;
+}
+// returns:
+// OK - in case capture has started successfuly
+//      absoluteFilePath then contains the path to the file being created
+//	totalShotCount contains total amount of shots to be captured (useful to indicate progress)
+// NO_SPACE_LEFT - no space left on the device to store intermediate files or result
+// PERMISSION_DENIED - permission denied to create intermediate files or result
+// FAILED_TO_PROCESS - failed to start the stitching process
+// FAILED - failed for other reasons
+message CaptureShotStartedResponse
+{
+	required Status status = 1;
+	optional int32 totalShotCount = 3;
+}
+// contains current shot number
+message CaptureShotProgressResponse
+{
+	required int32 lwrrentShot = 1;
+}
+// contains capture status
+message CaptureShotFinishedResponse
+{
+	required Status status = 1;
+}
+// OK - in case capture has finished successfully
+//      absoluteFilePath then contains the path to the result
+// FAILED - failed for other reasons
+message CaptureShotProcessingFinishedResponse
+{
+	required Status status = 1;
+	optional string absoluteFilePath = 2;
+}
+
+message EstimateCaptureRequest
+{
+	required ShotTypeIPC type = 1;
+	optional int32 highresMultiplier = 2;
+	optional int32 horizontal360Resolution = 3;
+	optional bool generateThumbnail = 4;
+	optional bool isExr = 5;
+	optional bool highresEnhance = 6;
+}
+message EstimateCaptureResponse
+{
+	required uint64 inputDatasetSizeTotalInBytes = 1;
+	required uint64 inputDatasetFrameCount = 2;
+	required uint64 inputDatasetFrameSizeInBytes = 3;
+	required uint64 stitcherMemoryRequirementsInBytes = 4;
+	required uint64 outputResolutionX = 5;
+	required uint64 outputResolutionY = 6;
+	required uint64 outputMPixels = 7;
+	required uint64 outputSizeInBytes = 8;
+}
+
+// in case a capture is in the process, abort it
+message AbortCaptureRequest {}
+// returns:
+// OK - successfully aborted the capture
+// FAILED - failed (not capture was active)
+message AbortCaptureResponse { required Status status = 1; }
+
+// request Super Resolution resolution list
+message GetHighresResolutionListRequest {}
+// by default multiplier is 1x-32x
+// x/yResolution = multiplier * lwrrentScreenResolutionX/Y
+message GetHighresResolutionListResponse
+{
+	message HighresResolution
+	{
+		required int32 multiplier = 1;
+		required int32 xResolution = 2;
+		required int32 yResolution = 3;
+	}
+	repeated HighresResolution resolutions = 1;
+}
+
+
+// request a valid range for setting the 360 quality angle in degrees
+message Get360ResolutionRangeRequest {}
+// return a valid range for setting the 360 quality angle in degrees
+message Get360ResolutionRangeResponse
+{
+	required int32 minimumXResolution = 3;
+	required int32 maximumXResolution = 4;
+}
+
+// request the filter name list
+message GetFilterListRequest {}
+// return the filter name list
+message GetFilterListResponse
+{
+	repeated string filterIdList = 1;
+	repeated string filterNameList = 2;
+}
+
+// used to remove all filters from the stack
+message ResetEntireStackRequest
+{
+}
+message ResetEntireStackResponse
+{
+	required Status status = 1;
+}
+
+message ResetFilterValuesRequest
+{
+	required int32 stackIdx = 1;
+}
+message ResetFilterValuesResponse
+{
+	required int32 stackIdx = 1;
+	required Status status = 2;
+}
+message ResetAllFilterValuesRequest
+{
+}
+
+// set filter in the stack
+message SetFilterRequest
+{
+	required string filterId = 1;
+	required int32 stackIdx = 2;
+}
+
+message SetFilterResponse
+{
+	required Status status = 1;
+	required int32 stackIdx = 2;
+	optional FilterProperties filterProperties = 3;
+}
+
+// set filter and attributes
+message SetFilterAndAttributesRequest
+{
+	required string filterId = 1;
+	required int32 stackIdx = 2;
+	repeated int32 intControlIds = 3;
+	repeated int32 intValues = 4;
+	repeated int32 uintControlIds = 5;
+	repeated uint32 uintValues = 6;
+	repeated int32 floatControlIds = 7;
+	repeated float floatValues = 8;
+	repeated int32 boolControlIds = 9;
+	repeated bool boolValues = 10;
+}
+message SetFilterAndAttributesResponse
+{
+	required SetFilterResponse setFilterResponse = 1;
+	repeated int32 attributeControlIds = 2;
+	repeated SetFilterAttributeResponse setFilterAttributeResponses = 3;
+}
+
+message InsertFilterRequest
+{
+	required string filterId = 1;
+	required int32 stackIdx = 2;
+}
+message InsertFilterResponse
+{
+	required Status status = 1;
+	required int32 stackIdx = 2;
+	optional FilterProperties filterProperties = 3;
+}
+
+message RemoveFilterRequest
+{
+	required int32 stackIdx = 1;
+}
+message RemoveFilterResponse
+{
+	required Status status = 1;
+}
+
+message MoveFilterRequest
+{
+	repeated uint32 desiredStackIndices = 1;
+}
+message MoveFilterResponse
+{
+	required Status status = 1;
+}
+
+message GetStackInfoRequest
+{
+}
+message GetStackInfoResponse
+{
+	repeated string filterIds = 1;
+}
+
+
+message FilterProperties
+{
+	message ValuesFloat
+	{
+		required float current = 1;
+		required float default = 2;
+		required float minimum = 3;
+		required float maximum = 4;
+		required float stepSize = 5;
+		optional float stepSizeUi = 6;
+		optional float milwalueUi = 7;
+		optional float maxValueUi = 8;
+		optional string displayName = 9;
+	}
+
+	message ValuesInt
+	{
+		required int32 current = 1;
+		required int32 default = 2;
+		required int32 minimum = 3;
+		required int32 maximum = 4;
+		required uint32 stepSize = 5;
+		optional uint32 stepSizeUi = 6;
+		optional int32 milwalueUi = 7;
+		optional int32 maxValueUi = 8;
+		optional string displayName = 9;
+	}
+
+	message ValuesUInt
+	{
+		required uint32 current = 1;
+		required uint32 default = 2;
+		required uint32 minimum = 3;
+		required uint32 maximum = 4;
+		required uint32 stepSize = 5;
+		optional uint32 stepSizeUi = 6;
+		optional uint32 milwalueUi = 7;
+		optional uint32 maxValueUi = 8;
+		optional string displayName = 9;
+	}
+
+	message ValuesBool
+	{
+		required bool current = 1;
+		required bool default = 2;
+		required bool minimum = 3;
+		required bool maximum = 4;
+		optional string displayName = 5;
+	}
+
+	message ControlDescription
+	{
+		required int32 controlId = 1;
+		required string displayName = 2;
+		required float milwalueUi = 3;
+		required float maxValueUi = 4;
+		required ControlType type = 5;
+		repeated ValuesFloat valuesFloat = 6;
+		repeated ValuesBool valuesBool = 7;
+		repeated ValuesInt valuesInt = 8;
+		repeated ValuesUInt valuesUInt = 9;
+		required int32 uiPrecision = 10;
+		optional string uiMeasurementUnit = 11;
+		repeated string labelsUi = 12;
+		optional string tooltip = 13;
+		optional string displayNameEnglish = 14;
+	}
+	required string filterId = 1;
+	required string filterDisplayName = 2;
+	repeated ControlDescription controls = 3;
+	optional string filterDisplayNameEnglish = 4;
+}
+
+message GetFilterInfoRequest
+{
+	required int32 stackIdx = 1;
+}
+message GetFilterInfoResponse
+{
+	required Status status = 1;
+	required int32 stackIdx = 2;
+	optional FilterProperties filterProperties = 3;
+}
+
+// returns true
+message IsAnselAvailableRequest {}
+message IsAnselAvailableResponse { required bool available = 1; }
+
+// get filter attributes
+message SetFilterAttributeRequest
+{
+	required string filterId = 1;
+	required int32 stackIdx = 2;
+	required int32 controlId = 3;
+	repeated float floatValue = 4;
+	repeated bool boolValue = 5;
+	repeated uint32 uintValue = 6;
+	repeated int32 intValue = 7;
+}
+message SetFilterAttributeResponse
+{
+	required Status status = 1;
+}
+
+message MouseEventRequest
+{
+	optional float absoluteX = 1;
+	optional float absoluteY = 2;
+	optional float deltaX = 3;
+	optional float deltaY = 4;
+	required int32 keyState = 5;
+}
+
+message KeyboardEventRequest
+{
+	// VK keycode (see Windows API)
+	required int32 key = 1;
+	required State state = 2;
+}
+
+message InputEventRequest
+{
+	required int32 message = 1;
+	required int32 wParam = 2;			// WORD in WinAPI
+	required int32 lParam = 3;			// LONG in WinAPI
+	optional bool isDeltaCoords = 4;	// true - mouse coords in mickeys, false - mouse coords absolute
+
+	optional float leftStickXValue = 5;  // 0
+	optional float leftStickYValue = 6;  // 1
+	optional float rightStickXValue = 7; // 2
+	optional float rightStickYValue = 8; // 3
+
+	optional float leftTriggerValue = 9;    // 4
+	optional float rightTriggerValue = 10;  // 5
+}
+// 0
+
+message InputEventResponse
+{
+	required Status status = 1;
+}
+
+message MultipleInputEventRequest
+{
+	repeated InputEventRequest inputEvents = 1;
+}
+
+message LogFilenameResponse
+{
+	required string filename = 1;
+}
+
+message ReportErrorResponse
+{
+	required ErrorType type = 1;
+	required uint32 code = 2;
+	required string filename = 3;
+	required uint32 line = 4;
+	required string reason = 5;
+}
+
+message SetHighQualityRequest
+{
+	required bool setting = 1;
+}
+
+message SetHighQualityResponse
+{
+	required Status status = 1;
+}
+
+// here we wrap around all of requests and responses into the single message
+message AnselIPCRequest
+{
+	oneof request
+	{
+		SetAnselEnabledRequest setAnselEnabledRequest = 1;
+		CaptureShotRequest captureShotRequest = 2;
+		GetFilterListRequest getFilterListRequest = 3;
+		GetHighresResolutionListRequest getHighresResolutionListRequest = 4;
+		AbortCaptureRequest abortCaptureRequest = 5;
+		Get360ResolutionRangeRequest get360ResolutionRangeRequest = 6;
+		GetFOVRangeRequest getFOVRangeRequest = 7;
+		SetFOVRequest setFOVRequest = 8;
+		GetRollRangeRequest getRollRangeRequest = 9;
+		SetRollRequest setRollRequest = 10;
+		GetAnselEnabledRequest getAnselEnabledRequest = 11;
+		GetLwrrentFOVRequest getLwrrentFOVRequest = 12;
+		SetFilterRequest setFilterRequest = 13;
+		SetFilterAttributeRequest setFilterAttributeRequest = 14;
+		IsAnselAvailableRequest isAnselAvailableRequest = 17;
+		ScreenResolutionChangedRequest screenResolutionChangedRequest = 18;
+		GetAnselShotPermissionsRequest getAnselShotPermissionsRequest = 19;
+		InputEventRequest inputEventRequest = 20;
+		SetLangIdRequest setLangIdRequest = 21;
+		GetFilterInfoRequest getFilterInfoRequest = 22;
+		ResetFilterValuesRequest resetFilterValuesRequest = 23;
+		ResetAllFilterValuesRequest resetAllFilterValuesRequest = 24;
+		IsAnselSDKIntegrationAvailableRequest isAnselSDKIntegrationAvailableRequest = 25;
+		IpcVersionRequest ipcVersionRequest = 26;
+		AddUIElementRequest addUIElementRequest = 27;
+		UIReadyRequest uiReadyRequest = 28;
+		UIControlChangedRequest uiControlChangedRequest = 29;
+		UIControlRemoveRequest uiControlRemoveRequest = 30;
+		UIControlSetVisibilityRequest uiControlSetVisibilityRequest = 31;
+		UIControlGetVisibilityRequest uiControlGetVisibilityRequest = 32;
+		GetProcessInfoRequest getProcessInfoRequest = 33;
+		GetScreenResolutionRequest getScreenResolutionRequest = 34;
+		IsAnselModdingAvailableRequest isAnselModdingAvailableRequest = 35;
+		SetGridOfThirdsEnabledRequest setGridOfThirdsEnabledRequest = 36;
+		ResetEntireStackRequest resetEntireStackRequest = 37;
+		GetFeatureSetRequest getFeatureSetRequest = 38;
+		SetStyleTransferEnabledRequest setStyleTransferEnabledRequest = 39;
+		SetStyleTransferStyleRequest setStyleTransferStyleRequest = 40;
+		GetStyleTransferModelListRequest getStyleTransferModelListRequest = 41;
+		SetStyleTransferModelRequest setStyleTransferModelRequest = 42;
+		StyleTransferStatusRequest styleTransferStatusRequest = 43;
+		InsertFilterRequest insertFilterRequest = 44;
+		RemoveFilterRequest removeFilterRequest = 45;
+		MoveFilterRequest moveFilterRequest = 46;
+		GetStackInfoRequest getStackInfoRequest	 = 47;
+		EstimateCaptureRequest estimateCaptureRequest = 48;
+		UIControlRemoveAllRequest uiControlRemoveAllRequest = 49;
+		GetSettingsRequest getSettingsRequest = 50;
+		AnselStatusReportRequest anselStatusReportRequest = 51;
+		StyleTransferSideloadChoiceRequest styleTransferSideloadChoiceRequest = 52;
+		StyleTransferSideloadProgressRequest styleTransferSideloadProgressRequest = 53;
+		UpdateRollRequest updateRollRequest = 54;
+		GetGameSpecificControlsRequest getGameSpecificControlsRequest = 55;
+		GetEnabledFeatureSetRequest getEnabledFeatureSetRequest = 56;
+		UpdateFovRequest updateFovRequest = 57;
+		AnselReadyRequest anselReadyRequest = 58;
+		SetHighQualityRequest setHighQualityRequest = 59;
+		SetFilterAndAttributesRequest setFilterAndAttributesRequest = 60;
+		SetCMSInfoRequest setCMSInfoRequest = 61;
+		MultipleInputEventRequest multipleInputEventRequest = 62;
+	}
+}
+
+message AnselIPCResponse
+{
+	oneof response
+	{
+		GetFilterListResponse getFilterListResponse = 1;
+		GetHighresResolutionListResponse getHighresResolutionListResponse = 2;
+		CaptureShotStartedResponse captureShotStartedResponse = 3;
+		CaptureShotFinishedResponse captureShotFinishedResponse = 4;
+		CaptureShotProcessingFinishedResponse captureShotProcessingFinishedResponse = 5;
+		Get360ResolutionRangeResponse get360ResolutionRangeResponse = 6;
+		GetFOVRangeResponse getFOVRangeResponse = 7;
+		SetFOVResponse setFOVResponse = 8;
+		GetRollRangeResponse getRollRangeResponse = 9;
+		SetRollResponse setRollResponse = 10;
+		SetAnselEnabledResponse setAnselEnabledResponse = 11;
+		AbortCaptureResponse abortCaptureResponse = 12;
+		GetAnselEnabledResponse getAnselEnabledResponse = 13;
+		GetLwrrentFOVResponse getLwrrentFOVResponse = 14;
+		CaptureShotProgressResponse captureShotProgressResponse = 15;
+		LogFilenameResponse logFilenameResponse = 16;
+		SetFilterResponse setFilterResponse = 17;
+		SetFilterAttributeResponse setFilterAttributeResponse = 18;
+		IsAnselAvailableResponse isAnselAvailableResponse = 19;
+		ScreenResolutionChangedResponse screenResolutionChangedResponse = 20;
+		GetAnselShotPermissionsResponse getAnselShotPermissionsResponse = 21;
+		InputEventResponse inputEventResponse = 22;
+		SetLangIdResponse setLangIdResponse = 23;
+		GetFilterInfoResponse getFilterInfoResponse = 24;
+		ResetFilterValuesResponse resetFilterValuesResponse = 25;
+		IsAnselSDKIntegrationAvailableResponse isAnselSDKIntegrationAvailableResponse = 26;
+		IpcVersionResponse ipcVersionResponse = 27;
+		AddUIElementResponse addUIElementResponse = 28;
+		UIReadyResponse uiReadyResponse = 29;
+		UIControlChangedResponse uiControlChangedResponse = 30;
+		UIControlRemoveResponse uiControlRemoveResponse = 31;
+		UIControlSetVisibilityResponse uiControlSetVisibilityResponse = 32;
+		UIControlGetVisibilityResponse uiControlGetVisibilityResponse = 33;
+		GetProcessInfoResponse getProcessInfoResponse = 34;
+		GetScreenResolutionResponse getScreenResolutionResponse = 35;
+		IsAnselModdingAvailableResponse isAnselModdingAvailableResponse = 36;
+		SetGridOfThirdsEnabledResponse setGridOfThirdsEnabledResponse = 37;
+		ResetEntireStackResponse resetEntireStackResponse = 38;
+		GetFeatureSetResponse getFeatureSetResponse = 39;
+		SetStyleTransferEnabledResponse setStyleTransferEnabledResponse = 40;
+		SetStyleTransferStyleResponse setStyleTransferStyleResponse = 41;
+		GetStyleTransferModelListResponse getStyleTransferModelListResponse = 42;
+		SetStyleTransferModelResponse setStyleTransferModelResponse = 43;
+		StyleTransferStatusResponse styleTransferStatusResponse = 44;
+		MoveFilterResponse moveFilterResponse = 45;
+		GetStackInfoResponse getStackInfoResponse = 46;
+		InsertFilterResponse insertFilterResponse = 47;
+		RemoveFilterResponse removeFilterResponse = 48;
+		ReportErrorResponse reportErrorResponse = 49;
+		EstimateCaptureResponse estimateCaptureResponse = 50;
+		UIControlRemoveAllResponse uiControlRemoveAllResponse = 51;
+		GetSettingsResponse getSettingsResponse = 52;
+		AnselStatusReportResponse anselStatusReportResponse = 53;
+		StyleTransferSideloadChoiceResponse styleTransferSideloadChoiceResponse = 54;
+		StyleTransferSideloadProgressResponse styleTransferSideloadProgressResponse = 55;
+		UpdateRollResponse updateRollResponse = 56;
+		GetEnabledFeatureSetResponse getEnabledFeatureSetResponse = 57;
+		UpdateFovResponse updateFovResponse = 58;
+		AnselReadyResponse anselReadyResponse = 59;
+		SetHighQualityResponse setHighQualityResponse = 60;
+		SetFilterAndAttributesResponse setFilterAndAttributesResponse = 61;
+		SetCMSInfoResponse setCMSInfoResponse = 62;
+	}
+}
+
+// Any message that Ansel and Ansel IPC client is going to send over the bus is
+// either AnselIPCRequest or AnselIPCResponse
+// Requests and responses are not directional - in principle Ansel might request something
+// or the Ansel might be requested by the client
+message AnselIPCMessage
+{
+	oneof message
+	{
+		AnselIPCRequest request = 1;
+		AnselIPCResponse response = 2;
+	}
+}

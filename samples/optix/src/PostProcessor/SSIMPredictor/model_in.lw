@@ -1,0 +1,292 @@
+/******************************************************************************
+ * Copyright 2019 LWPU Corporation. All rights reserved.
+ *****************************************************************************/
+
+#include <cmath>
+
+#include <algorithm>
+#include <map>
+#include <memory>
+#include <vector>
+
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+
+#include "model.h"
+#include "model_inline.h"
+#include "util.h"
+
+template <typename T>
+unsigned int input_pad( unsigned int c,      // input channels
+                        bool         nhwc )  // nhwc tensor?
+{
+    return 0;
+}
+
+// specialization for half
+template <>
+unsigned int input_pad<__half>( unsigned int c,      // input channels
+                                bool         nhwc )  // nhwc tensor?
+{
+    // pad layers with many channels which are not divisible by 4
+    if( !( c % 8 == 0 ) )
+        return 8 - c % 8;
+
+    return 0;
+}
+
+namespace LW {
+namespace SSIM {
+
+template <typename T>
+Input_layer<T>::Input_layer( lwdnnHandle_t lwdnn, int width, int height, int channels, bool pad, bool alloc, ILogger* logger )
+    : Layer<T>( "input", lwdnn )
+{
+    this->set_logger( logger );
+
+    // save original resolution
+    this->m_width         = width;
+    this->m_height        = height;
+    this->m_tensor_format = LWDNN_TENSOR_NCHW;
+    this->m_outPad        = input_pad<T>( channels, this->m_tensor_format == LWDNN_TENSOR_NHWC );
+
+    // pad resolution of input buffer to multiples of 32
+    if( pad )
+    {
+        this->m_outWidth  = ( ( width + 31 ) / 32 ) * 32;
+        this->m_outHeight = ( ( height + 31 ) / 32 ) * 32;
+    }
+    else
+    {
+        this->m_outWidth  = width;
+        this->m_outHeight = height;
+    }
+
+    this->m_outChannels = channels + this->m_outPad;
+
+    const int dims[] = {1, int( this->m_outChannels ), int( this->m_outHeight ), int( this->m_outWidth )};
+    this->checkLWDNN( lwdnnSetTensorNdDescriptorEx( this->m_outTensorDesc, this->m_tensor_format, this->LWDNN_DTYPE, 4, dims ) );
+}
+
+template <typename T>
+Input_layer<T>::~Input_layer()
+{
+}
+
+// utility for data extractrion
+template <typename In>
+const In* get_channel_data( const Image_buffer& ib )
+{
+    return static_cast<const In*>( ib.m_data );
+}
+inline const void* get_channel_data( const Image_buffer& ib, int offset )
+{
+    switch( ib.m_type )
+    {
+        case DATA_FLOAT:
+            return static_cast<const void*>( get_channel_data<float>( ib ) + offset );
+        case DATA_HALF:
+            return static_cast<const void*>( get_channel_data<__half>( ib ) + offset );
+        case DATA_INT8:
+            return static_cast<const void*>( get_channel_data<unsigned char>( ib ) + offset );
+        default:
+            MI_ASSERT( 0 );
+            return 0;
+    }
+}
+
+template <typename T, typename In>
+static __global__ void k_set_channel( T* out, const In* in, int start, int nchannel, int w, int h, int xr, int yr )
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+// arithmetic half operators are first defined for sm53
+#if __LWDA_ARCH__ >= 530
+    typedef T C;
+#else
+    typedef float C;
+#endif
+
+    // hack to workaround partial function template specialization with In=int8
+    C mul = sizeof( In ) == 1 ? 1.0f / 255.0f : 1.0f;
+
+    if( x < w && y < h )
+    {
+        const int N  = w * h;
+        const int IN = xr * yr;
+        if( x >= xr || y >= yr )
+        {
+            out[y * w + x + ( start + 0 ) * N] = 0;
+            if( nchannel > 1 )
+                out[y * w + x + ( start + 1 ) * N] = 0;
+            if( nchannel > 2 )
+                out[y * w + x + ( start + 2 ) * N] = 0;
+        }
+        else
+        {
+            out[y * w + x + ( start + 0 ) * N] = __saturate( mul * C( in[( y * xr + x ) + 0 * IN] ) );
+            if( nchannel > 1 )
+                out[y * w + x + ( start + 1 ) * N] = __saturate( mul * C( in[( y * xr + x ) + 1 * IN] ) );
+            if( nchannel > 2 )
+                out[y * w + x + ( start + 2 ) * N] = __saturate( mul * C( in[( y * xr + x ) + 2 * IN] ) );
+        }
+    }
+}
+
+
+template <typename T>
+template <typename In>
+void Input_layer<T>::set_channel_t( const In* indata,
+                                    In*       tmp,
+                                    int       start,
+                                    int       nchannel,
+                                    int       width,
+                                    int       height,
+                                    int       data_height )  // full res by tiling
+{
+    if( this->m_outPad > 0 )
+        this->checkLwdaErrors(
+            lwdaMemsetAsync( this->m_outData, 0, this->m_outWidth * this->m_outHeight * sizeof( T ), this->m_stream ) );
+
+    int N = width * height;
+    // pack
+    for( int i = 0; i < nchannel; i++ )
+        this->checkLwdaErrors( lwdaMemcpyAsync( tmp + i * N, &indata[i * width * data_height],
+                                                sizeof( In ) * width * height, lwdaMemcpyHostToDevice, this->m_stream ) );
+    dim3 dimBlock( LWDA_BLOCK, LWDA_BLOCK );
+    dim3 blockGrid = dim3( RoundUp( this->m_outWidth, dimBlock.x ), RoundUp( this->m_outHeight, dimBlock.y ) );
+    k_set_channel<T, In><<<blockGrid, dimBlock, 0, this->m_stream>>>( static_cast<T*>( this->m_outData ), tmp, start, nchannel,
+                                                                      this->m_outWidth, this->m_outHeight, width, height );
+}
+
+
+template <typename T>
+void Input_layer<T>::set_channel( const Image_buffer& buf,
+                                  void*               tmp,
+                                  int                 offset,
+                                  int                 start,
+                                  int                 nchannel,
+                                  int                 width,   // actual (tile) input width
+                                  int                 height,  // actual (tile) input height
+                                  int                 data_height )
+{
+    const void* data = get_channel_data( buf, offset );
+    switch( buf.m_type )
+    {
+        case DATA_FLOAT:
+            set_channel_t<float>( static_cast<const float*>( data ), static_cast<float*>( tmp ), start, nchannel, width,
+                                  height, data_height );
+            break;
+        case DATA_HALF:
+            set_channel_t<__half>( static_cast<const __half*>( data ), static_cast<__half*>( tmp ), start, nchannel,
+                                   width, height, data_height );
+            break;
+        case DATA_INT8:
+            set_channel_t<unsigned char>( static_cast<const unsigned char*>( data ), static_cast<unsigned char*>( tmp ),
+                                          start, nchannel, width, height, data_height );
+            break;
+        default:
+            MI_ASSERT( 0 );  // not implemented
+    }
+}
+
+
+// ############################################ R G B ############################################
+
+
+// w, h: colwolution buffer size (multiple of 32)
+// xr, yr: size of input buffer
+
+template <typename T, typename In>
+static __global__ void k_set_channel_rgb( T* out, const In* in, int nc, int N, int start, int nchannel, int w, int h, int xr, int yr )
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+// arithmetic half operators are first defined for sm53
+#if __LWDA_ARCH__ >= 530
+    typedef T C;
+#else
+    typedef float C;
+#endif
+
+    // hack to workaround partial function template specialization with In=int8
+    C mul = sizeof( In ) == 1 ? 1.0f / 255.0f : 1.0f;
+
+
+    if( x < w && y < h )
+    {
+        if( x >= xr || y >= yr )
+        {
+            out[( y * w + x ) * nc + ( start + 0 ) * N] = 0;
+            out[( y * w + x ) * nc + ( start + 1 ) * N] = 0;
+            out[( y * w + x ) * nc + ( start + 2 ) * N] = 0;
+        }
+        else
+        {
+            out[( y * w + x ) * nc + ( start + 0 ) * N] = __saturate( mul * C( in[( y * xr + x ) * nchannel + 0] ) );
+            out[( y * w + x ) * nc + ( start + 1 ) * N] = __saturate( mul * C( in[( y * xr + x ) * nchannel + 1] ) );
+            out[( y * w + x ) * nc + ( start + 2 ) * N] = __saturate( mul * C( in[( y * xr + x ) * nchannel + 2] ) );
+        }
+    }
+}
+
+template <typename T>
+template <typename In>
+void Input_layer<T>::set_channel_rgb_t( const In* indata, In* tmp, int start, int nchannel, int width, int height )
+{
+    // only needed if some channels are not set explicitly
+    if( this->m_outPad > 0 )
+        this->checkLwdaErrors(
+            lwdaMemsetAsync( this->m_outData, 0, this->m_outWidth * this->m_outHeight * sizeof( T ), this->m_stream ) );
+
+    int nc = this->m_tensor_format == LWDNN_TENSOR_NHWC ? this->m_outChannels : 1;
+    int N  = this->m_tensor_format == LWDNN_TENSOR_NHWC ? 1 : this->m_outWidth * this->m_outHeight;
+
+    if( tmp )
+        this->checkLwdaErrors( lwdaMemcpyAsync( tmp, indata, sizeof( In ) * width * height * nchannel,
+                                                lwdaMemcpyHostToDevice, this->m_stream ) );
+    dim3 dimBlock( LWDA_BLOCK, LWDA_BLOCK );
+    dim3 blockGrid = dim3( RoundUp( this->m_outWidth, dimBlock.x ), RoundUp( this->m_outHeight, dimBlock.y ) );
+    k_set_channel_rgb<<<blockGrid, dimBlock, 0, this->m_stream>>>( static_cast<T*>( this->m_outData ),
+                                                                   tmp ? tmp : indata, nc, N, start, nchannel,
+                                                                   this->m_outWidth, this->m_outHeight, width, height );
+}
+
+
+template <typename T>
+void Input_layer<T>::set_channel_rgb( const Image_buffer& buf,
+                                      void*               tmp,
+                                      int                 offset,  // input data offset
+                                      int                 start,
+                                      int                 nchannel,
+                                      int                 width,  // actual input width
+                                      int                 height )
+{
+    const void* data = get_channel_data( buf, offset );
+    switch( buf.m_type )
+    {
+        case DATA_FLOAT:
+            set_channel_rgb_t<float>( static_cast<const float*>( data ), static_cast<float*>( tmp ), start, nchannel, width, height );
+            break;
+        case DATA_HALF:
+            set_channel_rgb_t<__half>( static_cast<const __half*>( data ), static_cast<__half*>( tmp ), start, nchannel,
+                                       width, height );
+            break;
+        case DATA_INT8:
+            set_channel_rgb_t<unsigned char>( static_cast<const unsigned char*>( data ),
+                                              static_cast<unsigned char*>( tmp ), start, nchannel, width, height );
+            break;
+        default:
+            MI_ASSERT( 0 );  // not implemented
+    }
+}
+
+
+template struct Input_layer<float>;
+template struct Input_layer<__half>;
+
+}  // namespace SSIM
+}  // namespace LW

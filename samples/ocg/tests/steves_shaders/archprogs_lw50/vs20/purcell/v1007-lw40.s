@@ -1,0 +1,63 @@
+vs_1_1
+dcl_position0 v0
+dcl_tangent0 v1
+dcl_binormal0 v2
+dcl_normal0 v3
+dcl_texcoord0 v4
+dcl_blendweight0 v5
+mov a0.x, v5.y
+dp4 r0.x, c[a0.x+0], v0
+dp4 r0.y, c[a0.x+1], v0
+dp4 r0.z, c[a0.x+2], v0
+dp3 r1.x, c[a0.x+0], v1
+dp3 r1.y, c[a0.x+1], v1
+dp3 r1.z, c[a0.x+2], v1
+dp3 r2.x, c[a0.x+0], v2
+dp3 r2.y, c[a0.x+1], v2
+dp3 r2.z, c[a0.x+2], v2
+dp3 r3.x, c[a0.x+0], v3
+dp3 r3.y, c[a0.x+1], v3
+dp3 r3.z, c[a0.x+2], v3
+mov a0.x, v5.w
+dp4 r4.x, c[a0.x+0], v0
+dp4 r4.y, c[a0.x+1], v0
+dp4 r4.z, c[a0.x+2], v0
+dp3 r5.x, c[a0.x+0], v1
+dp3 r5.y, c[a0.x+1], v1
+dp3 r5.z, c[a0.x+2], v1
+dp3 r6.x, c[a0.x+0], v2
+dp3 r6.y, c[a0.x+1], v2
+dp3 r6.z, c[a0.x+2], v2
+dp3 r7.x, c[a0.x+0], v3
+dp3 r7.y, c[a0.x+1], v3
+dp3 r7.z, c[a0.x+2], v3
+mul r0.xyz, r0.xyz, v5.x
+mad r0.xyz, r4.xyz, v5.z, r0.xyz
+mov r0.w, v0.w
+m4x4 oPos, r0, c[0]
+mul r1.xyz, r1.xyz, v5.x
+mad r1.xyz, r5.xyz, v5.z, r1.xyz
+dp3 r1.w, r1.xyz, r1.xyz
+rsq r1.w, r1.w
+mul r1.xyz, r1.xyz, r1.w
+mul r2.xyz, r2.xyz, v5.x
+mad r2.xyz, r6.xyz, v5.z, r2.xyz
+dp3 r2.w, r2.xyz, r2.xyz
+rsq r2.w, r2.w
+mul r2.xyz, r2.xyz, r2.w
+mul r3.xyz, r3.xyz, v5.x
+mad r3.xyz, r7.xyz, v5.z, r3.xyz
+dp3 r3.w, r3.xyz, r3.xyz
+rsq r4.w, r3.w
+mul r3.xyz, r3.xyz, r4.w
+mov oD0, v0.w
+mov oT0, v4
+dp3 oT1.x, r1, c[4]
+dp3 oT1.y, r2, c[4]
+dp3 oT1.z, r3, c[4]
+dp3 oT2.x, r1, c[5]
+dp3 oT2.y, r2, c[5]
+dp3 oT2.z, r3, c[5]
+dp3 oT3.x, r1, c[6]
+dp3 oT3.y, r2, c[6]
+dp3 oT3.z, r3, c[6]

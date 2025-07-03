@@ -1,0 +1,86 @@
+# LWVS component configuration
+{
+  # Descriptive name for the component
+  "name"      : "LWVS",
+  # Component owner (email address)
+  "owner"     : "ailes-staff@exchange.lwpu.com",
+  # the module of the component. Usually the same as the corresponding lwbugs module
+  "module"    : "GPU Management SW",
+  # Build timeout (in seconds).
+  "buildtimeout" : "600",
+  # Define variables usable in this component
+  "elw"       : [
+                  "LWVS_P4DIR=${VULCAN_DRIVER_P4BASE}/apps/dcgm/lwvs",
+                  "LWVS_DIR=p4${LWVS_P4DIR}",
+                  "LWML_P4DIR=${VULCAN_DRIVER_P4BASE}/apps/lwml",
+                  "LWML_DIR=p4${LWML_P4DIR}",
+                  "LWHM_P4DIR=${VULCAN_DRIVER_P4BASE}/apps/lw-healthmon",
+                  "LWHM_DIR=p4${LWHM_P4DIR}",
+                  "DCGM_P4DIR=${VULCAN_DRIVER_P4BASE}/apps/dcgm",
+                  "DCGM_DIR=p4${DCGM_P4DIR}",
+                  # to be removed with Bug 1668371
+                  "OLD_LWVS_P4DIR=${VULCAN_DRIVER_P4BASE}/apps/gdk/lwvs",
+                  { "filter": { "arch": "x86_64" }},
+                  "ARCH=amd64",
+                  { "filter": { "arch": "ppc64le" }},
+                  "ARCH=ppc64le",
+                  { "filter": "all" },
+                  "OUTPUTDIR=${LWVS_DIR}/_out/Linux_${ARCH}_release"
+                ],
+  # Files included in this component specified with one or more paths. 
+  # Paths are relative to this file location. Path syntax uses wildcards and p4-like '...'.
+  "files"     : [ 
+                  { "filter" : { "os" : "Linux", "arch" : "x86_64, ppc64le" }},
+                  "${LWVS_P4DIR}/...",
+                  "${OLD_LWVS_P4DIR}/lwca/7.5/...",
+                  "${LWML_P4DIR}/build/...",
+                  "${LWML_P4DIR}/common/...",
+                  "${LWML_P4DIR}/libs/json-c-0.12/...",
+                  "${LWML_P4DIR}/libs/zlib-1.2.8/...",
+                  "${LWML_P4DIR}/lwml_loader/...",
+                  "${LWML_P4DIR}/*.h",
+                  "${LWHM_P4DIR}/lwca/...",
+                  "${DCGM_P4DIR}/dcgmlib/...",
+                  "${VULCAN_DRIVER_P4BASE}/apps/dcgm/common/DcgmStringTokenize.h",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/common/inc/lw*.h",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/resman/arch/lwalloc/unix/include/...",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/resman/arch/lwalloc/unix/lib/...",
+                  "${VULCAN_DRIVER_P4BASE}/drivers/unix/...",
+                  "${VULCAN_DRIVER_P4BASE}/sdk/lwpu/inc/...",
+
+                  "${VULCAN_DRIVER_P4BASE}/drivers/common/build/...",
+                  "${VULCAN_DEVREL_P4BASE}/SDK/inc/GL/...",
+                  "//sw/tools/unix/hosts/Linux-x86/...",
+                  "//sw/tools/unix/targets/common/xorg-server/include/...",
+                  "//sw/tools/unix/targets/Linux-x86_64/..."
+                ],
+  # Outputs produced by this component and the installation location for each output
+  "artifacts" : [ 
+                  { "filter": { "os": "Linux", "arch": "x86_64, ppc64le" }},
+                  { "${OUTPUTDIR}/lwvs" : "gdk/lwvs/.", "kind" : "EXE" },
+
+                  { "${OUTPUTDIR}/plugins" : "gdk/lwvs/." },
+                  { "${OUTPUTDIR}/plugins/lwda10" : "gdk/lwvs/lwda10/." },
+                  { "${OUTPUTDIR}/plugins/lwda9" : "gdk/lwvs/lwda9/." },
+                  { "${OUTPUTDIR}/lwvs.conf" : "gdk/lwvs/." },
+                  { "${OUTPUTDIR}/configfile_examples" : "gdk/lwvs/." },
+                  { "${OUTPUTDIR}/python_examples" : "gdk/lwvs/." },
+
+                  { "${OUTPUTDIR}/docs/*pdf" : "gdk/lwvs/docs/." },
+                  { "${OUTPUTDIR}/docs/man" : "gdk/lwvs/docs/." }
+                ],
+  # The dependencies for this component
+  "depends"   : [ "lwml", "dcgm" ],
+  # The agent responsible for "building" the component
+  "agent"     : [
+                  { "NONE" : "none" },
+                  { "filter" : { "os" : "Linux", "arch" : "x86_64, ppc64le" }},
+                  { "LWDA_DRIVER_MAKE" : "${LWVS_DIR}/Makefile", "build_target" : "",
+                    "clean_target" : "clobber",
+                    "args": [ "LWML_INTERNAL_DIR=${VULCAN_INSTALL_DIR}/gdk/_internal/lwml",
+                              "LWML_INC_DIR=${VULCAN_INSTALL_DIR}/gdk/lwml/include",
+                              "LWML_LIB_DIR=${VULCAN_INSTALL_DIR}/gdk/lwml/lib",
+                              "DCGM_INC_DIR=${VULCAN_INSTALL_DIR}/gdk/dcgm"
+                            ] }
+                ]
+}

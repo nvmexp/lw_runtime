@@ -1,0 +1,43 @@
+        
+	.version 3.1
+	.target sm_20
+
+        .global .u32 a;
+
+        .entry main
+        {
+        .reg .u32       tid, ctaid, result, ballot;
+        .reg .pred      p, r;
+
+        cvt.u32.u16     ctaid, %ctaid.x;
+	cvt.u32.u16 	tid, %tid.x;
+        mov.u32         result, 0;
+   
+        setp.eq.u32     p, ctaid, 5;
+        vote.all.pred   r, p;
+@r      or.b32          result, result, 0x1;
+
+        vote.any.pred   r, p;
+@r      or.b32          result, result, 0x2;
+
+        vote.uni.pred   r, p;
+@r      or.b32          result, result, 0x4;
+
+        setp.le.u32     p, tid, 10;
+        vote.ballot.b32 ballot, !p;
+        and.b32         result, result, ballot;
+        vote.ballot.b32 ballot, !p;
+        and.b32         result, result, ballot;
+
+        st.global.u32   [a], result;
+
+        bar.sync 0;
+
+        setp.eq.u32     p, ctaid, 5;
+        vote.ballot.b32 ballot, p;
+        vote.uni.pred   r, p;
+@r      st.global.u32   [a], ballot;
+
+        exit;
+        }
+

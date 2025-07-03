@@ -1,0 +1,167 @@
+[  
+   {  
+      "title":"total records in table",
+      "sql":"select '1000' as value, count(*) as name from ansel",
+      "size":"small",
+      "type":"number"
+   },
+   {  
+      "title":"Telemetry gathering started at:",
+      "type":"number",
+      "size":"small",
+      "sql":"SELECT 1000 as value, toDate(datereceived) as name FROM ansel WHERE toYear(datereceived) = 2016 AND isinternal != 'True' ORDER BY datereceived ASC LIMIT 1"
+   },
+   {  
+      "size":"small",
+      "type":"number",
+      "sql":"SELECT 1000 as value, max(dt) as name FROM ansel WHERE isinternal != 'True' limit 10",
+      "title":"Latest event received at:"
+   },
+   {  
+      "caption":"Sessions by countries last month",
+      "title":"Last month sessions density by countries",
+      "size":"big",
+      "type":"map",
+      "sql":"select country as country, count(distinct sessionid) as value from ansel where dateadjusted < now() and dateadjusted > now() - 3600*24*30  AND isinternal != 'True' group by country"
+   },
+   {  
+      "title":"All time sessions density by countries",
+      "caption":"Sessions by countries all time",
+      "sql":"select country as country, count(distinct sessionid) as value from ansel where isinternal != 'True' group by country",
+      "size":"big",
+      "type":"map"
+   },
+   {  
+      "size":"big",
+      "type":"pie",
+      "sql":"select max(drsprofilename) as name, count(distinct deviceid) as value from ansel where  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted'  and dateadjusted < now() and dateadjusted > now() - 3600*24*7 group by appexename order by value desc limit 15",
+      "title":"top 15 popular games last week"
+   },
+   {  
+      "size":"big",
+      "type":"pie",
+      "sql":"select max(drsprofilename) as name, count(distinct deviceid) as value from ansel where  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted'  and dateadjusted < now() and dateadjusted > now() - 3600*24*30 group by appexename order by value desc limit 15",
+      "title":"top 15 popular games last month"
+   },
+   {  
+      "sql":"select max(drsprofilename) as name, count(distinct deviceid) as value from ansel where  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted'  and dateadjusted < now() and dateadjusted > now() - 3600*24*90 group by appexename order by value desc limit 15",
+      "size":"big",
+      "type":"pie",
+      "title":"top 15 popular games last 3 months"
+   },
+   {  
+      "size":"big",
+      "type":"pie",
+      "sql":"select max(drsprofilename) as name, count(distinct deviceid) as value from ansel where  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' group by appexename order by value desc limit 15",
+      "title":"top 15 popular games all time"
+   },
+   {  
+      "title":"top 15 popular games (by amount of shots taken), all time",
+      "sql":"select max(drsprofilename) as name, count(*) as value from ansel where  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' group by appexename order by value desc limit 15",
+      "size":"big",
+      "type":"pie"
+   },
+   {  
+      "sql":"select max(drsprofilename) as name, count(*) as value from ansel where  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' and dateadjusted < now() and dateadjusted > now() - 3600*24*30 group by appexename order by value desc limit 15",
+      "type":"pie",
+      "size":"big",
+      "title":"top 15 popular games (by amount of shots taken), last month"
+   },
+   {  
+      "sql":"select max(drsprofilename) as name, count(*) as value from ansel where  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' and dateadjusted < now() and dateadjusted > now() - 3600*24*14 group by appexename order by value desc limit 15",
+      "type":"pie",
+      "size":"big",
+      "title":"top 15 popular games (by amount of shots taken), last 2 weeks"
+   },
+   {  
+      "title":"top 15 popular games (by amount of shots taken), last 3 months",
+      "type":"pie",
+      "size":"big",
+      "sql":"select max(drsprofilename) as name, count(*) as value from ansel where  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' and dateadjusted < now() and dateadjusted > now() - 3600*24*90 group by appexename order by value desc limit 15"
+   },
+   {  
+      "sql":"select replaceRegexpAll(max(drsprofilename), '[:\\' ]', '') as name0, toDate(dateadjusted) as name1, count(*) as value from ansel where appexename in (select appexename from ansel where  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' and dateadjusted < now() and dateadjusted > now() - 3600*24*30 group by appexename order by count(*) desc limit 7) and kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' and dateadjusted < toDateTime(today()) and dateadjusted > toDateTime(today()) - 3600*24*60 group by appexename, name1 order by name0, name1",
+      "type":"multiline",
+      "size":"big",
+      "title":"Top-7 titles backtrack by shots captured (top-15 last month backtracked for 2 months)"
+   },
+   {  
+      "sql":"select replaceRegexpAll(max(drsprofilename), '[:\\' ]', '') as name0, dsmall as name1, count(*) as value from (select dbig,dsmall,kk,deviceid,appexename,drsprofilename from (select 1 as kk, appexename,drsprofilename,deviceid, kindofshot, isinternal, eventname, toDate(dateadjusted) as dbig from ansel where kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' and drsprofilename!='') tbig all inner join (select 1 as kk, toDate(dateadjusted) dsmall from ansel where dateadjusted >= now() - 3600*24*60 and toDate(dateadjusted) > '1970-01-01' group by dsmall) t1 using kk where dbig <= dsmall and  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' and appexename in (select appexename from ansel where  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' and dateadjusted < now() and dateadjusted > now() - 3600*24*30 group by appexename order by count(*) desc limit 7)) group by appexename, dsmall order by name0,name1",
+      "type":"multiline",
+      "size":"big",
+      "title":"Top-7 titles backtrack by cumulative shots captured (top-15 last month backtracked for 2 months)"
+   },
+   {  
+      "sql":"select replaceRegexpAll(max(drsprofilename), '[:\\' ]', '') as name0, dsmall as name1, count(distinct deviceid) as value from (select dbig,dsmall,kk,deviceid,appexename,drsprofilename from (select 1 as kk, appexename,drsprofilename,deviceid, kindofshot, isinternal, eventname, toDate(dateadjusted) as dbig from ansel where kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' and drsprofilename!='') tbig all inner join (select 1 as kk, toDate(dateadjusted) dsmall from ansel where dateadjusted >= now() - 3600*24*60 and toDate(dateadjusted) > '1970-01-01' group by dsmall) t1 using kk where dbig <= dsmall and  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' and appexename in (select appexename from ansel where  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' and dateadjusted < now() and dateadjusted > now() - 3600*24*30 group by appexename order by count(*) desc limit 7)) group by appexename, dsmall order by name0,name1",
+      "type":"multiline",
+      "size":"big",
+      "title":"Top-7 titles backtrack by cumulative unique users (top-15 last month backtracked for 2 months)"
+   },
+   {  
+      "sql":"select replaceRegexpAll(effectname, '\\n', ',') as name, count(*) as value FROM ansel WHERE kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' group by name order by count(*) desc limit 20",
+      "type":"pie",
+      "size":"big",
+      "title":"Filter combinations"
+   },
+   {  
+      "title":"time spent in Ansel UI in seconds",
+      "type":"barchart",
+      "size":"small",
+      "sql":"select floor(timeelapsedsincesessionstarted/5)*5 as name, count(*) as value from ansel where greater(timeelapsedsincesessionstarted, 0) and eventname='AnselUIClosed' group by name order by name asc limit 30"
+   },
+   {  
+      "title":"total shots captured",
+      "sql":"select '1000' as value, count(*) as name FROM ansel WHERE kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted'",
+      "type":"number",
+      "size":"small"
+   },
+   {  
+      "size":"small",
+      "type":"number",
+      "sql":"select '1000' as value, round(COUNT(*) / count(distinct deviceid)) as name FROM ansel WHERE kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted'",
+      "title":"Average shots captured per user"
+   },
+   {  
+      "title":"total unique users (captured at least one image)",
+      "type":"number",
+      "size":"small",
+      "sql":"select '1000' as value, count(distinct deviceid) as name FROM ansel WHERE kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted'"
+   },
+   {  
+      "sql":" select dsmall as X, count(distinct deviceid) as Y from (select dbig,dsmall,kk,deviceid from (select 1 as kk, deviceid, kindofshot, isinternal, eventname, toDate(dateadjusted) as dbig from ansel) tbig all inner join (select 1 as kk, toDate(dateadjusted) dsmall from ansel where dateadjusted >= now() - 3600*24*60 and toDate(dateadjusted) > '1970-01-01' group by dsmall) t1 using kk where dbig <= dsmall and  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' ) group by dsmall",
+      "type":"graph",
+      "size":"big",
+      "title":"Unique users over time"
+   },
+   {  
+      "type":"graph",
+      "size":"big",
+      "sql":"select dsmall as X, count(*) as Y from (select dbig,dsmall,kk,deviceid from (select 1 as kk, deviceid, kindofshot, isinternal, eventname, toDate(dateadjusted) as dbig from ansel) tbig all inner join (select 1 as kk, toDate(dateadjusted) dsmall from ansel where toDate(dateadjusted) >= '2016-10-01' group by dsmall) t1 using kk where dbig <= dsmall and  kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' ) group by dsmall",
+      "interval":"1",
+      "title":"Shots over time"
+   },
+   {  
+      "title":"Shots count by type (all time)",
+      "sql":"SELECT kindofshot as name, COUNT(*) as value FROM ansel WHERE kindofshot != 'NONE' AND kindofshot != '' AND isinternal != 'True' AND eventname = 'CaptureStarted' GROUP BY kindofshot order by value desc",
+      "type":"barchart",
+      "size":"small"
+   },
+   {  
+      "sql":"SELECT highresmultiplier as name, count(*) as value FROM ansel WHERE kindofshot = 'HIGHRES' AND isinternal != 'True' AND eventname = 'CaptureStarted' GROUP BY highresmultiplier ORDER BY COUNT(*) DESC LIMIT 16",
+      "size":"small",
+      "type":"barchart",
+      "title":"Super resolution multipliers (all time)"
+   },
+   {  
+      "title":"last month activity by devices",
+      "sql":"select substring(toString(toStartOfHour(dateadjusted)),6,5) as name, count(distinct deviceid) as value from ansel where dateadjusted < now() and dateadjusted > now() - 3600*24*30   AND isinternal != 'True' group by name order by name",
+      "type":"barchart",
+      "size":"big"
+   },
+   {  
+      "sql":"select substring(toString(toStartOfHour(dateadjusted)),6,5) as name, count(*) as value from ansel where dateadjusted < now() and dateadjusted > now() - 3600*24*30 AND isinternal != 'True' and like(eventname,'AnselError%') group by name order by name",
+      "size":"big",
+      "type":"barchart",
+      "title":"last month error count"
+   }
+]

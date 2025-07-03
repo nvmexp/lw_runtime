@@ -1,0 +1,175 @@
+##############################################################################
+# drivers/resman/tests/lwAppsCommon.lwmk
+##############################################################################
+
+#
+# This makefile adds lwmake support for building multiple standalone
+# applications in one run that can but don't necessarily have to share common
+# code and other resources.
+# The goal is to simplify per-application makefiles and provide a single place
+# to build all the applications.
+#
+# Example on how this is used:
+#   https://wiki.lwpu.com/engwiki/index.php/Resman/RM_Foundations/Lwrrent_Projects/Standalone_Test_Infrastructure
+#
+
+# Required variables:
+#   TARGETS_MAKEFILE - contains list of application makefiles
+#       List of applications' makefile. Application exelwtable name will have
+#       the same name as its makefile.
+#   COMMONS_MAKEFILE - contains list of common resource makefiles
+#   APPS_ROOT_DIR - root folder for all applications
+#       Usually this is the folder of top-level makefile for your project
+
+#############################################################################
+
+#
+# Include platform-specific rules sets.  Some of these variables might
+# need to be accessible from with test makefiles (such as testList)
+#
+include $(APPS_ROOT_DIR)/build/$(LW_TARGET_OS_FAMILY_LOWER_CASE).lwmk
+include $(APPS_ROOT_DIR)/build/lwApps$(LW_TARGET_OS_FAMILY)Rules.lwmk
+
+#############################################################################
+
+TARGETS := $(dir $(TARGETS_MAKEFILE))
+COMMONS := $(dir $(COMMONS_MAKEFILE))
+
+# Avoid later undefined variable warnings from lwmake
+$(foreach TARGET, $(TARGETS), $(eval $(TARGET)_SOURCES := ))
+$(foreach TARGET, $(TARGETS), $(eval $(TARGET)_INCLUDES := ))
+$(foreach TARGET, $(TARGETS), $(eval $(TARGET)_CFLAGS := ))
+$(foreach TARGET, $(TARGETS), $(eval $(TARGET)_UNIX_LDFLAGS := ))
+$(foreach TARGET, $(TARGETS), $(eval $(TARGET)_WIN_LDFLAGS := ))
+$(foreach TARGET, $(TARGETS), $(eval $(TARGET)_WIN_LIBS := ))
+$(foreach TARGET, $(TARGETS), $(eval $(TARGET)_MACOSX_LIBS := ))
+$(foreach TARGET, $(TARGETS), $(eval $(TARGET)_COMMONS := ))
+$(foreach TARGET, $(TARGETS), $(eval $(TARGET)_PREREQUISITES := ))
+$(foreach TARGET, $(TARGETS), $(eval $(TARGET)_GEN_SOURCES := ))
+$(foreach TARGET, $(TARGETS), $(eval $(TARGET)_GEN_FILES := ))
+
+$(foreach COMMON, $(COMMONS), $(eval $(COMMON)_SOURCES := ))
+$(foreach COMMON, $(COMMONS), $(eval $(COMMON)_INCLUDES := ))
+$(foreach COMMON, $(COMMONS), $(eval $(COMMON)_CFLAGS := ))
+$(foreach COMMON, $(COMMONS), $(eval $(COMMON)_UNIX_LDFLAGS := ))
+$(foreach COMMON, $(COMMONS), $(eval $(COMMON)_WIN_LDFLAGS := ))
+$(foreach COMMON, $(COMMONS), $(eval $(COMMON)_MACOSX_LDFLAGS := ))
+$(foreach COMMON, $(COMMONS), $(eval $(COMMON)_WIN_LIBS := ))
+$(foreach COMMON, $(COMMONS), $(eval $(COMMON)_MACOSX_LIBS := ))
+$(foreach COMMON, $(COMMONS), $(eval $(COMMON)_COMMONS := ))
+$(foreach COMMON, $(COMMONS), $(eval $(COMMON)_PREREQUISITES := ))
+$(foreach COMMON, $(COMMONS), $(eval $(COMMON)_OUTDIR := $(OUTPUTDIR)/_out_files/$(COMMON)))
+
+
+
+##############################################################################
+# Include all targets makefiles
+##############################################################################
+
+# Avoid later undefined variable warnings from lwmake
+# INCLUDE_TARGET_MAKEFILE
+#     $(1) - target application's makefile
+#     $(2) - target application's root folder
+#   Includes the target application makefile and creates applicaiton-specific
+#   variables based on LOCAL_* variables that get define in the included
+#   makefiles
+#
+define INCLUDE_TARGET_MAKEFILE
+    LOCAL_SOURCES :=
+    LOCAL_INCLUDES :=
+    LOCAL_CFLAGS :=
+    LOCAL_UNIX_LDFLAGS :=
+    LOCAL_WIN_LDFLAGS :=
+    LOCAL_WIN_LIBS :=
+    LOCAL_MACOSX_LIBS :=
+    LOCAL_COMMONS :=
+    LOCAL_PREREQUISITES :=
+    LOCAL_DIR := $(dir $(APPS_ROOT_DIR)/$(2))
+    LOCAL_OUTDIR =  $$(OUTPUTDIR)/_out_files/$(2)
+    LOCAL_GEN_SOURCES :=
+    LOCAL_GEN_FILES :=
+
+    include $(APPS_ROOT_DIR)/$(1)
+
+    $$(eval $(2)_SOURCES += $$(abspath $$(addprefix $$(APPS_ROOT_DIR)/$(2),$$(LOCAL_SOURCES))))
+    $$(eval $(2)_INCLUDES += $$(LOCAL_INCLUDES))
+    $$(eval $(2)_INCLUDES += $$(APPS_ROOT_DIR)/$(2))
+    $$(eval $(2)_INCLUDES += $$(LOCAL_OUTDIR))
+    $$(eval $(2)_CFLAGS += $$(LOCAL_CFLAGS))
+    $$(eval $(2)_UNIX_LDFLAGS += $$(LOCAL_UNIX_LDFLAGS))
+    $$(eval $(2)_WIN_LDFLAGS += $$(LOCAL_WIN_LDFLAGS))
+    $$(eval $(2)_WIN_LIBS += $$(LOCAL_WIN_LIBS))
+    $$(eval $(2)_MACOSX_LIBS += $$(LOCAL_MACOSX_LIBS))
+    $$(eval $(2)_COMMONS += $$(LOCAL_COMMONS))
+    $$(eval $(2)_PREREQUISITES += $$(LOCAL_PREREQUISITES))
+    $$(eval $(2)_GEN_SOURCES += $$(LOCAL_GEN_SOURCES))
+    $$(eval $(2)_GEN_FILES += $$(addprefix $$(LOCAL_OUTDIR),$$(LOCAL_GEN_FILES)))
+endef
+
+# Include all application makefiles
+$(foreach TARGET_MAKEFILE,$(TARGETS_MAKEFILE),\
+    $(eval $(call INCLUDE_TARGET_MAKEFILE,$(TARGET_MAKEFILE),$(dir $(TARGET_MAKEFILE)))))
+
+##############################################################################
+
+##############################################################################
+# Include all common makefiles, join them with the targets.
+##############################################################################
+
+# Returns the full path of a shadow file (imported from an external source)
+# Input:
+# $(1) - common name
+# $(2) - external source file
+define EXTERNAL_SOURCE_SHADOW
+    $(addprefix $($(1)_OUTDIR)external/,$(notdir $(2)))
+endef
+
+# Creates rules for importing external sources, one per directory
+# Input:
+# $(1) - common name
+# $(2) - external source dir
+define IMPORT_EXTERNAL_SOURCE_DIR
+$($(1)_OUTDIR)external/%: $(2)%
+	$$(MKDIR) $$(dir $$@)
+	$$(COPY) $$< $$@
+endef
+
+# Imports external sources into a common resource.
+# Input:
+# $(1) - common name
+# $(2) - source list
+define IMPORT_EXTERNAL_SOURCES
+$(foreach DIR,$(dir $(2)),\
+    $(eval $(call IMPORT_EXTERNAL_SOURCE_DIR,$(1),$(DIR))))
+
+$(eval $(1)_SOURCES += $(call EXTERNAL_SOURCE_SHADOW,$(1),$(2)))
+#
+# Add every folder with sources to the include paths
+# This is done because local folder is always in a file's include path,
+# but when we move the files, we change the local folder.
+#
+$(eval $(1)_INCLUDES += $(dir $(2)))
+endef
+
+
+# ADD_COMMON - adds a common makefile module to a target, avoiding duplicates
+#     $(1) - target application's root folder
+#     $(2) - common name
+define ADD_COMMON
+    ifndef $(1)_$(2)_ADDED
+        $(1)_$(2)_ADDED:=1
+        $$(eval $$(call $(2)_ADD,$(1)))
+    endif
+endef
+
+# Include all common sub makefiles
+include $(COMMONS_MAKEFILE)
+
+ifdef LWCFG_INITIALIZED
+# Add all the common resources requested in the application specific files
+$(foreach TARGET,$(TARGETS),\
+    $(foreach COMMON,$($(TARGET)_COMMONS),$(eval $(call ADD_COMMON,$(TARGET),$(COMMON)))))
+endif
+
+# Include the common rules
+include $(LWSWITCH_TEST_DIR)/build/lwAppsCommonRules.lwmk

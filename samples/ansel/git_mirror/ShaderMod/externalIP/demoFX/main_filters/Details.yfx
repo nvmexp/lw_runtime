@@ -1,0 +1,113 @@
+//------------------------------------------------------------------
+// Shader file for LWPU Ansel
+//------------------------------------------------------------------
+
+//------------------------------------------------------------------
+// Constants
+//------------------------------------------------------------------
+
+#define PixelSize               rcp(screenSize)   //x = Pixel width, y = Pixel height
+
+cbuffer globalParams
+{
+	float2 screenSize;         //x = screen width, y = screen height
+	int captureState;         
+    float4 tileUV;             //xy - top left tile coordinate, zw - bottom right tile coordinate
+}
+
+cbuffer controlBuf
+{
+	float g_sldSharpen;
+	float g_sldClarity;
+	float g_sldHDR;
+	float g_sldBloom;
+}
+
+Texture2D texOriginalColor;
+Texture2D texBlurred;
+SamplerState SamplerLinear;
+
+float4 ScaleableGaussianBlurLinear(Texture2D    tex,
+                                   float2       uv,
+                                   int          nSteps,
+                                   float2       axis,
+                                   float2       texelsize)
+{
+        float norm = -1.35914091423 / (nSteps * nSteps);
+        float4 aclwm = tex.Sample(SamplerLinear, uv);
+        float2 offsetinc = axis * texelsize;
+
+	float divisor = 0.5; //exp(0) * 0.5
+
+        [loop]
+        for(float iStep = 1; iStep <= nSteps; iStep++)
+        {
+                float tapOffset = iStep * 2.0 - 0.5;
+                float tapWeight = exp(iStep * iStep * norm);
+
+                aclwm += tex.SampleLevel(SamplerLinear,uv + offsetinc * tapOffset,0) * tapWeight;
+                aclwm += tex.SampleLevel(SamplerLinear,uv - offsetinc * tapOffset,0) * tapWeight;
+				divisor += tapWeight;
+        }
+		aclwm /= 2.0 * divisor;
+        return aclwm;
+}
+
+float4 BoxBlur(Texture2D tex, float2 uv, float2 texelsize)
+{
+        float3 blurData[8] = 
+        {
+                float3( 0.5, 1.5,1.50),
+                float3( 1.5,-0.5,1.50),
+                float3(-0.5,-1.5,1.50),
+                float3(-1.5, 0.5,1.50),
+                float3( 2.5, 1.5,1.00),
+                float3( 1.5,-2.5,1.00),
+                float3(-2.5,-1.5,1.00),
+                float3(-1.5, 2.5,1.00),            
+        };
+
+        float4 blur = 0.0;        
+        for(int i=0; i<8; i++)
+        	blur += tex.SampleLevel(SamplerLinear,uv + blurData[i].xy * texelsize, 0) * blurData[i].z;
+
+        blur /= (4 * 1.5) + (4 * 1.0);
+        return blur;        
+}
+
+
+void PS_LargeBlur1(in float4 position : SV_POSITION, in float2 uv : TEXCOORD, out float4 color : SV_Target)
+{
+        color = ScaleableGaussianBlurLinear(texOriginalColor, uv, 15, float2(1, 0), PixelSize);
+}
+
+void PS_SharpenClarity(in float4 position : SV_POSITION, in float2 uv : TEXCOORD, out float4 color : SV_Target)
+{
+    color = texOriginalColor.Sample(SamplerLinear,uv);
+
+	float4 largeblur = ScaleableGaussianBlurLinear(texBlurred, uv, 15, float2(0, 1), PixelSize);
+	float4 smallblur = BoxBlur(texOriginalColor,uv, PixelSize);
+
+	float a 		= dot(color.rgb,float3(0.299,0.587,0.114));
+	float b 		= dot(largeblur.rgb,float3(0.299,0.587,0.114));
+	float c			= dot(smallblur.rgb,float3(0.299,0.587,0.114));
+
+//HDR Toning
+	float sqrta 	= sqrt(a);
+	float HDRToning = sqrta * lerp(sqrta*(2*a*b-a-2*b+2.0), (2*sqrta*b-2*b+1), b > 0.5); //modified soft light v1
+	color = color / (a+1e-6) * lerp(a,HDRToning,g_sldHDR);
+
+//sharpen
+    float Sharpen = dot(color.rgb - smallblur.rgb, float3(0.299,0.587,0.114)); //need to recompute, as luma of color changed by hdr toning
+    float sharplimit = lerp(0.25,0.6,g_sldSharpen);
+    Sharpen = clamp(Sharpen,-sharplimit,sharplimit);
+    color.rgb = color.rgb / a * lerp(a,a+Sharpen,g_sldSharpen);
+
+//clarity
+    float Clarity = (0.5 + a - b);
+    Clarity = lerp(2*Clarity + a*(1-2*Clarity), 2*(1-Clarity)+(2*Clarity-1)*rsqrt(a), a > b); //modified soft light v2
+    color.rgb *= lerp(1.0,Clarity,g_sldClarity);
+
+//bloom
+    color.rgb = 1-(1-color.rgb)*(1-largeblur.rgb * g_sldBloom);
+}

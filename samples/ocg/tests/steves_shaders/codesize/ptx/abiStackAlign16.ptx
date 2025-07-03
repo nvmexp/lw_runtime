@@ -1,0 +1,128 @@
+.version 3.1
+.target sm_20
+
+/*
+ *  This test case exercises the 16byte stack alignment with 8byte incoming stack alignement (i.e 
+ *  there are no 16byte parameters/return values in memory). It also tests that 16byte local read/writes 
+ *  are not split.
+ */
+
+.func (.param .align 8 .u64 out) myadd (.reg .u32 a, .reg .u32 b, 
+                               .reg .u32 c, .reg .u32 d, .reg .u32 cc, .reg .u32 dd,
+                               .reg .u32 e, .reg .u32 f, .reg .u32 g, .reg .u32 h,
+                               .reg .u32 i, .reg .u32 j, .reg .u32 k, .reg .u32 m,
+                               .reg .u32 n, .reg .u32 o, .reg .u32 p, .param .align 8 .u64 l)
+{
+    .reg .u32 r, s, u, v, y, addr;
+    .reg .u64 t1, t2;
+    .local .align 16 .u8 z[100];
+ 
+    add.u32       r, a, b;
+    add.u32       r, r, c;
+    add.u32       r, r, d;
+    add.u32       r, r, cc;
+    add.u32       r, r, dd;
+    add.u32       r, r, e;
+    add.u32       r, r, f;
+    add.u32       r, r, g;
+    add.u32       r, r, h;
+    add.u32       r, r, i;
+    add.u32       r, r, j;
+    add.u32       r, r, k;
+    add.u32       r, r, m;
+    add.u32       r, r, n;
+    add.u32       r, r, o;
+    add.u32       r, r, p;
+    ld.param.u64  t1, [l];
+    cvt.u64.u32   t2, 1000;
+    mov.u32 addr, z;
+    st.local.v2.u64  [addr], {t1, t2};
+
+    ld.local.u64  t2, [z];
+    cvt.u32.u64   y, t2; 
+    add.u32       r, r, y;
+
+    cvt.u64.u32   t1, r;
+    st.param.u64  [out], t1;
+//    st.param.u64  [out+4], t2;   // This causes an assert
+    ret;
+}
+
+/*
+ *  This test case exercises the 16byte stack alignment case with 16byte incoming stack frame alignement (i.e there is 
+ *  atleast one 16byte aligned params/return value passed in memory). It also tests that 16byte frame/param/var 
+ *  read/writes are not split.
+ *  
+ */
+
+
+.func (.param .align 16 .u64 out[1000]) myadd2 (.param .align 16 .u64 a, .reg .u32 b, 
+                               .reg .u32 c, .reg .u32 d, .reg .u32 cc, .reg .u32 dd,
+                               .reg .u32 e, .reg .u32 f, .reg .u32 g, .reg .u32 h,
+                               .reg .u32 i, .reg .u32 j, .reg .u32 k, .reg .u32 m,
+                               .reg .u32 n, .reg .u32 o, .reg .u32 p, .param .align 8 .u64 l)
+{
+    .reg .u32 r, s, u, v, y, addr;
+    .reg .u64 t1, t2;
+    .local .align 16 .u8 z[50];
+
+    ld.param.u32  r, [a]; 
+    add.u32       r, r, b;
+    add.u32       r, r, c;
+    add.u32       r, r, d;
+    add.u32       r, r, cc;
+    add.u32       r, r, dd;
+    add.u32       r, r, e;
+    add.u32       r, r, f;
+    add.u32       r, r, g;
+    add.u32       r, r, h;
+    add.u32       r, r, i;
+    add.u32       r, r, j;
+    add.u32       r, r, k;
+    add.u32       r, r, m;
+    add.u32       r, r, n;
+    add.u32       r, r, o;
+    add.u32       r, r, p;
+    mov.u32 addr, a;
+    ld.local.v2.u64  {t1, t2}, [addr];
+    st.local.v2.u64  [z], {t1, t2};
+
+    ld.local.u64  t2, [z];
+    cvt.u32.u64   y, t2; 
+    add.u32       r, r, y;
+
+    cvt.u64.u32   t1, r;
+    add.u32       r, k, g;
+    mov.u32 addr, l; 
+    ld.local.u64 t2, [addr];
+    st.param.u64  [out], {t1, t2};
+    ret;
+}
+
+/*
+ *  Tests that the incoming SP has 16byte alignment (because it is an entry)
+ *  Tests that the frame is 16byte aligned. Because atleast one 16byte outgoing parameter is passed in stack
+ */
+
+.entry main(.param .u32 output, .param .u32 output1)
+{
+    .reg .u32 t, o;
+    .param .align 8 .u64 ret;
+    .param .align 16 .u64 ret2[1000];  
+    .reg .u64 t1;
+
+    call (ret), myadd, (4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 2000);
+    ld.param.u32  o, [output];
+    ld.param.u64  t1, [ret]; 
+    st.b64        [o], t1;
+
+    call (ret2), myadd2, (4, t, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 2000);
+    ld.param.u64  t1, [ret2];
+    ld.param.u32  o, [output1];
+    st.b64        [o], t1;
+
+    exit;
+}
+ 
+
+

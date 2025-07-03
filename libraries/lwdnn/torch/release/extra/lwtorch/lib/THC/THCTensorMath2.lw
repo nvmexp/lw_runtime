@@ -1,0 +1,30 @@
+#include "THCTensorMath.h"
+#include "THCGeneral.h"
+#include "THCBlas.h"
+#include "THCTensorCopy.h"
+#include "THCTensorRandom.h"
+#include "THCApply.lwh"
+#include "THCReduce.lwh"
+#include "THCTensorMathReduce.lwh"
+#include "THCTensorMathPointwise.lwh"
+
+struct TensorATan2Op {
+  __device__ __forceinline__ void operator()(float* out, float* a, float* b) {
+    *out = atan2f(*a, *b);
+  }
+};
+
+void THLwdaTensor_atan2(THCState *state, THLwdaTensor *self_, THLwdaTensor *tx, THLwdaTensor *ty)
+{
+  THCAssertSameGPU(THLwdaTensor_checkGPU(state, 3, self_, tx, ty));
+  THArgCheck(THLwdaTensor_nElement(state, tx) ==
+             THLwdaTensor_nElement(state, ty), 3, "sizes do not match");
+  THLwdaTensor_resizeAs(state, self_, tx);
+
+  if (!THC_pointwiseApply3(state, self_, tx, ty, TensorATan2Op())) {
+    THArgCheck(false, 2, LWTORCH_DIM_WARNING);
+  }
+
+  THLwdaCheck(lwdaGetLastError());
+}
+

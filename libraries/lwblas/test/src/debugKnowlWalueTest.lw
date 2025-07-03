@@ -1,0 +1,360 @@
+/*  
+ * Copyright (c) 2019, LWPU CORPORATION.  All rights reserved.
+ * 
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
+ *  - Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  - Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  - Neither the name(s) of the copyright holder(s) nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */  
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <assert.h>
+
+#include <unordered_map>
+#include <vector>
+#include <algorithm>
+#include <chrono>
+
+#include <lwda_runtime.h>
+#include <lwda_fp16.h>
+#include <lwtensor.h>
+
+#define HANDLE_ERROR(x)                                               \
+{ const auto err = x;                                                 \
+  if( err != LWTENSOR_STATUS_SUCCESS )                                \
+  { printf("Error (%s:%d): %s\n", __FILE__, __LINE__, lwtensorGetErrorString(err)); return err; } \
+};
+
+#define HANDLE_LWDA_ERROR(x)                                      \
+{ const auto err = x;                                             \
+  if( err != lwdaSuccess )                                        \
+  { printf("Error (%s:%d): %s\n", __FILE__, __LINE__, lwdaGetErrorString(err)); return err; } \
+};
+
+std::unordered_map<int, int64_t> reference_decode(const std::vector<int>& mode, const std::unordered_map<int, int64_t>& extent, int64_t elem)
+{
+    std::unordered_map<int, int64_t> position;
+    for (int m : mode) {
+        position[m] = elem % extent.at(m);
+        elem /= extent.at(m);
+    }
+    assert(elem == 0);
+    return position;
+}
+
+int64_t reference_evaluate(
+    const std::unordered_map<int, int64_t>& c_pos,
+    const std::unordered_map<int, int64_t>& k_pos,
+    const std::unordered_map<int, int64_t>& extent,
+    std::vector<int> mode)
+{
+    int64_t result = 0;
+    int64_t stride = 1;
+    for (auto m : mode)
+    {
+        int64_t val = 0;
+        if (c_pos.count(m) != 0)
+        {
+            val = c_pos.at(m);
+        }
+        else if (k_pos.count(m) != 0)
+        {
+            val = k_pos.at(m);
+        }
+        else
+        {
+            assert(0);
+        }
+        result += stride * val;
+        stride *= extent.at(m);
+    }
+    return result;
+}
+
+int64_t reference_callwlation(
+    const std::vector<int>& modeA,
+    const std::vector<int>& modeB,
+    const std::vector<int>& modeC,
+    const std::unordered_map<int, int64_t>& extent,
+    int64_t elem)
+{
+    auto c_pos = reference_decode(modeC, extent, elem);
+    int64_t k_elems = 1;
+    std::vector<int> modeK;
+    for (int mA : modeA)
+    {
+        if (std::find(modeC.begin(), modeC.end(), mA) != modeC.end()) continue;
+        k_elems *= extent.at(mA);
+        modeK.push_back(mA);
+    }
+    int64_t result = 0;
+    for (int64_t k_elem = 0; k_elem < k_elems; k_elem++)
+    {
+        auto k_pos = reference_decode(modeK, extent, k_elem);
+        int64_t a_val = reference_evaluate(c_pos, k_pos, extent, modeA);
+        int64_t b_val = reference_evaluate(c_pos, k_pos, extent, modeB);
+        result += a_val * b_val;
+    }
+    return result;
+}
+
+/**
+ * This test verifies the correctness for the C{0,1} = A{3,2,1} * B_{2,3,0} for known (non-random) inputs.
+ */
+int main(int argc, char** argv)
+{
+    typedef double floatTypeA;
+    typedef double floatTypeB;
+    typedef double floatTypeC;
+    typedef double floatTypeCompute;
+
+    lwdaDataType_t typeA = LWDA_R_64F;
+    lwdaDataType_t typeB = LWDA_R_64F;
+    lwdaDataType_t typeC = LWDA_R_64F;
+    lwtensorComputeType_t typeCompute = LWTENSOR_R_MIN_64F;
+
+    floatTypeCompute alpha = (floatTypeCompute)1.0f;
+    floatTypeCompute beta  = (floatTypeCompute)0.f;
+
+    /**********************
+     * Computing: C_{0,1} = alpha * A_{3,2,1} B_{2,3,0} + beta * C_{0,1}
+     **********************/
+
+    std::vector<int> modeC{'0', '1'};
+    std::vector<int> modeA{'3', '2', '1'};
+    std::vector<int> modeB{'2', '3', '0'};
+    int nmodeA = modeA.size();
+    int nmodeB = modeB.size();
+    int nmodeC = modeC.size();
+
+    std::unordered_map<int, int64_t> extent;
+    extent['0'] = argc < 2 ? 2 : atoi(argv[1]);
+    extent['1'] = argc < 3 ? 2 : atoi(argv[2]);
+    extent['2'] = argc < 4 ? 2 : atoi(argv[3]);
+    extent['3'] = argc < 5 ? 2 : atoi(argv[4]);
+
+    std::vector<int64_t> extentC;
+    for (auto mode : modeC)
+        extentC.push_back(extent[mode]);
+    std::vector<int64_t> extentA;
+    for (auto mode : modeA)
+        extentA.push_back(extent[mode]);
+    std::vector<int64_t> extentB;
+    for (auto mode : modeB)
+        extentB.push_back(extent[mode]);
+
+    /**********************
+     * Allocating data
+     **********************/
+
+    size_t elementsA = 1;
+    for (auto mode : modeA)
+        elementsA *= extent[mode];
+    size_t elementsB = 1;
+    for (auto mode : modeB)
+        elementsB *= extent[mode];
+    size_t elementsC = 1;
+    for (auto mode : modeC)
+        elementsC *= extent[mode];
+
+    size_t sizeA = sizeof(floatTypeA) * elementsA;
+    size_t sizeB = sizeof(floatTypeB) * elementsB;
+    size_t sizeC = sizeof(floatTypeC) * elementsC;
+
+    void *A_d, *B_d, *C_d;
+    HANDLE_LWDA_ERROR(lwdaMalloc((void**) &A_d, sizeA));
+    HANDLE_LWDA_ERROR(lwdaMalloc((void**) &B_d, sizeB));
+    HANDLE_LWDA_ERROR(lwdaMalloc((void**) &C_d, sizeC));
+
+    floatTypeA *A = (floatTypeA*) malloc(sizeof(floatTypeA) * elementsA);
+    floatTypeB *B = (floatTypeB*) malloc(sizeof(floatTypeB) * elementsB);
+    floatTypeC *C = (floatTypeC*) malloc(sizeof(floatTypeC) * elementsC);
+    floatTypeC *D = (floatTypeC*) malloc(sizeof(floatTypeC) * elementsC);
+
+    if (A == NULL || B == NULL || C == NULL)
+    {
+        printf("Error: Host allocation of A or C.\n");
+        return -1;
+    }
+
+    /*******************
+     * Initialize data
+     *******************/
+
+    for (size_t i = 0; i < elementsA; i++)
+        A[i] = (double) i;
+    for (size_t i = 0; i < elementsB; i++)
+        B[i] = (double) i;
+    for (size_t i = 0; i < elementsC; i++)
+        C[i] = (double) i;
+
+    HANDLE_LWDA_ERROR(lwdaMemcpy(A_d, A, sizeA, lwdaMemcpyHostToDevice));
+    HANDLE_LWDA_ERROR(lwdaMemcpy(B_d, B, sizeB, lwdaMemcpyHostToDevice));
+    HANDLE_LWDA_ERROR(lwdaMemcpy(C_d, C, sizeC, lwdaMemcpyHostToDevice));
+
+    /*************************
+     * lwTENSOR
+     *************************/ 
+
+    lwtensorHandle_t handle;
+    HANDLE_ERROR(lwtensorInit(&handle));
+
+    /**********************
+     * Create Tensor Descriptors
+     **********************/
+
+    lwtensorTensorDescriptor_t descA;
+    HANDLE_ERROR(lwtensorInitTensorDescriptor(&handle,
+                 &descA,
+                 nmodeA,
+                 extentA.data(),
+                 NULL,/*stride*/
+                 typeA, LWTENSOR_OP_IDENTITY));
+
+    lwtensorTensorDescriptor_t descB;
+    HANDLE_ERROR(lwtensorInitTensorDescriptor(&handle,
+                 &descB,
+                 nmodeB,
+                 extentB.data(),
+                 NULL,/*stride*/
+                 typeB, LWTENSOR_OP_IDENTITY));
+
+    lwtensorTensorDescriptor_t descC;
+    HANDLE_ERROR(lwtensorInitTensorDescriptor( &handle,
+                 &descC,
+                 nmodeC,
+                 extentC.data(),
+                 NULL,/*stride*/
+                 typeC, LWTENSOR_OP_IDENTITY));
+
+    /**********************************************
+     * Retrieve the memory alignment for each tensor
+     **********************************************/ 
+
+     uint32_t alignmentRequirementA;
+     HANDLE_ERROR(lwtensorGetAlignmentRequirement(&handle,
+                  A_d,
+                  &descA,
+                  &alignmentRequirementA));
+
+     uint32_t alignmentRequirementB;
+     HANDLE_ERROR(lwtensorGetAlignmentRequirement(&handle,
+                  B_d,
+                  &descB,
+                  &alignmentRequirementB));
+
+     uint32_t alignmentRequirementC;
+     HANDLE_ERROR(lwtensorGetAlignmentRequirement(&handle,
+                  C_d,
+                  &descC, 
+                  &alignmentRequirementC));
+
+    /*******************************
+     * Create Contraction Descriptor
+     *******************************/
+
+    lwtensorContractionDescriptor_t desc;
+    HANDLE_ERROR(lwtensorInitContractionDescriptor(&handle, 
+                 &desc,
+                 &descA, modeA.data(), alignmentRequirementA,
+                 &descB, modeB.data(), alignmentRequirementB,
+                 &descC, modeC.data(), alignmentRequirementC,
+                 &descC, modeC.data(), alignmentRequirementC,
+                 typeCompute));
+
+    /**************************
+    * Set the algorithm to use
+    ***************************/
+
+    lwtensorContractionFind_t find;
+    HANDLE_ERROR(lwtensorInitContractionFind( 
+                 &handle, &find, 
+                 (lwtensorAlgo_t) 0));
+
+    /**********************
+     * Query workspace
+     **********************/
+
+    size_t worksize = 0;
+    HANDLE_ERROR(lwtensorContractionGetWorkspace(&handle,
+                 &desc,
+                 &find,
+                 LWTENSOR_WORKSPACE_RECOMMENDED, (size_t*)&worksize));
+
+    void *work = nullptr;
+    if (worksize > 0)
+    {
+        if (lwdaSuccess != lwdaMalloc(&work, worksize))
+        {
+            work = nullptr;
+            worksize = 0;
+        }
+    } 
+
+    /**************************
+     * Create Contraction Plan
+     **************************/
+
+    lwtensorContractionPlan_t plan;
+    HANDLE_ERROR(lwtensorInitContractionPlan(&handle,
+                 &plan,
+                 &desc,
+                 &find,
+                 worksize));
+
+    /**********************
+     * Run
+     **********************/
+
+    HANDLE_LWDA_ERROR(lwdaMemcpy(C_d, C, sizeC, lwdaMemcpyHostToDevice));
+    HANDLE_LWDA_ERROR(lwdaDeviceSynchronize());
+
+    HANDLE_ERROR(lwtensorContraction(&handle,
+                              &plan,
+                              (void*) &alpha, A_d, B_d,
+                              (void*) &beta,  C_d, C_d, 
+                              work, worksize, 0 /* stream */));
+
+    HANDLE_LWDA_ERROR(lwdaMemcpyAsync(C, C_d, sizeof(floatTypeC) * elementsC, lwdaMemcpyDeviceToHost, 0 /* stream */));
+    lwdaDeviceSynchronize();
+
+    for (size_t i = 0; i < elementsC; i++) {
+        double ref = reference_callwlation(modeA, modeB, modeC, extent, i);
+        printf("%s:%d> %d %f %f\n", __FILE__, __LINE__, static_cast<int>(i), static_cast<double>(C[i]), ref);
+    }
+
+
+    /*************************/
+
+
+    if (A) free(A);
+    if (B) free(B);
+    if (C) free(C);
+    if (A_d) lwdaFree(A_d);
+    if (B_d) lwdaFree(B_d);
+    if (C_d) lwdaFree(C_d);
+    if (work) lwdaFree(work);
+
+    return 0;
+}

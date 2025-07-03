@@ -1,0 +1,41 @@
+// dof_simple.cg
+// 021025 - From Joe
+//
+//   Originally: ?? instructions - ?? passes
+//   Lwrrently:  33 instructions - 28 passes - 2 R-regs, 6 H-regs
+//   Optimal:    ?? instructions - ?? passes
+
+struct v2fconnector : vertex2fragment {
+  float2 TEX0 : TEX0;
+};
+
+fragout main(v2fconnector v2f,
+             uniform float scale, uniform float bias,
+             uniform texobj2D colortex,
+             uniform texobj2D depthtex) {
+  fragout f2f;
+
+  half z = f1tex2D(depthtex, v2f.TEX0);
+  half coc = abs(z * scale + bias);
+  half2 cocNE = half2(coc, 0.5*coc);
+  half2 cocNW = half2(-0.5*coc, coc);
+  half2 cocx = half2(coc,0);
+  half2 cocy = half2(0,coc);
+
+  fixed4 center = f4tex2D(colortex, v2f.TEX0, cocx, cocy);
+  fixed4 ne     = f4tex2D(colortex, v2f.TEX0+cocNE, cocx, cocy);
+  fixed4 sw     = f4tex2D(colortex, v2f.TEX0-cocNE, cocx, cocy);
+  fixed4 nw     = f4tex2D(colortex, v2f.TEX0+cocNW, cocx, cocy);
+  fixed4 se     = f4tex2D(colortex, v2f.TEX0-cocNW, cocx, cocy);
+
+  // this is laid out weird in to maximize precision in the 12-bit register combiners
+  f2f.col = center*0.5 + (ne*0.25 + sw*0.25 + nw*0.25 + se*0.25)*0.5;
+
+//  f2f.col = center;
+//  f2f.col = f4tex2D(colortex, half2(v2f.TEX0.x, v2f.TEX0.y));
+//  f2f.col = half4(z,z,z,1);
+//  f2f.col = half4(coc,coc,coc,1);
+
+  return f2f;
+}
+

@@ -1,0 +1,973 @@
+//
+// Copyright 2020 LWPU Corporation. All rights reserved.
+//
+
+#include <cfloat>
+#include <sstream>
+#include <string>
+
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+#include "inference.h"
+#include "layers_inline.h"
+#include "luminance.h"
+#include "rgbaverage.h"
+#ifndef IRAY_BUILD
+#include <g_lwconfig.h>
+#include <corelib/system/LwdaDriver.h>
+#include <exp/context/DeviceContext.h>
+#endif
+
+namespace optix_exp {
+
+// list of CTA MNK tile size parameters supported by denoiser colwolution kernels
+#define CTA_TILE_NCONFIGS 7
+static int ctaTileSizes[2*CTA_TILE_NCONFIGS][3] = {
+    {256,128,32},{256,64,64},{256,64,32},{128,128,64},{128,128,32},{128,64,64},{64,32,64},      // volta/turing
+    {256,128,32},{256,64,64},{256,64,32},{128,128,64},{128,128,32},{128,64,64},{64,32,64} };    // ampere
+
+#define D_LAYERS 17
+
+// for each colwolution layer there is a corresponding index into the CTA tile size table.
+// there are 7 volta and 7 turing kernels. for ampere there are 7 kernels with turing instructions and 7
+// kernels with ampere instructions (total 14 available for ampere).
+// the last index is used for replacing the 17th layer index in kernel prediction mode.
+// layers 1-5 are modified perf results, these are fused colw+pool layers where only two kernel sets are created.
+// layer 1 gets the bigger configuration, layers 2-5 the smaller one.
+static int xmma_cta_ts_sm70[D_LAYERS+1] = {2, 2, 4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 4, 2, 2, 2, /* */ 2};
+static int xmma_cta_ts_sm75[D_LAYERS+1] = {2, 2, 4, 4, 4, 4, 5, 5, 0, 0, 0, 0, 4, 4, 1, 2, 6, /* */ 4};
+static int xmma_cta_ts_sm80[D_LAYERS+1] = {2, 9, 11, 11, 11, 11, 5, 5, 10, 7, 11, 11, 10, 10, 1, 9, 6, /* */ 11};
+static int xmma_cta_ts_sm86[D_LAYERS+1] = {2, 9, 4, 4, 4, 4, 5, 5, 11, 11, 0, 4, 11, 11, 1, 5, 6, /* */ 11};
+
+Denoise::Denoise( DeviceContextLogger& logger )
+    : m_logger( logger )
+{
+}
+
+OptixResult Denoise::init( ErrorDetails& errDetails )
+{
+    LWdevice device;
+    corelib::lwdaDriver().LwCtxGetDevice( &device );
+
+    int m_lwComputeCapabilityMajor, m_lwComputeCapabilityMinor;
+    corelib::lwdaDriver().LwDeviceGetAttribute( &m_lwComputeCapabilityMajor, LW_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device );
+    corelib::lwdaDriver().LwDeviceGetAttribute( &m_lwComputeCapabilityMinor, LW_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device );
+    m_deviceInfo.m_device_capability = m_lwComputeCapabilityMajor * 10 + m_lwComputeCapabilityMinor;
+
+    corelib::lwdaDriver().LwDeviceGetAttribute( &m_deviceInfo.m_lwMaxThreadsPerMultiProcessor,
+                                                LW_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR, device );
+    corelib::lwdaDriver().LwDeviceGetAttribute( &m_deviceInfo.m_lwMaxThreadsPerBlock,
+                                                LW_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK, device );
+    corelib::lwdaDriver().LwDeviceGetAttribute( &m_deviceInfo.m_lwMultiProcessorCount,
+                                                LW_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device );
+
+    m_blendFactor     = 0.f;
+    m_intensityFactor = 0;
+    m_hdrAverageColor = 0;
+    m_kpnModelAB      = 0;
+    m_denoiseAlpha    = OPTIX_DENOISER_ALPHA_MODE_COPY;
+
+    m_inputLayer      = 0;
+    m_outputLayer     = 0;
+
+    int rtv;
+    corelib::lwdaDriver().LwDriverGetVersion(&rtv);
+    char name[200];
+    corelib::lwdaDriver().LwDeviceGetName( name, sizeof( name ), device );
+    m_logger.callback( DeviceContextLogger::Print, "DENOISER",
+                       corelib::stringf( "using lwca device \"%s\" (%d.%d), buffers: %s, %s colwolution, rt v%d", name,
+                                         m_lwComputeCapabilityMajor, m_lwComputeCapabilityMinor,
+                                         halfEnabled() ? "fp16" : "fp32",
+                                         m_deviceInfo.m_device_capability >= 70 ? "xmma/xmma-jit" : "Winograd",
+                                         rtv ) .c_str() );
+    return OPTIX_SUCCESS;
+}
+
+OptixResult Denoise::deleteLayers( ErrorDetails& errDetails )
+{
+    OptixResult result = OPTIX_SUCCESS;
+
+    for( AELayer* layer : m_layers )
+    {
+        OptixResult res = layer->destroy( errDetails );
+        if( !result )
+            result = res;
+        delete layer;
+    }
+
+    m_layers.clear();
+    m_colwLayers.clear();
+    m_inputLayer  = nullptr;
+    m_outputLayer = nullptr;
+
+    return result;
+}
+
+
+Denoise::~Denoise()
+{
+}
+
+OptixResult Denoise::destroy( ErrorDetails& errDetails )
+{
+    OptixResult result = deleteLayers( errDetails );
+
+    return result;
+}
+
+OptixResult Denoise::run( void* smem, size_t smemSize, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    OptixResult result = OPTIX_SUCCESS;
+
+#ifdef DENOISE_DEBUG_TIMING
+    float ttime = 0.f;
+    int maxNameLen = 0;
+    for( size_t l = 0; l < m_layers.size(); ++l )
+        if( std::string( m_layers[l]->name() ).length() > maxNameLen )
+            maxNameLen = std::string( m_layers[l]->name() ).length();
+#endif
+    for( size_t l = 0; l < m_layers.size(); ++l )
+    {
+        if( !m_layers[l]->isFused() )
+        {
+            if( result = m_layers[l]->fwdEval( smem, stream, errDetails ) )
+                break;
+#ifdef DENOISE_DEBUG_TIMING
+            ttime += m_layers[l]->getEvalTime();
+            int color = std::string( m_layers[l]->name() ).find( "colw" ) != std::string::npos ? 92 : 0;
+            int sl = std::string( m_layers[l]->name() ).length();
+            char fusedName[4] = {};
+            if( m_layers[l]->m_nextLayer && m_layers[l]->m_nextLayer->isFused() )
+            {
+                fusedName[0] = '+';
+                fusedName[1] = m_layers[l]->m_nextLayer->name()[0];
+                fusedName[2] = m_layers[l]->m_nextLayer->name()[1];
+                sl += 3;
+            }
+            char space[16] = {};
+            for( int s=0; sl < maxNameLen+3; sl++, s++ )
+                space[s] = ' ';
+            m_logger.callback( DeviceContextLogger::Print, "DENOISER",
+                corelib::stringf( "\033[%dmlayer %s%s%s[%d x %d x %d]:\t%f ms\033[0m",
+                color,
+                m_layers[l]->name(), fusedName, space,
+                m_layers[l]->m_outWidth, m_layers[l]->m_outHeight, m_layers[l]->m_outChannels,
+                m_layers[l]->getEvalTime() ).c_str() );
+#endif
+        }
+    }
+#ifdef DENOISE_DEBUG_TIMING
+    m_logger.callback( DeviceContextLogger::Print, "DENOISER",
+                       corelib::stringf( "total time over all layers %f ms", ttime ).c_str() );
+#endif
+    return result;
+}
+
+OptixResult Denoise::allocateLayers( std::vector<AELayer*>&            layers,
+                                     std::vector<AEColwolutionLayer*>& colwLayers,
+                                     int                               width,
+                                     int                               height,
+                                     int                               inpChannels,
+                                     int                               outChannels,
+                                     ErrorDetails&                     errDetails ) const
+{
+    OptixResult result = OPTIX_SUCCESS;
+
+    if( m_layerData.getVersion() == 0 )  // layerdata not initialized
+        return errDetails.logDetails( OPTIX_ERROR_DENOISER_NOT_INITIALIZED, "layerdata not initialized" );
+
+    if( m_layerData.getNumLayers() != D_LAYERS )
+        return errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE,
+                                      corelib::stringf( "wrong number of layers in weights: %d, expected %d",
+                                                        m_layerData.getNumLayers(), D_LAYERS ) );
+
+    bool tc = m_deviceInfo.m_device_capability >= 70 ? true : false;
+
+    int           minsize     = m_layerData.needsS2D() ? 64 : 32;
+    AEInputLayer* input_layer = new AEInputLayer( "input", m_deviceInfo );
+    OptixResult res = input_layer->init( width, height, m_layerData.needsS2D() ? inpChannels : M8tc( inpChannels, tc ),
+                                         minsize, errDetails );
+    if( !result )
+        result = res;
+    layers.push_back( input_layer );
+
+    const float alpha = m_layerData.getLeakyReluAlpha();
+    AEColwolutionLayer::Activation activation =
+        alpha == 0.f ? AEColwolutionLayer::ACTIVATION_RELU : AEColwolutionLayer::ACTIVATION_LEAKY_RELU;
+
+    int f = 0;
+
+    if( m_layerData.getVersion() == 2 || m_layerData.getVersion() == 3 || m_layerData.getVersion() == 4 )
+    {  // upscale concatenation
+        std::vector<AELayer*> pool_layers;
+
+        if( m_layerData.needsS2D() )
+        {
+            AESpaceToDepth* sd  = new AESpaceToDepth( "s2d", m_deviceInfo );
+            OptixResult     res = sd->init( layers.back(), errDetails );
+            if( !result )
+                result = res;
+            layers.push_back( sd );
+            pool_layers.push_back( sd );
+            sd->setOutBufferShared( false );  // it is a skip connection target
+        }
+        else
+        {
+            pool_layers.push_back( input_layer );
+            input_layer->setOutBufferShared( false );
+        }
+
+        AEColwolutionLayer* ecolw0 = new AEColwolutionLayer( "ecolw0", m_deviceInfo );
+        OptixResult         res =
+            ecolw0->init( layers.back(), 3, m_layerData.getFeatureSize( f++ ), activation, alpha, errDetails );
+        if( !result )
+            result = res;
+        layers.push_back( ecolw0 );
+        colwLayers.push_back( ecolw0 );
+
+        // encoder
+        for( int i = 1; i <= 5; i++ )
+        {
+            char lname[256];
+            sprintf( lname, "ecolw%d", i );
+            AEColwolutionLayer* cl = new AEColwolutionLayer( lname, m_deviceInfo );
+            OptixResult         res =
+                cl->init( layers.back(), 3, m_layerData.getFeatureSize( f++ ), activation, alpha, errDetails );
+            if( !result )
+                result = res;
+            layers.push_back( cl );
+            colwLayers.push_back( cl );
+
+            sprintf( lname, "epool%d", i );
+            AEPoolingLayer* pl = new AEPoolingLayer( lname, m_deviceInfo );
+            res = pl->init( layers.back(), false, errDetails );       // max pooling
+            if( !result )
+                result = res;
+            pl->setOutBufferShared( false );  // it is a skip connection target
+            layers.push_back( pl );
+            pool_layers.push_back( pl );
+        }
+
+        // decoder
+        for( int i = 0; i <= 4; i++ )
+        {
+            char lname[256];
+            sprintf( lname, "unpool%d", 4 + i );
+            AEUpscaleConcat* us  = new AEUpscaleConcat( lname, m_deviceInfo );
+            // linear interpolation upscale concat
+            OptixResult res = us->init( layers.back(), pool_layers[pool_layers.size() - 2 - i], false, errDetails );
+            if( !result )
+                result = res;
+            layers.push_back( us );
+
+            if( i > 0 && m_layerData.hKPN() )
+            {
+                sprintf( lname, "reformat%d", 4 + i );
+                AEKernelpredictionReformat * ref = new AEKernelpredictionReformat( lname, m_deviceInfo );
+                if( ( !m_layerData.needsS2D() || findLayer( layers, "s2d" )->m_outChannels < 16 ) && i == 4 )
+                    ref->setOutBufferShared( false );
+                res = ref->init( layers.back(), m_layerData.hKPNClipWeights(), errDetails );
+                if( !result )
+                    result = res;
+                layers.push_back( ref );
+            }
+
+            sprintf( lname, "colw%d", 6 + i );
+            AEColwolutionLayer* cl = new AEColwolutionLayer( lname, m_deviceInfo );
+            res = cl->init( us, 3, m_layerData.getFeatureSize( f++ ), activation, alpha, errDetails );
+            if( !result )
+                result = res;
+            layers.push_back( cl );
+            colwLayers.push_back( cl );
+
+            sprintf( lname, "colw%db", 6 + i );
+            AEColwolutionLayer* clb = new AEColwolutionLayer( lname, m_deviceInfo );
+            res = clb->init( layers.back(), 3, m_layerData.getFeatureSize( f++ ), activation, alpha, errDetails );
+            if( !result )
+                result = res;
+            layers.push_back( clb );
+            colwLayers.push_back( clb );
+        }
+
+        unsigned int colwOutChannels = M8tc( m_layerData.getFeatureSize( f++ ), tc );
+
+        AEColwolutionLayer* colw_out = new AEColwolutionLayer( "out_colw", m_deviceInfo );
+        res = colw_out->init( layers.back(), 3, colwOutChannels, AEColwolutionLayer::ACTIVATION_NONE, 0.0f, errDetails );
+        if( !result )
+            result = res;
+        layers.push_back( colw_out );
+        colwLayers.push_back( colw_out );
+
+        if( m_layerData.needsD2S() )
+        {
+            AEDepthToSpace* ds  = new AEDepthToSpace( "d2s", m_deviceInfo );
+            OptixResult     res = ds->init( layers.back(), m_layerData.hKPN() ? colwOutChannels/4 : outChannels, m_layerData.getNumHiddenChannels(), errDetails );
+            if( !result )
+                result = res;
+            layers.push_back( ds );
+        }
+    }
+    else if( m_layerData.getVersion() == 0 )
+    {
+        OptixResult res = errDetails.logDetails( OPTIX_ERROR_DENOISER_NOT_INITIALIZED,
+                                                 "layers of autoencoder network not initialized" );
+        if( !result )
+            result = res;
+    }
+    else
+    {
+        OptixResult res = errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE, corelib::stringf( "unsupported version of "
+                                                                                              "autoencoder "
+                                                                                              "network %d",
+                                                                                              m_layerData.getVersion() ) );
+        if( !result )
+            result = res;
+    }
+
+    if( result )
+    {
+        for( size_t i = 0; i < layers.size(); i++ )
+        {
+            layers[i]->destroy( errDetails );
+            delete layers[i];
+        }
+        layers.clear();
+        colwLayers.clear();
+    }
+
+    for( size_t i = 0; i < layers.size(); i++ )
+    {
+        layers[i]->m_nextLayer = i < layers.size() - 1 ? layers[i + 1] : 0;
+        layers[i]->setHdrScale( m_layerData.m_hdrScale );
+    }
+
+    // set up XMMA kernel configurations for all colwolution layers
+
+    int* kIdx = 0;
+    switch( m_deviceInfo.m_device_capability )
+    {
+        case 70:
+            kIdx = xmma_cta_ts_sm70;
+            break;
+        case 75:
+            kIdx = xmma_cta_ts_sm75;
+            break;
+        case 80:
+            kIdx = xmma_cta_ts_sm80;
+            break;
+        case 82:
+        case 86:
+            kIdx = xmma_cta_ts_sm86;
+            break;
+    }
+
+    if( kIdx )
+    {
+        for( size_t i = 0; i < D_LAYERS; i++ )
+        {
+            int index = kIdx[i];
+            // in KPN mode the last colw layer is bigger and we change the default kernel index
+            if( i == D_LAYERS-1 && m_layerData.hKPN() )
+                index = kIdx[D_LAYERS];
+            int arch;
+            if( m_deviceInfo.m_device_capability >= 80 )
+                arch = index < CTA_TILE_NCONFIGS ? 75 : 80;
+            else
+                arch = m_deviceInfo.m_device_capability >= 75 ? 75 : 70;
+            colwLayers[i]->setupXMMA( arch, ctaTileSizes[index][0], ctaTileSizes[index][1], ctaTileSizes[index][2] );
+        }
+    }
+
+    // tensor size check
+    for( size_t i = 0; i < colwLayers.size(); i++ )
+    {
+        size_t tsize = (size_t)colwLayers[i]->m_input->m_outChannels *
+                       (size_t)colwLayers[i]->m_outWidth * (size_t)colwLayers[i]->m_outHeight *
+                       (size_t)colwLayers[i]->getBufferTypeSize();
+        if( tsize > std::numeric_limits<unsigned int>::max() )
+            return errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE,
+                corelib::stringf("input resolution too large, tensor size %llu (max %llu)", tsize, std::numeric_limits<unsigned int>::max() ) );
+    }
+
+    return result;
+}
+
+inline size_t a128( size_t x )
+{
+    return ( x | 128u ) & ~127u;
+}
+
+// callwlate memory required for layer buffers ("scratch")
+OptixResult Denoise::callwlateMemoryResources( int           width,
+                                               int           height,
+                                               int           inpChannels,
+                                               int           outChannels,
+                                               size_t*       smemSize,
+                                               size_t*       wmemSize,
+                                               ErrorDetails& errDetails ) const
+{
+    OptixResult result = OPTIX_SUCCESS;
+
+    if( m_layerData.getVersion() == 0 )  // layerdata not initialized
+        return errDetails.logDetails( OPTIX_ERROR_DENOISER_NOT_INITIALIZED, "layerdata not initialized" );
+
+    std::vector<AELayer*>            layers;
+    std::vector<AEColwolutionLayer*> colwLayers;
+
+    if( result = allocateLayers( layers, colwLayers, width, height, inpChannels, outChannels, errDetails ) )
+        return result;
+
+    size_t workMemSize = 0;
+    size_t max_size = 0, total_alloc = 0;
+    for( size_t l = 0; l < layers.size(); ++l )
+    {
+        size_t wss;
+        if( ( result = layers[l]->getWorkspaceSize( wss, errDetails ) ) )
+            return result;
+        workMemSize = max( workMemSize, wss );
+        size_t l_mem = layers[l]->getBufferTypeSize() * layers[l]->m_outChannels * layers[l]->m_outHeight * layers[l]->m_outWidth;
+        if( layers[l]->getOutSize() > max_size && layers[l]->isOutBufferShared() )
+            max_size = layers[l]->getOutSize();
+        if( !layers[l]->isOutBufferShared() )
+            total_alloc += a128( l_mem );
+    }
+    *wmemSize = 0;
+    // add size for two floats per RGB channel in KPN mode, AB parameters
+    *wmemSize += a128( sizeof(float) * 6 );
+    for( size_t l = 0; l < colwLayers.size(); l++ )
+        *wmemSize += a128( colwLayers[l]->getFilterWeightsSize() ) + a128( colwLayers[l]->getBiasSize() );
+
+    for( size_t l = 0; l < layers.size(); ++l )
+        delete layers[l];
+    total_alloc += a128( workMemSize );
+    total_alloc += a128( max_size ) * 2;
+    total_alloc += a128( sizeof( float ) );      // default intensity memory location (1.f)
+    total_alloc += a128( sizeof( float ) * 9 );  // default hdr transform memory location (1.f)
+    *smemSize = total_alloc;
+
+    if( *wmemSize > *smemSize )
+        *smemSize = *wmemSize;  // we use smem temporarily for colwerting weights, see setWeights
+
+    return result;
+}
+
+static void s_alloc( size_t* m, size_t sz, size_t* lwr_allocated )
+{
+    sz = a128( sz );
+    *m = *lwr_allocated;
+    *lwr_allocated += sz;
+}
+
+OptixResult Denoise::createLayers( int width, int height, int inpChannels, ErrorDetails& errDetails )
+{
+    OptixResult result = OPTIX_SUCCESS;
+
+    const unsigned int outChannels = 3;
+
+    if( result = allocateLayers( m_layers, m_colwLayers, width, height, inpChannels, outChannels, errDetails ) )
+        return result;
+
+    m_inputLayer  = (AEInputLayer*)m_layers.front();
+    m_outputLayer = m_layers.back();
+
+    m_outputLayer->m_width  = m_inputLayer->m_width;
+    m_outputLayer->m_height = m_inputLayer->m_height;
+
+    m_logger.callback( DeviceContextLogger::Print, "DENOISER",
+                       corelib::stringf( "layers created for resolution %d %d, inp %d, outp %d", width, height, inpChannels, outChannels )
+                           .c_str() );
+
+    // ------------------ assign memory indices to layers (for given resolution)
+
+    size_t lwr_mem = 0;
+
+    size_t workMemSize = 0;
+
+    size_t max_size = 0;
+    for( size_t l = 0; l < m_layers.size(); ++l )
+    {
+        if( !m_layers[l]->isOutBufferShared() )
+        {
+            size_t oidx;
+            s_alloc( &oidx, m_layers[l]->getOutSize(), &lwr_mem );
+            m_layers[l]->setOutDataIndex( oidx );
+        }
+        else if( m_layers[l]->getOutSize() > max_size )
+            max_size = m_layers[l]->getOutSize();
+        size_t wss;
+        result = m_layers[l]->getWorkspaceSize( wss, errDetails );
+        if( result )
+            return result;
+        workMemSize = max( workMemSize, wss );
+    }
+
+    size_t colwBufferIndex[2], workMemIndex;
+    s_alloc( &colwBufferIndex[0], max_size, &lwr_mem );
+    s_alloc( &colwBufferIndex[1], max_size, &lwr_mem );
+    s_alloc( &m_intensityIndex, sizeof( float ), &lwr_mem );
+    s_alloc( &m_hdrTransformIndex, 9*sizeof( float ), &lwr_mem );
+    s_alloc( &workMemIndex, workMemSize, &lwr_mem );
+
+    // assign re-used memory for other layers
+    int bc = 0;
+    for( size_t l = 0; l < m_layers.size(); ++l )
+    {
+        if( std::string( m_layers[l]->name() ).find( "reformat" ) == std::string::npos && m_layers[l]->isOutBufferShared() )
+            m_layers[l]->setOutDataIndex( colwBufferIndex[( bc++ ) & 1] );
+        m_layers[l]->setWorkmemIndex( workMemIndex );
+        m_layers[l]->setWorkmemSize( workMemSize );
+        m_layers[l]->setIntensityIndex( m_intensityIndex );
+    }
+    m_inputLayer->setHdrTransformIndex( m_hdrTransformIndex );
+
+    m_sizeWmemRequired = 0;
+    m_sizeWmemRequired += a128( sizeof(float) * 6 );    // KPN AB parameters
+    for( size_t l = 0; l < m_colwLayers.size(); l++ )
+        m_sizeWmemRequired += a128( m_colwLayers[l]->getFilterWeightsSize() ) + a128( m_colwLayers[l]->getBiasSize() );
+
+    if( m_layerData.hKPN() )
+    {
+        // reformat8 writes to s2d, which has insufficient size (24 channels). however epool1 is
+        // allocated after s2d, so we actually combine epool1+s2d for reformat8 (25/32 channels required).
+        // in case of upscale2x there is no s2d layer, and with three input channels (s2d -> 12) the
+        // size is insufficient, here reformat8 has it's own memory.
+        const char * refo[] = {"reformat5", "reformat6", "reformat7", "reformat8" };
+        const char * tbuf[] = {"epool4",    "epool3",    "epool2",    "s2d" };
+        for( int i=0; i < 4; i++ )
+        {
+            AELayer * rl = findLayer( refo[i] ), * tl = findLayer( tbuf[i] );
+            if( rl->isOutBufferShared() )
+            {
+                if( !tl )
+                    return errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "s2d layer not found for reformat8" );
+                rl->setOutDataIndex( tl->getOutDataIndex() );
+                unsigned int lsize = tl->getOutSize();
+                if( i == 3 )
+                    lsize += findLayer( "epool1" )->getOutSize();
+                if( lsize < rl->getOutSize() )
+                    return errDetails.logDetails( OPTIX_ERROR_INTERNAL_ERROR, "insufficient size for reformat" );
+            }
+        }
+        // KPN pass: begin of re-usable memory
+        m_kpnScratchOutIndex = colwBufferIndex[0] == m_layers.back()->getOutDataIndex() ? colwBufferIndex[1] : colwBufferIndex[0];
+    }
+
+    m_sizeSmemRequired = lwr_mem;
+
+    return result;
+}
+
+OptixResult Denoise::initializeWeights( void* smem, size_t smemSize, void* wmem, size_t wmemSize, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    if( !m_inputLayer )
+        return errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE, "layers have not been created" );
+
+    if( wmemSize < m_sizeWmemRequired )
+        return errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE,
+                                      corelib::stringf( "insufficient size of weight memory (%llu given), need %llu "
+                                                        "bytes",
+                                                        static_cast<unsigned long long>( wmemSize ),
+                                                        static_cast<unsigned long long>( m_sizeWmemRequired ) ) );
+
+    if( smemSize < m_sizeWmemRequired )  // scratch memory used for weight colwersion
+        return errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE,
+                                      corelib::stringf( "insufficient size of scratch memory (%llu given), need %llu "
+                                                        "bytes",
+                                                        static_cast<unsigned long long>( smemSize ),
+                                                        static_cast<unsigned long long>( m_sizeWmemRequired ) ) );
+    OptixResult result   = OPTIX_SUCCESS;
+    size_t      lwr_wmem = 0;
+
+    // initialize global kpn (a, b) weights.
+    if( m_layerData.hKPN() )
+    {
+        m_kpnModelAB = (float*) ( (char*)wmem + lwr_wmem );
+        LWresult lwret;
+        if( lwret = corelib::lwdaDriver().LwMemcpyHtoDAsync( (LWdeviceptr)m_kpnModelAB, m_layerData.m_hdrTransform,
+            sizeof( float ) * 6, stream ) )
+            return errDetails.logDetails( lwret, "copy of global per RGB-channel weights from host to device failed" );
+        lwr_wmem += a128( sizeof( float ) * 6 );
+    }
+
+    for( size_t l = 0; l < m_colwLayers.size(); l++ )
+    {
+        m_colwLayers[l]->setFilterWeightsPtr( &( (char*)wmem )[lwr_wmem] );
+        lwr_wmem += m_colwLayers[l]->getFilterWeightsSize();
+        m_colwLayers[l]->setBiasPtr( &( (char*)wmem )[lwr_wmem] );
+        lwr_wmem += m_colwLayers[l]->getBiasSize();
+
+        if( result = m_colwLayers[l]->setWeights( smem, m_layerData.m_data[l].m_weights, m_layerData.m_data[l].m_tdim, stream, errDetails ) )
+            return result;
+
+        if( result = m_colwLayers[l]->setBias( m_layerData.m_data[l].m_bias, m_layerData.m_data[l].m_tdim[0], stream, errDetails ) )
+            return result;
+    }
+
+    return OPTIX_SUCCESS;
+}
+
+OptixResult Denoise::initializeHDR( const OptixImage2D* inputImage, void* smem, size_t smemSize, lwdaStream_t stream, ErrorDetails& errDetails )
+{
+    LWresult lwret;
+
+    if( m_intensityFactor )
+    {
+        if( lwret = corelib::lwdaDriver().LwMemcpyDtoDAsync( ( LWdeviceptr )smem + m_intensityIndex,
+                                                             ( LWdeviceptr )m_intensityFactor, sizeof( float ), stream ) )
+            return errDetails.logDetails( lwret, "copy of intensity factor failed" );
+    }
+    else
+    {
+        if( OptixResult res = denoiseAutoexposure( inputImage, (float*)( (char*)smem + m_intensityIndex ), smem, smemSize, stream, errDetails ) )
+            return res;
+    }
+
+    if( m_hdrAverageColor )
+    {
+        if( lwret = corelib::lwdaDriver().LwMemcpyDtoDAsync( ( LWdeviceptr )smem + m_hdrTransformIndex,
+                                                             ( LWdeviceptr )m_hdrAverageColor, 3 * sizeof( float ), stream ) )
+            return errDetails.logDetails( lwret, "copy of hdr average color failed" );
+    }
+    else
+    {
+        if( OptixResult res = denoiseRGBAverage( inputImage, (float*)( (char*)smem + m_hdrTransformIndex ), smem, smemSize, stream, errDetails ) )
+            return res;
+    }
+
+    for( unsigned int l = 0; l < m_layers.size(); l++ )
+        if( m_layers[l]->needsZeroInit() )
+            if( lwret = corelib::lwdaDriver().LwMemsetD8Async( ( LWdeviceptr )smem + m_layers[l]->getOutDataIndex(),
+                                                               0, m_layers[l]->getOutSize(), stream ) )
+                return errDetails.logDetails( lwret, "clearing of layer failed" );
+
+    // initialize global kpn (a, b) weights. they follow the RGB channel log averages in memory
+    if( m_layerData.hKPN() )
+    {
+        LWresult lwret;
+        if( lwret = corelib::lwdaDriver().LwMemcpyDtoDAsync( ( LWdeviceptr )smem+m_hdrTransformIndex+sizeof(float)*3,
+            ( LWdeviceptr )m_kpnModelAB, sizeof( float ) * 6, stream ) )
+            return errDetails.logDetails( lwret, "copy of global per RGB-channel weights to device failed" );
+    }
+
+#ifdef DENOISE_DEBUG_TIMING
+    m_kpnTime = 0.f;
+#endif
+
+    return OPTIX_SUCCESS;
+}
+
+OptixResult Denoise::runAOV( const OptixImage2D* inputLayer,
+                             const OptixImage2D* outputLayer,
+                             const OptixImage2D* prevDenoised,
+                             const OptixImage2D* flow,
+                             AEKernelpredictionReformat* refl[5],
+                             int                 inOp,
+                             int                 outOp,
+                             unsigned int        inputOffsetX,
+                             unsigned int        inputOffsetY,
+                             void*               scratch,
+                             size_t              scratchSizeInBytes,
+                             lwdaStream_t        stream,
+                             ErrorDetails&       errDetails )
+{
+    OptixResult result = OPTIX_SUCCESS;
+#ifdef DENOISE_DEBUG_TIMING
+    float dstime = 0.f, upstime = 0.f, kptime = 0.f;
+#endif
+    deviceInfo di = m_deviceInfo;
+    if( m_deviceInfo.m_device_capability == 61 )
+        di.m_device_capability = 50;            // force fp32 buffers on GP102, GP104
+    size_t offset = m_kpnScratchOutIndex;
+    AEInputLayer _inputLayerNotransform( "_input_notransform", di );
+    if( result = _inputLayerNotransform.init( m_inputLayer->m_width, m_inputLayer->m_height, 4, 64, errDetails ) )
+        return result;
+    size_t kpnInputLayerNotransformOutIndex;
+    s_alloc( &kpnInputLayerNotransformOutIndex, _inputLayerNotransform.getOutSize(), &offset );
+    _inputLayerNotransform.setOutDataIndex( kpnInputLayerNotransformOutIndex );
+
+    // initialize AOV (copy values from AOV, no transformation)
+    _inputLayerNotransform.setChannelRGB( inputLayer, 0, inOp, scratch, stream );
+
+    // ---------------
+
+    AEInputLayer inputLayerNotransform( "input_notransform", di );
+    if( m_layerData.isUpscale() )
+    {
+        AEUpscale upscale( "inputUpscale", di );
+        if( result = upscale.init( &_inputLayerNotransform, errDetails ) )
+            return result;
+        s_alloc( &kpnInputLayerNotransformOutIndex, upscale.getOutSize(), &offset );
+        upscale.setOutDataIndex( kpnInputLayerNotransformOutIndex );
+        upscale.fwdEval( scratch, stream, errDetails );
+
+        inputLayerNotransform.init( upscale.m_outWidth, upscale.m_outHeight, upscale.m_outChannels, 64, errDetails );
+    }
+    else
+        inputLayerNotransform.init( m_inputLayer->m_width, m_inputLayer->m_height, 4, 64, errDetails );
+
+    inputLayerNotransform.setOutDataIndex( kpnInputLayerNotransformOutIndex );
+
+    AEInputLayer pdNotransform( "prevDenoised_notransform", di );
+    if( prevDenoised )          // temporal
+    {
+        if( result = pdNotransform.init( m_inputLayer->m_width, m_inputLayer->m_height, 3, 64, errDetails ) )
+            return result;
+        size_t kpnPdNotransformOutIndex;
+        s_alloc( &kpnPdNotransformOutIndex, pdNotransform.getOutSize(), &offset );
+        pdNotransform.setOutDataIndex( kpnPdNotransformOutIndex );
+
+        // initialize previous denoised image, flow transformed (no transformation)
+        pdNotransform.setChannelMotion( prevDenoised, flow, 0, 3, inOp, scratch, stream );
+    }
+
+    // downsampling with pooling layer (average pooling)
+    AELayer * dsl[5];
+    dsl[0] = &inputLayerNotransform;
+    for( int i=1; i < 5; i++ )
+    {
+        AEPoolingLayer * pl = new AEPoolingLayer( "dsl", di );
+        if( result = pl->init( dsl[i-1], true, errDetails ) )
+            return result;
+        size_t plOutIndex;
+        s_alloc( &plOutIndex, pl->getOutSize(), &offset );
+        pl->setOutDataIndex( plOutIndex );
+        pl->fwdEval( scratch, stream, errDetails );
+        dsl[i] = pl;
+#ifdef DENOISE_DEBUG_TIMING
+        dstime += pl->getEvalTime();
+#endif
+    }
+
+    // apply hKPN
+    size_t kpnOut;
+    s_alloc( &kpnOut, dsl[0]->getOutSize(), &offset );
+    for( int i=0; i < 5; i++ )
+    {
+        AELayer * cdsl = dsl[4-i];           // starts with 1/16, last is fullres image
+
+        AEWeightedFilterForward wff( "wff", m_deviceInfo );
+        if( result = wff.init( cdsl, refl[i], i == 4 && prevDenoised ? &pdNotransform : 0, 5, errDetails ) )
+            return result;
+        wff.setOutDataIndex( kpnOut );
+        wff.fwdEval( scratch, stream, errDetails );
+#ifdef DENOISE_DEBUG_TIMING
+        kptime += wff.getEvalTime();
+#endif
+        if( i == 0 )
+        {
+            LWresult lwret;
+            if( lwret = corelib::lwdaDriver().LwMemcpyDtoDAsync(
+                ( LWdeviceptr )(char*)scratch+cdsl->getOutDataIndex(),
+                ( LWdeviceptr )(char*)scratch+wff.getOutDataIndex(),
+                wff.getOutSize(), stream ) )                          // replace 1/16
+                return errDetails.logDetails( lwret, "copy of filtered result in KPN failed" );
+        }
+        else
+        {
+            AEKernelpredictionUpsample upsample( "kp_upsample", m_deviceInfo );
+            if( result = upsample.init( dsl[5-i], &wff, refl[i], errDetails ) )
+                return result;
+            upsample.setOutDataIndex( cdsl->getOutDataIndex() );      // replace 1/8, 1/4, 1/2, 1/1 image
+            upsample.fwdEval( scratch, stream, errDetails );
+#ifdef DENOISE_DEBUG_TIMING
+            upstime += upsample.getEvalTime();
+#endif
+        }
+    }
+
+    AEInputLayer outLayer( "outLayer", m_deviceInfo );
+    if( result = outLayer.init( inputLayerNotransform.m_width, inputLayerNotransform.m_height,
+                                inputLayerNotransform.m_outChannels, 64, errDetails ) )
+        return result;
+    outLayer.setOutDataIndex( inputLayerNotransform.getOutDataIndex() );
+    outLayer.copyOutput( outputLayer, inputLayer, inputOffsetX, inputOffsetY,
+                         0, outOp == IMPORT_A ? 1 : 3, outOp, scratch, stream, m_layerData.isUpscale(), m_blendFactor );
+
+    for( int i=1; i < 5; i++)
+    {
+        dsl[i]->destroy( errDetails );
+        delete dsl[i];
+    }
+#ifdef DENOISE_DEBUG_TIMING
+    m_logger.callback( DeviceContextLogger::Print, "DENOISER",
+        corelib::stringf( "\033[93mAOV downsample %.3f, wff %.3f, upsample %.3f, total %.3f ms\033[0m",
+        dstime, kptime, upstime, dstime + kptime + upstime ).c_str() );
+    m_kpnTime += dstime + kptime + upstime;
+#endif
+    return result;
+}
+
+OptixResult Denoise::denoiseTile( const OptixImage2D* inputLayers,
+                                  unsigned int        numInputLayers,
+                                  const OptixImage2D* flow,
+                                  const OptixImage2D* outputLayer,
+                                  const OptixImage2D* hiddenLayerIn,
+                                  const OptixImage2D* hiddenLayerOut,
+                                  unsigned int        inputOffsetX,
+                                  unsigned int        inputOffsetY,
+                                  void*               scratch,
+                                  size_t              scratchSizeInBytes,
+                                  lwdaStream_t        stream,
+                                  ErrorDetails&       errDetails )
+{
+    OptixResult result = OPTIX_SUCCESS;
+
+    if( !m_inputLayer )
+        return errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE, "layers have not been created" );
+
+    if( scratchSizeInBytes < m_sizeSmemRequired )
+        return errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE,
+                                      corelib::stringf( "insufficient size of scratch memory (%llu given), need %llu "
+                                                        "bytes",
+                                                        static_cast<unsigned long long>( scratchSizeInBytes ),
+                                                        static_cast<unsigned long long>( m_sizeSmemRequired ) ) );
+
+    if( result = initializeHDR( &inputLayers[0], scratch, scratchSizeInBytes, stream, errDetails ) )
+        return result;
+
+    unsigned int infLayers = ( m_layerData.getNumInfChannels() - m_layerData.getNumHiddenChannels() + 1 ) / 3;
+    if( m_layerData.getNumHiddenChannels() )
+    {
+        if( !hiddenLayerIn )
+            return errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE, "hiddenLayerIn null" );
+        if( !hiddenLayerOut )
+            return errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE, "hiddenLayerOut null" );
+    }
+
+    if( numInputLayers < infLayers )
+        return errDetails.logDetails( OPTIX_ERROR_ILWALID_VALUE,
+                                      corelib::stringf( "wrong number of input layers %u, expected %u", numInputLayers, infLayers ) );
+
+    for( int i = 0; i < infLayers; i++ )
+    {
+        if( i == m_layerData.getTemporalLayerIndex() )
+            m_inputLayer->setChannelMotion( &inputLayers[i], flow, i*3, 3, m_layerData.m_importOperations[i], scratch, stream );
+        else
+            m_inputLayer->setChannelRGB( &inputLayers[i], i*3, m_layerData.m_importOperations[i], scratch, stream );
+    }
+
+    if( m_layerData.getNumHiddenChannels() )
+    {
+        m_inputLayer->setChannelMotion( hiddenLayerIn, flow, infLayers*3, getNumChannels( *hiddenLayerIn ), IMPORT_XYZ, scratch, stream );
+        ((AEDepthToSpace*)findLayer( "d2s" ))->setHiddenOutput( hiddenLayerOut,
+                inputOffsetX * (m_layerData.isUpscale() ? 2:1), inputOffsetY * (m_layerData.isUpscale() ? 2:1) );
+    }
+
+    if( result = run( scratch, scratchSizeInBytes, stream, errDetails ) )
+        return result;
+
+    // Write back the last 8 channels of d2s to hiddenLayer if d2s does not support fused writeback
+    if( m_layerData.getNumHiddenChannels() && !((AEDepthToSpace*)findLayer( "d2s" ))->writesHiddenSeparate() )
+        findLayer( "d2s" )->copyOutput( hiddenLayerOut, 0, inputOffsetX, inputOffsetY, 48, m_layerData.getNumHiddenChannels(), IMPORT_XYZ, scratch, stream, m_layerData.isUpscale() );
+
+    // inference finished - process AOVs
+
+    if( !m_layerData.hKPN() )
+    {
+        m_outputLayer->copyOutput( outputLayer, &inputLayers[0], inputOffsetX, inputOffsetY, 0, 3,
+                                   m_layerData.exportOp(), scratch, stream, m_layerData.isUpscale(), m_blendFactor );
+
+        if( m_denoiseAlpha != OPTIX_DENOISER_ALPHA_MODE_COPY && getNumChannels( inputLayers[0] ) == 4 )
+        {
+            // clear albedo and normal (rgb overwritten below), set to constant value which works good
+            if( numInputLayers > 1 && ( result = m_inputLayer->setBuffer( scratch, stream, 0.5f, errDetails ) ) )
+                return result;
+
+            m_inputLayer->setChannelRGB( &inputLayers[0], 0, m_layerData.alphaImportOp(), scratch, stream );
+
+            int tli = m_layerData.getTemporalLayerIndex();
+            if( tli != -1 )
+                m_inputLayer->setChannelMotion( &inputLayers[tli], flow, tli*3, 3, m_layerData.alphaImportOp(), scratch, stream );
+            
+            if( result = run( scratch, scratchSizeInBytes, stream, errDetails ) )
+                return result;
+
+            m_outputLayer->copyOutput( outputLayer, &inputLayers[0], inputOffsetX, inputOffsetY, 0, 1, m_layerData.alphaImportOp(), scratch, stream, m_layerData.isUpscale() );
+        }
+    }
+    else
+    {
+        // initialize 5x5 filter weights from inference pass
+        AEKernelpredictionReformat refd2s( m_layerData.getTemporalLayerIndex() == -1 ? "refd2s" : "refd2s-temporal", m_deviceInfo );
+        refd2s.init( findLayer( "d2s" ), m_layerData.hKPNClipWeights(), errDetails );
+        refd2s.setOutDataIndex( findLayer( "d2s" )->getOutDataIndex() );
+
+        AEKernelpredictionReformat * refl[5];
+        refl[0] = (AEKernelpredictionReformat*)findLayer( "reformat5" );
+        refl[1] = (AEKernelpredictionReformat*)findLayer( "reformat6" );
+        refl[2] = (AEKernelpredictionReformat*)findLayer( "reformat7" );
+        refl[3] = (AEKernelpredictionReformat*)findLayer( "reformat8" );
+        refl[4] = &refd2s;
+
+        // denoise beauty
+        unsigned int lwrOut = 0;
+        if( result = runAOV( &inputLayers[0], &outputLayer[lwrOut],
+                             m_layerData.getTemporalLayerIndex() != -1 ? &inputLayers[m_layerData.getTemporalLayerIndex()] : 0, flow,
+                             refl, IMPORT_HDR, m_layerData.exportOp(),
+                             inputOffsetX, inputOffsetY, scratch, scratchSizeInBytes, stream, errDetails ) )
+            return result;
+
+        // denoise AOVs
+        for( unsigned int aov=infLayers; aov < numInputLayers; aov++ )
+        {
+            const OptixImage2D * prevDenoisedAOV = m_layerData.getTemporalLayerIndex() != -1 ? &inputLayers[aov++] : 0;
+            if( result = runAOV( &inputLayers[aov], &outputLayer[++lwrOut],
+                                 prevDenoisedAOV, flow,
+                                 refl, IMPORT_HDR, m_layerData.exportOp(),
+                                 inputOffsetX, inputOffsetY, scratch, scratchSizeInBytes, stream, errDetails ) )
+                return result;
+        }
+
+        // kpn denoise alpha.
+        // mode 1: handle alpha like an AOV.
+        // mode 2: keep albedo/normal, re-run inference on alpha.
+        // mode 3: clear albedo/normal to 0.5, re-run inference on alpha.
+        if( m_denoiseAlpha != OPTIX_DENOISER_ALPHA_MODE_COPY && getNumChannels( inputLayers[0] ) == 4 )
+        {
+            if( m_denoiseAlpha == OPTIX_DENOISER_ALPHA_MODE_FULL_DENOISE_PASS ||
+                m_denoiseAlpha == (OptixDenoiserAlphaMode)3 )           // undolwmented mode
+            {
+                if( m_denoiseAlpha == OPTIX_DENOISER_ALPHA_MODE_FULL_DENOISE_PASS )
+                {
+                    // clear input/s2d
+                    if( result = initializeHDR( &inputLayers[0], scratch, scratchSizeInBytes, stream, errDetails ) )
+                        return result;
+
+                    // re-initialize albedo/normal
+                    for( int i = 1; i < infLayers; i++ )
+                        if( i != m_layerData.getTemporalLayerIndex() && i != m_layerData.getHiddenLayerIndex() )
+                            m_inputLayer->setChannelRGB( &inputLayers[i], i*3, m_layerData.m_importOperations[i], scratch, stream );
+                }
+                else if( m_denoiseAlpha == (OptixDenoiserAlphaMode)3 )  // undolwmented mode
+                {
+                    if( numInputLayers > 1 && ( result = m_inputLayer->setBuffer( scratch, stream, 0.5f, errDetails ) ) )
+                        return result;
+                }
+                // Copy alpha into RGB = AAA
+                m_inputLayer->setChannelRGB( &inputLayers[0], 0, m_layerData.alphaImportOp(), scratch, stream );
+
+                // Set up previous alpha to warped AAA
+                int tli = m_layerData.getTemporalLayerIndex();
+                if( tli != -1 )
+                    m_inputLayer->setChannelMotion( &inputLayers[tli], flow, tli*3, 3, m_layerData.alphaImportOp(), scratch, stream );
+
+                int hli = m_layerData.getHiddenLayerIndex();
+                if( hli != -1 )
+                    m_inputLayer->setChannelMotion( hiddenLayerIn, flow, hli*3, getNumChannels( *hiddenLayerIn ), m_layerData.alphaImportOp(), scratch, stream );
+
+                // Run inference model on AAA input
+                if( result = run( scratch, scratchSizeInBytes, stream, errDetails ) )
+                    return result;
+            }
+            result = runAOV( &inputLayers[0], &outputLayer[0],
+                             m_layerData.getTemporalLayerIndex() != -1 ? &inputLayers[m_layerData.getTemporalLayerIndex()] : 0, flow,
+                             refl, IMPORT_A, IMPORT_A,
+                             inputOffsetX, inputOffsetY, scratch, scratchSizeInBytes, stream, errDetails );
+        }
+    }
+
+    return result;
+}
+
+};  // namespace optix_exp

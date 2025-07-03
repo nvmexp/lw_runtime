@@ -1,0 +1,148 @@
+// _LWRM_COPYRIGHT_BEGIN_
+//
+// Copyright 2009 by LWPU Corporation.  All rights reserved.  All
+// information contained herein is proprietary and confidential to LWPU
+// Corporation.  Any use, reproduction, or disclosure without the written
+// permission of LWPU Corporation is prohibited.
+//
+// _LWRM_COPYRIGHT_END_
+//
+
+package Mc;
+
+import "regs.proto";
+import "all_dcl.proto";
+import "fifo.proto";
+import "gr.proto";
+import "rc.proto";
+import "vbios.proto";
+
+// From Lwcm.h
+enum CpuType
+{
+    LW_CPU_UNKNOWN        = 0x00000000;
+    LW_CPU_P5             = 0x00000001;
+    LW_CPU_P55            = 0x00000002;
+    LW_CPU_P6             = 0x00000003;
+    LW_CPU_P2             = 0x00000004;
+    LW_CPU_P2XC           = 0x00000005;
+    LW_CPU_CELA           = 0x00000006;
+    LW_CPU_P3             = 0x00000007;
+    LW_CPU_P3_INTL2       = 0x00000008;
+    LW_CPU_P4             = 0x00000009;
+    LW_CPU_CORE2          = 0x00000010;
+    LW_CPU_CELN_M16H      = 0x00000011;
+    LW_CPU_CORE2_EXTRM    = 0x00000012;
+    LW_CPU_ATOM           = 0x00000013;
+    LW_CPU_IA64           = 0x00000020;
+    LW_CPU_K5             = 0x00000030;
+    LW_CPU_K6             = 0x00000031;
+    LW_CPU_K62            = 0x00000032;
+    LW_CPU_K63            = 0x00000033;
+    LW_CPU_K7             = 0x00000034;
+    LW_CPU_K8             = 0x00000035;
+    LW_CPU_K10            = 0x00000036;
+    LW_CPU_K11            = 0x00000037;
+    LW_CPU_K8_NON_OPTERON = 0x00000000;
+    LW_CPU_K8_OPTERON     = 0x00000001;
+    LW_CPU_C6             = 0x00000060;
+    LW_CPU_C62            = 0x00000061;
+    LW_CPU_GX             = 0x00000070;
+    LW_CPU_M1             = 0x00000071;
+    LW_CPU_M2             = 0x00000072;
+    LW_CPU_MGX            = 0x00000073;
+    LW_CPU_TM_CRUSOE      = 0x00000080;
+    LW_CPU_PPC603         = 0x00000090;
+    LW_CPU_PPC604         = 0x00000091;
+    LW_CPU_PPC750         = 0x00000092;
+};
+
+message LwcdData
+{   
+    optional LwcdRmData  rm_data  = 1;
+    // optional LwcdKmdData kmd_data = 2;
+};
+
+message LwcdRmData
+{
+    optional GlobalInfo       global_info   = 1;
+    optional LwrrentStateInfo lwrrent_state = 2;
+    // Data from rc errors, the journal, etc.
+    repeated Dcl.DclMsg       dcl_data      = 3;
+    optional Vbios.OCAData    vbios_data    = 4;
+    optional Gr.Sigdump       sigdump       = 5;
+    optional Gr.StatusInfo    gr_status     = 6;
+    repeated SignalInfo       sig_info      = 7;
+    //TODO: more to come
+}
+
+message GlobalInfo
+{
+    optional uint32                chiprev              = 1;
+    optional uint32                northbridge_id       = 2;
+    repeated Regs.RegsAndMem       regs                 = 3;
+    optional uint32                bios_revision        = 4;
+    optional uint32                bios_oem_revision    = 5;
+    optional CpuType               cpu_type             = 6;
+    optional uint32                num_physical_cpus    = 7;
+    optional uint32                num_logical_cpus     = 8;
+    optional uint32                total_error          = 9;
+    repeated Rc.RobustChannelError last_errors          = 10;
+
+    enum RmGlobal_Bitfields
+    {
+        FLAG_OVERCLOCKMEM     = 1;
+        FLAG_OVERCLOCKG       = 2;
+        FLAG_OVERCLOCKS       = 4;
+        FLAG_OVERCLOCKR       = 8;
+        FLAG_FUSEERROR        = 0x10;
+        FLAG_SLIMODE          = 0x20;
+        FLAG_MULTIMON         = 0x40;
+        FLAG_POWERMIZER       = 0x80;
+        FLAG_DAMAGEROUTINE    = 0x100;
+        FLAG_DEVIDHACK        = 0x200;
+        FLAG_DRIVERHACKFORSLI = 0x400;
+    }
+    optional RmGlobal_Bitfields flags                   = 11;
+}
+
+message LwrrentStateInfo
+{
+    optional Rc.GenericData     generic_data        = 1;
+    optional Fifo.FifoStatus    fifo_status         = 2;
+    repeated Regs.RegsAndMem    regs                = 3;
+    // Legacy OCA info. Not on all chips.
+    optional uint32             pgraph_status       = 4;
+    optional uint32             pgraph_intr         = 5;
+    optional uint32             pgraph_ctx_control  = 6;
+    optional uint32             pgraph_ctx_user     = 7;
+    optional uint32             pgraph_trapped_addr = 8;
+    optional uint64             trapped_data        = 9;
+};
+
+message SignalInfo
+{
+    // From rmcd.h
+    enum SignalType
+    {
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_ZTLF_PM_ZADDR_WAIT_0 = 0;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_ZTLF_PM_ZADDR_WAIT_1 = 1;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_ZTLF_PM_ZADDR_WAIT_2 = 2;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_ZTLF_PM_ZADDR_WAIT_3 = 3;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_ZTLF_PM_ZADDR_WAIT_4 = 4;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_ZTLF_PM_ZADDR_WAIT_5 = 5;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_ZTLF_PM_ZADDR_WAIT_6 = 6;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_ZTLF_PM_ZADDR_WAIT_7 = 7;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_CSB_PM_CADDR_WAIT_0  = 8;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_CSB_PM_CADDR_WAIT_1  = 9;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_CSB_PM_CADDR_WAIT_2  = 10;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_CSB_PM_CADDR_WAIT_3  = 11;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_CSB_PM_CADDR_WAIT_4  = 12;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_CSB_PM_CADDR_WAIT_5  = 13;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_CSB_PM_CADDR_WAIT_6  = 14;
+        GPU_SIGNAL_INFO_SIGNAL_TYPE_CSB_PM_CADDR_WAIT_7  = 15;
+    };
+
+    optional SignalType signal = 1;
+    optional uint32     value  = 2;
+};

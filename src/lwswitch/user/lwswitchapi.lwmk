@@ -1,0 +1,43 @@
+##############################################################################
+#
+# _LWRM_COPYRIGHT_BEGIN_
+#
+# Copyright 2017-2020 by LWPU Corporation.  All rights reserved.  All
+# information contained herein is proprietary and confidential to LWPU
+# Corporation.  Any use, reproduction, or disclosure without the written
+# permission of LWPU Corporation is prohibited.
+#
+# _LWRM_COPYRIGHT_END_
+#
+##############################################################################
+
+# Set this to 1 to enable the cross-platform user API
+LWSWITCH_ENABLE_CROSS_PLATFORM_USER_API ?= 0
+
+ifdef LW_EXTERNAL_DRIVER_SOURCE
+  LWSWITCHAPI_SOURCE_ROOT = $(LW_EXTERNAL_DRIVER_SOURCE)
+else
+  LWSWITCHAPI_SOURCE_ROOT = $(LW_SOURCE)
+endif
+
+LWSWITCH_CLIENT_PROVIDES_VERSION_COMPAT ?= 0
+ifeq ($(LWSWITCH_CLIENT_PROVIDES_VERSION_COMPAT),1)
+    LW_DEFINES += LWSWITCH_CLIENT_PROVIDES_VERSION_COMPAT
+endif
+
+ifeq ($(LW_TARGET_OS_FAMILY), Unix)
+ include $(LWSWITCHAPI_SOURCE_ROOT)/drivers/lwswitch/user/Linux/lwswitchapi_$(LW_TARGET_OS_FAMILY_LOWER_CASE).mk
+endif
+
+ifeq ($(LW_TARGET_OS_FAMILY), Windows)
+    include $(LWSWITCHAPI_SOURCE_ROOT)/drivers/lwswitch/user/Windows/lwswitchapi_$(LW_TARGET_OS_FAMILY_LOWER_CASE).mk
+endif
+
+LWSWITCHAPI_INCLUDES += $(OUTPUTDIR)
+
+SOURCES += $(LWSWITCHAPI_SOURCES)
+
+LWSWITCHAPI_OBJECTS := $(call BUILD_OBJECT_LIST,$(LWSWITCHAPI_SOURCES))
+$(LWSWITCHAPI_OBJECTS): LW_INCLUDES += $(LWSWITCHAPI_INCLUDES)
+$(LWSWITCHAPI_OBJECTS): LW_INCLUDES += $(LWSWITCHAPI_SOURCE_ROOT)/sdk/lwpu/inc
+$(LWSWITCHAPI_OBJECTS): LW_INCLUDES += $(LWSWITCHAPI_SOURCE_ROOT)/drivers/common/inc

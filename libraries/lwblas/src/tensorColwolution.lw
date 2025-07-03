@@ -1,0 +1,406 @@
+
+#include <lwtensor.h>
+
+#include <iostream>
+
+#include <lwtensor/internal/types.h>
+#include <lwtensor/internal/context.h>
+#include <lwtensor/internal/utilEx.h>
+#include <lwtensor/internal/exceptions.h>
+#include <lwtensor/internal/export.h>
+#include <lwtensor/internal/defines.h>
+
+namespace LWTENSOR_NAMESPACE
+{
+
+}
+
+extern "C" EXPORT_INTERNAL_SYMBOL
+lwtensorStatus_t lwtensorInitColwolvedMode(
+        const lwtensorHandle_t* handle,
+        lwtensorColwolvedMode_t* colwolvedMode,
+        uint32_t padding, int32_t stride, int32_t dilation,
+        int32_t modeActivation, int32_t modeFilter, int32_t modeOutput)
+{
+    if (colwolvedMode == nullptr)
+        RETURN_STATUS(LWTENSOR_STATUS_ILWALID_VALUE);
+
+    const auto ctx = reinterpret_cast<const LWTENSOR_NAMESPACE::Context*>(handle);
+    if (ctx == nullptr || !ctx->isInitialized())
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_INITIALIZED);
+     
+    colwolvedMode->modeActivation= modeActivation;
+    colwolvedMode->modeFilter= modeFilter;
+    colwolvedMode->modeOutput= modeOutput;
+    colwolvedMode->padding = padding;
+    colwolvedMode->stride = stride;
+    colwolvedMode->dilation= dilation;
+    return LWTENSOR_STATUS_SUCCESS;
+}
+
+
+extern "C" EXPORT_INTERNAL_SYMBOL
+lwtensorStatus_t lwtensorInitColwolutionDescriptor(
+        const lwtensorHandle_t* handle,
+        lwtensorContractionDescriptor_t *desc,
+        const lwtensorTensorDescriptor_t *descActivation_, const int32_t modeActivation[], uint32_t alignmentRequirementA,
+        const lwtensorTensorDescriptor_t *descFilter_,     const int32_t modeFilter[],     uint32_t alignmentRequirementB,
+        const lwtensorTensorDescriptor_t *descOutput_,     const int32_t modeOutput[],     uint32_t alignmentRequirementC,
+        const uint32_t numColwolvedModes, const lwtensorColwolvedMode_t colwolvedModes[],
+        const uint32_t numGroupes,
+        const lwtensorComputeType_t typeCompute,
+        const lwtensorOperator_t opOut)
+{
+    try
+    {
+        using namespace LWTENSOR_NAMESPACE;
+
+        const auto ctx = reinterpret_cast<const Context*>(handle);
+        if (ctx == nullptr || !ctx->isInitialized())
+        {
+            return handleError(LWTENSOR_STATUS_NOT_INITIALIZED, "Handle must be initialized.");
+        }
+
+        if (opOut != LWTENSOR_OP_IDENTITY)
+        {
+            return ctx->logError(LWTENSOR_STATUS_NOT_SUPPORTED, "Only identity op is supported right now.");
+        }
+
+        if (modeActivation == nullptr || modeFilter == nullptr || modeOutput == nullptr)
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "modeActivation, modeFilter, and modeOutput must not be nullptr.");
+        }
+
+        if( desc == nullptr )
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "colwolution descriptor must not be nullptr.");
+        }
+
+        if( descActivation_ == nullptr || descFilter_ == nullptr || descOutput_ == nullptr )
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "descActivation, descFilter and descOutput must not be nullptr.");
+        }
+
+        //TODO verify output extent
+
+        const TensorDescriptor * descActivation = reinterpret_cast<const TensorDescriptor *>(descActivation_);
+        const TensorDescriptor * descFilter = reinterpret_cast<const TensorDescriptor *>(descFilter_);
+        const TensorDescriptor * descOutput = reinterpret_cast<const TensorDescriptor *>(descOutput_);
+
+        auto numModesActivation = descActivation->getNumModes();
+        auto numModesFilter = descFilter->getNumModes();
+        auto numModesOutput = descOutput->getNumModes();
+
+
+        ColwolutionDescriptor descColw;
+        descColw.unsetInitialized();
+
+        HANDLE_ERROR(descColw.init(
+                ctx,
+                numModesActivation, modeActivation,
+                numModesFilter, modeFilter,
+                numModesOutput, modeOutput,
+                numColwolvedModes, colwolvedModes,
+                numGroupes,
+                typeCompute, opOut));
+
+        const extent_type numGroups = descColw.numGroups_;
+
+        const mode_type* modeActivations = descColw.modeActivation_;
+        const mode_type* modeFilter = descColw.modeFilter_;
+        const mode_type* modeOutput = descColw.modeOutput_;
+
+        mode_type filterInputMode = LWTENSOR_ILWALID_MODE; // e.g., corresponds to 'C' in lwDNN notation
+        for (uint32_t i=0; i < descActivation->getNumModes(); ++i)
+        {
+            for (uint32_t j=0; j < descFilter->getNumModes(); ++j)
+            {
+                if (modeActivations[i] == modeFilter[j])
+                {
+                    filterInputMode = modeActivations[i];
+                    break;
+                }
+            }
+        }
+
+        if (filterInputMode == LWTENSOR_ILWALID_MODE )
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "No input-filter-mode (i.e., 'C') found.\n");
+        }
+
+        mode_type filterOutputMode = LWTENSOR_ILWALID_MODE; // e.g., corresponds to 'K' in lwDNN notation
+        for (uint32_t i=0; i < descOutput->getNumModes(); ++i)
+        {
+            for (uint32_t j=0; j < descFilter->getNumModes(); ++j)
+            {
+                if (modeOutput[i] == modeFilter[j])
+                {
+                    filterOutputMode = modeOutput[i];
+                    break;
+                }
+            }
+        }
+
+        if (filterOutputMode == LWTENSOR_ILWALID_MODE)
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "No output-filter-mode (i.e., 'K') found.\n");
+        }
+        // Notice: Only the filterInputMode and filterOutputMode can be "grouped"
+
+        // TODO assert that only one of such mode exists.
+
+        ExtentMap extent;
+        for(uint32_t i=0; i < descActivation->getNumModes(); ++i)
+        {
+            if( modeActivations[i] == filterInputMode )
+            {
+                if (descActivation->getExtent(i) % numGroups != 0)
+                {
+                    return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Number of input filters is not divisible by the number of groups.\n");
+                }
+                extent[filterInputMode] = descActivation->getExtent(i) / numGroups; // C mode
+                // I think it is very strange that lwDNN mixes the notion of free and
+                // contrcontracted modes; I'd advocate to make 'grouped' modes first-class
+                // citizens and expose them directly (e.g., via an 'g' mode)
+            }
+            else
+            {
+                extent[modeActivations[i]] = descActivation->getExtent(i);
+            }
+        }
+
+        for (uint32_t i=0; i < descFilter->getNumModes(); ++i)
+        {
+            if (modeFilter[i] == filterInputMode)
+            {
+                if (descFilter->getExtent(i) != extent.at(modeFilter[i]))
+                {
+                    return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "extent of 'C' does not match between the activation and the filter.\n");
+                }
+            }
+            else if (modeFilter[i] == filterOutputMode)
+            {
+                // split this mode into two
+                if (descFilter->getExtent(i) % numGroups != 0)
+                {
+                    return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Number of output filters is not divisible by the number of groups.\n");
+                }
+                extent[filterOutputMode] = descFilter->getExtent(i) / numGroups;
+            }else
+            {
+                extent[modeFilter[i]] = descFilter->getExtent(i);
+            }
+        }
+
+        for (uint32_t i=0; i < descOutput->getNumModes(); ++i)
+        {
+            if (modeOutput[i] == filterOutputMode)
+            {
+                if (extent[filterOutputMode] != (descOutput->getExtent(i) / numGroups))
+                {
+                    return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "extent of 'K' does not match between output and the activation.\n");
+                }
+            }
+            else
+            {
+                extent[modeOutput[i]] = descOutput->getExtent(i);
+            }
+        }
+
+        const uint32_t numGroupedModes = numGroups > 1 ? 1 : 0;
+
+        /********************************************************************
+         * Create Ouput descriptor (this would not be necessary if numGroups == 1).
+         ********************************************************************/
+        const uint32_t numModesC= descOutput->getNumModes() + numGroupedModes;
+        std::array<mode_type,TensorDescriptor::LWTENSOR_MAX_MODES_EXTERNAL> modeC;
+        std::array<extent_type,TensorDescriptor::LWTENSOR_MAX_MODES_EXTERNAL> extentC;
+        std::array<stride_type, TensorDescriptor::LWTENSOR_MAX_MODES_EXTERNAL> strideC;
+
+        for (uint32_t i=0, j = 0; i < descOutput->getNumModes(); ++i, ++j)
+        {
+            if (numGroups > 1 && filterOutputMode == modeOutput[i])
+            {
+                // insert grouped mode
+                extentC[j] = numGroups;
+                strideC[j] = extent.at(filterOutputMode) * descOutput->getStride(i);
+                modeC[j] = RESERVED_GROUP_MODE;
+                j++;
+            }
+            extentC[j] = extent.at(modeOutput[i]);
+            strideC[j] = descOutput->getStride(i);
+            modeC[j] = modeOutput[i];
+        }
+        TensorDescriptor descC(
+                numModesC,
+                extentC.data(),
+                strideC.data(),
+                descOutput->getDataType(),
+                descOutput->getOp(),
+                descOutput->getVectorWidth(),
+                descOutput->getVectorModeIndex());
+
+        /********************************************************************
+         * Create filter descriptor (this would not be necessary if numGroups == 1).
+         ********************************************************************/
+        const uint32_t numModesB = descFilter->getNumModes() + numGroupedModes;
+        std::array<mode_type, TensorDescriptor::LWTENSOR_MAX_MODES_EXTERNAL> modeB;
+        std::array<extent_type, TensorDescriptor::LWTENSOR_MAX_MODES_EXTERNAL> extentB;
+        std::array<stride_type, TensorDescriptor::LWTENSOR_MAX_MODES_EXTERNAL> strideB;
+
+        for (uint32_t i=0, j = 0; i < descFilter->getNumModes(); ++i, ++j)
+        {
+            if (numGroups > 1 && filterOutputMode == modeFilter[i])
+            {
+                // insert grouped mode
+                extentB[j] = numGroups;
+                strideB[j] = extent.at(filterOutputMode) * descFilter->getStride(i);
+                modeB[j] = RESERVED_GROUP_MODE;
+                j++;
+            }
+            extentB[j] = extent.at(modeFilter[i]);
+            strideB[j] = descFilter->getStride(i);
+            modeB[j] = modeFilter[i];
+        }
+        TensorDescriptor descB(
+                numModesB,
+                extentB.data(),
+                strideB.data(),
+                descFilter->getDataType(),
+                descFilter->getOp(),
+                descFilter->getVectorWidth(),
+                descFilter->getVectorModeIndex());
+
+        /********************************************************************
+         * Create new artificial "colwolved" activation tensor with overlapping strides.
+         ********************************************************************/
+        const uint32_t numModesA = descActivation->getNumModes() + descColw.numColwolvedModes_ + numGroupedModes;
+        if (numModesA > TensorDescriptor::LWTENSOR_MAX_MODES_EXTERNAL)
+        {
+            return handleError(LWTENSOR_STATUS_NOT_SUPPORTED, "Activation tensor has too many modes.\n");
+        }
+
+        std::array<mode_type, TensorDescriptor::LWTENSOR_MAX_MODES_EXTERNAL> modeA;
+        std::array<extent_type, TensorDescriptor::LWTENSOR_MAX_MODES_EXTERNAL> extentA;
+        std::array<stride_type, TensorDescriptor::LWTENSOR_MAX_MODES_EXTERNAL> strideA;
+        for (uint32_t i=0, j = 0; i < descActivation->getNumModes(); ++i, ++j)
+        {
+            const int pos = descColw.findColwolvedMode(modeActivations[i]);
+
+            if (pos == -1) // not a colwolved mode (just copy it)
+            {
+                if (numGroups > 1 && modeActivations[i] == filterInputMode)
+                {
+                    extentA[j] = numGroups;
+                    strideA[j] = extent.at(filterInputMode) * descActivation->getStride(i);
+                    modeA[j] = RESERVED_GROUP_MODE;
+                    j++;
+                }
+                extentA[j] = extent.at(modeActivations[i]);
+                strideA[j] = descActivation->getStride(i);
+                modeA[j] = modeActivations[i];
+            }
+            else
+            {
+                // colwolved mode (i.e., we have to split into two)
+                //TODO use dilation and stride
+                const auto colwolvedMode = descColw.colwolvedModes_[pos];
+                const auto filterMode = colwolvedMode.modeFilter;
+                extentA[j] = extent.at(filterMode);
+                strideA[j] = descActivation->getStride(i) * colwolvedMode.dilation;
+                modeA[j] = filterMode;
+                j++;
+
+                const auto outputMode = colwolvedMode.modeOutput;
+                extentA[j] = extent.at(outputMode);
+                strideA[j] = descActivation->getStride(i) * colwolvedMode.stride;
+                modeA[j] = outputMode;
+            }
+        }
+
+        TensorDescriptor descA(
+                numModesA,
+                extentA.data(),
+                strideA.data(),
+                descActivation->getDataType(),
+                descActivation->getOp(),
+                descActivation->getVectorWidth(),
+                descActivation->getVectorModeIndex());
+        /******************************************************************/
+
+        /*******************************
+         * Create Contraction Descriptor
+         *******************************/
+        return lwtensorInitContractionDescriptor( handle, 
+                    desc,
+                    reinterpret_cast<lwtensorTensorDescriptor_t*>(&descA), modeA.data(), alignmentRequirementA,
+                    reinterpret_cast<lwtensorTensorDescriptor_t*>(&descB), modeB.data(), alignmentRequirementB,
+                    reinterpret_cast<lwtensorTensorDescriptor_t*>(&descC), modeC.data(), alignmentRequirementC,
+                    reinterpret_cast<lwtensorTensorDescriptor_t*>(&descC), modeC.data(), alignmentRequirementC,
+                    typeCompute);
+
+    }
+    catch ( const std::exception& e )
+    {
+        std::cerr << e.what() << std::endl;
+        if( dynamic_cast<const LWTENSOR_NAMESPACE::NotSupported*>(&e) != nullptr )
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+        RETURN_STATUS(LWTENSOR_STATUS_INTERNAL_ERROR);
+    }
+}
+ 
+extern "C" EXPORT_INTERNAL_SYMBOL
+lwtensorStatus_t lwtensorColwolutionGetOutput(
+    const lwtensorHandle_t* handle,
+    const lwtensorColwolutionDescriptor_t *descColw,
+    const lwtensorTensorDescriptor_t      *descActivation,
+    const lwtensorTensorDescriptor_t      *descFilter,
+    uint32_t                              numModes,
+    int64_t                               extent[])
+{
+    try{
+        using namespace LWTENSOR_NAMESPACE;
+        const ColwolutionDescriptor * descColw_ = reinterpret_cast<const ColwolutionDescriptor*>(descColw);
+        const TensorDescriptor * descActivation_ = reinterpret_cast<const TensorDescriptor *>(descActivation); 
+        const TensorDescriptor * descFilter_ = reinterpret_cast<const TensorDescriptor *>(descFilter); 
+
+
+        auto ctx = reinterpret_cast<const Context*>(handle);
+        if (ctx == nullptr || !ctx->isInitialized())
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_INITIALIZED);
+        }
+
+        if( descColw_ == nullptr || descActivation_ == nullptr || descFilter_ == nullptr )
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "descColw, descActivation, and descFilter must not be nullptr.");
+        }
+        if (numModes != descColw_->numModesOutput_)
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "numModes and descColw.numModes do not match.");
+        }
+
+        descColw_->getOutputExtent(descActivation_, descFilter_, extent); 
+
+        return LWTENSOR_STATUS_SUCCESS;
+    }catch ( const std::exception& e )
+    {
+        std::cerr << e.what() << std::endl;
+        if( dynamic_cast<const LWTENSOR_NAMESPACE::NotSupported*>(&e) != nullptr )
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+        RETURN_STATUS(LWTENSOR_STATUS_INTERNAL_ERROR);
+    }
+}
+
+
+
+
+
+
+
+
+

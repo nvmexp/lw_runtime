@@ -1,0 +1,314 @@
+/*
+  STREAM benchmark implementation in LWCA.
+
+    COPY:       a(i) = b(i)                 
+    SCALE:      a(i) = q*b(i)               
+    SUM:        a(i) = b(i) + c(i)          
+    TRIAD:      a(i) = b(i) + q*c(i)        
+
+  It measures the memory system on the device.
+
+  Code based on the code developed by John D. McCalpin
+  http://www.cs.virginia.edu/stream/FTP/Code/stream.c
+
+*/
+
+#define CHECK_LWDART(x) do { \
+  lwdaError_t res = (x); \
+  if(res != lwdaSuccess) { \
+    fprintf(stderr, "LWDART: %s = %d (%s) at (%s:%d)\n", #x, res, lwdaGetErrorString(res),__FILE__,__LINE__); \
+    exit(1); \
+  } \
+} while(0)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <strings.h>
+#include <float.h>
+#include <limits.h>
+#include <lwrand_kernel.h>
+#include "MemoryBandwidthShared.h"
+
+#define MK_STR_INNER(arg) # arg
+#define MK_STR(arg) MK_STR_INNER(arg)
+
+# ifndef MIN
+# define MIN(x,y) ((x)<(y)?(x):(y))
+# endif
+# ifndef MAX
+# define MAX(x,y) ((x)>(y)?(x):(y))
+# endif
+
+#define LD0 0
+#define LD1 1
+#define LD2 2
+#define LD3 3
+
+template<int loadPer,int blkSize,int blkStride,int loadtype>
+__global__ void STREAM_Triad( const REAL* a, const REAL* b, REAL* c, REAL scalar, int len);
+typedef void (*func_Triad)( const REAL* a, const REAL* b, REAL* c, REAL scalar, int len);
+func_Triad Triad_optimal;
+func_Triad Triad_f[4][8][4][4] = {
+{//LD0
+{//STR0
+{ STREAM_Triad<1, BLK0, STR0, LD0>, STREAM_Triad<1, BLK1, STR0, LD0>, STREAM_Triad<1, BLK2, STR0, LD0>, STREAM_Triad<1, BLK3, STR0, LD0> },
+{ STREAM_Triad<2, BLK0, STR0, LD0>, STREAM_Triad<2, BLK1, STR0, LD0>, STREAM_Triad<2, BLK2, STR0, LD0>, STREAM_Triad<2, BLK3, STR0, LD0> },
+{ STREAM_Triad<3, BLK0, STR0, LD0>, STREAM_Triad<3, BLK1, STR0, LD0>, STREAM_Triad<3, BLK2, STR0, LD0>, STREAM_Triad<3, BLK3, STR0, LD0> },
+{ STREAM_Triad<4, BLK0, STR0, LD0>, STREAM_Triad<4, BLK1, STR0, LD0>, STREAM_Triad<4, BLK2, STR0, LD0>, STREAM_Triad<4, BLK3, STR0, LD0> }
+},
+{//STR1
+{ STREAM_Triad<1, BLK0, STR1, LD0>, STREAM_Triad<1, BLK1, STR1, LD0>, STREAM_Triad<1, BLK2, STR1, LD0>, STREAM_Triad<1, BLK3, STR1, LD0> },
+{ STREAM_Triad<2, BLK0, STR1, LD0>, STREAM_Triad<2, BLK1, STR1, LD0>, STREAM_Triad<2, BLK2, STR1, LD0>, STREAM_Triad<2, BLK3, STR1, LD0> },
+{ STREAM_Triad<3, BLK0, STR1, LD0>, STREAM_Triad<3, BLK1, STR1, LD0>, STREAM_Triad<3, BLK2, STR1, LD0>, STREAM_Triad<3, BLK3, STR1, LD0> },
+{ STREAM_Triad<4, BLK0, STR1, LD0>, STREAM_Triad<4, BLK1, STR1, LD0>, STREAM_Triad<4, BLK2, STR1, LD0>, STREAM_Triad<4, BLK3, STR1, LD0> }
+},
+{//STR2
+{ STREAM_Triad<1, BLK0, STR2, LD0>, STREAM_Triad<1, BLK1, STR2, LD0>, STREAM_Triad<1, BLK2, STR2, LD0>, STREAM_Triad<1, BLK3, STR2, LD0> },
+{ STREAM_Triad<2, BLK0, STR2, LD0>, STREAM_Triad<2, BLK1, STR2, LD0>, STREAM_Triad<2, BLK2, STR2, LD0>, STREAM_Triad<2, BLK3, STR2, LD0> },
+{ STREAM_Triad<3, BLK0, STR2, LD0>, STREAM_Triad<3, BLK1, STR2, LD0>, STREAM_Triad<3, BLK2, STR2, LD0>, STREAM_Triad<3, BLK3, STR2, LD0> },
+{ STREAM_Triad<4, BLK0, STR2, LD0>, STREAM_Triad<4, BLK1, STR2, LD0>, STREAM_Triad<4, BLK2, STR2, LD0>, STREAM_Triad<4, BLK3, STR2, LD0> }
+},
+{//STR3
+{ STREAM_Triad<1, BLK0, STR3, LD0>, STREAM_Triad<1, BLK1, STR3, LD0>, STREAM_Triad<1, BLK2, STR3, LD0>, STREAM_Triad<1, BLK3, STR3, LD0> },
+{ STREAM_Triad<2, BLK0, STR3, LD0>, STREAM_Triad<2, BLK1, STR3, LD0>, STREAM_Triad<2, BLK2, STR3, LD0>, STREAM_Triad<2, BLK3, STR3, LD0> },
+{ STREAM_Triad<3, BLK0, STR3, LD0>, STREAM_Triad<3, BLK1, STR3, LD0>, STREAM_Triad<3, BLK2, STR3, LD0>, STREAM_Triad<3, BLK3, STR3, LD0> },
+{ STREAM_Triad<4, BLK0, STR3, LD0>, STREAM_Triad<4, BLK1, STR3, LD0>, STREAM_Triad<4, BLK2, STR3, LD0>, STREAM_Triad<4, BLK3, STR3, LD0> }
+},
+{//STR4
+{ STREAM_Triad<1, BLK0, STR4, LD0>, STREAM_Triad<1, BLK1, STR4, LD0>, STREAM_Triad<1, BLK2, STR4, LD0>, STREAM_Triad<1, BLK3, STR4, LD0> },
+{ STREAM_Triad<2, BLK0, STR4, LD0>, STREAM_Triad<2, BLK1, STR4, LD0>, STREAM_Triad<2, BLK2, STR4, LD0>, STREAM_Triad<2, BLK3, STR4, LD0> },
+{ STREAM_Triad<3, BLK0, STR4, LD0>, STREAM_Triad<3, BLK1, STR4, LD0>, STREAM_Triad<3, BLK2, STR4, LD0>, STREAM_Triad<3, BLK3, STR4, LD0> },
+{ STREAM_Triad<4, BLK0, STR4, LD0>, STREAM_Triad<4, BLK1, STR4, LD0>, STREAM_Triad<4, BLK2, STR4, LD0>, STREAM_Triad<4, BLK3, STR4, LD0> }
+},
+{//STR5
+{ STREAM_Triad<1, BLK0, STR5, LD0>, STREAM_Triad<1, BLK1, STR5, LD0>, STREAM_Triad<1, BLK2, STR5, LD0>, STREAM_Triad<1, BLK3, STR5, LD0> },
+{ STREAM_Triad<2, BLK0, STR5, LD0>, STREAM_Triad<2, BLK1, STR5, LD0>, STREAM_Triad<2, BLK2, STR5, LD0>, STREAM_Triad<2, BLK3, STR5, LD0> },
+{ STREAM_Triad<3, BLK0, STR5, LD0>, STREAM_Triad<3, BLK1, STR5, LD0>, STREAM_Triad<3, BLK2, STR5, LD0>, STREAM_Triad<3, BLK3, STR5, LD0> },
+{ STREAM_Triad<4, BLK0, STR5, LD0>, STREAM_Triad<4, BLK1, STR5, LD0>, STREAM_Triad<4, BLK2, STR5, LD0>, STREAM_Triad<4, BLK3, STR5, LD0> }
+},
+{//STR6
+{ STREAM_Triad<1, BLK0, STR6, LD0>, STREAM_Triad<1, BLK1, STR6, LD0>, STREAM_Triad<1, BLK2, STR6, LD0>, STREAM_Triad<1, BLK3, STR6, LD0> },
+{ STREAM_Triad<2, BLK0, STR6, LD0>, STREAM_Triad<2, BLK1, STR6, LD0>, STREAM_Triad<2, BLK2, STR6, LD0>, STREAM_Triad<2, BLK3, STR6, LD0> },
+{ STREAM_Triad<3, BLK0, STR6, LD0>, STREAM_Triad<3, BLK1, STR6, LD0>, STREAM_Triad<3, BLK2, STR6, LD0>, STREAM_Triad<3, BLK3, STR6, LD0> },
+{ STREAM_Triad<4, BLK0, STR6, LD0>, STREAM_Triad<4, BLK1, STR6, LD0>, STREAM_Triad<4, BLK2, STR6, LD0>, STREAM_Triad<4, BLK3, STR6, LD0> }
+},
+{//STR7
+{ STREAM_Triad<1, BLK0, STR7, LD0>, STREAM_Triad<1, BLK1, STR7, LD0>, STREAM_Triad<1, BLK2, STR7, LD0>, STREAM_Triad<1, BLK3, STR7, LD0> },
+{ STREAM_Triad<2, BLK0, STR7, LD0>, STREAM_Triad<2, BLK1, STR7, LD0>, STREAM_Triad<2, BLK2, STR7, LD0>, STREAM_Triad<2, BLK3, STR7, LD0> },
+{ STREAM_Triad<3, BLK0, STR7, LD0>, STREAM_Triad<3, BLK1, STR7, LD0>, STREAM_Triad<3, BLK2, STR7, LD0>, STREAM_Triad<3, BLK3, STR7, LD0> },
+{ STREAM_Triad<4, BLK0, STR7, LD0>, STREAM_Triad<4, BLK1, STR7, LD0>, STREAM_Triad<4, BLK2, STR7, LD0>, STREAM_Triad<4, BLK3, STR7, LD0> }
+}
+}, 
+{//LD2
+{ 
+{ STREAM_Triad<1, BLK0, STR0, LD1>, STREAM_Triad<1, BLK1, STR0, LD1>, STREAM_Triad<1, BLK2, STR0, LD1>, STREAM_Triad<1, BLK3, STR0, LD1> },
+{ STREAM_Triad<2, BLK0, STR0, LD1>, STREAM_Triad<2, BLK1, STR0, LD1>, STREAM_Triad<2, BLK2, STR0, LD1>, STREAM_Triad<2, BLK3, STR0, LD1> },
+{ STREAM_Triad<3, BLK0, STR0, LD1>, STREAM_Triad<3, BLK1, STR0, LD1>, STREAM_Triad<3, BLK2, STR0, LD1>, STREAM_Triad<3, BLK3, STR0, LD1> },
+{ STREAM_Triad<4, BLK0, STR0, LD1>, STREAM_Triad<4, BLK1, STR0, LD1>, STREAM_Triad<4, BLK2, STR0, LD1>, STREAM_Triad<4, BLK3, STR0, LD1> }
+},
+{ 
+{ STREAM_Triad<1, BLK0, STR1, LD1>, STREAM_Triad<1, BLK1, STR1, LD1>, STREAM_Triad<1, BLK2, STR1, LD1>, STREAM_Triad<1, BLK3, STR1, LD1> },
+{ STREAM_Triad<2, BLK0, STR1, LD1>, STREAM_Triad<2, BLK1, STR1, LD1>, STREAM_Triad<2, BLK2, STR1, LD1>, STREAM_Triad<2, BLK3, STR1, LD1> },
+{ STREAM_Triad<3, BLK0, STR1, LD1>, STREAM_Triad<3, BLK1, STR1, LD1>, STREAM_Triad<3, BLK2, STR1, LD1>, STREAM_Triad<3, BLK3, STR1, LD1> },
+{ STREAM_Triad<4, BLK0, STR1, LD1>, STREAM_Triad<4, BLK1, STR1, LD1>, STREAM_Triad<4, BLK2, STR1, LD1>, STREAM_Triad<4, BLK3, STR1, LD1> }
+},
+{ 
+{ STREAM_Triad<1, BLK0, STR2, LD1>, STREAM_Triad<1, BLK1, STR2, LD1>, STREAM_Triad<1, BLK2, STR2, LD1>, STREAM_Triad<1, BLK3, STR2, LD1> },
+{ STREAM_Triad<2, BLK0, STR2, LD1>, STREAM_Triad<2, BLK1, STR2, LD1>, STREAM_Triad<2, BLK2, STR2, LD1>, STREAM_Triad<2, BLK3, STR2, LD1> },
+{ STREAM_Triad<3, BLK0, STR2, LD1>, STREAM_Triad<3, BLK1, STR2, LD1>, STREAM_Triad<3, BLK2, STR2, LD1>, STREAM_Triad<3, BLK3, STR2, LD1> },
+{ STREAM_Triad<4, BLK0, STR2, LD1>, STREAM_Triad<4, BLK1, STR2, LD1>, STREAM_Triad<4, BLK2, STR2, LD1>, STREAM_Triad<4, BLK3, STR2, LD1> }
+},
+{ 
+{ STREAM_Triad<1, BLK0, STR3, LD1>, STREAM_Triad<1, BLK1, STR3, LD1>, STREAM_Triad<1, BLK2, STR3, LD1>, STREAM_Triad<1, BLK3, STR3, LD1> },
+{ STREAM_Triad<2, BLK0, STR3, LD1>, STREAM_Triad<2, BLK1, STR3, LD1>, STREAM_Triad<2, BLK2, STR3, LD1>, STREAM_Triad<2, BLK3, STR3, LD1> },
+{ STREAM_Triad<3, BLK0, STR3, LD1>, STREAM_Triad<3, BLK1, STR3, LD1>, STREAM_Triad<3, BLK2, STR3, LD1>, STREAM_Triad<3, BLK3, STR3, LD1> },
+{ STREAM_Triad<4, BLK0, STR3, LD1>, STREAM_Triad<4, BLK1, STR3, LD1>, STREAM_Triad<4, BLK2, STR3, LD1>, STREAM_Triad<4, BLK3, STR3, LD1> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR4, LD1>, STREAM_Triad<1, BLK1, STR4, LD1>, STREAM_Triad<1, BLK2, STR4, LD1>, STREAM_Triad<1, BLK3, STR4, LD1> },
+{ STREAM_Triad<2, BLK0, STR4, LD1>, STREAM_Triad<2, BLK1, STR4, LD1>, STREAM_Triad<2, BLK2, STR4, LD1>, STREAM_Triad<2, BLK3, STR4, LD1> },
+{ STREAM_Triad<3, BLK0, STR4, LD1>, STREAM_Triad<3, BLK1, STR4, LD1>, STREAM_Triad<3, BLK2, STR4, LD1>, STREAM_Triad<3, BLK3, STR4, LD1> },
+{ STREAM_Triad<4, BLK0, STR4, LD1>, STREAM_Triad<4, BLK1, STR4, LD1>, STREAM_Triad<4, BLK2, STR4, LD1>, STREAM_Triad<4, BLK3, STR4, LD1> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR5, LD1>, STREAM_Triad<1, BLK1, STR5, LD1>, STREAM_Triad<1, BLK2, STR5, LD1>, STREAM_Triad<1, BLK3, STR5, LD1> },
+{ STREAM_Triad<2, BLK0, STR5, LD1>, STREAM_Triad<2, BLK1, STR5, LD1>, STREAM_Triad<2, BLK2, STR5, LD1>, STREAM_Triad<2, BLK3, STR5, LD1> },
+{ STREAM_Triad<3, BLK0, STR5, LD1>, STREAM_Triad<3, BLK1, STR5, LD1>, STREAM_Triad<3, BLK2, STR5, LD1>, STREAM_Triad<3, BLK3, STR5, LD1> },
+{ STREAM_Triad<4, BLK0, STR5, LD1>, STREAM_Triad<4, BLK1, STR5, LD1>, STREAM_Triad<4, BLK2, STR5, LD1>, STREAM_Triad<4, BLK3, STR5, LD1> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR6, LD1>, STREAM_Triad<1, BLK1, STR6, LD1>, STREAM_Triad<1, BLK2, STR6, LD1>, STREAM_Triad<1, BLK3, STR6, LD1> },
+{ STREAM_Triad<2, BLK0, STR6, LD1>, STREAM_Triad<2, BLK1, STR6, LD1>, STREAM_Triad<2, BLK2, STR6, LD1>, STREAM_Triad<2, BLK3, STR6, LD1> },
+{ STREAM_Triad<3, BLK0, STR6, LD1>, STREAM_Triad<3, BLK1, STR6, LD1>, STREAM_Triad<3, BLK2, STR6, LD1>, STREAM_Triad<3, BLK3, STR6, LD1> },
+{ STREAM_Triad<4, BLK0, STR6, LD1>, STREAM_Triad<4, BLK1, STR6, LD1>, STREAM_Triad<4, BLK2, STR6, LD1>, STREAM_Triad<4, BLK3, STR6, LD1> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR7, LD1>, STREAM_Triad<1, BLK1, STR7, LD1>, STREAM_Triad<1, BLK2, STR7, LD1>, STREAM_Triad<1, BLK3, STR7, LD1> },
+{ STREAM_Triad<2, BLK0, STR7, LD1>, STREAM_Triad<2, BLK1, STR7, LD1>, STREAM_Triad<2, BLK2, STR7, LD1>, STREAM_Triad<2, BLK3, STR7, LD1> },
+{ STREAM_Triad<3, BLK0, STR7, LD1>, STREAM_Triad<3, BLK1, STR7, LD1>, STREAM_Triad<3, BLK2, STR7, LD1>, STREAM_Triad<3, BLK3, STR7, LD1> },
+{ STREAM_Triad<4, BLK0, STR7, LD1>, STREAM_Triad<4, BLK1, STR7, LD1>, STREAM_Triad<4, BLK2, STR7, LD1>, STREAM_Triad<4, BLK3, STR7, LD1> }
+}
+},
+{//LD2
+{
+{ STREAM_Triad<1, BLK0, STR0, LD2>, STREAM_Triad<1, BLK1, STR0, LD2>, STREAM_Triad<1, BLK2, STR0, LD2>, STREAM_Triad<1, BLK3, STR0, LD2> },
+{ STREAM_Triad<2, BLK0, STR0, LD2>, STREAM_Triad<2, BLK1, STR0, LD2>, STREAM_Triad<2, BLK2, STR0, LD2>, STREAM_Triad<2, BLK3, STR0, LD2> },
+{ STREAM_Triad<3, BLK0, STR0, LD2>, STREAM_Triad<3, BLK1, STR0, LD2>, STREAM_Triad<3, BLK2, STR0, LD2>, STREAM_Triad<3, BLK3, STR0, LD2> },
+{ STREAM_Triad<4, BLK0, STR0, LD2>, STREAM_Triad<4, BLK1, STR0, LD2>, STREAM_Triad<4, BLK2, STR0, LD2>, STREAM_Triad<4, BLK3, STR0, LD2> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR1, LD2>, STREAM_Triad<1, BLK1, STR1, LD2>, STREAM_Triad<1, BLK2, STR1, LD2>, STREAM_Triad<1, BLK3, STR1, LD2> },
+{ STREAM_Triad<2, BLK0, STR1, LD2>, STREAM_Triad<2, BLK1, STR1, LD2>, STREAM_Triad<2, BLK2, STR1, LD2>, STREAM_Triad<2, BLK3, STR1, LD2> },
+{ STREAM_Triad<3, BLK0, STR1, LD2>, STREAM_Triad<3, BLK1, STR1, LD2>, STREAM_Triad<3, BLK2, STR1, LD2>, STREAM_Triad<3, BLK3, STR1, LD2> },
+{ STREAM_Triad<4, BLK0, STR1, LD2>, STREAM_Triad<4, BLK1, STR1, LD2>, STREAM_Triad<4, BLK2, STR1, LD2>, STREAM_Triad<4, BLK3, STR1, LD2> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR2, LD2>, STREAM_Triad<1, BLK1, STR2, LD2>, STREAM_Triad<1, BLK2, STR2, LD2>, STREAM_Triad<1, BLK3, STR2, LD2> },
+{ STREAM_Triad<2, BLK0, STR2, LD2>, STREAM_Triad<2, BLK1, STR2, LD2>, STREAM_Triad<2, BLK2, STR2, LD2>, STREAM_Triad<2, BLK3, STR2, LD2> },
+{ STREAM_Triad<3, BLK0, STR2, LD2>, STREAM_Triad<3, BLK1, STR2, LD2>, STREAM_Triad<3, BLK2, STR2, LD2>, STREAM_Triad<3, BLK3, STR2, LD2> },
+{ STREAM_Triad<4, BLK0, STR2, LD2>, STREAM_Triad<4, BLK1, STR2, LD2>, STREAM_Triad<4, BLK2, STR2, LD2>, STREAM_Triad<4, BLK3, STR2, LD2> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR3, LD2>, STREAM_Triad<1, BLK1, STR3, LD2>, STREAM_Triad<1, BLK2, STR3, LD2>, STREAM_Triad<1, BLK3, STR3, LD2> },
+{ STREAM_Triad<2, BLK0, STR3, LD2>, STREAM_Triad<2, BLK1, STR3, LD2>, STREAM_Triad<2, BLK2, STR3, LD2>, STREAM_Triad<2, BLK3, STR3, LD2> },
+{ STREAM_Triad<3, BLK0, STR3, LD2>, STREAM_Triad<3, BLK1, STR3, LD2>, STREAM_Triad<3, BLK2, STR3, LD2>, STREAM_Triad<3, BLK3, STR3, LD2> },
+{ STREAM_Triad<4, BLK0, STR3, LD2>, STREAM_Triad<4, BLK1, STR3, LD2>, STREAM_Triad<4, BLK2, STR3, LD2>, STREAM_Triad<4, BLK3, STR3, LD2> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR4, LD2>, STREAM_Triad<1, BLK1, STR4, LD2>, STREAM_Triad<1, BLK2, STR4, LD2>, STREAM_Triad<1, BLK3, STR4, LD2> },
+{ STREAM_Triad<2, BLK0, STR4, LD2>, STREAM_Triad<2, BLK1, STR4, LD2>, STREAM_Triad<2, BLK2, STR4, LD2>, STREAM_Triad<2, BLK3, STR4, LD2> },
+{ STREAM_Triad<3, BLK0, STR4, LD2>, STREAM_Triad<3, BLK1, STR4, LD2>, STREAM_Triad<3, BLK2, STR4, LD2>, STREAM_Triad<3, BLK3, STR4, LD2> },
+{ STREAM_Triad<4, BLK0, STR4, LD2>, STREAM_Triad<4, BLK1, STR4, LD2>, STREAM_Triad<4, BLK2, STR4, LD2>, STREAM_Triad<4, BLK3, STR4, LD2> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR5, LD2>, STREAM_Triad<1, BLK1, STR5, LD2>, STREAM_Triad<1, BLK2, STR5, LD2>, STREAM_Triad<1, BLK3, STR5, LD2> },
+{ STREAM_Triad<2, BLK0, STR5, LD2>, STREAM_Triad<2, BLK1, STR5, LD2>, STREAM_Triad<2, BLK2, STR5, LD2>, STREAM_Triad<2, BLK3, STR5, LD2> },
+{ STREAM_Triad<3, BLK0, STR5, LD2>, STREAM_Triad<3, BLK1, STR5, LD2>, STREAM_Triad<3, BLK2, STR5, LD2>, STREAM_Triad<3, BLK3, STR5, LD2> },
+{ STREAM_Triad<4, BLK0, STR5, LD2>, STREAM_Triad<4, BLK1, STR5, LD2>, STREAM_Triad<4, BLK2, STR5, LD2>, STREAM_Triad<4, BLK3, STR5, LD2> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR6, LD2>, STREAM_Triad<1, BLK1, STR6, LD2>, STREAM_Triad<1, BLK2, STR6, LD2>, STREAM_Triad<1, BLK3, STR6, LD2> },
+{ STREAM_Triad<2, BLK0, STR6, LD2>, STREAM_Triad<2, BLK1, STR6, LD2>, STREAM_Triad<2, BLK2, STR6, LD2>, STREAM_Triad<2, BLK3, STR6, LD2> },
+{ STREAM_Triad<3, BLK0, STR6, LD2>, STREAM_Triad<3, BLK1, STR6, LD2>, STREAM_Triad<3, BLK2, STR6, LD2>, STREAM_Triad<3, BLK3, STR6, LD2> },
+{ STREAM_Triad<4, BLK0, STR6, LD2>, STREAM_Triad<4, BLK1, STR6, LD2>, STREAM_Triad<4, BLK2, STR6, LD2>, STREAM_Triad<4, BLK3, STR6, LD2> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR7, LD2>, STREAM_Triad<1, BLK1, STR7, LD2>, STREAM_Triad<1, BLK2, STR7, LD2>, STREAM_Triad<1, BLK3, STR7, LD2> },
+{ STREAM_Triad<2, BLK0, STR7, LD2>, STREAM_Triad<2, BLK1, STR7, LD2>, STREAM_Triad<2, BLK2, STR7, LD2>, STREAM_Triad<2, BLK3, STR7, LD2> },
+{ STREAM_Triad<3, BLK0, STR7, LD2>, STREAM_Triad<3, BLK1, STR7, LD2>, STREAM_Triad<3, BLK2, STR7, LD2>, STREAM_Triad<3, BLK3, STR7, LD2> },
+{ STREAM_Triad<4, BLK0, STR7, LD2>, STREAM_Triad<4, BLK1, STR7, LD2>, STREAM_Triad<4, BLK2, STR7, LD2>, STREAM_Triad<4, BLK3, STR7, LD2> }
+}
+},
+{//LD3
+{
+{ STREAM_Triad<1, BLK0, STR0, LD3>, STREAM_Triad<1, BLK1, STR0, LD3>, STREAM_Triad<1, BLK2, STR0, LD3>, STREAM_Triad<1, BLK3, STR0, LD3> },
+{ STREAM_Triad<2, BLK0, STR0, LD3>, STREAM_Triad<2, BLK1, STR0, LD3>, STREAM_Triad<2, BLK2, STR0, LD3>, STREAM_Triad<2, BLK3, STR0, LD3> },
+{ STREAM_Triad<3, BLK0, STR0, LD3>, STREAM_Triad<3, BLK1, STR0, LD3>, STREAM_Triad<3, BLK2, STR0, LD3>, STREAM_Triad<3, BLK3, STR0, LD3> },
+{ STREAM_Triad<4, BLK0, STR0, LD3>, STREAM_Triad<4, BLK1, STR0, LD3>, STREAM_Triad<4, BLK2, STR0, LD3>, STREAM_Triad<4, BLK3, STR0, LD3> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR1, LD3>, STREAM_Triad<1, BLK1, STR1, LD3>, STREAM_Triad<1, BLK2, STR1, LD3>, STREAM_Triad<1, BLK3, STR1, LD3> },
+{ STREAM_Triad<2, BLK0, STR1, LD3>, STREAM_Triad<2, BLK1, STR1, LD3>, STREAM_Triad<2, BLK2, STR1, LD3>, STREAM_Triad<2, BLK3, STR1, LD3> },
+{ STREAM_Triad<3, BLK0, STR1, LD3>, STREAM_Triad<3, BLK1, STR1, LD3>, STREAM_Triad<3, BLK2, STR1, LD3>, STREAM_Triad<3, BLK3, STR1, LD3> },
+{ STREAM_Triad<4, BLK0, STR1, LD3>, STREAM_Triad<4, BLK1, STR1, LD3>, STREAM_Triad<4, BLK2, STR1, LD3>, STREAM_Triad<4, BLK3, STR1, LD3> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR2, LD3>, STREAM_Triad<1, BLK1, STR2, LD3>, STREAM_Triad<1, BLK2, STR2, LD3>, STREAM_Triad<1, BLK3, STR2, LD3> },
+{ STREAM_Triad<2, BLK0, STR2, LD3>, STREAM_Triad<2, BLK1, STR2, LD3>, STREAM_Triad<2, BLK2, STR2, LD3>, STREAM_Triad<2, BLK3, STR2, LD3> },
+{ STREAM_Triad<3, BLK0, STR2, LD3>, STREAM_Triad<3, BLK1, STR2, LD3>, STREAM_Triad<3, BLK2, STR2, LD3>, STREAM_Triad<3, BLK3, STR2, LD3> },
+{ STREAM_Triad<4, BLK0, STR2, LD3>, STREAM_Triad<4, BLK1, STR2, LD3>, STREAM_Triad<4, BLK2, STR2, LD3>, STREAM_Triad<4, BLK3, STR2, LD3> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR3, LD3>, STREAM_Triad<1, BLK1, STR3, LD3>, STREAM_Triad<1, BLK2, STR3, LD3>, STREAM_Triad<1, BLK3, STR3, LD3> },
+{ STREAM_Triad<2, BLK0, STR3, LD3>, STREAM_Triad<2, BLK1, STR3, LD3>, STREAM_Triad<2, BLK2, STR3, LD3>, STREAM_Triad<2, BLK3, STR3, LD3> },
+{ STREAM_Triad<3, BLK0, STR3, LD3>, STREAM_Triad<3, BLK1, STR3, LD3>, STREAM_Triad<3, BLK2, STR3, LD3>, STREAM_Triad<3, BLK3, STR3, LD3> },
+{ STREAM_Triad<4, BLK0, STR3, LD3>, STREAM_Triad<4, BLK1, STR3, LD3>, STREAM_Triad<4, BLK2, STR3, LD3>, STREAM_Triad<4, BLK3, STR3, LD3> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR4, LD3>, STREAM_Triad<1, BLK1, STR4, LD3>, STREAM_Triad<1, BLK2, STR4, LD3>, STREAM_Triad<1, BLK3, STR4, LD3> },
+{ STREAM_Triad<2, BLK0, STR4, LD3>, STREAM_Triad<2, BLK1, STR4, LD3>, STREAM_Triad<2, BLK2, STR4, LD3>, STREAM_Triad<2, BLK3, STR4, LD3> },
+{ STREAM_Triad<3, BLK0, STR4, LD3>, STREAM_Triad<3, BLK1, STR4, LD3>, STREAM_Triad<3, BLK2, STR4, LD3>, STREAM_Triad<3, BLK3, STR4, LD3> },
+{ STREAM_Triad<4, BLK0, STR4, LD3>, STREAM_Triad<4, BLK1, STR4, LD3>, STREAM_Triad<4, BLK2, STR4, LD3>, STREAM_Triad<4, BLK3, STR4, LD3> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR5, LD3>, STREAM_Triad<1, BLK1, STR5, LD3>, STREAM_Triad<1, BLK2, STR5, LD3>, STREAM_Triad<1, BLK3, STR5, LD3> },
+{ STREAM_Triad<2, BLK0, STR5, LD3>, STREAM_Triad<2, BLK1, STR5, LD3>, STREAM_Triad<2, BLK2, STR5, LD3>, STREAM_Triad<2, BLK3, STR5, LD3> },
+{ STREAM_Triad<3, BLK0, STR5, LD3>, STREAM_Triad<3, BLK1, STR5, LD3>, STREAM_Triad<3, BLK2, STR5, LD3>, STREAM_Triad<3, BLK3, STR5, LD3> },
+{ STREAM_Triad<4, BLK0, STR5, LD3>, STREAM_Triad<4, BLK1, STR5, LD3>, STREAM_Triad<4, BLK2, STR5, LD3>, STREAM_Triad<4, BLK3, STR5, LD3> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR6, LD3>, STREAM_Triad<1, BLK1, STR6, LD3>, STREAM_Triad<1, BLK2, STR6, LD3>, STREAM_Triad<1, BLK3, STR6, LD3> },
+{ STREAM_Triad<2, BLK0, STR6, LD3>, STREAM_Triad<2, BLK1, STR6, LD3>, STREAM_Triad<2, BLK2, STR6, LD3>, STREAM_Triad<2, BLK3, STR6, LD3> },
+{ STREAM_Triad<3, BLK0, STR6, LD3>, STREAM_Triad<3, BLK1, STR6, LD3>, STREAM_Triad<3, BLK2, STR6, LD3>, STREAM_Triad<3, BLK3, STR6, LD3> },
+{ STREAM_Triad<4, BLK0, STR6, LD3>, STREAM_Triad<4, BLK1, STR6, LD3>, STREAM_Triad<4, BLK2, STR6, LD3>, STREAM_Triad<4, BLK3, STR6, LD3> }
+},
+{
+{ STREAM_Triad<1, BLK0, STR7, LD3>, STREAM_Triad<1, BLK1, STR7, LD3>, STREAM_Triad<1, BLK2, STR7, LD3>, STREAM_Triad<1, BLK3, STR7, LD3> },
+{ STREAM_Triad<2, BLK0, STR7, LD3>, STREAM_Triad<2, BLK1, STR7, LD3>, STREAM_Triad<2, BLK2, STR7, LD3>, STREAM_Triad<2, BLK3, STR7, LD3> },
+{ STREAM_Triad<3, BLK0, STR7, LD3>, STREAM_Triad<3, BLK1, STR7, LD3>, STREAM_Triad<3, BLK2, STR7, LD3>, STREAM_Triad<3, BLK3, STR7, LD3> },
+{ STREAM_Triad<4, BLK0, STR7, LD3>, STREAM_Triad<4, BLK1, STR7, LD3>, STREAM_Triad<4, BLK2, STR7, LD3>, STREAM_Triad<4, BLK3, STR7, LD3> }
+}
+}
+};
+
+__global__ void set_array(REAL* __restrict__ a, REAL value, int len)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    lwrandState_t random_state;
+    if (value == -1) 
+        lwrand_init(reinterpret_cast<long long>(a), idx, 0, &random_state);
+    int nthreads = gridDim.x * blockDim.x;
+    for ( ; idx < len; idx += nthreads) {
+        if (value == -1) 
+            a[idx] = lwrand(&random_state);
+        else
+            a[idx] = value;
+    }
+}
+
+__global__ void STREAM_Triad_cleanup( const REAL* a, const REAL* b, REAL* c, REAL scalar, int len, int offset)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x + offset;
+    if (idx < len) c[idx] = a[idx] + scalar*b[idx];
+}
+
+template<int loadPer,int blkSize,int blkStride,int loadtype>
+__global__ void STREAM_Triad( const REAL* a, const REAL* b, REAL* c, REAL scalar, int len)
+{
+    REAL r_c[loadPer];
+    int bid = blockIdx.y*gridDim.x + blockIdx.x;
+    int idx = (bid/blkStride)*blkStride*loadPer*blkSize + (bid%blkStride)*blkSize + threadIdx.x;
+    const REAL* aa = &a[idx];
+    const REAL* bb = &b[idx];
+          REAL* cc = &c[idx];
+
+    #pragma unroll
+    for(int i=0; i<loadPer; i++){
+#if __LWDA_ARCH__ > 300
+if(loadtype==0){
+        r_c[i] = (*aa)^scalar*(*bb);
+}
+if(loadtype==1){
+        r_c[i] = __ldg(aa)^scalar*(*bb); 
+}
+if(loadtype==2){
+        r_c[i] = (*aa)^scalar*__ldg(bb); 
+}
+if(loadtype==3){
+        r_c[i] = __ldg(aa)^scalar*__ldg(bb);
+}
+#else
+        r_c[i] = (*aa)^scalar*(*bb);
+#endif
+        aa += blkSize*blkStride; bb += blkSize*blkStride; 
+    }
+    #pragma unroll
+    for(int i=0; i<loadPer; i++){
+        (*cc) = r_c[i];
+        cc += blkSize*blkStride;
+    }
+}
+
+
+
+

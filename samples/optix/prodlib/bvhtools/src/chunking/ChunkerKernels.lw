@@ -1,0 +1,91 @@
+// Copyright LWPU Corporation 2014
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "ChunkerKernels.hpp"
+#include <prodlib/bvhtools/src/common/SharedKernelFunctions.hpp>
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(CHUNKER_INTERVAL_WARPS_PER_BLOCK * 32, CHUNKER_INTERVAL_BLOCKS_PER_SM)
+void ChunkerIntervalsA(ChunkerIntervalsParams p)
+{
+    // Pick a node.
+    int i = threadIdx.x + 32 * (threadIdx.y + CHUNKER_INTERVAL_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+    if (i >= p.numPrims - 1)
+        return;
+
+    int s, d, j;
+    computeInterval( i, p.numPrims, p.inPrimMorton, s, d, j );
+
+    int childA = i + s * d + min(d, 0);
+    int childB = childA + 1;
+
+    //The range [min(i,j), max(i,j)] essentially indicates the range of triangles covered by a (hypothetical) internal node in a (hypothetical) BVH. 
+    //Furthermore, [min(i,j), childA] and [childB, max(i,j)] indicate the ranges covered by its children. 
+    //Whenever a parent range is >N, but a child range is <=N, the child range corresponds to a valid and maximal group.
+
+    Range parentRange( min(i,j), max(i,j) + 1 );
+    Range child0Range( min(i,j), childA   + 1 );
+    Range child1Range( childB,   max(i,j) + 1 );
+
+    if (parentRange.span() > p.maxChunkPrims)
+    {
+        if (child0Range.span() <= p.maxChunkPrims)
+            p.outPrimRanges[atomicAdd(p.outNumChunks, 1)] = child0Range;
+
+        if (child1Range.span() <= p.maxChunkPrims)
+            p.outPrimRanges[atomicAdd(p.outNumChunks, 1)] = child1Range;
+    }
+}
+
+//-----------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(32, 1)
+void ChunkerIntervalsB(ChunkerIntervalsParams p)
+{
+    if( threadIdx.x == 0 )
+    {
+        int numChunks = *p.outNumChunks;
+        if( numChunks == 0 ) 
+        {
+            // If no chunks were created, write a chunk that covers the range [0,maxPrims)
+            *p.outNumChunks = 1;
+            *p.outLwtoffLevels = 0;
+            p.outPrimRanges[0] = Range(0, p.numPrims);
+        }
+        else
+        {
+            *p.outLwtoffLevels = computeLwtoffLevel(p.preferredTopTreePrims, numChunks);
+        }
+    }
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchChunkerIntervalsA(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const ChunkerIntervalsParams& p)
+{
+    if (lwdaFuncSetCacheConfig(ChunkerIntervalsA, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    ChunkerIntervalsA<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchChunkerIntervalsB(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const ChunkerIntervalsParams& p)
+{
+    if (lwdaFuncSetCacheConfig(ChunkerIntervalsB, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    ChunkerIntervalsB<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

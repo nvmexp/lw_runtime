@@ -1,0 +1,59 @@
+!!ARBfp1.0
+OPTION LW_fragment_program2;
+TEMP R0, R1, R5, R6, R7, R8, R9, CC;
+PARAM half = {0.5, 0.5, 0.5, 0.5};
+PARAM thresh  = {0.333333333, 0.666666666};
+ALIAS tcZero  = R5;  # 0.0 value derived from texcoord
+ALIAS fcZero  = R6;  # 0.0 value derived from frag clr
+ALIAS fcHalf  = R7;  # 0.5 value derived from frag clr
+ALIAS loopnum = R8;
+
+main:
+MOV R0, 9;
+MOV R1, 8;
+MUL fcHalf, fragment.color, half;
+SUB fcZero, fcHalf.x, fcHalf.y;
+MOV R9, fcZero;
+MOV loopnum, R9;
+LOOP {2, 0, 1};
+    MOVC CC, loopnum;
+    IF EQ.x;
+        MOV tcZero, fragment.texcoord[A0.x].z;
+        FRC R0, fragment.texcoord[A0.x].x;
+        FRC R1, fragment.texcoord[0].y;
+    ENDIF;
+
+    SUBC CC, R1, thresh;
+    REP {2};
+        BRK (LE.x);
+        ADD R9.y, R9.y, fcHalf;
+        BRK (LE.y);
+    ENDREP;
+    SUBC CC, R0, thresh;
+    BRK (LE.x);
+
+    SUBC CC, R0, thresh;
+    ADD R9.z, R9.z, tcZero.z;
+    MOV R9.y, R9.z;
+    IF LE.y;
+        SUBC CC, R1, thresh;
+        REP {2};
+            BRK (LE.x);
+            ADD R9.y, R9.y, fcHalf.x;
+            BRK (LE.y);
+        ENDREP;
+        MOV R9.x, fcHalf.y;
+    ELSE;
+        ADD R9.x, R9.x, fcHalf.z;
+        SUBC CC, R1, thresh;
+        REP {2};
+            BRK (LE.x);
+            ADD R9.y, R9.y, fcHalf.z;
+            BRK (LE.y);
+        ENDREP;
+    ENDIF;
+
+    ADD loopnum, loopnum, fragment.color;
+ENDLOOP;
+MOV result.color, R9;
+END

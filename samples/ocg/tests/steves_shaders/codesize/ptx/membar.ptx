@@ -1,0 +1,35 @@
+        .version 3.1 
+        .target sm_20
+        .global .s32 b;
+        .global .u16 g;
+
+       .entry main 
+       {
+        .reg .u32 r1,r2,r3,r4;
+        .reg .u16 s0, s1;
+        .reg .pred p;
+
+
+        ld.global.s32   r1, [b];
+        mov.u16         s0, %tid.x;
+        mov.u16         s1, %tid.y;
+        add.u16         s0, s0, s1; 
+
+        membar.gl;
+
+        ld.global.s32   r2, [b + 8];
+        add.s32         r1, r1, r2;
+        st.global.s32   [b], r1;
+
+        membar.cta;
+
+        ld.global.s32   r2, [b + 8];
+        add.s32         r1, r1, r2;
+        st.global.s32   [b], r1;
+
+        membar.sys;
+
+        st.global.u16   [g], s0;
+        exit;
+        }
+

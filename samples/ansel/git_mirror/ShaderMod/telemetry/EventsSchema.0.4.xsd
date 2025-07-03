@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <xsd:element name="eventDefinition">
+        <xsd:complexType>
+            <xsd:sequence>
+                <xsd:element name="types" type="Types"/>
+                <xsd:element name="events" type="Events"/>
+            </xsd:sequence>
+            <xsd:attribute name="clientName" type="Name" use="required"/>
+            <xsd:attribute name="clientID" type="ID" use="required"/>
+            <xsd:attribute name="thisFileVersion" type="Version" use="required"/>
+        </xsd:complexType>
+        <xsd:key name="TypeKey">
+            <xsd:selector xpath="types/type"/>
+            <xsd:field xpath="@name"/>
+        </xsd:key>
+        <xsd:keyref name="TypeKeyRefForKey" refer="TypeKey">
+            <xsd:selector xpath="events/event/parameters/key"/>
+            <xsd:field xpath="@type"/>
+        </xsd:keyref>
+        <xsd:keyref name="TypeKeyRefForValue" refer="TypeKey">
+            <xsd:selector xpath="events/event/parameters/value"/>
+            <xsd:field xpath="@type"/>
+        </xsd:keyref>
+        <xsd:key name="EventKey">
+            <xsd:selector xpath="events/event"/>
+            <xsd:field xpath="@name"/>
+        </xsd:key>
+        <xsd:keyref name="EventKeyRef" refer="EventKey">
+            <xsd:selector xpath="events/event/parameters/eventAsKey"/>
+            <xsd:field xpath="@event"/>
+        </xsd:keyref>
+    </xsd:element>
+    <xsd:complexType name="Types">
+        <xsd:sequence>
+            <xsd:element name="type" type="Type" maxOclwrs="250">
+                <xsd:unique name="uniqueType">
+                    <xsd:selector xpath="type"/>
+                    <xsd:field xpath="@name"/>
+                </xsd:unique>
+            </xsd:element>
+        </xsd:sequence>
+    </xsd:complexType>
+    <xsd:complexType name="Type">
+        <xsd:sequence>
+            <xsd:element name="description" type="Description" minOclwrs="0"/>
+            <xsd:element name="enum" type="Enum" minOclwrs="0" maxOclwrs="unbounded"/>
+        </xsd:sequence>
+        <xsd:attribute name="name" type="Name" use="required"/>
+        <xsd:attribute name="nativeType" use="required">
+            <xsd:simpleType>
+                <xsd:restriction base="xsd:string">
+                    <xsd:enumeration value="enum"/>
+                    <xsd:enumeration value="uint8"/>
+                    <xsd:enumeration value="int8"/>
+                    <xsd:enumeration value="uint16"/>
+                    <xsd:enumeration value="int16"/>
+                    <xsd:enumeration value="uint32"/>
+                    <xsd:enumeration value="int32"/>
+                    <xsd:enumeration value="int64"/>
+                    <xsd:enumeration value="float"/>
+                    <xsd:enumeration value="double"/>
+                    <xsd:enumeration value="vector2"/>
+                    <xsd:enumeration value="vector3"/>
+                    <xsd:enumeration value="string16"/>
+                    <xsd:enumeration value="string32"/>
+                    <xsd:enumeration value="string64"/>
+                    <xsd:enumeration value="string128"/>
+                    <xsd:enumeration value="datetime"/>
+                    <xsd:enumeration value="duration"/>
+                    <xsd:enumeration value="userID"/>
+                    <xsd:enumeration value="clientID"/>
+                    <xsd:enumeration value="stringVariableLength"/>
+                    <xsd:enumeration value="binaryVariableLength"/>
+                </xsd:restriction>
+            </xsd:simpleType>
+        </xsd:attribute>
+    </xsd:complexType>
+    <xsd:complexType name="Enum">
+        <xsd:sequence>
+            <xsd:element name="description" type="Description" minOclwrs="0"/>
+        </xsd:sequence>
+        <xsd:attribute name="name" type="Name" use="required"/>
+    </xsd:complexType>
+    <xsd:complexType name="Events">
+        <xsd:sequence>
+            <xsd:element name="event" type="Event" maxOclwrs="250">
+                <xsd:unique name="uniqueEvent">
+                    <xsd:selector xpath="event"/>
+                    <xsd:field xpath="@name"/>
+                </xsd:unique>
+            </xsd:element>
+        </xsd:sequence>
+    </xsd:complexType>
+    <xsd:complexType name="Event">
+        <xsd:sequence>
+            <xsd:element name="description" type="Description" minOclwrs="0"/>
+            <xsd:element name="gdpr" type="Gdpr"/>
+            <xsd:element name="services" type="Services">
+                <xsd:unique name="uniqueService">
+                    <xsd:selector xpath="service"/>
+                    <xsd:field xpath="."/>
+                </xsd:unique>
+            </xsd:element>
+            <xsd:element name="parameters" type="Parameters" minOclwrs="0" maxOclwrs="1">
+                <xsd:unique name="uniqueParameter">
+                    <xsd:selector xpath="*"/>
+                    <xsd:field xpath="@name"/>
+                </xsd:unique>
+            </xsd:element>
+        </xsd:sequence>
+        <xsd:attribute name="name" type="Name" use="required"/>
+    </xsd:complexType>
+    <xsd:complexType name="Services">
+        <xsd:sequence>
+            <xsd:element name="service" type="Service" minOclwrs="1" maxOclwrs="5"/>
+        </xsd:sequence>
+    </xsd:complexType>
+    <xsd:simpleType name="Service">
+        <xsd:restriction base="xsd:string">
+            <xsd:enumeration value="richpresence"/>
+            <xsd:enumeration value="leaderboard"/>
+            <xsd:enumeration value="telemetry"/>
+            <xsd:enumeration value="lltelemetry"/>
+            <xsd:enumeration value="achievement"/>
+            <xsd:enumeration value="feedback"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+    <xsd:complexType name="Gdpr">
+        <xsd:simpleContent>
+            <xsd:extension base="DescriptionText">
+                <xsd:attribute name="level" type="GdprLevel" use="required"/>
+            </xsd:extension>
+        </xsd:simpleContent>
+    </xsd:complexType>
+    <xsd:simpleType name="GdprLevel">
+        <xsd:restriction base="xsd:string">
+            <xsd:enumeration value="functional"/>
+            <xsd:enumeration value="technical"/>
+            <xsd:enumeration value="behavioral"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+    <xsd:complexType name="Parameters">
+        <xsd:sequence>
+            <xsd:element name="eventAsKey" type="EventAsKey" minOclwrs="0" maxOclwrs="unbounded"/>
+            <xsd:element name="key" type="Key" minOclwrs="0" maxOclwrs="unbounded"/>
+            <xsd:element name="value" type="Value" minOclwrs="0" maxOclwrs="unbounded"/>
+        </xsd:sequence>
+    </xsd:complexType>
+    <xsd:complexType name="EventAsKey">
+        <xsd:attribute name="name" type="Name" use="required"/>
+        <xsd:attribute name="event" type="Name" use="required"/>
+    </xsd:complexType>
+    <xsd:complexType name="Key">
+        <xsd:sequence>
+            <xsd:element name="description" type="Description" minOclwrs="0"/>
+        </xsd:sequence>
+        <xsd:attribute name="name" type="Name" use="required"/>
+        <xsd:attribute name="type" type="Name" use="required"/>
+    </xsd:complexType>
+    <xsd:complexType name="Value">
+        <xsd:attribute name="name" type="Name" use="required"/>
+        <xsd:attribute name="type" type="Name" use="required"/>
+        <xsd:attribute name="telemetryStyle">
+            <xsd:simpleType>
+                <xsd:restriction base="xsd:string">
+                    <xsd:enumeration value="normal"/>
+                    <xsd:enumeration value="duration"/>
+                    <xsd:enumeration value="sum"/>
+                    <xsd:enumeration value="max"/>
+                    <xsd:enumeration value="min"/>
+                </xsd:restriction>
+            </xsd:simpleType>
+        </xsd:attribute>
+    </xsd:complexType>
+    <xsd:simpleType name="Version">
+        <xsd:restriction base="xsd:string">
+            <xsd:pattern value="[1-9]?[0-9][.][1-9]?[0-9]"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+    <xsd:simpleType name="ID">
+        <xsd:restriction base="xsd:long"/>
+    </xsd:simpleType>
+    <xsd:simpleType name="Name">
+        <xsd:restriction base="xsd:string">
+            <xsd:pattern value="[0-9a-zA-Z_]{0,100}"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+    <xsd:complexType name="Description">
+        <xsd:sequence>
+            <xsd:element name="text" type="DescriptionText"/>
+            <xsd:element name="tasks" type="Tasks" minOclwrs="0"/>
+        </xsd:sequence>
+    </xsd:complexType>
+    <xsd:simpleType name="DescriptionText">
+        <xsd:restriction base="xsd:string">
+            <xsd:pattern value="[-\s\t\n\r0-9a-zA-Z~!@#$%^_`:;',./?/*\\\(\)\{\}\[\]]{1,1000}"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+    <xsd:simpleType name="Tasks">
+        <xsd:list itemType="TaskId"/>
+    </xsd:simpleType>
+    <xsd:simpleType name="TaskId">
+        <xsd:restriction base="xsd:string">
+            <xsd:pattern value="[-\s\t\n\r0-9a-zA-Z~!@#$%^_`:;',./?/*\\\(\)\{\}\[\]]{1,200}"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+</xsd:schema>

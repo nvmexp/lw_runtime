@@ -1,0 +1,33 @@
+.version 3.1 
+.target sm_20
+
+.entry main {
+   .reg .s32 as, bs;
+   .reg .u32 au, bu;
+   .reg .f32 af, bf;
+   .reg .u32 addr;
+   .reg .u64 eaddr;
+   .reg .u64 lw, du, eu, fu;
+
+   // atomic add
+   mov.f32 af, 0.0;
+   mov.u32 addr, 33;
+   ld.global.u64 eaddr, [addr];
+   atom.add.f32 af, [eaddr], 3.5;
+   atom.add.u64 lw, [eaddr], 11;
+   atom.global.add.u64 du, [eaddr], 22;
+   atom.cas.b64 lw, [eaddr], du, 33;
+   atom.global.cas.b64 lw, [eaddr], du, 44;
+   atom.exch.b64 eu, [eaddr], du;
+   atom.global.exch.b64 fu, [eaddr], du;
+
+   bar.sync 0;
+
+   red.add.f32 [eaddr], 3.5;
+
+   st.u64           [eaddr], lw;
+   st.global.u64    [eaddr], du;
+   st.u64           [eaddr], eu;
+   st.global.u64    [eaddr], fu;
+   exit;
+}

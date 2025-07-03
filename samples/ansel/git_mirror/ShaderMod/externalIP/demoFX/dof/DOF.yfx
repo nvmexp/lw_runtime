@@ -1,0 +1,301 @@
+//------------------------------------------------------------------
+// Shader file for LWPU Ansel
+//------------------------------------------------------------------
+
+//------------------------------------------------------------------
+// Constants
+//------------------------------------------------------------------
+
+#define DepthParameters         float4(1.0,1000.0,-999.0f,0.0)                   //x = near plane, y = far plane, z = -(y-x), w = unused
+#define PixelSize               float2(1.0 / screenSize.x, 1.0 / screenSize.y)   //x = Pixel width, y = Pixel height
+#define Aspect                  (screenSize.x / screenSize.y)                    //Aspect ratio
+
+cbuffer globalParams
+{
+	float2 screenSize;             //x = screen width, y = screen height
+	int captureState;              //unused, my math works without using specific cases
+	float4 tileUV;                 //xy - top left tile coordinate, zw - bottom right tile coordinate
+}
+
+cbuffer controlBuf
+{
+	float ui_fFolwsDepth;             //focus plane distance, in code ^4 to make adjustments for low value ranges easier, where ui-center-mapping doesn't cut it
+	float ui_fFarBlurLwrve;           //buildup lwrve of blur behind focus plane
+	float ui_fNearBlurLwrve;          //buildup lwrve of blur in front of focus plane
+	float ui_fShapeRadius;            //blur radius where CoC is max
+	#define ui_iShapeVertices 6 //float ui_iShapeVertices;          //bokeh shape vertices, 5 == pentagon, 6 == hexagon ...
+	#define ui_fShapeRoundness 1//float ui_fShapeRoundness;         //deforms polygon to circle, 0 == polygon, 1 == circle
+	#define ui_fBokehIntensity 0.7//float ui_fBokehIntensity;         //intensity of bokeh highlighting
+	bool g_sldIlwert;
+}
+
+struct VSOut
+{
+	float4 position	: SV_POSITION;
+	float2 txcoord	: TEXCOORD;
+};
+
+//------------------------------------------------------------------
+// Textures, Samplers
+//------------------------------------------------------------------
+
+Texture2D texOriginalColor;
+Texture2D texOriginalDepth;
+Texture2D texColorCoC;
+
+//------------------------------------------------------------------
+
+SamplerState SamplerLinear;
+SamplerState SamplerPoint;
+
+//------------------------------------------------------------------
+// Functions
+//------------------------------------------------------------------
+
+/* linearizes depth value so distance from camera ~ depth value */
+float GetLinearDepth(float2 texcoord)
+{
+	float depth = texOriginalDepth.SampleLevel(SamplerLinear, texcoord.xy,0).x;
+	if(!g_sldIlwert) depth = 1.0 - depth;
+	depth *= rcp(DepthParameters.y + depth * DepthParameters.z);
+	return saturate(depth);
+}
+
+//------------------------------------------------------------------
+
+/* callwlates out-of-focus value for given depth and focus plane distance.
+   where 0 means pixel is in focus, 1 means focus is entirely out of focus.
+   Aggressive leak reduction basically shifts depth to minimum of neighbour pixels
+   to completely eradicate color leaking of main bokeh pass. This introduces a sharp
+   border around sharp objects, which gets removed by gaussian blur after bokeh filter
+   which uses CoC without leak reduction.*/
+float CircleOfConfusion(float2 texcoord, bool aggressiveLeakReduction)
+{
+	float2 depthdata; //x - linear scene depth, y - linear scene focus
+	float scenecoc;   //blur value, signed by position relative to focus plane
+
+    depthdata.x = GetLinearDepth(texcoord.xy);
+
+	[branch]
+	if(aggressiveLeakReduction)
+	{
+        float3 neighbourOffsets = float3(PixelSize.xy, 0);
+        //sadly, flipped depth buffers etc don't allow for gather or linearizing in batch
+        float4 neighbourDepths = float4(GetLinearDepth(texcoord.xy - neighbourOffsets.xz), //left
+                                        GetLinearDepth(texcoord.xy + neighbourOffsets.xz), //right
+                                        GetLinearDepth(texcoord.xy - neighbourOffsets.zy), //top
+                                        GetLinearDepth(texcoord.xy + neighbourOffsets.zy));//bottom
+
+		float neighbourMin = min(min(neighbourDepths.x,neighbourDepths.y),min(neighbourDepths.z,neighbourDepths.w));
+		depthdata.x = lerp(min(neighbourMin, depthdata.x), depthdata.x, 0.001);
+	}
+
+	depthdata.y =  ui_fFolwsDepth*ui_fFolwsDepth*ui_fFolwsDepth;
+
+	[branch]
+	if(depthdata.x < depthdata.y)
+	{
+		scenecoc = depthdata.x / depthdata.y - 1.0;
+		scenecoc = ldexp(scenecoc, -0.5*ui_fNearBlurLwrve*ui_fNearBlurLwrve*10*10);
+	}
+	else
+	{
+		scenecoc = (depthdata.x - depthdata.y)/(ldexp(depthdata.y, pow(ui_fFarBlurLwrve * 10, 1.5)) - depthdata.y);
+	    scenecoc = saturate(scenecoc);
+	}
+
+	return abs(scenecoc);
+}
+
+//------------------------------------------------------------------
+// Pixel Shaders
+//------------------------------------------------------------------
+
+/* writes CoC to alpha channel. Early firefly reduction with depth
+masking to prevent color leaking in main bokeh pass.*/
+float4 PS_CoC2Alpha( VSOut IN ): SV_Target
+{
+	float4 color = texOriginalColor.Sample(SamplerLinear, IN.txcoord.xy);
+
+	static const float2 sampleOffsets[4] = {float2( 1.5, 0.5) * PixelSize.xy,
+		                                	float2( 0.5,-1.5) * PixelSize.xy,
+				                			float2(-1.5,-0.5) * PixelSize.xy,
+				                			float2(-0.5, 1.5) * PixelSize.xy};
+
+	float centerDepth = GetLinearDepth(IN.txcoord.xy);
+    float2 sampleCoord = 0.0;
+    float3 neighbourOffsets = float3(PixelSize.xy, 0);
+    float4 coccolor = 0.0;
+
+	[loop]
+	for(int i=0; i<4; i++)
+	{
+		sampleCoord.xy = IN.txcoord.xy + sampleOffsets[i];
+		float3 sampleColor = texOriginalColor.SampleLevel(SamplerLinear, sampleCoord, 0).rgb;
+
+        float4 sampleDepths = float4(GetLinearDepth(sampleCoord.xy + neighbourOffsets.xz),  //right
+                                     GetLinearDepth(sampleCoord.xy - neighbourOffsets.xz),  //left
+                                     GetLinearDepth(sampleCoord.xy + neighbourOffsets.zy),  //bottom
+                                     GetLinearDepth(sampleCoord.xy - neighbourOffsets.zy)); //top
+
+        float sampleDepthMin = min(min(sampleDepths.x,sampleDepths.y),min(sampleDepths.z,sampleDepths.w));
+
+		sampleColor /= 1.0 + max(max(sampleColor.r, sampleColor.g), sampleColor.b);
+
+		float sampleWeight = saturate(sampleDepthMin * rcp(centerDepth + 1e-6) + 1e-3);
+		coccolor += float4(sampleColor.rgb * sampleWeight, sampleWeight);
+	}
+
+	coccolor.rgb /= coccolor.a;
+	coccolor.rgb /= 1.0 - max(coccolor.r, max(coccolor.g, coccolor.b));
+
+	color.rgb = lerp(color.rgb, coccolor.rgb, saturate(coccolor.w * 8.0));
+	color.w = CircleOfConfusion(IN.txcoord.xy, 1);
+        color.w = saturate(color.w * 0.5 + 0.5);
+	return color;
+}
+
+//------------------------------------------------------------------
+
+/* main bokeh blur pass.*/
+float4 PS_Bokeh( VSOut IN ): SV_Target
+{
+	static const float2 PixelSizeScaled = PixelSize.xy * float2(rcp(tileUV.z-tileUV.x),rcp(tileUV.w-tileUV.y));
+
+	float4 BokehSum, BokehMax;
+	BokehMax		        = texColorCoC.Sample(SamplerLinear, IN.txcoord.xy);
+        BokehSum                        = BokehMax;
+	float weightSum 		= 1.0;
+	float CoC 			= abs(BokehSum.w * 2.0 - 1.0);
+	float2 bokehRadiusScaled	= CoC * ui_fShapeRadius * 25;
+	float nRings 			= round(bokehRadiusScaled*rcp(tileUV.z-tileUV.x)*0.2) + 2 + (dot(IN.position.xy,1) % 2) * 0.5;
+
+	bokehRadiusScaled /= nRings;
+	bokehRadiusScaled *= PixelSizeScaled;
+	CoC /= nRings;
+
+	float2 lwrrentVertex,nextVertex,matrixVector;
+	sincos(radians(10.0), lwrrentVertex.y,lwrrentVertex.x);
+	sincos(radians(360.0 / round(ui_iShapeVertices)),matrixVector.x,matrixVector.y);
+
+	float2x2 rotMatrix = float2x2(matrixVector.y,-matrixVector.x,matrixVector.x,matrixVector.y);
+
+	[fastopt]
+    for (int iVertices = 0; iVertices < ui_iShapeVertices; iVertices++)
+    {
+	nextVertex = mul(lwrrentVertex.xy, rotMatrix);
+        [fastopt]
+            for(float iRings = 1; iRings <= nRings; iRings++)
+            {
+                [fastopt]
+                for(float iSamplesPerRing = 0; iSamplesPerRing < iRings; iSamplesPerRing++)
+                {
+	            float2 sampleOffset = lerp(lwrrentVertex,nextVertex,iSamplesPerRing/iRings);
+
+		      	//sampleOffset *= (1.0-ui_fShapeRoundness) + rsqrt(dot(sampleOffset,sampleOffset))*ui_fShapeRoundness;
+		      	sampleOffset *= rsqrt(dot(sampleOffset,sampleOffset));
+
+	            float4 sampleBokeh 	= texColorCoC.SampleLevel(SamplerLinear, IN.txcoord.xy + sampleOffset.xy * bokehRadiusScaled * iRings,0);
+	            float sampleWeight	= saturate(1e6 * (abs(sampleBokeh.a * 2.0 - 1.0) - CoC * (float)iRings) + 1.0);
+
+	            sampleBokeh.rgb *= sampleWeight;
+	            weightSum 		+= sampleWeight;
+	            BokehSum 		+= sampleBokeh;
+	            BokehMax 		= max(BokehMax,sampleBokeh);
+               }
+           }
+
+           lwrrentVertex = nextVertex;
+       }
+
+	//scale bokeh intensity by blur level to make transition from sharp to blurred area less apparent
+    return lerp(BokehSum / weightSum, BokehMax, ui_fBokehIntensity * saturate(CoC*nRings*4.0));
+}
+
+/* combines blurred bokeh output with sharp original texture.
+Callwlate CoC a second time because gaussian blur is not prone to
+obvious color leaking. */
+float4 PS_Combine( VSOut IN ): SV_Target
+{
+	float4 blurredColor   = texColorCoC.Sample(SamplerLinear, IN.txcoord.xy);
+	float4 originalColor  = texOriginalColor.Sample(SamplerLinear, IN.txcoord.xy);
+
+	float CoC 		 = CircleOfConfusion(IN.txcoord.xy, 0);
+	float2 bokehRadiusScaled = CoC * ui_fShapeRadius * 25;
+
+	#define linearstep(a,b,x) saturate((x-a)/(b-a))
+	float blendWeight = linearstep(0.25, 1.0, bokehRadiusScaled.x);
+	blendWeight = sqrt(blendWeight);
+
+	float4 color;
+	color.rgb      = lerp(originalColor.rgb, blurredColor.rgb, blendWeight);
+	color.a        = saturate(CoC * 2.0) * 0.5 + 0.5;
+	return color;
+}
+
+/* blur color (and blur radius) to solve common DoF technique
+issue of having sharp transitions in blurred regions because of
+blurred color vs sharp depth info*/
+float4 PS_Gauss1( VSOut IN ): SV_Target
+{
+	float4 centerTap = texColorCoC.Sample(SamplerLinear, IN.txcoord.xy);
+    float CoC = abs(centerTap.a * 2.0 - 1.0);
+
+    float nSteps 		= floor(CoC * (2.0));
+	float expCoeff 		= -2.0 * rcp(nSteps * nSteps + 1e-3); //sigma adjusted for blur width
+	static const float2 blurAxisScaled 	= float2(1,0) * PixelSize.xy;
+
+	float4 gaussianSum = 0.0;
+	float  gaussianSumWeight = 1e-3;
+
+	for(float iStep = -nSteps; iStep <= nSteps; iStep++)
+	{
+		float lwrrentWeight = exp(iStep * iStep * expCoeff);
+		float lwrrentOffset = 2.0 * iStep - 0.5; //Sample between texels to double blur width at no cost
+
+		float4 lwrrentTap = texColorCoC.SampleLevel(SamplerLinear, IN.txcoord.xy + blurAxisScaled.xy * lwrrentOffset, 0);
+		lwrrentWeight *= saturate(abs(lwrrentTap.a * 2.0 - 1.0) - CoC * 0.25); //bleed fix
+
+		gaussianSum += lwrrentTap * lwrrentWeight;
+		gaussianSumWeight += lwrrentWeight;
+	}
+
+	gaussianSum /= gaussianSumWeight;
+
+	float4 color;
+	color.rgb = lerp(centerTap.rgb, gaussianSum.rgb, saturate(gaussianSumWeight));
+    color.a = centerTap.a;
+	return color;
+}
+
+float4 PS_Gauss2( VSOut IN ): SV_Target
+{
+	float4 centerTap = texColorCoC.Sample(SamplerLinear, IN.txcoord.xy);
+    float CoC = abs(centerTap.a * 2.0 - 1.0);
+
+    float nSteps 		= floor(CoC * (2.0));
+	float expCoeff 		= -2.0 * rcp(nSteps * nSteps + 1e-3); //sigma adjusted for blur width
+	static const float2 blurAxisScaled 	= float2(0,1) * PixelSize.xy;
+
+	float4 gaussianSum = 0.0;
+	float  gaussianSumWeight = 1e-3;
+
+	for(float iStep = -nSteps; iStep <= nSteps; iStep++)
+	{
+		float lwrrentWeight = exp(iStep * iStep * expCoeff);
+		float lwrrentOffset = 2.0 * iStep - 0.5; //Sample between texels to double blur width at no cost
+
+		float4 lwrrentTap = texColorCoC.SampleLevel(SamplerLinear, IN.txcoord.xy + blurAxisScaled.xy * lwrrentOffset, 0);
+		lwrrentWeight *= saturate(abs(lwrrentTap.a * 2.0 - 1.0) - CoC * 0.25); //bleed fix
+
+		gaussianSum += lwrrentTap * lwrrentWeight;
+		gaussianSumWeight += lwrrentWeight;
+	}
+
+	gaussianSum /= gaussianSumWeight;
+
+	float4 color;
+	color.rgb = lerp(centerTap.rgb, gaussianSum.rgb, saturate(gaussianSumWeight));
+    color.a = centerTap.a;
+	return color;
+}

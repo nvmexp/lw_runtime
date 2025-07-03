@@ -1,0 +1,1290 @@
+#include <stdlib.h>
+#include <stdio.h>
+
+#include <ostream>
+#include <list>
+#include <unordered_map>
+
+#include "gtest/gtest.h"
+#include "lwtensor/internal/util.h"
+#include "lwtensor/internal/utilEx.h"
+#include <lwtensor/internal/operators.h>
+#include <lwtensor/internal/defines.h>
+
+namespace
+{
+   using namespace LWTENSOR_NAMESPACE;
+
+   const mode_type MODE_A = 1;
+   const mode_type MODE_B = 2;
+   const mode_type MODE_C = 3;
+   const mode_type MODE_D = 4;
+
+   lwtensorStatus_t fuseModesWrapper(
+           const uint32_t numModesA, const stride_type *const sortedStrideA, const mode_type *const sortedModeA,
+           const uint32_t numModesB, const stride_type *const sortedStrideB, const mode_type *const sortedModeB,
+           const uint32_t numModesC, const stride_type *const sortedStrideC, const mode_type *const sortedModeC,
+           ModeList &modeA, StrideMap &strideA,
+           ModeList &modeB, StrideMap &strideB,
+           ModeList &modeC, StrideMap &strideC,
+           ExtentMap &extent)
+   {
+       assert( (modeA.size() == 0) &&
+               (modeB.size() == 0) &&
+               (modeC.size() == 0) &&
+               (strideA.size() == 0) &&
+               (strideB.size() == 0) &&
+               (strideC.size() == 0) );
+
+       /*******************************
+        * Init modes A, B, C & strides
+        *******************************/
+       stride_type tmpStride = 1;
+       for(uint32_t idx=0; idx < numModesA; idx++)
+       {
+           auto mode = sortedModeA[idx];
+           modeA.push_back(mode);
+           if(sortedStrideA){
+               strideA[mode] = sortedStrideA[idx];
+           }else{
+               strideA[mode] = tmpStride ;
+               tmpStride *= extent[mode];
+           }
+       }
+       tmpStride = 1;
+       for(uint32_t idx=0; idx < numModesB; idx++ )
+       {
+           auto mode = sortedModeB[idx];
+           modeB.push_back(mode);
+           if(sortedStrideB){
+               strideB[mode] = sortedStrideB[idx];
+           }else{
+               strideB[mode] = tmpStride ;
+               tmpStride *= extent[mode];
+           }
+       }
+       tmpStride = 1;
+       for(uint32_t idx=0; idx < numModesC; idx++)
+       {
+           auto mode = sortedModeC[idx];
+           modeC.push_back(mode);
+           if(sortedStrideC){
+               strideC[mode] = sortedStrideC[idx];
+           }else{
+               strideC[mode] = tmpStride ;
+               tmpStride *= extent[mode];
+           }
+       }
+       /*******************************/
+
+       return fuseModes(modeA, strideA,
+                        modeB, strideB,
+                        modeC, strideC, extent);
+   }
+
+   class UtilTest: public ::testing::Test
+   {
+      protected:
+         // You can remove any or all of the following functions if its body
+         // is empty.
+
+         UtilTest()
+         {
+            modeA = {MODE_C,MODE_B,MODE_A};
+            modeB = {MODE_C,MODE_A,MODE_B};
+            modeC = {MODE_A,MODE_B,MODE_C,MODE_D};
+         }
+
+         ~UtilTest() override {
+            // You can do clean-up work that doesn't throw exceptions here.
+         }
+
+         // If the constructor and destructor are not enough for setting up
+         // and cleaning up each test, you can define the following methods:
+
+         void SetUp() override
+         {
+            // Code here will be called immediately after the constructor (right
+            // before each test).
+
+            uint32_t nmodeA = modeA.size();
+            uint32_t nmodeB = modeB.size();
+            uint32_t nmodeC = modeC.size();
+
+            std::unordered_map<mode_type, extent_type> extent;
+            extent[MODE_A] = 400;
+            extent[MODE_B] = 200;
+            extent[MODE_C] = 300;
+            extent[MODE_D] = 300;
+
+            int vectorWidth = 4;
+            int vectorModeA = rand() % (nmodeA+1) - 1;
+            int vectorWidthA = vectorModeA == -1 ? 1 : vectorWidth;
+            int vectorModeB = rand() % (nmodeB+1) - 1;
+            int vectorWidthB = vectorModeB == -1 ? 1 : vectorWidth;
+            int vectorModeC = rand() % (nmodeC+1) - 1;
+            int vectorWidthC = vectorModeC == -1 ? 1 : vectorWidth;
+
+            if( vectorModeA != -1 && std::find(vectorizedModes.begin(), vectorizedModes.end(), modeA[vectorModeA]) == vectorizedModes.end())
+               vectorizedModes.push_back(modeA[vectorModeA]);
+            if( vectorModeB != -1 && std::find(vectorizedModes.begin(), vectorizedModes.end(), modeB[vectorModeB]) == vectorizedModes.end())
+               vectorizedModes.push_back(modeB[vectorModeB]);
+            if( vectorModeC != -1 && std::find(vectorizedModes.begin(), vectorizedModes.end(), modeC[vectorModeC]) == vectorizedModes.end())
+               vectorizedModes.push_back(modeC[vectorModeC]);
+
+            std::vector<extent_type> extentA;
+            for(auto mode : modeA)
+               extentA.push_back(extent[mode] / ((vectorModeA != -1 && mode == modeA[vectorModeA] ) ? vectorWidthA : 1));
+            std::vector<extent_type> extentB;
+            for(auto mode : modeB)
+               extentB.push_back(extent[mode] / ((vectorModeB != -1 && mode == modeB[vectorModeB] ) ? vectorWidthB : 1));
+            std::vector<extent_type> extentC;
+            for(auto mode : modeC)
+               extentC.push_back(extent[mode] / ((vectorModeC != -1 && mode == modeC[vectorModeC] ) ? vectorWidthC : 1));
+
+            descA = new TensorDescriptor(nmodeA, &extentA[0], nullptr, LWDA_R_32F, LWTENSOR_OP_IDENTITY, vectorWidthA, vectorModeA);
+            descB = new TensorDescriptor(nmodeB, &extentB[0], nullptr, LWDA_R_32F, LWTENSOR_OP_IDENTITY, vectorWidthB, vectorModeB);
+            descC = new TensorDescriptor(nmodeC, &extentC[0], nullptr, LWDA_R_32F, LWTENSOR_OP_IDENTITY, vectorWidthC, vectorModeC);
+         }
+
+         void TearDown() override {
+            // Code here will be called immediately after each test (right
+            // before the destructor).
+            vectorizedModes.clear();
+            delete descA;
+            delete descB;
+            delete descC;
+         }
+
+         // Objects declared here can be used by all tests in the test case for Foo.
+      public:
+         int seed;
+         TensorDescriptor *descA;
+         TensorDescriptor *descB;
+         TensorDescriptor *descC;
+         std::vector<mode_type> modeA;
+         std::vector<mode_type> modeB;
+         std::vector<mode_type> modeC;
+         std::vector<mode_type> vectorizedModes;
+
+//         std::string DebugString() const{
+//            std::string debug;
+////            debug += descA->toString();
+////            debug += descB->toString();
+////            debug += descC->toString();
+////            for( auto x : vectorizedModesToNewMode)
+////               printf("%c %c\n", x.first, x.second.first);
+////            for( auto x : vectorizedModes)
+////               printf("%c \n", x);
+//            return debug;
+//         }
+   };
+
+   // ensure that isValidBinaryOperator and lwtensorUnaryOp work well together
+   TEST_F(UtilTest, pw_binaryOperatorsI8)
+   {
+       lwtensorOperator_t ops[] = {
+           LWTENSOR_OP_IDENTITY,
+           LWTENSOR_OP_SQRT    ,
+           LWTENSOR_OP_ADD     ,
+           LWTENSOR_OP_MUL     ,
+           LWTENSOR_OP_MAX     ,
+           LWTENSOR_OP_MIN     ,
+           LWTENSOR_OP_RELU    ,
+           LWTENSOR_OP_CONJ    ,
+           LWTENSOR_OP_RCP     ,
+           LWTENSOR_OP_UNKNOWN};
+
+       lwdaDataType_t computeType = LWDA_R_8I;
+       using dataType = int8_t;
+       auto a = lwGet<dataType>(3);
+       auto b = lwGet<dataType>(2);
+       int n = sizeof(ops)/ sizeof(lwtensorOperator_t);
+
+       ElementwiseParameters::ActivationContext ctx{};
+       for(int i=0; i < n; ++i)
+           if( isValidBinaryOperator( ops[i], computeType ) )
+               EXPECT_FALSE( lwIsEqual(lwGet<dataType>(0), lwtensorBinaryOp<dataType>(a, b, ops[i], &ctx)) );
+   }
+   // ensure that isValidBinaryOperator and lwtensorUnaryOp work well together
+   TEST_F(UtilTest, pw_binaryOperatorsH)
+   {
+       lwtensorOperator_t ops[] = {
+           LWTENSOR_OP_IDENTITY,
+           LWTENSOR_OP_SQRT    ,
+           LWTENSOR_OP_ADD     ,
+           LWTENSOR_OP_MUL     ,
+           LWTENSOR_OP_MAX     ,
+           LWTENSOR_OP_MIN     ,
+           LWTENSOR_OP_RELU    ,
+           LWTENSOR_OP_CONJ    ,
+           LWTENSOR_OP_RCP     ,
+           LWTENSOR_OP_UNKNOWN};
+
+       lwdaDataType_t computeType = LWDA_R_16F;
+       half a = lwGet<half>(3.0f);
+       half b = lwGet<half>(2.0f);
+       int n = sizeof(ops)/ sizeof(lwtensorOperator_t);
+
+       ElementwiseParameters::ActivationContext ctx{};
+       for(int i=0; i < n; ++i)
+           if( isValidBinaryOperator( ops[i], computeType ) )
+               EXPECT_FALSE( lwIsEqual(lwGet<half>(0.0f), lwtensorBinaryOp<half>(a, b, ops[i], &ctx)) );
+   }
+
+   // ensure that isValidUnaryOperator and lwtensorUnaryOp work well together
+   TEST_F(UtilTest, pw_unaryOperatorsH)
+   {
+       lwtensorOperator_t ops[] = {
+           LWTENSOR_OP_IDENTITY,
+           LWTENSOR_OP_SQRT    ,
+           LWTENSOR_OP_ADD     ,
+           LWTENSOR_OP_MUL     ,
+           LWTENSOR_OP_MAX     ,
+           LWTENSOR_OP_MIN     ,
+           LWTENSOR_OP_RELU    ,
+           LWTENSOR_OP_CONJ    ,
+           LWTENSOR_OP_RCP     ,
+           LWTENSOR_OP_UNKNOWN};
+
+       lwdaDataType_t computeType = LWDA_R_16F;
+
+       half ti = lwGet<half>(2.0f);
+       int n = sizeof(ops)/ sizeof(lwtensorOperator_t);
+
+       ElementwiseParameters::ActivationContext ctx{};
+       for(int i=0; i < n; ++i)
+           if( isValidUnaryOperator( ops[i], computeType ) )
+               EXPECT_FALSE( lwIsEqual(lwGet<half>(0.0f), lwtensorUnaryOp<half>(ti, ops[i], &ctx)) );
+   }
+
+   // ensure that isValidUnaryOperator and lwtensorUnaryOp work well together
+   TEST_F(UtilTest, pw_unaryOperatorsS)
+   {
+       lwtensorOperator_t ops[] = {
+           LWTENSOR_OP_IDENTITY,
+           LWTENSOR_OP_SQRT    ,
+           LWTENSOR_OP_ADD     ,
+           LWTENSOR_OP_MUL     ,
+           LWTENSOR_OP_MAX     ,
+           LWTENSOR_OP_MIN     ,
+           LWTENSOR_OP_RELU    ,
+           LWTENSOR_OP_CONJ    ,
+           LWTENSOR_OP_RCP     ,
+           LWTENSOR_OP_UNKNOWN};
+
+       lwdaDataType_t computeType = LWDA_R_32F;
+       float ti = 2.0;
+       int n = sizeof(ops)/ sizeof(lwtensorOperator_t);
+
+       ElementwiseParameters::ActivationContext ctx{};
+       for(int i=0; i < n; ++i)
+           if( isValidUnaryOperator( ops[i], computeType ) )
+               EXPECT_FALSE( lwIsEqual(0.0f, lwtensorUnaryOp<float>(ti, ops[i], &ctx)) );
+   }
+
+   // ensure that isValidUnaryOperator and lwtensorUnaryOp work well together
+   TEST_F(UtilTest, pw_unaryOperatorsZ)
+   {
+       lwtensorOperator_t ops[] = {
+           LWTENSOR_OP_IDENTITY,
+           LWTENSOR_OP_SQRT    ,
+           LWTENSOR_OP_ADD     ,
+           LWTENSOR_OP_MUL     ,
+           LWTENSOR_OP_MAX     ,
+           LWTENSOR_OP_MIN     ,
+           LWTENSOR_OP_RELU    ,
+           LWTENSOR_OP_CONJ    ,
+           LWTENSOR_OP_RCP     ,
+           LWTENSOR_OP_UNKNOWN};
+
+       lwdaDataType_t computeType = LWDA_C_64F;
+       lwDoubleComplex ti = make_lwDoubleComplex(2.0, 3.0);
+       int n = sizeof(ops)/ sizeof(lwtensorOperator_t);
+
+       for(int i=0; i < n; ++i)
+           if( isValidUnaryOperator( ops[i], computeType ) )
+               EXPECT_FALSE( lwIsEqual(make_lwDoubleComplex(0.0, 0.0), lwtensorUnaryOp<lwDoubleComplex>(ti, ops[i])) );
+   }
+   TEST_F(UtilTest, pw_unaryOperatorsC)
+   {
+       lwtensorOperator_t ops[] = {
+           LWTENSOR_OP_IDENTITY,
+           LWTENSOR_OP_SQRT    ,
+           LWTENSOR_OP_ADD     ,
+           LWTENSOR_OP_MUL     ,
+           LWTENSOR_OP_MAX     ,
+           LWTENSOR_OP_MIN     ,
+           LWTENSOR_OP_RELU    ,
+           LWTENSOR_OP_CONJ    ,
+           LWTENSOR_OP_RCP     ,
+           LWTENSOR_OP_UNKNOWN};
+
+       lwdaDataType_t computeType = LWDA_C_32F;
+       lwComplex ti = make_lwComplex(2.0, 3.0);
+       int n = sizeof(ops)/ sizeof(lwtensorOperator_t);
+
+       for(int i=0; i < n; ++i)
+           if( isValidUnaryOperator( ops[i], computeType ) )
+               EXPECT_FALSE( lwIsEqual(make_lwComplex(0.0, 0.0), lwtensorUnaryOp<lwComplex>(ti, ops[i])) );
+   }
+
+   TEST_F(UtilTest, tensorDescriptorInit)
+   {
+      uint32_t nmodeA = 3;
+      extent_type extentA[] = {20,10,30};
+      TensorDescriptor descA(nmodeA, extentA);
+
+      EXPECT_EQ( descA.getExtent(0), extentA[0]);
+      EXPECT_EQ( descA.getExtent(1), extentA[1]);
+      EXPECT_EQ( descA.getExtent(2), extentA[2] );
+      EXPECT_EQ( descA.getStride(0), 1 );
+      EXPECT_EQ( descA.getStride(1), extentA[0]);
+      EXPECT_EQ( descA.getStride(2), extentA[0] * extentA[1]);
+      EXPECT_EQ( descA.getVectorModeIndex(), 999 );
+      EXPECT_EQ( descA.getVectorMode(nullptr), LWTENSOR_ILWALID_MODE);
+      EXPECT_EQ( descA.getVectorWidth(), 1 );
+      EXPECT_EQ( descA.getDataType(), LWDA_R_32F );
+   }
+
+   TEST_F(UtilTest, tensorDescriptorInitVec)
+   {
+      uint32_t nmodeA = 3;
+      extent_type extentA[] = {20,10,30};
+      mode_type modes[] = { 3, 4, 5};
+      uint32_t vectorModeIndex = 2;
+      TensorDescriptor descA(nmodeA, extentA, nullptr, LWDA_R_32F, LWTENSOR_OP_IDENTITY, 2U, vectorModeIndex);
+
+      EXPECT_EQ( descA.getExtent(0), extentA[0]);
+      EXPECT_EQ( descA.getExtent(1), extentA[1]);
+      EXPECT_EQ( descA.getExtent(2), extentA[2] );
+      EXPECT_EQ( descA.getStride(0), 1 );
+      EXPECT_EQ( descA.getStride(1), extentA[0]);
+      EXPECT_EQ( descA.getStride(2), extentA[0] * extentA[1]);
+      EXPECT_EQ( descA.getVectorModeIndex(), vectorModeIndex );
+      EXPECT_EQ( descA.getVectorMode(modes), modes[vectorModeIndex]);
+      EXPECT_EQ( descA.getVectorWidth(), 2 );
+      EXPECT_EQ( descA.getDataType(), LWDA_R_32F );
+   }
+
+   TEST_F(UtilTest, tensorDescriptorStrideInit)
+   {
+      uint32_t nmodeA = 3;
+      extent_type extentA[] = {20,10,30};
+      stride_type stride[] = {(stride_type) 2, (stride_type)extentA[0], (stride_type)(extentA[0] * extentA[1])};
+      TensorDescriptor descA(nmodeA, extentA, stride);
+      EXPECT_EQ( descA.getStride(0), stride[0]);
+      EXPECT_EQ( descA.getStride(1), stride[1]);
+      EXPECT_EQ( descA.getStride(2), stride[2]);
+   }
+   TEST_F(UtilTest, tensorDescriptorInitFailExtent)
+   {
+      uint32_t nmodeA = 3;
+      extent_type extentA[] = {20,0,30};
+      EXPECT_ANY_THROW(TensorDescriptor descA(nmodeA, extentA));
+   }
+   TEST_F(UtilTest, tensorDescriptorInitFailStride)
+   {
+      uint32_t nmodeA = 3;
+      extent_type extentA[] = {20,10,30};
+      stride_type stride[] = {(stride_type)2, (stride_type)extentA[0], (stride_type)0};
+      EXPECT_ANY_THROW(TensorDescriptor descA(nmodeA, extentA, stride));
+   }
+
+   TEST_F(UtilTest, tensorDescriptorInitFailVectorMode)
+   {
+      uint32_t nmodeA = 3;
+      extent_type extentA[] = {20,10,30};
+      stride_type stride[] = {(stride_type)2, (stride_type)extentA[0], (stride_type)0};
+      int vectorWidth = 2;
+      int vectorMode = -1;
+      EXPECT_ANY_THROW(TensorDescriptor descA(nmodeA, extentA, stride, LWDA_R_32F, LWTENSOR_OP_IDENTITY, vectorWidth, vectorMode));
+   }
+   TEST_F(UtilTest, tensorDescriptorInitFailVectorWidth)
+   {
+      uint32_t nmodeA = 3;
+      extent_type extentA[] = {20,10,30};
+      stride_type stride[] = {2, (stride_type)extentA[0], 0};
+      int vectorWidth = 7;
+      int vectorMode = 2;
+      EXPECT_ANY_THROW(TensorDescriptor descA(nmodeA, extentA, stride, LWDA_R_32F, LWTENSOR_OP_IDENTITY, vectorWidth, vectorMode));
+   }
+
+   // fuse two looped modes
+   TEST_F(UtilTest, fuseModes15)
+   {
+      mode_type modeA[] = {0,4,3,1,5};
+      mode_type modeB[] = {4,5,2};
+      mode_type modeC[] = {0,1,5,2,3};
+      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+
+      ExtentMap extent;
+      for(int i=0; i < nmodeA; ++i)
+         extent[modeA[i]] = 2;
+      for(int i=0; i < nmodeB; ++i)
+         extent[modeB[i]] = 2;
+      for(int i=0; i < nmodeC; ++i)
+         extent[modeC[i]] = 2;
+
+      ModeList modeA_;
+      ModeList modeB_;
+      ModeList modeC_;
+      StrideMap strideA_;
+      StrideMap strideB_;
+      StrideMap strideC_;
+      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+                           nmodeB, nullptr, modeB,
+                           nmodeC, nullptr, modeC,
+                           modeA_, strideA_,
+                           modeB_, strideB_,
+                           modeC_, strideC_,
+                           extent);
+      EXPECT_EQ(strideA_.size(), modeA_.size());
+      EXPECT_EQ(strideB_.size(), modeB_.size());
+      EXPECT_EQ(strideC_.size(), modeC_.size());
+      std::vector<mode_type> modeA__(modeA_.size());
+      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+      std::vector<mode_type> modeB__(modeB_.size());
+      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+      std::vector<mode_type> modeC__(modeC_.size());
+      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+
+      EXPECT_EQ( modeA__.size(), nmodeA );
+      EXPECT_EQ( modeB__.size(), nmodeB );
+      EXPECT_EQ( modeC__.size(), nmodeC );
+
+      EXPECT_EQ( modeA__[0], 0 );
+      EXPECT_EQ( modeA__[1], 4 );
+      EXPECT_EQ( modeA__[2], 3 );
+      EXPECT_EQ( modeA__[3], 1 );
+      EXPECT_EQ( modeA__[4], 5 );
+
+      EXPECT_EQ( modeB__[0], modeB[0] );
+      EXPECT_EQ( modeB__[1], modeB[1] );
+      EXPECT_EQ( modeB__[2], modeB[2] );
+
+      EXPECT_EQ( modeC__[0], 0 );
+      EXPECT_EQ( modeC__[1], 1 );
+      EXPECT_EQ( modeC__[2], 5 );
+      EXPECT_EQ( modeC__[3], 2 );
+      EXPECT_EQ( modeC__[4], 3 );
+
+      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+   }
+//   TEST_F(UtilTest, fuseModes15Vec1)
+//   {
+//      mode_type modeA[] = {0,4,3,1,5};
+//      mode_type modeB[] = {4,5,2};
+//      mode_type modeC[] = {0,1,5,2,3};
+//      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+//      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+//      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+//
+//      ExtentMap extent;
+//      for(int i=0; i < nmodeA; ++i)
+//         extent[modeA[i]] = 2;
+//      for(int i=0; i < nmodeB; ++i)
+//         extent[modeB[i]] = 2;
+//      for(int i=0; i < nmodeC; ++i)
+//         extent[modeC[i]] = 2;
+//
+//      ModeList modeA_;
+//      ModeList modeB_;
+//      ModeList modeC_;
+//      StrideMap strideA_;
+//      StrideMap strideB_;
+//      StrideMap strideC_;
+//      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+//                           nmodeB, nullptr, modeB,
+//                           nmodeC, nullptr, modeC,
+//                           modeA_, strideA_,
+//                           modeB_, strideB_,
+//                           modeC_, strideC_,
+//                           extent, 0, 0, 3);
+//      EXPECT_EQ(strideA_.size(), modeA_.size());
+//      EXPECT_EQ(strideB_.size(), modeB_.size());
+//      EXPECT_EQ(strideC_.size(), modeC_.size());
+//      std::vector<mode_type> modeA__(modeA_.size());
+//      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+//      std::vector<mode_type> modeB__(modeB_.size());
+//      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+//      std::vector<mode_type> modeC__(modeC_.size());
+//      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+//
+//      EXPECT_EQ( modeA__.size(), nmodeA );
+//      EXPECT_EQ( modeB__.size(), nmodeB );
+//      EXPECT_EQ( modeC__.size(), nmodeC );
+//
+//      EXPECT_EQ( modeA__[0], 0 );
+//      EXPECT_EQ( modeA__[1], 4 );
+//      EXPECT_EQ( modeA__[2], 3 );
+//      EXPECT_EQ( modeA__[3], 1 );
+//      EXPECT_EQ( modeA__[4], 5 );
+//
+//      EXPECT_EQ( modeB__[0], modeB[0] );
+//      EXPECT_EQ( modeB__[1], modeB[1] );
+//      EXPECT_EQ( modeB__[2], modeB[2] );
+//
+//      EXPECT_EQ( modeC__[0], 0 );
+//      EXPECT_EQ( modeC__[1], 1 );
+//      EXPECT_EQ( modeC__[2], 5 );
+//      EXPECT_EQ( modeC__[3], 2 );
+//      EXPECT_EQ( modeC__[4], 3 );
+//
+//      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+//   }
+
+   TEST_F(UtilTest, fuseModes2)
+   {
+      mode_type modeA[] = {8,9,7};
+      mode_type modeB[] = {8,0,9,7,1};
+      mode_type modeC[] = {0,9,7,1};
+      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+
+      ExtentMap extent;
+      for(int i=0; i < nmodeA; ++i)
+         extent[modeA[i]] = 2;
+      for(int i=0; i < nmodeB; ++i)
+         extent[modeB[i]] = 2;
+      for(int i=0; i < nmodeC; ++i)
+         extent[modeC[i]] = 2;
+
+      ModeList modeA_;
+      ModeList modeB_;
+      ModeList modeC_;
+      StrideMap strideA_;
+      StrideMap strideB_;
+      StrideMap strideC_;
+      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+                           nmodeB, nullptr, modeB,
+                           nmodeC, nullptr, modeC,
+                           modeA_, strideA_,
+                           modeB_, strideB_,
+                           modeC_, strideC_,
+                           extent);
+      EXPECT_EQ(strideA_.size(), modeA_.size());
+      EXPECT_EQ(strideB_.size(), modeB_.size());
+      EXPECT_EQ(strideC_.size(), modeC_.size());
+      std::vector<mode_type> modeA__(modeA_.size());
+      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+      std::vector<mode_type> modeB__(modeB_.size());
+      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+      std::vector<mode_type> modeC__(modeC_.size());
+      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+
+      ASSERT_EQ( modeA__.size(), nmodeA - 1 );
+      EXPECT_EQ( modeB__.size(), nmodeB - 1 );
+      EXPECT_EQ( modeC__.size(), nmodeC - 1 );
+
+      EXPECT_EQ( modeA__[0], 8 );
+      EXPECT_EQ( modeA__[1], 9 );
+
+      EXPECT_EQ( modeB__[0], 8 );
+      EXPECT_EQ( modeB__[1], 0 );
+      EXPECT_EQ( modeB__[2], 9 );
+      EXPECT_EQ( modeB__[3], 1 );
+
+      EXPECT_EQ( modeC__[0], 0 );
+      EXPECT_EQ( modeC__[1], 9 );
+      EXPECT_EQ( modeC__[2], 1 );
+
+      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+   }
+//   TEST_F(UtilTest, fuseModes2Vec1)
+//   {
+//      mode_type modeA[] = {8,9,7};
+//      mode_type modeB[] = {8,0,9,7,1};
+//      mode_type modeC[] = {0,9,7,1};
+//      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+//      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+//      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+//
+//      ExtentMap extent;
+//      for(int i=0; i < nmodeA; ++i)
+//         extent[modeA[i]] = 2;
+//      for(int i=0; i < nmodeB; ++i)
+//         extent[modeB[i]] = 2;
+//      for(int i=0; i < nmodeC; ++i)
+//         extent[modeC[i]] = 2;
+//
+//      ModeList modeA_;
+//      ModeList modeB_;
+//      ModeList modeC_;
+//      StrideMap strideA_;
+//      StrideMap strideB_;
+//      StrideMap strideC_;
+//      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+//                           nmodeB, nullptr, modeB,
+//                           nmodeC, nullptr, modeC,
+//                           modeA_, strideA_,
+//                           modeB_, strideB_,
+//                           modeC_, strideC_,
+//                           extent, 8, 1, 1);
+//      EXPECT_EQ(strideA_.size(), modeA_.size());
+//      EXPECT_EQ(strideB_.size(), modeB_.size());
+//      EXPECT_EQ(strideC_.size(), modeC_.size());
+//      std::vector<mode_type> modeA__(modeA_.size());
+//      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+//      std::vector<mode_type> modeB__(modeB_.size());
+//      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+//      std::vector<mode_type> modeC__(modeC_.size());
+//      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+//
+//      ASSERT_EQ( modeA__.size(), nmodeA - 1 );
+//      EXPECT_EQ( modeB__.size(), nmodeB - 1 );
+//      EXPECT_EQ( modeC__.size(), nmodeC - 1 );
+//
+//      EXPECT_EQ( modeA__[0], 8 );
+//      EXPECT_EQ( modeA__[1], 9 );
+//
+//      EXPECT_EQ( modeB__[0], 8 );
+//      EXPECT_EQ( modeB__[1], 0 );
+//      EXPECT_EQ( modeB__[2], 9 );
+//      EXPECT_EQ( modeB__[3], 1 );
+//
+//      EXPECT_EQ( modeC__[0], 0 );
+//      EXPECT_EQ( modeC__[1], 9 );
+//      EXPECT_EQ( modeC__[2], 1 );
+//
+//      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+//   }
+//   TEST_F(UtilTest, fuseModes2Vec2)
+//   {
+//      mode_type modeA[] = {8,9,7};
+//      mode_type modeB[] = {8,0,9,7,1};
+//      mode_type modeC[] = {0,9,7,1};
+//      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+//      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+//      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+//
+//      ExtentMap extent;
+//      for(int i=0; i < nmodeA; ++i)
+//         extent[modeA[i]] = 2;
+//      for(int i=0; i < nmodeB; ++i)
+//         extent[modeB[i]] = 2;
+//      for(int i=0; i < nmodeC; ++i)
+//         extent[modeC[i]] = 2;
+//
+//      ModeList modeA_;
+//      ModeList modeB_;
+//      ModeList modeC_;
+//      StrideMap strideA_;
+//      StrideMap strideB_;
+//      StrideMap strideC_;
+//      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+//                           nmodeB, nullptr, modeB,
+//                           nmodeC, nullptr, modeC,
+//                           modeA_, strideA_,
+//                           modeB_, strideB_,
+//                           modeC_, strideC_,
+//                           extent, 7, 1, 1);
+//      EXPECT_EQ(strideA_.size(), modeA_.size());
+//      EXPECT_EQ(strideB_.size(), modeB_.size());
+//      EXPECT_EQ(strideC_.size(), modeC_.size());
+//      std::vector<mode_type> modeA__(modeA_.size());
+//      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+//      std::vector<mode_type> modeB__(modeB_.size());
+//      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+//      std::vector<mode_type> modeC__(modeC_.size());
+//      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+//
+//      ASSERT_EQ( modeA__.size(), nmodeA );
+//      EXPECT_EQ( modeB__.size(), nmodeB );
+//      EXPECT_EQ( modeC__.size(), nmodeC );
+//
+//      EXPECT_EQ( modeA__[0], 8 );
+//      EXPECT_EQ( modeA__[1], 9 );
+//      EXPECT_EQ( modeA__[2], 7 );
+//
+//      EXPECT_EQ( modeB__[0], 8 );
+//      EXPECT_EQ( modeB__[1], 0 );
+//      EXPECT_EQ( modeB__[2], 9 );
+//      EXPECT_EQ( modeB__[3], 7 );
+//      EXPECT_EQ( modeB__[4], 1 );
+//
+//      EXPECT_EQ( modeC__[0], 0 );
+//      EXPECT_EQ( modeC__[1], 9 );
+//      EXPECT_EQ( modeC__[2], 7 );
+//      EXPECT_EQ( modeC__[3], 1 );
+//
+//      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+//   }
+
+   TEST_F(UtilTest, fuseModesFuseLoopedModes)
+   {
+      // fuse 5,2
+      mode_type modeA[] = {0,4,1,5,2};
+      mode_type modeB[] = {4,5,2,3};
+      mode_type modeC[] = {0,1,5,2,3};
+      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+
+      ExtentMap extent;
+      for(int i=0; i < nmodeA; ++i)
+         extent[modeA[i]] = 2;
+      for(int i=0; i < nmodeB; ++i)
+         extent[modeB[i]] = 2;
+      for(int i=0; i < nmodeC; ++i)
+         extent[modeC[i]] = 2;
+
+      ModeList modeA_;
+      ModeList modeB_;
+      ModeList modeC_;
+      StrideMap strideA_;
+      StrideMap strideB_;
+      StrideMap strideC_;
+      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+                           nmodeB, nullptr, modeB,
+                           nmodeC, nullptr, modeC,
+                           modeA_, strideA_,
+                           modeB_, strideB_,
+                           modeC_, strideC_,
+                           extent);
+      EXPECT_EQ(strideA_.size(), modeA_.size());
+      EXPECT_EQ(strideB_.size(), modeB_.size());
+      EXPECT_EQ(strideC_.size(), modeC_.size());
+      std::vector<mode_type> modeA__(modeA_.size());
+      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+      std::vector<mode_type> modeB__(modeB_.size());
+      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+      std::vector<mode_type> modeC__(modeC_.size());
+      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+
+      EXPECT_EQ( modeA__.size(), nmodeA -1 );
+      EXPECT_EQ( modeB__.size(), nmodeB -1 );
+      EXPECT_EQ( modeC__.size(), nmodeC -1 );
+      EXPECT_EQ( modeA__[0], 0 );
+      EXPECT_EQ( modeA__[1], 4 );
+      EXPECT_EQ( modeA__[2], 1 );
+      EXPECT_EQ( modeA__[3], 5 );
+
+      EXPECT_EQ( modeB__[0], 4 );
+      EXPECT_EQ( modeB__[1], 5 );
+      EXPECT_EQ( modeB__[2], 3 );
+
+      EXPECT_EQ( modeC__[0], 0 );
+      EXPECT_EQ( modeC__[1], 1 );
+      EXPECT_EQ( modeC__[2], 5 );
+      EXPECT_EQ( modeC__[3], 3 );
+
+      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+   }
+//   TEST_F(UtilTest, fuseModesFuseLoopedModesVec1)
+//   {
+//      // fuse 5,2
+//      mode_type modeA[] = {0,4,1,5,2};
+//      mode_type modeB[] = {4,5,2,3};
+//      mode_type modeC[] = {0,1,5,2,3};
+//      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+//      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+//      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+//
+//      ExtentMap extent;
+//      for(int i=0; i < nmodeA; ++i)
+//         extent[modeA[i]] = 2;
+//      for(int i=0; i < nmodeB; ++i)
+//         extent[modeB[i]] = 2;
+//      for(int i=0; i < nmodeC; ++i)
+//         extent[modeC[i]] = 2;
+//
+//      ModeList modeA_;
+//      ModeList modeB_;
+//      ModeList modeC_;
+//      StrideMap strideA_;
+//      StrideMap strideB_;
+//      StrideMap strideC_;
+//      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+//                           nmodeB, nullptr, modeB,
+//                           nmodeC, nullptr, modeC,
+//                           modeA_, strideA_,
+//                           modeB_, strideB_,
+//                           modeC_, strideC_,
+//                           extent, 1,4,1);
+//      EXPECT_EQ(strideA_.size(), modeA_.size());
+//      EXPECT_EQ(strideB_.size(), modeB_.size());
+//      EXPECT_EQ(strideC_.size(), modeC_.size());
+//      std::vector<mode_type> modeA__(modeA_.size());
+//      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+//      std::vector<mode_type> modeB__(modeB_.size());
+//      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+//      std::vector<mode_type> modeC__(modeC_.size());
+//      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+//
+//      EXPECT_EQ( modeA__.size(), nmodeA -1 );
+//      EXPECT_EQ( modeB__.size(), nmodeB -1 );
+//      EXPECT_EQ( modeC__.size(), nmodeC -1 );
+//      EXPECT_EQ( modeA__[0], 0 );
+//      EXPECT_EQ( modeA__[1], 4 );
+//      EXPECT_EQ( modeA__[2], 1 );
+//      EXPECT_EQ( modeA__[3], 5 );
+//
+//      EXPECT_EQ( modeB__[0], 4 );
+//      EXPECT_EQ( modeB__[1], 5 );
+//      EXPECT_EQ( modeB__[2], 3 );
+//
+//      EXPECT_EQ( modeC__[0], 0 );
+//      EXPECT_EQ( modeC__[1], 1 );
+//      EXPECT_EQ( modeC__[2], 5 );
+//      EXPECT_EQ( modeC__[3], 3 );
+//
+//      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+//   }
+//   TEST_F(UtilTest, fuseModesFuseLoopedModesVec2)
+//   {
+//      // fuse 5,2
+//      mode_type modeA[] = {0,4,1,5,2};
+//      mode_type modeB[] = {4,5,2,3};
+//      mode_type modeC[] = {0,1,5,2,3};
+//      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+//      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+//      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+//
+//      ExtentMap extent;
+//      for(int i=0; i < nmodeA; ++i)
+//         extent[modeA[i]] = 2;
+//      for(int i=0; i < nmodeB; ++i)
+//         extent[modeB[i]] = 2;
+//      for(int i=0; i < nmodeC; ++i)
+//         extent[modeC[i]] = 2;
+//
+//      ModeList modeA_;
+//      ModeList modeB_;
+//      ModeList modeC_;
+//      StrideMap strideA_;
+//      StrideMap strideB_;
+//      StrideMap strideC_;
+//      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+//                           nmodeB, nullptr, modeB,
+//                           nmodeC, nullptr, modeC,
+//                           modeA_, strideA_,
+//                           modeB_, strideB_,
+//                           modeC_, strideC_,
+//                           extent, 2,4,1);
+//      EXPECT_EQ(strideA_.size(), modeA_.size());
+//      EXPECT_EQ(strideB_.size(), modeB_.size());
+//      EXPECT_EQ(strideC_.size(), modeC_.size());
+//      std::vector<mode_type> modeA__(modeA_.size());
+//      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+//      std::vector<mode_type> modeB__(modeB_.size());
+//      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+//      std::vector<mode_type> modeC__(modeC_.size());
+//      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+//
+//      EXPECT_EQ( modeA__.size(), nmodeA );
+//      EXPECT_EQ( modeB__.size(), nmodeB );
+//      EXPECT_EQ( modeC__.size(), nmodeC );
+//
+//      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+//   }
+   TEST_F(UtilTest, fuseModesFuse3ModesAB)
+   {
+      mode_type modeA[] = {0,4,1,5,2,3};
+      mode_type modeB[] = {4,5,2,3};
+      mode_type modeC[] = {0,1};
+      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+
+      ExtentMap extent;
+      for(int i=0; i < nmodeA; ++i)
+         extent[modeA[i]] = 2;
+      for(int i=0; i < nmodeB; ++i)
+         extent[modeB[i]] = 2;
+      for(int i=0; i < nmodeC; ++i)
+         extent[modeC[i]] = 2;
+
+      ModeList modeA_;
+      ModeList modeB_;
+      ModeList modeC_;
+      StrideMap strideA_;
+      StrideMap strideB_;
+      StrideMap strideC_;
+      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+                           nmodeB, nullptr, modeB,
+                           nmodeC, nullptr, modeC,
+                           modeA_, strideA_,
+                           modeB_, strideB_,
+                           modeC_, strideC_,
+                           extent);
+      EXPECT_EQ(strideA_.size(), modeA_.size());
+      EXPECT_EQ(strideB_.size(), modeB_.size());
+      EXPECT_EQ(strideC_.size(), modeC_.size());
+      std::vector<mode_type> modeA__(modeA_.size());
+      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+      std::vector<mode_type> modeB__(modeB_.size());
+      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+      std::vector<mode_type> modeC__(modeC_.size());
+      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+
+      EXPECT_EQ( modeA__.size(), nmodeA -2 );
+      EXPECT_EQ( modeB__.size(), nmodeB -2 );
+      EXPECT_EQ( modeC__.size(), nmodeC );
+      EXPECT_EQ( modeA__[0], 0 );
+      EXPECT_EQ( modeA__[1], 4 );
+      EXPECT_EQ( modeA__[2], 1 );
+      EXPECT_EQ( modeA__[3], 5 );
+
+      EXPECT_EQ( modeB__[0], 4 );
+      EXPECT_EQ( modeB__[1], 5 );
+
+      EXPECT_EQ( modeC__[0], 0 );
+      EXPECT_EQ( modeC__[1], 1 );
+
+      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+   }
+//TEST_F(UtilTest, fuseModesFuse3ModesABVec1)
+//   {
+//      mode_type modeA[] = {0,4,1,5,2,3};
+//      mode_type modeB[] = {4,5,2,3};
+//      mode_type modeC[] = {0,1};
+//      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+//      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+//      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+//
+//      ExtentMap extent;
+//      for(int i=0; i < nmodeA; ++i)
+//         extent[modeA[i]] = 2;
+//      for(int i=0; i < nmodeB; ++i)
+//         extent[modeB[i]] = 2;
+//      for(int i=0; i < nmodeC; ++i)
+//         extent[modeC[i]] = 2;
+//
+//      ModeList modeA_;
+//      ModeList modeB_;
+//      ModeList modeC_;
+//      StrideMap strideA_;
+//      StrideMap strideB_;
+//      StrideMap strideC_;
+//      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+//                           nmodeB, nullptr, modeB,
+//                           nmodeC, nullptr, modeC,
+//                           modeA_, strideA_,
+//                           modeB_, strideB_,
+//                           modeC_, strideC_,
+//                           extent,3,4);
+//      EXPECT_EQ(strideA_.size(), modeA_.size());
+//      EXPECT_EQ(strideB_.size(), modeB_.size());
+//      EXPECT_EQ(strideC_.size(), modeC_.size());
+//      std::vector<mode_type> modeA__(modeA_.size());
+//      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+//      std::vector<mode_type> modeB__(modeB_.size());
+//      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+//      std::vector<mode_type> modeC__(modeC_.size());
+//      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+//
+//      EXPECT_EQ( modeA__.size(), nmodeA -1 );
+//      EXPECT_EQ( modeB__.size(), nmodeB -1 );
+//      EXPECT_EQ( modeC__.size(), nmodeC );
+//      EXPECT_EQ( modeA__[0], 0 );
+//      EXPECT_EQ( modeA__[1], 4 );
+//      EXPECT_EQ( modeA__[2], 1 );
+//      EXPECT_EQ( modeA__[3], 5 );
+//      EXPECT_EQ( modeA__[4], 3 );
+//
+//      EXPECT_EQ( modeB__[0], 4 );
+//      EXPECT_EQ( modeB__[1], 5 );
+//      EXPECT_EQ( modeB__[2], 3 );
+//
+//      EXPECT_EQ( modeC__[0], 0 );
+//      EXPECT_EQ( modeC__[1], 1 );
+//
+//      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+//   }
+   TEST_F(UtilTest, fuseModesFuseModesBC)
+   {
+      mode_type modeA[] = {4,5};
+      mode_type modeB[] = {4,0,1};
+      mode_type modeC[] = {0,1};
+      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+
+      ExtentMap extent;
+      for(int i=0; i < nmodeA; ++i)
+         extent[modeA[i]] = 2;
+      for(int i=0; i < nmodeB; ++i)
+         extent[modeB[i]] = 2;
+      for(int i=0; i < nmodeC; ++i)
+         extent[modeC[i]] = 2;
+
+      ModeList modeA_;
+      ModeList modeB_;
+      ModeList modeC_;
+      StrideMap strideA_;
+      StrideMap strideB_;
+      StrideMap strideC_;
+      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+                           nmodeB, nullptr, modeB,
+                           nmodeC, nullptr, modeC,
+                           modeA_, strideA_,
+                           modeB_, strideB_,
+                           modeC_, strideC_,
+                           extent);
+      EXPECT_EQ(strideA_.size(), modeA_.size());
+      EXPECT_EQ(strideB_.size(), modeB_.size());
+      EXPECT_EQ(strideC_.size(), modeC_.size());
+      std::vector<mode_type> modeA__(modeA_.size());
+      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+      std::vector<mode_type> modeB__(modeB_.size());
+      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+      std::vector<mode_type> modeC__(modeC_.size());
+      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+
+      EXPECT_EQ( modeA__.size(), nmodeA );
+      EXPECT_EQ( modeB__.size(), nmodeB - 1);
+      EXPECT_EQ( modeC__.size(), nmodeC - 1);
+      EXPECT_EQ( modeA__[0], 4 );
+      EXPECT_EQ( modeA__[1], 5 );
+
+      EXPECT_EQ( modeB__[0], 4 );
+      EXPECT_EQ( modeB__[1], 0 );
+
+      EXPECT_EQ( modeC__[0], 0 );
+
+      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+   }
+//   TEST_F(UtilTest, fuseModesFuseModesBCVec)
+//   {
+//      mode_type modeA[] = {4,5};
+//      mode_type modeB[] = {4,0,1};
+//      mode_type modeC[] = {0,1};
+//      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+//      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+//      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+//
+//      ExtentMap extent;
+//      for(int i=0; i < nmodeA; ++i)
+//         extent[modeA[i]] = 2;
+//      for(int i=0; i < nmodeB; ++i)
+//         extent[modeB[i]] = 2;
+//      for(int i=0; i < nmodeC; ++i)
+//         extent[modeC[i]] = 2;
+//
+//      ModeList modeA_;
+//      ModeList modeB_;
+//      ModeList modeC_;
+//      StrideMap strideA_;
+//      StrideMap strideB_;
+//      StrideMap strideC_;
+//      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+//                           nmodeB, nullptr, modeB,
+//                           nmodeC, nullptr, modeC,
+//                           modeA_, strideA_,
+//                           modeB_, strideB_,
+//                           modeC_, strideC_,
+//                           extent,4,0);
+//      EXPECT_EQ(strideA_.size(), modeA_.size());
+//      EXPECT_EQ(strideB_.size(), modeB_.size());
+//      EXPECT_EQ(strideC_.size(), modeC_.size());
+//      std::vector<mode_type> modeA__(modeA_.size());
+//      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+//      std::vector<mode_type> modeB__(modeB_.size());
+//      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+//      std::vector<mode_type> modeC__(modeC_.size());
+//      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+//
+//      EXPECT_EQ( modeA__.size(), nmodeA );
+//      EXPECT_EQ( modeB__.size(), nmodeB);
+//      EXPECT_EQ( modeC__.size(), nmodeC);
+//      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+//   }
+   TEST_F(UtilTest, fuseModesFuseModesAB_BC)
+   {
+      mode_type modeA[] = {4,5,3,2};
+      mode_type modeB[] = {4,3,2,0,1};
+      mode_type modeC[] = {0,1};
+      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+
+      ExtentMap extent;
+      for(int i=0; i < nmodeA; ++i)
+         extent[modeA[i]] = 2;
+      for(int i=0; i < nmodeB; ++i)
+         extent[modeB[i]] = 2;
+      for(int i=0; i < nmodeC; ++i)
+         extent[modeC[i]] = 2;
+
+      ModeList modeA_;
+      ModeList modeB_;
+      ModeList modeC_;
+      StrideMap strideA_;
+      StrideMap strideB_;
+      StrideMap strideC_;
+      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+                           nmodeB, nullptr, modeB,
+                           nmodeC, nullptr, modeC,
+                           modeA_, strideA_,
+                           modeB_, strideB_,
+                           modeC_, strideC_,
+                           extent);
+      EXPECT_EQ(strideA_.size(), modeA_.size());
+      EXPECT_EQ(strideB_.size(), modeB_.size());
+      EXPECT_EQ(strideC_.size(), modeC_.size());
+      std::vector<mode_type> modeA__(modeA_.size());
+      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+      std::vector<mode_type> modeB__(modeB_.size());
+      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+      std::vector<mode_type> modeC__(modeC_.size());
+      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+
+      EXPECT_EQ( modeA__.size(), nmodeA - 1);
+      EXPECT_EQ( modeB__.size(), nmodeB - 2);
+      EXPECT_EQ( modeC__.size(), nmodeC - 1);
+      EXPECT_EQ( modeA__[0], 4 );
+      EXPECT_EQ( modeA__[1], 5 );
+      EXPECT_EQ( modeA__[2], 3 );
+
+      EXPECT_EQ( modeB__[0], 4 );
+      EXPECT_EQ( modeB__[1], 3 );
+      EXPECT_EQ( modeB__[2], 0 );
+
+      EXPECT_EQ( modeC__[0], 0 );
+
+      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+   }
+TEST_F(UtilTest, fuseModesFuseModesAB_BC_ABC)
+   {
+      mode_type modeA[] = {4,5,6,7,3,2};
+      mode_type modeB[] = {4,3,2,6,7,0,1};
+      mode_type modeC[] = {0,1,6,7};
+      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+
+      ExtentMap extent;
+      for(int i=0; i < nmodeA; ++i)
+         extent[modeA[i]] = 2;
+      for(int i=0; i < nmodeB; ++i)
+         extent[modeB[i]] = 2;
+      for(int i=0; i < nmodeC; ++i)
+         extent[modeC[i]] = 2;
+
+      ModeList modeA_;
+      ModeList modeB_;
+      ModeList modeC_;
+      StrideMap strideA_;
+      StrideMap strideB_;
+      StrideMap strideC_;
+      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+                           nmodeB, nullptr, modeB,
+                           nmodeC, nullptr, modeC,
+                           modeA_, strideA_,
+                           modeB_, strideB_,
+                           modeC_, strideC_,
+                           extent);
+      EXPECT_EQ(strideA_.size(), modeA_.size());
+      EXPECT_EQ(strideB_.size(), modeB_.size());
+      EXPECT_EQ(strideC_.size(), modeC_.size());
+      std::vector<mode_type> modeA__(modeA_.size());
+      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+      std::vector<mode_type> modeB__(modeB_.size());
+      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+      std::vector<mode_type> modeC__(modeC_.size());
+      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+
+      EXPECT_EQ( modeA__.size(), nmodeA - 2);
+      EXPECT_EQ( modeB__.size(), nmodeB - 3);
+      EXPECT_EQ( modeC__.size(), nmodeC - 2);
+      EXPECT_EQ( modeA__[0], 4 );
+      EXPECT_EQ( modeA__[1], 5 );
+      EXPECT_EQ( modeA__[2], 6 );
+      EXPECT_EQ( modeA__[3], 3 );
+
+      EXPECT_EQ( modeB__[0], 4 );
+      EXPECT_EQ( modeB__[1], 3 );
+      EXPECT_EQ( modeB__[2], 6 );
+      EXPECT_EQ( modeB__[3], 0 );
+
+      EXPECT_EQ( modeC__[0], 0 );
+      EXPECT_EQ( modeC__[1], 6 );
+
+      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+   }
+   TEST_F(UtilTest, fuseModesFuseModesAC)
+   {
+      mode_type modeA[] = {0,1,4};
+      mode_type modeB[] = {4,5};
+      mode_type modeC[] = {0,1};
+      uint32_t nmodeA = sizeof(modeA) / sizeof(mode_type);
+      uint32_t nmodeB = sizeof(modeB) / sizeof(mode_type);
+      uint32_t nmodeC = sizeof(modeC) / sizeof(mode_type);
+
+      ExtentMap extent;
+      for(int i=0; i < nmodeA; ++i)
+         extent[modeA[i]] = 2;
+      for(int i=0; i < nmodeB; ++i)
+         extent[modeB[i]] = 2;
+      for(int i=0; i < nmodeC; ++i)
+         extent[modeC[i]] = 2;
+
+      ModeList modeA_;
+      ModeList modeB_;
+      ModeList modeC_;
+      StrideMap strideA_;
+      StrideMap strideB_;
+      StrideMap strideC_;
+      auto err = fuseModesWrapper(nmodeA, nullptr, modeA,
+                           nmodeB, nullptr, modeB,
+                           nmodeC, nullptr, modeC,
+                           modeA_, strideA_,
+                           modeB_, strideB_,
+                           modeC_, strideC_,
+                           extent);
+      EXPECT_EQ(strideA_.size(), modeA_.size());
+      EXPECT_EQ(strideB_.size(), modeB_.size());
+      EXPECT_EQ(strideC_.size(), modeC_.size());
+      std::vector<mode_type> modeA__(modeA_.size());
+      std::copy(modeA_.begin(), modeA_.end(), modeA__.begin());
+      std::vector<mode_type> modeB__(modeB_.size());
+      std::copy(modeB_.begin(), modeB_.end(), modeB__.begin());
+      std::vector<mode_type> modeC__(modeC_.size());
+      std::copy(modeC_.begin(), modeC_.end(), modeC__.begin());
+
+      EXPECT_EQ( modeA__.size(), nmodeA - 1 );
+      EXPECT_EQ( modeB__.size(), nmodeB );
+      EXPECT_EQ( modeC__.size(), nmodeC - 1);
+      EXPECT_EQ( modeA__[0], 0 );
+      EXPECT_EQ( modeA__[1], 4 );
+
+      EXPECT_EQ( modeB__[0], 4 );
+      EXPECT_EQ( modeB__[1], 5 );
+
+      EXPECT_EQ( modeC__[0], 0 );
+
+      EXPECT_EQ( err, LWTENSOR_STATUS_SUCCESS );
+   }
+}  // namespace
+
+/* lwTensor intenal API. */
+#include "unit/types.hpp"
+#include "unit/typesEx.hpp"
+
+#if defined(__x86_64__) || defined(_MSC_VER)
+//#include "unit/dnnHeuristicDDDD.hpp"
+//#include "unit/dnnHeuristicSSSS.hpp"
+#endif
+
+int main(int argc, char **argv) {
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+

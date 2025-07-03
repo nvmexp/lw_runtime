@@ -1,0 +1,131 @@
+#
+#  Copyright (c) 2021 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+d2irWrapperGenerator_INCLUDES = \
+  $(LW_OPTIX)/tools/d2irWrapperGenerator \
+  $(LWVM_LW_SDK_INCLUDES) \
+  $(LWVM_COMMON_INCLUDES) \
+  $(LWVM_INCLUDES) \
+  $(OPTIX_INCLUDES) \
+  $(OPTIX_PTXPARSE_GENERATED_DIR) \
+  $(LW_OPTIX)/src/FrontEnd/PTX/PTXStitch/ptxparse \
+  $(LW_OPTIX)/src/FrontEnd/PTX/PTXStitch/gpuInfo
+
+d2irWrapperGenerator_SOURCES = \
+  $(LW_OPTIX)/tools/d2irWrapperGenerator/main.cpp \
+  $(LW_OPTIX)/tools/d2irWrapperGenerator/InstructionTemplates.cpp \
+  $(LW_OPTIX)/tools/d2irWrapperGenerator/InstructionPermutationGenerator.cpp \
+  $(LW_OPTIX)/prodlib/exceptions/AssertionFailure.cpp \
+  $(LW_OPTIX)/prodlib/exceptions/Backtrace.cpp \
+  $(LW_OPTIX)/prodlib/exceptions/BasicException.cpp \
+  $(LW_OPTIX)/prodlib/exceptions/Exception.cpp \
+  $(LWVM_COMMON_PATH)/utils/AssertHandler/AssertHandler.cpp
+
+d2irWrapperGenerator_OBJECTS := $(call BUILD_OPTIX_TOOL_OBJECT_LIST,d2irWrapperGenerator,$(d2irWrapperGenerator_SOURCES))
+
+ifeq ($(LW_TARGET_ARCH),amd64)
+    $(d2irWrapperGenerator_OBJECTS): $(Intrinsics_OBJECTS)
+else
+    d2irWrapperGenerator_Intrinsics_OBJECTS := $(call BUILD_OPTIX_TOOL_OBJECT_LIST,d2irWrapperGenerator,$(Intrinsics_SOURCES))
+    d2irWrapperGenerator_OBJECTS += $(d2irWrapperGenerator_Intrinsics_OBJECTS)
+    d2irWrapperGenerator_SOURCES += $(Intrinsics_SOURCES)
+endif
+
+$(filter %/Backtrace$(OBJSUFFIX),$(d2irWrapperGenerator_OBJECTS)): $(OUTPUTDIR)/optix-include/enableBacktrace.h
+
+ifneq ($(LW_TARGET_ARCH),amd64)
+    $(d2irWrapperGenerator_OBJECTS): LW_HOST_BUILD = 1
+    $(d2irWrapperGenerator_OBJECTS): LW_HOST_INCLUDES += $(d2irWrapperGenerator_INCLUDES)
+
+    # Use OptiX flags, defines, and includes when building generator.
+    $(d2irWrapperGenerator_OBJECTS): private HOST_CFLAGS += $(OPTIX_CFLAGS)
+    $(d2irWrapperGenerator_OBJECTS): private HOST_LW_DEFINES += $(OPTIX_DEFINES)
+    $(d2irWrapperGenerator_OBJECTS): private HOST_LW_INCLUDES += $(OPTIX_INCLUDES)
+    $(d2irWrapperGenerator_OBJECTS): private HOST_CFLAGS := $(filter-out -fno-exceptions,$(HOST_CFLAGS))
+else
+    $(d2irWrapperGenerator_OBJECTS): LW_INCLUDES += $(d2irWrapperGenerator_INCLUDES)
+
+    # Use OptiX flags, defines, and includes when building generator.
+    $(d2irWrapperGenerator_OBJECTS): private CFLAGS += $(OPTIX_CFLAGS)
+    $(d2irWrapperGenerator_OBJECTS): private LW_DEFINES += $(OPTIX_DEFINES)
+    $(d2irWrapperGenerator_OBJECTS): private LW_INCLUDES += $(OPTIX_INCLUDES)
+endif
+
+# This tool depends on generated templates for PTX instructions.
+$(d2irWrapperGenerator_OBJECTS): $(OPTIX_PTXPARSE_GENERATED_DIR)/ptxInstructionDefs.adapted.incl
+$(d2irWrapperGenerator_OBJECTS): | lwvm-build
+
+# Generate rules to build exelwtable object files from source files
+$(foreach f,$(sort $(d2irWrapperGenerator_SOURCES)),$(eval $(call LW_OBJECT_FROM_SOURCE_RULE,$(f),$(call BUILD_OPTIX_TOOL_OBJECT_LIST,d2irWrapperGenerator,$(f)))))
+
+# Rule for exelwtable
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+  $(d2irWrapperGenerator_EXE): $(d2irWrapperGenerator_OBJECTS) $(LW_OPTIX)/tools/d2irWrapperGenerator/makefile.lwmk
+	  $(file >$(OUTPUTDIR)/d2irWrapperGenerator_linkParameters.txt,\
+	    $(strip \
+		  $(LFLAGS) \
+		  $(OPTIX_LFLAGS) \
+		  /ignore:4099 \
+		  -subsystem:console \
+		  Ole32.lib \
+		  ws2_32.lib \
+		  Rpcrt4.lib \
+		  /NODEFAULTLIB:libcmt.lib \
+	      $(LW_WINCPRT_LFLAGS) \
+		 -libpath:$(OUTPUTDIR) \
+		 $(notdir $(LWVM_LIBRARIES)) \
+	      -out:$@ $(d2irWrapperGenerator_OBJECTS) $(Intrinsics_OBJECTS)))
+	  $(call call_linker_print_params_on_verbose,$(OUTPUTDIR)/d2irWrapperGenerator_linkParameters.txt)
+	  $(LINK) @$(OUTPUTDIR)/d2irWrapperGenerator_linkParameters.txt
+	  $(call sign_host_exelwtable_if_needed,$@)
+
+else
+  ifneq ($(LW_TARGET_ARCH),amd64)
+    $(d2irWrapperGenerator_EXE): $(d2irWrapperGenerator_OBJECTS) $(LW_OPTIX)/tools/d2irWrapperGenerator/makefile.lwmk
+	    $(call quiet_cmd,HOST_LINKXX) \
+	       -o $(d2irWrapperGenerator_EXE) \
+	       $(d2irWrapperGenerator_OBJECTS) \
+	       $(OPTIX_HOST_LWVM_LDFLAGS) \
+	       $(SRC_TOOLS_LDFLAGS) \
+	       -static-libstdc++ \
+	       -static-libgcc \
+	       -lpthread \
+	       -ldl
+
+  else
+
+    $(d2irWrapperGenerator_EXE): $(d2irWrapperGenerator_OBJECTS) $(LW_OPTIX)/tools/d2irWrapperGenerator/makefile.lwmk
+	  $(call quiet_cmd,LINKXX) \
+	    -o $(d2irWrapperGenerator_EXE) \
+	    $(SRC_TOOLS_LDFLAGS) \
+	    $(d2irWrapperGenerator_OBJECTS) \
+        $(Intrinsics_OBJECTS) \
+	    $(OPTIX_LWVM_LDFLAGS) \
+	    -static-libstdc++ \
+	    -static-libgcc \
+	    -lpthread \
+	    -ldl
+
+  endif
+endif
+
+.PHONY: d2irWrapperGenerator
+
+d2irWrapperGenerator: $(d2irWrapperGenerator_EXE)

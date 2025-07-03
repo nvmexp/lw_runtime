@@ -1,0 +1,138 @@
+//------------------------------------------------------------------
+// Shader file for LWPU Ansel
+//------------------------------------------------------------------
+
+//------------------------------------------------------------------
+// Constants
+//------------------------------------------------------------------
+
+#define PixelSize               float2(1.0 / screenSize.x, 1.0 / screenSize.y)   //x = Pixel width, y = Pixel height
+
+cbuffer globalParams
+{
+	float2 screenSize;             //x = screen width, y = screen height
+	int captureState;              //unused, my math works without using specific cases
+        float4 tileUV;                 //xy - top left tile coordinate, zw - bottom right tile coordinate
+}
+
+cbuffer controlBuf
+{
+	/*float g_sldSharpen;
+	float g_sldClarity;
+	float g_sldHDR;
+	float g_sldBloom;*/
+        float g_sldAxis;
+        float g_sldBlur;
+        float g_sldLwrve;
+}
+
+struct VSOut
+{
+    float4 position 	: SV_POSITION;
+    float2 txcoord	: TEXCOORD;
+};
+
+//------------------------------------------------------------------
+// Textures, Samplers
+//------------------------------------------------------------------
+
+Texture2D texOriginalColor;
+Texture2D texBlurred;
+
+//------------------------------------------------------------------
+
+SamplerState SamplerLinear;
+
+#ifndef LW_COMMON
+#define LW_COMMON
+
+#define CAPTURE_STATE_NOT_STARTED     0
+#define CAPTURE_STATE_REGULAR         1
+#define CAPTURE_STATE_REGULARSTEREO   2
+#define CAPTURE_STATE_HIGHRES         3
+#define CAPTURE_STATE_360             4
+#define CAPTURE_STATE_360STEREO       5
+
+#endif 
+
+//------------------------------------------------------------------
+// Pixel Shaders
+//------------------------------------------------------------------
+/*
+#define g_sldAxis (360.0 * g_sldClarity)
+#define g_sldBlur  (g_sldSharpen * 20.0)
+#define g_sldLwrve  (g_sldHDR * 5.0 + 5.0)
+*/
+float4 PS_GaussianA( VSOut IN ): SV_Target
+{
+        float tsAngle = radians(g_sldAxis);
+        float2x2 tsMat = float2x2(cos(tsAngle),-sin(tsAngle),sin(tsAngle),cos(tsAngle));
+		
+		float2 inTex = (captureState == CAPTURE_STATE_HIGHRES) 
+		? IN.txcoord.xy * (tileUV.zw - tileUV.xy) + tileUV.xy 
+		: IN.txcoord.xy;
+		
+        float2 tsCoord = inTex.xy * 2.0 - 1.0;
+        tsCoord = mul(tsCoord, tsMat);
+
+        float tsBlur = pow(saturate(abs(tsCoord.y)), g_sldLwrve);
+
+        //separate as func?
+       	float4 color = texOriginalColor.Sample(SamplerLinear,IN.txcoord.xy);
+
+        float nSteps 		= tsBlur * g_sldBlur;    
+        float expCoeff 		= -2.0 * rcp(nSteps * nSteps + 1e-3); //requires non-integer stepped range as it'd make blur kernel size increments visible
+        float2 blurAxisScaled 	= float2(PixelSize.x, 0);
+
+        float4 gaussianSum = 1e-3;
+        nSteps = ceil(nSteps);
+
+        [loop]
+	for(float iStep = -nSteps; iStep <= nSteps; iStep++)
+	{
+		float lwrrentWeight = exp(iStep * iStep * expCoeff);
+		float lwrrentOffset = 2.0 * iStep - 0.5; //Sample between texels to double blur width at no cost
+
+		gaussianSum += float4(texOriginalColor.SampleLevel(SamplerLinear, IN.txcoord.xy + blurAxisScaled.xy * lwrrentOffset, 0).rgb, 1) * lwrrentWeight;	
+	}
+	gaussianSum.rgb /= gaussianSum.w;
+        color.rgb = lerp(color.rgb, gaussianSum.rgb, saturate( 4 * gaussianSum.w));
+        return color;
+}
+
+float4 PS_GaussianB( VSOut IN ): SV_Target
+{
+        float tsAngle = radians(g_sldAxis);
+        float2x2 tsMat = float2x2(cos(tsAngle),-sin(tsAngle),sin(tsAngle),cos(tsAngle));
+		
+		float2 inTex = (captureState == CAPTURE_STATE_HIGHRES) 
+		? IN.txcoord.xy * (tileUV.zw - tileUV.xy) + tileUV.xy 
+		: IN.txcoord.xy;
+		
+        float2 tsCoord = inTex.xy * 2.0 - 1.0;
+        tsCoord = mul(tsCoord, tsMat);
+
+        float tsBlur = pow(saturate(abs(tsCoord.y)), g_sldLwrve);
+
+        //separate as func?
+       	float4 color = texBlurred.Sample(SamplerLinear,IN.txcoord.xy);
+
+        float nSteps 		= tsBlur * g_sldBlur;    
+        float expCoeff 		= -2.0 * rcp(nSteps * nSteps + 1e-3); //requires non-integer stepped range as it'd make blur kernel size increments visible
+        float2 blurAxisScaled 	= float2(0, PixelSize.y);
+
+        float4 gaussianSum = 1e-3;
+        nSteps = ceil(nSteps);
+
+        [loop]
+	for(float iStep = -nSteps; iStep <= nSteps; iStep++)
+	{
+		float lwrrentWeight = exp(iStep * iStep * expCoeff);
+		float lwrrentOffset = 2.0 * iStep - 0.5; //Sample between texels to double blur width at no cost
+
+		gaussianSum += float4(texBlurred.SampleLevel(SamplerLinear, IN.txcoord.xy + blurAxisScaled.xy * lwrrentOffset, 0).rgb, 1) * lwrrentWeight;	
+	}
+	gaussianSum.rgb /= gaussianSum.w;
+        color.rgb = lerp(color.rgb, gaussianSum.rgb, saturate( 4 * gaussianSum.w));
+        return color;
+}

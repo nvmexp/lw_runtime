@@ -1,0 +1,201 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+# math(EXPR BITNESS "$(CMAKE_SIZEOF_VOID_P) * 8" )
+ifeq ($(LW_TARGET_ARCH),amd64)
+  BITNESS = 64
+else
+  BITNESS = 32
+endif
+
+# Windows Specifics.
+
+# Set the compiler
+# FIXME: We are triggered by someone that defines the compiler. Aren't we?
+
+# If you change $(compiler) check to see if you need a LWCA toolkit update at the same time
+compiler = msvc142u92
+compilerOverride ?= $(compiler)
+ifeq ($(LW_VERBOSE),1)
+  $(info Including $(LW_COMMON)/build/$(compiler)_tools_$(LW_TARGET_ARCH).lwmk)
+endif
+include $(LW_COMMON)/build/$(compiler)_tools_$(LW_TARGET_ARCH).lwmk
+
+# Tools
+CMAKE ?= $(LW_TOOLS)/win32/cmake/3.9.0/bin/cmake.exe
+# Override PYTHON from lwWindowsCommon.lwmk, which picks 2.54 and we need 2.7+
+PYTHON := $(LW_TOOLS)/win32/python/275/python.exe
+
+UNESCAPE ?= $(LWUTIL) -unescape
+
+# Generated during build
+LLVM_TOOLS_BINARY_DIR = $(OUTPUTDIR)
+
+
+export LW_HOST_USE_DDK
+
+# definitions for windows versioning values in RCFLAGS (Set the File Information on the DLL)
+include  $(LW_SOURCE)/drivers/common/build/lwWindowsVersionRC.lwmk
+
+# globally auto CRT usage see sw\dev\gpu_drv\bugfix_main\drivers\common\build\lwWindowsCRT.lwmk
+LW_WIN_USES_CRT = 1
+
+# Static is default. This is the ability to switch
+ifeq ($(RELEASE_USE_STATIC_CRT),1)
+  LW_WINCRT_LIB_TYPE = STATIC
+else
+  LW_WINCRT_LIB_TYPE = DYNAMIC
+endif
+
+# The lwoptix DLL is a Windows subsystem exelwtable,
+# but unit tests or other targets may be console, so
+# don't hardcode this globally into OPTIX_LFLAGS but
+# put it into LWOPTIX_LFLAGS
+LWOPTIX_LFLAGS += -subsystem:windows,6.0
+
+ifneq ($(findstring "wddm",$(LW_TARGET_OS))$(findstring "wddm2",$(LW_TARGET_OS))$(findstring "winnext",$(LW_TARGET_OS)),)
+  $(warning I know only wddm, wddm2 and winnext. You probably want to select an WDK for $(LW_TARGET_OS).)
+endif
+
+include $(LW_SOURCE)/drivers/common/build/lwWindowsWdkVersion.lwmk
+
+ifeq (1,$(LW_MSVC_141))
+  # FIXME: That really should go to lwWindowsCRT.lwmk
+  LW_INCLUDES += $(MSVC_COMPILER_DIR)/include
+
+  ifeq ($(LW_VERBOSE),1)
+    $(info LW_WDKSDK_LIB_CPU=$(LW_WDKSDK_LIB_CPU))
+    $(info LW_WDKSDK_LIB=$(LW_WDKSDK_LIB))
+  endif
+
+  # We need the WDK
+  LW_REQUIRED_DIRS += $(LW_WDKSDK_BASE)
+
+  # windows.h
+  LW_INCLUDES += $(LW_WDKSDK_INC)/um
+
+  # stdlib.h
+  LW_INCLUDES += $(LW_WDKSDK_INC)/ucrt
+
+  # uuid.lib ole32.lib
+  libpath += $(LW_WDKSDK_LIB)/um/$(LW_WDKSDK_LIB_CPU)
+  LFLAGS += -libpath:$(LW_WDKSDK_LIB)/um/$(LW_WDKSDK_LIB_CPU)
+
+  # winapifamily.h
+  LW_INCLUDES += $(LW_WDKSDK_INC)/shared
+  libpath += $(LW_WDKSDK_LIB)/um/$(LW_WDKSDK_LIB_CPU)
+  libpath += $(LW_WDKSDK_LIB)/um/$(LW_WDKSDK_LIB_CPU)
+
+  # rtcore.lib(ChunkedTrbvhBuilder.obj) : error LNK2005: fminf already defined in libucrt.lib(fminf.obj)
+  # rtcore.lib(MortonTriangleSplitter.obj) : error LNK2005: fmaxf already defined in libucrt.lib(fmaxf.obj)
+
+  # VS2015++ has fmin/fmax in math.h
+  OPTIX_DEFINES +=  BVHTOOLS_NO_LWDA_FMIN_FMAX
+
+  # link to VC++ CRT.
+  LW_WIN_USES_VCRT = 1
+
+  # link to UCRT.
+  LW_WIN_USES_UCRT = 1
+
+  # Add libvcruntime.lib/vcruntime.lib.
+  LFLAGS += $(LW_WILWCRT_LFLAGS)
+
+  # Add libucrt.lib/ucrt.lib.
+  LFLAGS += $(LW_WINUCRT_LFLAGS)
+
+  # alloca.h vs malloc.h/llvm
+  OPTIX_DEFINES += WIN32
+
+  OPTIX_DEFINES += _WIN32
+
+  #__imp_CoTaskMemFree?
+  OPTIX_LFLAGS += Ole32.lib
+  # gethostbyname
+  OPTIX_LFLAGS += ws2_32.lib
+
+  # uuid
+  OPTIX_LFLAGS += Rpcrt4.lib
+endif
+
+# Enable all level 3 warnings
+OPTIX_CFLAGS += /W3
+
+# Warnings are errors; keep the code free of warnings.  Suppress specific warnings below.
+OPTIX_CFLAGS += /WX
+
+# For target OS wddm, old Windows SDK header files generate this warning.
+ifeq ($(LW_TARGET_OS),wddm)
+  # 4091: 'keyword' : ignored on left of 'type' when no variable is declared
+  OPTIX_CFLAGS += /wd4091
+endif
+
+# 4244: 'argument' : colwersion from 'type1' to 'type2', possible loss of data
+OPTIX_CFLAGS += /wd4244
+
+# 4267: 'var' : colwersion from 'size_t' to 'type', possible loss of data
+# TODO: See about localizing this warning to LWVM/LLVM and fixing the warning in corelib.
+OPTIX_CFLAGS += /wd4267
+
+# 4296: 'operator' : expression is always false
+OPTIX_CFLAGS += /wd4296
+
+# OptiX uses exceptions, so compile everything with exceptions enabled
+OPTIX_CFLAGS += /EHsc
+
+# Library file suffix
+LIBSUFFIX := .lib
+
+# Library file prefix
+LIBPREFIX :=
+
+# OptiX library filename
+LWOPTIX_FILENAME := $(DRIVER_BASE_NAME).dll
+
+# We need M_PI, etc., and don't want the macro versions of min()/max()
+LW_DEFINES += \
+  _USE_MATH_DEFINES \
+  NOMINMAX
+
+# Suppress warnings about poetntially unsafe functions in the C runtime.
+OPTIX_DEFINES +=  _CRT_SELWRE_NO_WARNINGS
+
+# Suppress warnings about potentially unsafe functions in the C++ Standard Library.
+OPTIX_DEFINES +=  _SCL_SELWRE_NO_WARNINGS
+
+# Variable to accumulate .res files needed for linking
+OPTIX_RESOURCES =
+
+# This adds an extra file to the OUTPUTDIR that does not belong to other categories (but should be shipped)
+# It just copies the file, removing the dir-to. Packaging is assuming files only (no subdirectories)
+# $(COPY) can handle one file only. Call this function multiple times to add many files
+define add_file_to_output
+  # Mark for installer
+  target_final_outputs += $$(LW_INSTALL_DIR)/$2
+
+  .PHONY: $(OUTPUTDIR)/$(2)
+  $$(OUTPUTDIR)/$(2): $(1)
+	$$(COPY) $(1) $$(OUTPUTDIR)/$(2)
+
+  ifeq ($(LW_DO_INSTALL),1)
+    $$(LW_INSTALL_DIR)/$(2): $$(OUTPUTDIR)/$(2)
+	$$(standard_install)
+  endif
+endef

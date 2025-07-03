@@ -1,0 +1,56 @@
+###############################################################################
+#
+# Copyright (c) 2020 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+#
+###############################################################################
+
+#
+# This file should be included in order to use GTest framework
+#
+
+###############################################################################
+# Path shorthands
+###############################################################################
+
+#TODO: replace to use gtest header files on P4 when it is added to all build
+#GTEST_HEADERS_PATH := $(LW_TOOLS)/sdk/gtest/1.8.0/include
+GTEST_PATH := $(LW_SOURCE)/drivers/lwsci/tests/gtest
+GTEST_HEADERS_PATH := $(GTEST_PATH)/include
+GTEST_LIB_PATH :=
+ifeq ($(LW_TARGET_OS), Linux)
+  ifneq ($(filter amd64 x86,$(LW_TARGET_ARCH)),)
+    GTEST_LIB_PATH := $(GTEST_PATH)/lib/linux_x86
+  else
+    GTEST_LIB_PATH := $(GTEST_PATH)/lib/linux
+  endif
+endif
+
+ifeq ($(LW_TARGET_OS), QNX)
+  GTEST_LIB_PATH := $(GTEST_PATH)/lib/qnx
+endif
+
+###############################################################################
+# define CFLAGS
+###############################################################################
+
+CFLAGS += -DGTEST_HAS_TR1_TUPLE=0
+
+###############################################################################
+# define LW_INCLUDES
+###############################################################################
+
+LW_INCLUDES += $(GTEST_HEADERS_PATH)
+
+###############################################################################
+# library flags
+###############################################################################
+
+LDFLAGS += $(GTEST_LIB_PATH)/libgmock_main.a
+LDFLAGS += $(GTEST_LIB_PATH)/libgmock.a

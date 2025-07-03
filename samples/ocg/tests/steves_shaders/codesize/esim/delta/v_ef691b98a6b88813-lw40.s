@@ -1,0 +1,66 @@
+vs_3_0
+def c205, 2.00000000, -1.00000000, 3.00000000, 0.00000000
+dcl_position0 v0
+dcl_tangent0 v1
+dcl_binormal0 v2
+dcl_normal0 v3
+dcl_texcoord0 v4
+dcl_blendindices0 v5
+dcl_blendweight0 v6
+dcl_texcoord0 o0.xy
+dcl_texcoord2 o1.xyz
+dcl_texcoord3 o2.xyz
+dcl_texcoord4 o3.xyz
+dcl_texcoord5 o4.xyz
+dcl_texcoord6 o5.xyz
+dcl_texcoord7 o6
+dcl_position0 o7
+mul r0.xy, c205.zzzz, v5
+mova a0.xy, r0
+mul r0, c[a0.y + 0], v6.yyyy
+mad r3, c[a0.x + 0], v6.xxxx, r0
+dp4 r0.x, v0, r3
+mul r1, c[a0.y + 1], v6.yyyy
+mad r2, c[a0.x + 1], v6.xxxx, r1
+mul r1, c[a0.y + 2], v6.yyyy
+dp4 r0.y, v0, r2
+mad r1, c[a0.x + 2], v6.xxxx, r1
+dp4 r0.z, v0, r1
+mov r0.w, v0.wwww
+dp4 o7.x, r0, c196
+dp4 o7.y, r0, c197
+mad r4.xyz, c205.xxxx, v1, c205.yyyy
+dp4 o7.z, r0, c198
+dp3 r5.x, r4, r3
+dp3 r5.y, r4, r2
+dp3 r5.z, r4, r1
+dp4 o7.w, r0, c199
+dp3 o1.x, r5, c200
+dp3 o2.x, r5, c201
+mad r6.xyz, c205.xxxx, v2, c205.yyyy
+dp3 o3.x, r5, c202
+dp3 r4.x, r6, r3
+dp3 r4.y, r6, r2
+dp3 r4.z, r6, r1
+dp3 o1.y, r4, c200
+mad r6.xyz, c205.xxxx, v3, c205.yyyy
+dp3 o2.y, r4, c201
+dp3 r3.x, r6, r3
+dp3 r3.y, r6, r2
+dp3 r3.z, r6, r1
+dp3 o3.y, r4, c202
+dp3 o1.z, r3, c200
+dp3 o2.z, r3, c201
+dp3 o3.z, r3, c202
+dp4 o6.x, r0, c192
+dp4 o6.y, r0, c193
+dp4 o6.z, r0, c194
+dp4 o6.w, r0, c195
+add r0.xyz, -r0, c204
+dp3 o5.x, c203, r5
+dp3 o4.x, r0, r5
+dp3 o5.y, c203, r4
+dp3 o4.y, r0, r4
+dp3 o4.z, r0, r3
+dp3 o5.z, c203, r3
+mov o0.xy, v4

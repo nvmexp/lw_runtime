@@ -1,0 +1,20 @@
+!!LWfp4.0
+TEMP coord, size, txqf, color, color2, xy, grad;
+INT TEMP icoord, iodd, mtxid;
+FLOAT PARAM remapToNrm[18] = { program.elw[0..17] };
+FLOAT TEMP nrm,length;
+MOV coord, fragment.texcoord[0];
+MOV size, fragment.texcoord[1];
+FLR xy.xy, fragment.position;
+ROUND.S icoord, coord;
+MAD coord.xy, coord, 1.984, -0.992;
+MOV coord.z, 1.0;
+MAD.U mtxid.xyz, icoord.z, 3, {0,1,2,3};
+DP3 nrm.x, remapToNrm[mtxid.x], coord;
+DP3 nrm.y, remapToNrm[mtxid.y], coord;
+DP3 nrm.z, remapToNrm[mtxid.z], coord;
+MOV coord.xyz, nrm;
+I2F coord.w, icoord;
+TXL color, coord, texture[0], LWBE;
+MOV result.color, color;
+END

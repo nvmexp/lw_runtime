@@ -1,0 +1,126 @@
+Texture2D txDiffuse : register( t0 );
+
+SamplerState colorLinearSampler : register( s0 );
+SamplerState colorGammaSampler : register( s1 );
+SamplerState BorderSampler : register( s2 );
+
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+}
+
+cbuffer ControlBuf
+{
+    bool g_chkASCII;
+    bool g_chkAdvCRT;
+	float g_sldAdvCRTStrength;
+    bool g_chkCartoon;
+    bool g_chkNostalgia;
+    bool g_chkExplosion;
+    bool g_chkColorMatrix;
+}
+
+// Defines from original Sweet.fx
+#define s0 colorGammaSampler
+#define s1 colorLinearSampler
+
+// Defines that aim to provide compatibility with ReShade sampling syntax
+#define myTex2D txDiffuse.Sample
+#define tex2D txDiffuse.Sample
+
+#include "Global_settings.h"
+#include "SweetFX_settings.h"
+#include "Shaders\Globals.h"
+#include "Shaders\Main.h"
+//#include "Shaders\Shared.h"
+
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 texcoord: TexCoord;
+};
+
+#if (USE_CA == 1)
+float4 LwChromaticAberrationWrap(VSOut frag) : SV_Target
+{
+	float4 color = myTex2D(s0, frag.texcoord);
+	color = ChromaticAberrationPass(color, frag.texcoord);
+	
+	return color;
+}
+#endif
+
+#if (USE_BLOOM == 1)
+float4 LwBloomWrap(VSOut frag) : SV_Target
+{
+	float4 color = myTex2D(s0, frag.texcoord);
+	color = BloomPass(color, frag.texcoord);
+	
+	return color;
+}
+#endif
+
+#if (USE_EXPLOSION == 1)
+float4 LwExplosionWrap(VSOut frag) : SV_Target
+{
+	float4 color = myTex2D(s0, frag.texcoord);
+	if (g_chkExplosion)
+	{
+		color = ExplosionPass(color, frag.texcoord);
+	}	
+	return color;
+}
+#endif
+
+#if (USE_CARTOON == 1)
+float4 LwCartoonWrap(VSOut frag) : SV_Target
+{
+	float4 color = myTex2D(s0, frag.texcoord);
+	if (g_chkCartoon)
+	{
+		color = CartoonPass(color, frag.texcoord);
+	}	
+	return color;
+}
+#endif
+
+#if (USE_ADVANCED_CRT == 1)
+float4 LwAdvCRTWrap(VSOut frag) : SV_Target
+{
+	float4 color = myTex2D(s0, frag.texcoord);
+	if (g_chkAdvCRT)
+	{
+		color = AdvancedCRTPass(color, frag.texcoord);
+	}	
+	return color;
+}
+#endif
+
+#if (USE_ASCII == 1)
+float4 LwAsciiWrap(VSOut frag) : SV_Target
+{
+	float3 color;
+	if (g_chkASCII)
+	{
+		color = AsciiPass(frag.texcoord);
+	}
+	else
+	{
+		color = myTex2D(s0, frag.texcoord);
+	}
+	return float4(color, 1.0);
+}
+#endif
+
+#if (USE_SHARED == 1)
+float4 LwSharedWrap(VSOut frag) : SV_Target
+{
+	float3 color;
+	color = txDiffuse.Sample(colorGammaSampler, frag.texcoord).rgb;
+	color = SharedPass(frag.texcoord, color.rgbb).rgb;
+	
+	return float4(color, 1.0);
+}
+#endif

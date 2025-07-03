@@ -1,0 +1,55 @@
+package fabricmanagerHA;
+
+// the following defines protobuf messages
+// which will be used to store and restore states for Fabric Manager HA 
+
+// Partition Info in shared fabric virtualization mode
+message partitionGpuInfo
+{
+    required uint32 physicalId      = 1;
+    required bytes  uuid            = 2;
+    optional uint32 numEnabledLinks = 3;
+    optional uint64 enabledLinkMask = 4;
+};
+
+message partitionSwitchInfo
+{
+    required uint32 physicalId      = 1;
+    optional uint32 numEnabledLinks = 2;
+    optional uint64 enabledLinkMask = 3;
+};
+
+message partitionInfo
+{
+    required uint32              partitionId    = 1;
+    optional uint32              trunkConnCount = 2;
+    repeated partitionGpuInfo    gpuList        = 3;
+    repeated partitionSwitchInfo switchList     = 4;
+};
+
+message nodePartitionInfo
+{
+    required uint32        nodeId        = 1;
+    repeated partitionInfo partitionList = 2;
+};
+
+message infoHeader
+{
+    required uint32  version      = 1; // version of the info struct
+}
+
+message sharedFabricPartiontionInfo
+{
+    required infoHeader        header    = 1;
+    repeated nodePartitionInfo nodeList  = 2;
+};
+
+message fmHaState
+{
+    required uint32  majorVersion = 1; // fabric manager HA major version
+    required uint32  minorVersion = 2; // fabric manager HA minor version
+    optional string  platformId   = 3; // such as "DGX-2" that matches the name in the topology
+    optional string  timeStamp    = 4; // time when the info is generated
+    
+    optional sharedFabricPartiontionInfo sharedFabricState = 5;
+}

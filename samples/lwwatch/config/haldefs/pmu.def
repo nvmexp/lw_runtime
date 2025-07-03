@@ -1,0 +1,555 @@
+# -*- mode: perl; -*-
+
+# PMU Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $pmuHal = [
+
+    # per-GPU defaults for PMU engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+    # HAL Interfaces
+    # ********************************************************************************
+
+    HAL_INTERFACES => [
+
+         _GROUP_GPUS_WITH_PMU => [
+             DESCRIPTION     => "Template for all HAL calls that are supported iff PMU is present",
+             _GK104          => [ MAXWELL_and_later, ],
+         ],
+
+        GET_FALCON_CORE_IFACE => [
+            DESCRIPTION     => "pmuGetFalconCoreIFace, it returns FLCN_CORE_IFACES*",
+            INTERFACE_TAG   => "pmuGetFalconCoreIFace",  #IFace instead of Iface
+            RETURN_TYPE     => "const FLCN_CORE_IFACES *",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => NULL,
+
+            _GK104        => [ pre_GP102, ],
+            _GP104        => [ GP102_and_later, ],
+        ],
+
+        GET_FALCON_ENGINE_IFACE => [
+            DESCRIPTION     => "pmuGetFalconEngineIFace, it returns FLCN_ENGINE_IFACES*",
+            INTERFACE_TAG   => "pmuGetFalconEngineIFace",  #IFace instead of Iface
+            RETURN_TYPE     => "const FLCN_ENGINE_IFACES *",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => NULL,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        GET_FALCON_BASE => [
+            DESCRIPTION     => "pmuGetFalconBase, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE     => "LwU32",
+            ARGUMENTS       => "void",
+            STUB_RETURNS    => ZERO,
+
+            _GK104        => [ dMAXWELL_thru_dPASCAL, ],
+            _GV100        => [ dVOLTA_and_later, ],
+        ],
+
+        DMEM_GET_SIZE  => [
+            DESCRIPTION   => "PMUDmemGetSize",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        DMEM_GET_NUM_PORTS  => [
+            DESCRIPTION   => "PMUDmemGetNumPorts",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        DMEM_READ  => [
+            DESCRIPTION   => "PMUDmemRead",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "LwU32 addr, LwBool bIsAddrVa, LwU32 length, LwU32 port, LwU32* pDmem",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ dMAXWELL_thru_GP100, tAMPERE_and_later, G00X, ],
+            _GP102        => [ GP10X_and_later, -GP100, -G00X, ],
+        ],
+
+        DMEM_WRITE  => [
+            DESCRIPTION   => "PMUDmemWrite",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "LwU32 addr, LwBool bIsAddrVa, LwU32 value, LwU32 width, LwU32 length, LwU32 port",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => DMEM_READ,
+        ],
+
+        IMEM_GET_NUM_BLOCKS  => [
+            DESCRIPTION   => "PMUImemGetNumBlocks",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        IMEM_GET_SIZE  => [
+            DESCRIPTION   => "PMUImemGetSize",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        IMEM_GET_NUM_PORTS  => [
+            DESCRIPTION   => "PMUImemGetNumPorts",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        IMEM_GET_TAG_WIDTH => [
+            DESCRIPTION   => "PMUImemGetTagWidth",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        IMEM_READ  => [
+            DESCRIPTION   => "PMUImemRead",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "LwU32 addr, LwU32 length, LwU32 port, LwU32* pImem",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        IMEM_WRITE  => [
+            DESCRIPTION   => "PMUImemWrite",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "LwU32 addr, LwU32 value, LwU32 width, LwU32 length, LwU32 port",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        IMEM_SET_TAG  => [
+            DESCRIPTION   => "Sets IMEM tag",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "LwU32 addr, LwU32 port",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        IMBLK  => [
+            DESCRIPTION   => "PMUImblk",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32 blockIndeX, struct PmuBlock* pBlockInfo",
+            STUB_RETURNS  => FALSE,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        IMTAG  => [
+            DESCRIPTION   => "PMUImtag",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32 codeAddr, struct PmuTagBlock* pPmuTagBlock",
+            STUB_RETURNS  => FALSE,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        QUEUE_GET_NUM  => [
+            DESCRIPTION   => "PMUQueueGetNum, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ pre_VOLTA, ],
+            _GV100        => [ VOLTA_and_later, ],
+        ],
+
+        QUEUE_READ_COMMAND_HEAD => [
+            DESCRIPTION   => "Returns the head of the 'command queue' on the PMU.",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "LwU32 queueId",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => QUEUE_GET_NUM,
+        ],
+
+        QUEUE_READ_COMMAND_TAIL => [
+            DESCRIPTION   => "Returns the tail of the 'command queue' on the PMU.",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "LwU32 queueId",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => QUEUE_GET_NUM,
+        ],
+
+        QUEUE_READ  => [
+            DESCRIPTION   => "PMUQueueRead, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE   =>  LwBool,
+            ARGUMENTS     => "LwU32 queueId, PFLCN_QUEUE pQueue",
+            STUB_RETURNS  => LW_FALSE,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        MUTEX_GET_NUM => [
+            DESCRIPTION   => "PMUMuteXGetNum",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        MUTEX_READ => [
+            DESCRIPTION   => "PMUMuteXRead",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32 muteXId, LwU32* pMuteX, BOOL* pFree",
+            STUB_RETURNS  => FALSE,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        TCB_GET => [
+            DESCRIPTION   => "Retrieve the content of an RTOS TCB",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32 tcbAddress, LwU32 port, PMU_TCB *pTcb",
+            STUB_RETURNS  => FALSE,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        TEST_ELPG_STATE => [
+            DESCRIPTION   => "test if elpg state is valid",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ONE,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        TEST_LPWR_STATE => [
+            DESCRIPTION   => "test if Lpwr state is valid",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ONE,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        UCODE_NAME => [
+            DESCRIPTION   => "returns Ucode file name, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE   => "const char *",
+            ARGUMENTS     => "",
+            STUB_RETURNS  => "NULL",
+
+            _GK107  => [ ],                                             # gk10x
+            _GK110  => [ ],                                             # gk11x
+            _GK208  => [ ],                                             # gk20x
+            _GM107  => [ GM10X, ],                                      # gm10x
+            _GM204  => [ GM200, GM204, GM206, ],                        # gm20x
+            _GP100  => [ GP100, ],                                      # gp100
+            _GP102  => [ GP10X, -GP100, ],                              # gp10x
+            _GV100  => [ GV10X, GV11X, ],                               # gv10x
+            _GV11B  => [ ],                                             # gv11b
+            _TU102  => [ TU10X, ],                                      # tu10x
+            _GA102  => [ GA10X, GA10XF, -GA100, -TEGRA_DGPU_AMPERE, ],  # ga10x
+            _STUB   => [ GA100, TEGRA_DGPU_AMPERE, ADA_and_later, ],
+        ],
+
+        UCODE_GET_VERSION  => [
+            DESCRIPTION   => "Get the ucode version# from the HW",
+            RETURN_TYPE   => "LwU32",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        SANITY_TEST_GET_ENTRY_TABLE  => [
+            DESCRIPTION   => "runs a chip specific basic test, useful for bringup/emulation checkout",
+            RETURN_TYPE   => "void *",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => NULL,
+
+            _GK104        => [ pre_dPASCAL, ],
+            _GP100        => [ GP100, ],
+            _GP10X        => [ GP10X_and_later, -GP100, ],
+            _T124         => [ tAMPERE_and_later, ],
+        ],
+
+        SANITY_TEST_RUN  => [
+            DESCRIPTION   => "runs a chip specific basic test, useful for bringup/emulation checkout",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32, LwU32, char *",
+            STUB_RETURNS  => ERROR,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        SANITY_TEST_GET_NUM  => [
+            DESCRIPTION   => "returns the number of sanity tests",
+            RETURN_TYPE   => "LwU32",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => SANITY_TEST_GET_ENTRY_TABLE,
+        ],
+
+        SANITY_TEST_GET_INFO  => [
+            DESCRIPTION   => "returns the description of a corresponding test",
+            RETURN_TYPE   => "const char *",
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => '"N/A"',
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        SANITY_TEST_GET_FLAGS  => [
+            DESCRIPTION   => "returns the flags of a corresponding test",
+            RETURN_TYPE   => "LwU32",
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        MASTER_RESET  => [
+            DESCRIPTION   => "Reset PMU using PMC",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_OK,
+
+            _GK104        => [ ],
+            _GM107        => [ MAXWELL_thru_GP100, ],
+            _GP10X        => [ GP10X_and_later, -GP100, -G00X, ],
+            _STUB         => [ G00X, ],
+        ],
+
+        BOOTSTRAP  => [
+            DESCRIPTION   => "Bootstraps the PMU",
+            RETURN_TYPE   => "void",
+            ARGUMENTS     => "LwU32",
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        GET_VA_BASE  => [
+            DESCRIPTION   => "Get the base address of the PMU vaspace",
+            INTERFACE_TAG => "pmuGetVABase",
+            RETURN_TYPE   => "LwU64",
+            STUB_RETURNS  => ZERO,
+            ARGUMENTS     => "void",
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        FALCON_GET_REGISTER => [
+
+            DESCRIPTION   => "get falcon register",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32 regIdx",
+            STUB_RETURNS  => -1,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        MUTEX_GET_COUNT => [
+            DESCRIPTION     => "mutex get count",
+            INTERFACE_TAG   => "pmuMutex_GetCount", # Added underscore to avoid collision with MODS symbols
+            RETURN_TYPE     => LW_STATUS,
+            ARGUMENTS       => "LwU32 *pCount",
+            STUB_RETURNS    => ERROR,
+
+            LIKE_INTERFACE => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        MUTEX_QUERY_OWNER_BY_INDEX => [
+            DESCRIPTION     => "query mutex owner by index",
+            INTERFACE_TAG   => "pmuMutex_QueryOwnerByIndex", # Added underscore to avoid collision with MODS symbols
+            RETURN_TYPE     => LW_STATUS,
+            ARGUMENTS       => "LwU32 mutexIndex, LwU32 *pOwner",
+            STUB_RETURNS    => ERROR,
+
+            LIKE_INTERFACE  => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        MUTEX_ACQUIRE_BY_INDEX => [
+            DESCRIPTION     => "mutex acquire by index",
+            INTERFACE_TAG   => "pmuMutex_AcquireByIndex", # Added underscore to avoid collision with MODS symbols
+            RETURN_TYPE     => LW_STATUS,
+            ARGUMENTS       => "LwU32 mutexIndex, LwU32 *pOwnerId",
+            STUB_RETURNS    => ERROR,
+
+            LIKE_INTERFACE  => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        MUTEX_RELEASE_BY_INDEX => [
+            DESCRIPTION     => "mutex release by index",
+            INTERFACE_TAG   => "pmuMutex_ReleaseByIndex", # Added underscore to avoid collision with MODS symbols
+            RETURN_TYPE     => LW_STATUS,
+            ARGUMENTS       => "LwU32 mutexIndex, LwU32 ownerId",
+            STUB_RETURNS    => ERROR,
+
+            LIKE_INTERFACE  => _GROUP_GPUS_WITH_PMU,
+        ],
+
+        READ_PMU_MAILBOX => [
+            DESCRIPTION     => "read LW_PPWR_PMU_MAILBOX(i)",
+            RETURN_TYPE     => LwU32,
+            ARGUMENTS       => "LwU32 index",
+            STUB_RETURNS    => ZERO,
+
+            _GK104          => [ ],
+            _GK208          => [ dMAXWELL_and_later, tAMPERE_and_later, ],
+        ],
+
+        WRITE_PMU_MAILBOX => [
+            DESCRIPTION     => "write to LW_PPWR_PMU_MAILBOX(i)",
+            RETURN_TYPE     => void,
+            ARGUMENTS       => "LwU32 index, LwU32 value",
+
+            LIKE_INTERFACE => READ_PMU_MAILBOX,
+        ],
+
+        READ_PMU_NEW_INSTBLK => [
+            DESCRIPTION   => "read LW_PPWR_PMU_NEW_INSTBLK",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => ZERO,
+
+            LIKE_INTERFACE => READ_PMU_MAILBOX,
+        ],
+
+        FLCNGDB_GET_REG_MAP => [
+            DESCRIPTION   => "Gets the structure of register addresses for FlcnGdb",
+            RETURN_TYPE   => "void",
+            ARGUMENTS     => "FLCNGDB_REGISTER_MAP* pRegisterMap",
+
+            _GK107        => [ MAXWELL_and_later, ],
+        ],
+
+        VERIFY_FUSE => [
+            DESCRIPTION   => "Verify Secure fuse binary",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => LwU32,
+            STUB_RETURNS  => ERROR,
+
+            _GM107        => [ dMAXWELL_and_later, -GM200, ],
+            _STUB         => [ pre_MAXWELL, GM200, CHEETAH, ],
+         ],
+
+        GET_FUSE_BINARY  => [
+            DESCRIPTION   => "Get Secure fuse binary",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "PmuFuseBinaryDesc *pDesc",
+            STUB_RETURNS  => ERROR,
+
+            LIKE_INTERFACE => VERIFY_FUSE,
+         ],
+
+        IS_DEBUG_MODE => [
+            DESCRIPTION   => "Check if PMU is in DEBUG mode or not",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_FALSE,
+
+            _GM107        => [ dMAXWELL_and_later, tAMPERE_and_later, ],
+            _STUB         => [ pre_MAXWELL, ],
+
+         ],
+
+        IS_DMEM_RANGE_ACCESSIBLE => [
+            DESCRIPTION    => "Check if the DMEM range is accessible",
+            RETURN_TYPE    => "LwBool",
+            ARGUMENTS      => "LwU32 blkLo, LwU32 blkHi",
+            STUB_RETURNS   => LW_TRUE, # All of DMEM is readable in pre-carveouts land
+
+            _GM200         => [ GM20X_and_later, ],
+            _STUB          => [ pre_MAXWELL, GM10X, ],
+        ],
+
+        GET_DMEM_NUM_PRIV_RANGES => [
+            DESCRIPTION    => "Get the number of DMEM priv ranges (carveouts)",
+            RETURN_TYPE    =>  LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => IS_DMEM_RANGE_ACCESSIBLE,
+        ],
+
+        GET_DMEM_PRIV_RANGE => [
+            DESCRIPTION    => "PmuGetDmemPrivRange, member of FLCN_ENGINE_IFACES",
+            RETURN_TYPE    =>  void,
+            ARGUMENTS      => "LwU32 index, LwU32 *rangeStart, LwU32 *rangeEnd",
+
+            LIKE_INTERFACE => IS_DMEM_RANGE_ACCESSIBLE,
+        ],
+
+        EMEM_GET_SIZE => [
+            DESCRIPTION    => "Get the size of EMEM",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            _STUB          => [ ALL, ],
+        ],
+
+        EMEM_GET_OFFSET_IN_DMEM_VA_SPACE => [
+            DESCRIPTION    => "Get the offset off EMEM in DMEM VA space",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => EMEM_GET_SIZE,
+        ],
+
+        EMEM_GET_NUM_PORTS => [
+            DESCRIPTION    => "Get the number of EMEM ports",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "void",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => EMEM_GET_SIZE,
+        ],
+
+        EMEM_READ => [
+            DESCRIPTION    => "Read the EMEM carveout",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "LwU32 offset, LwU32 length, LwU32 port, LwU32 *pBuf",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => EMEM_GET_SIZE,
+        ],
+
+        EMEM_WRITE => [
+            DESCRIPTION    => "Write to the EMEM carveout",
+            RETURN_TYPE    => LwU32,
+            ARGUMENTS      => "LwU32 offset, LwU32 val, LwU32 width, LwU32 length, LwU32 port",
+            STUB_RETURNS   => ZERO,
+
+            LIKE_INTERFACE => EMEM_GET_SIZE,
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+# return a reference to the Hal definition
+return $pmuHal;
+

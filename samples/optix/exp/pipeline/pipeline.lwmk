@@ -1,0 +1,79 @@
+#
+#  Copyright (c) 2017 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *Objects IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+O7Runtime_SOURCES = $(LW_OPTIX)/exp/pipeline/O7Runtime.cpp
+$(call optix_bitcode_library,O7Runtime)
+
+O7TextureFootprintWrappersHW_LLVM_SOURCES = $(LW_OPTIX)/exp/pipeline/TextureFootprintWrappersHW.ll
+$(call optix_bitcode_library,O7TextureFootprintWrappersHW)
+
+O7TextureFootprintWrappersSW_LLVM_SOURCES = $(LW_OPTIX)/exp/pipeline/TextureFootprintWrappersSW.ll
+$(call optix_bitcode_library,O7TextureFootprintWrappersSW)
+
+exp_pipeline_BITCODE_FILES = \
+  $(O7Runtime_OPT_BITCODE) \
+  $(O7TextureFootprintWrappersHW_OPT_BITCODE) \
+  $(O7TextureFootprintWrappersSW_OPT_BITCODE)
+
+exp_pipeline_NEEDS_LWVM_HEADERS = 1
+
+exp_pipeline_INCLUDES = \
+  $(LWVM_LW_SDK_INCLUDES) \
+  $(LW_OPTIX_OUTPUTDIR)
+
+# For .lw -> ptx
+exp_pipeline_BINARY_LW_ENCRYPTED_PTX_SOURCES = $(addprefix $(LW_OPTIX)/exp/builtinIS/, \
+  SphereIntersector.lw \
+  CatmullRomPhantomIntersector.lw \
+  CatmullRomPhantomLowMemIntersector.lw \
+  LwbicLwrvePhantomIntersector.lw \
+  LwbicLwrvePhantomLowMemIntersector.lw \
+  QuadraticLwrvePhantomIntersector.lw \
+  QuadraticLwrvePhantomLowMemIntersector.lw \
+  LinearLwrveIntersector.lw \
+  LinearLwrveLowMemIntersector.lw \
+)
+
+exp_pipeline_BINARY_LW_PTX_SOURCES = $(addprefix $(LW_OPTIX)/exp/pipeline/, \
+  DefaultException.lw \
+  NopIS.lw \
+  TextureFootprintHW.lw \
+  TextureFootprintSW.lw \
+)
+
+$(LW_OPTIX_OUTPUTDIR)/exp/pipeline/TextureFootprintHW.lw.ptx: LWCC_FLAGS += -rdc true --keep-device-functions
+$(LW_OPTIX_OUTPUTDIR)/exp/pipeline/TextureFootprintSW.lw.ptx: LWCC_FLAGS += -rdc true --keep-device-functions
+
+exp_pipeline_SOURCES += $(addprefix $(LW_OPTIX)/exp/pipeline/, \
+  Compile.cpp \
+  Module.cpp \
+  Pipeline.cpp \
+  ProgramGroup.cpp \
+  ReadLWVMContainer.cpp \
+)
+
+$(call optix_module,exp_pipeline)
+
+$(call optix_declare_binary_bitcode_header_dependency,$(LW_OPTIX)/exp/pipeline/Compile.cpp, $(O7Runtime_OPT_BITCODE))
+$(call optix_declare_binary_bitcode_header_dependency,$(LW_OPTIX)/exp/pipeline/Pipeline.cpp, $(O7TextureFootprintWrappersHW_OPT_BITCODE) $(O7TextureFootprintWrappersSW_OPT_BITCODE))

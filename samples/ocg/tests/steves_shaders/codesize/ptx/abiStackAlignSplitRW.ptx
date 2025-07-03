@@ -1,0 +1,89 @@
+.version 3.1
+.target sm_20
+
+/*
+ *  This test case exercises read/write splitting when stack has 8byte alignment and 
+ *  16byte incoming stack alignement. It also tests that the param/ret read/writes  
+ *  are not split
+ */
+
+.func (.param .align 16 .u8 out[1000]) myFunc (.param .align 16 .u8 l2[1000])
+{
+    .reg .u32 r, s, u, v, y, addr;
+    .reg .u64 t1, t2;
+    .local .align 16 .b8 z[24];
+ 
+    ld.param.v2.u64  {t1, t2}, [l2];
+    st.local.v2.u64  [z], {t1, t2};
+
+    bar.sync 0;
+
+    ld.local.v2.u64  {t2,t1}, [z];
+    st.param.v2.u64  [out], t2;
+
+    bar.sync 0;
+
+    ld.param.v4.u32  {r, s, u, v}, [l2 + 16];
+    st.local.v4.u32  [z], {r, s, u, v};
+
+    bar.sync 0;
+
+    ld.local.v4.u32  {r, s, u, v} , [z];
+    st.param.v4.u32  [out + 16], {r, s, u, v};
+ 
+    ret;
+}
+
+/*
+ *  This test case exercises the splitting of 16byte read/writes when the stack alignment is 8bytes and incoming 
+ *  SP alignment is 8byte (i.e there is no 16byte param/return value is passed through memeory).
+ *
+ */
+
+.func (.param .align 16 .u8 out[16]) myFunc2 (.param .align 16 .u8 l2[16])
+{
+    .reg .u32 r, s, u, v, y, addr;
+    .reg .u64 t1, t2;
+    .local .align 16 .b8 z[24];
+
+    ld.param.v2.u64  {t1, t2}, [l2];
+    st.local.v2.u64  [z], {t1, t2};
+
+    bar.sync 0;
+
+    ld.local.v2.u64  {t2,t1}, [z];
+    st.param.v2.u64  [out], t2;
+
+    bar.sync 0;
+
+    ld.param.v4.u32  {r, s, u, v}, [l2];
+    st.local.v4.u32  [z], {r, s, u, v};
+
+    bar.sync 0;
+
+    ld.local.v4.u32  {r, s, u, v} , [z];
+    st.param.v4.u32  [out], {r, s, u, v};
+}
+
+.entry main(.param .u32 output, .param .u32 output1)
+{
+    .reg .u32 t, o;
+    .reg .u64 t1;
+    .param .align 16 .u8 ret[16];
+    .param .align 16 .u8 ret2[1000];  
+ 
+    st.param.v2.u64  [ret2], {1000, 2000};
+    call (ret2), myFunc, (ret2);
+    ld.param.u32  o, [output];
+    ld.param.u64  t1, [ret2]; 
+    st.b64        [o], t1;
+
+    st.param.v2.u64  [ret], {1000, 2000};
+    call (ret), myFunc2, (ret);
+    ld.param.u64  t1, [ret]; 
+    st.b64        [o], t1;
+
+    exit;
+}
+ 
+

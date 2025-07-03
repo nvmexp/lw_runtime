@@ -1,0 +1,48 @@
+!!ARBvp1.0
+OPTION LW_vertex_program3;
+PARAM pgmElw[256] = { program.elw[0..255] };
+TEMP tmpR2;
+TEMP tmpR11;
+TEMP tmpR12;
+MOV tmpR2, 0;
+MOV tmpR11, 0;
+MOV tmpR12, 0;
+DP4 result.position.x, pgmElw[0], vertex.position;
+DP4 result.position.y, pgmElw[1], vertex.position;
+DP4 result.position.z, pgmElw[2], vertex.position;
+DP4 result.position.w, pgmElw[3], vertex.position;
+ABSC tmpR12, -vertex.texcoord[3].xyzw;
+MINC1 tmpR11, tmpR12.yzzy, -vertex.texcoord[5].xyzw;
+SNEC1 result.color.primary, vertex.color.primary.wyxz, pgmElw[185].zyxx;
+MINC_SAT tmpR2, |vertex.position.yxwz|, vertex.position.xyzw;
+SUBC1 tmpR2 (GE.zwyx), tmpR2.xyzw, |vertex.texcoord[4].wxyz|;
+BRA label_one  (LE0.z);
+LITC_SAT result.color.primary (LE.zwxy), vertex.texcoord[3].zxyw;
+SLT tmpR11 (LE.xzzz), vertex.color.primary.yxwy, vertex.color.primary.xzwy;
+ADDC tmpR11 (LT.xywy), vertex.color.primary.wwzx, tmpR2.yzxw;
+LG2C1 tmpR12.w, |pgmElw[202].y|;
+SNEC1 tmpR2, tmpR2.xyzw, vertex.color.secondary.xyzw;
+SLE tmpR2, vertex.texcoord[5].xyzw, tmpR11.xyzw;
+ADD_SAT tmpR11 (FL.xyzw), -vertex.position.yyxx, -pgmElw[125].xyzw;
+LIT result.color.primary, tmpR11.ywxw;
+ADD result.fogcoord.x, -vertex.texcoord[3].xyzw, tmpR2.xyzw;
+SFL result.color.primary (FL.wwxy), vertex.texcoord[4].wwwz, tmpR11.yzwx;
+LOG tmpR11 (TR.xxxz), vertex.color.primary.x;
+label_one:
+BRA label_two  (LE1.x);
+label_two:
+FLR result.texcoord[4], |vertex.texcoord[7].yxyy|;
+SNEC result.color.secondary, -vertex.color.primary.xzwy, -tmpR2.zxyw;
+MOVC1 result.pointsize.x, vertex.texcoord[2].yyxw;
+ADD result.color.back.secondary, vertex.normal.xzyw, tmpR2.xyzw;
+LOGC1 result.texcoord[2], -vertex.color.secondary.z;
+FRCC result.texcoord[7], vertex.texcoord[2].xyzw;
+MAX result.texcoord[6], |vertex.color.primary.yxwz|, |pgmElw[22].wyzx|;
+MULC1 result.color.back.primary, -vertex.color.primary.wxyz, -vertex.color.primary.xyzw;
+MAXC1 result.fogcoord.x, |pgmElw[140].xyzw|, vertex.color.secondary.xwzy;
+MOVC1_SAT result.texcoord[1], |vertex.texcoord[3].zwyx|;
+FRCC1 result.texcoord[5], -|pgmElw[245].xyzw|;
+ADD result.texcoord[3], -|vertex.texcoord[3].xzwy|, tmpR12.xyzw;
+ABSC result.texcoord[0], pgmElw[247].ywzx;
+END
+

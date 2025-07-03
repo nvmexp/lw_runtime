@@ -1,0 +1,22 @@
+!!FP1.0
+TEX R0, f[TEX0], TEX0, 2D;
+TEX R1, f[TEX1], TEX0, 2D;
+ADDR R1.w, R0, R1;
+TEX R0, f[TEX2], TEX0, 2D;
+ADDR R1.w, R0, R1;
+TEX R0, f[TEX3], TEX0, 2D;
+ADDR R1.w, R0, R1;
+TEX R0, f[TEX4], TEX0, 2D;
+ADDR R0.w, R0, R1;
+MADR_SAT R0.w, R0, {1.987654, 1.788889, 1.610000, 1.449000}.x, -f[COL0];
+ADDR R0.w, -R0, {1.304100, 1.173690, 1.056321, 0.950689}.x;
+ADDR R0.z, -R0.w, {0.855620, 0.770058, 0.693052, 0.623747}.x;
+MADR R0.x, {0.561372, 0.505235, 0.454712, 0.409240}.x, R0.z, R0.w;
+MOVR o[COLR], R0; 
+END
+
+# Passes = 9 
+
+# Registers = 2 
+
+# Textures = 5 

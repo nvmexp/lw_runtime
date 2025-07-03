@@ -1,0 +1,50 @@
+image: gitlab-master.lwpu.com:5005/gputelecom/lwphy
+
+stages:
+  - src
+  - config
+  - build
+
+source_code_package:
+  stage: src
+  script:
+    - mkdir .__tmppackage__
+    - cp -R * .__tmppackage__/
+    - mv .__tmppackage__ lwPHY
+  artifacts:
+    name: "lwPHY-${CI_COMMIT_SHA:0:8}-src"
+    paths:
+      - lwPHY/
+    expire_in: 4 hrs
+
+config_x86:
+  stage: config
+  dependencies:
+    - source_code_package
+  script:
+    - mkdir build
+    - git submodule init
+    - git submodule update --remote
+    - cd build
+    - cmake --version
+    - cmake .. -DCMAKE_INSTALL_PREFIX=../lwPHY -DBUILD_DOCS=ON
+  artifacts:
+    name: "lwPHY-${CI_COMMIT_SHA:0:8}-config"
+    paths:
+      - build/
+    expire_in: 4 hrs
+
+build_x86:
+  stage: build
+  dependencies:
+    - config_x86
+  script:
+    - mkdir lwPHY
+    - cd build
+    - make -j 16
+    - make install
+  artifacts:
+    name: "lwPHY-${CI_COMMIT_SHA:0:8}-build"
+    paths:
+      - lwPHY
+    expire_in: 36 hrs

@@ -1,0 +1,187 @@
+/******************************************************************************
+ * Copyright (c) 2011, Duane Merrill.  All rights reserved.
+ * Copyright (c) 2011-2018, LWPU CORPORATION.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in the
+ *       documentation and/or other materials provided with the distribution.
+ *     * Neither the name of the LWPU CORPORATION nor the
+ *       names of its contributors may be used to endorse or promote products
+ *       derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL LWPU CORPORATION BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ ******************************************************************************/
+
+/**
+ * \file
+ * Static architectural properties by SM version.
+ */
+
+#pragma once
+
+#include "util_cpp_dialect.lwh"
+#include "util_namespace.lwh"
+#include "util_macro.lwh"
+
+/// Optional outer namespace(s)
+LWB_NS_PREFIX
+
+/// LWB namespace
+namespace lwb {
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+
+#if ((__LWDACC_VER_MAJOR__ >= 9) || defined(__LWCOMPILER_LWDA__) ||            \
+     LWDA_VERSION >= 9000) &&                                                  \
+  !defined(LWB_USE_COOPERATIVE_GROUPS)
+#define LWB_USE_COOPERATIVE_GROUPS
+#endif
+
+/// In device code, LWB_PTX_ARCH expands to the PTX version for which we are
+/// compiling. In host code, LWB_PTX_ARCH's value is implementation defined.
+#ifndef LWB_PTX_ARCH
+    #if defined(__LWCOMPILER_LWDA__)
+        // __LWCOMPILER_LWDA_ARCH__ is the target PTX version, and is defined
+        // when compiling both host code and device code. Lwrrently, only one
+        // PTX version can be targeted.
+        #define LWB_PTX_ARCH __LWCOMPILER_LWDA_ARCH__
+    #elif !defined(__LWDA_ARCH__)
+        #define LWB_PTX_ARCH 0
+    #else
+        #define LWB_PTX_ARCH __LWDA_ARCH__
+    #endif
+#endif
+
+#ifndef LWB_IS_DEVICE_CODE
+    #if defined(__LWCOMPILER_LWDA__)
+        #define LWB_IS_DEVICE_CODE __builtin_is_device_code()
+        #define LWB_IS_HOST_CODE (!__builtin_is_device_code())
+        #define LWB_INCLUDE_DEVICE_CODE 1
+        #define LWB_INCLUDE_HOST_CODE 1
+    #elif LWB_PTX_ARCH > 0
+        #define LWB_IS_DEVICE_CODE 1
+        #define LWB_IS_HOST_CODE 0
+        #define LWB_INCLUDE_DEVICE_CODE 1
+        #define LWB_INCLUDE_HOST_CODE 0
+    #else
+        #define LWB_IS_DEVICE_CODE 0
+        #define LWB_IS_HOST_CODE 1
+        #define LWB_INCLUDE_DEVICE_CODE 0
+        #define LWB_INCLUDE_HOST_CODE 1
+    #endif
+#endif
+
+/// Maximum number of devices supported.
+#ifndef LWB_MAX_DEVICES
+    #define LWB_MAX_DEVICES 128
+#endif
+
+#if LWB_CPP_DIALECT >= 2011
+    static_assert(LWB_MAX_DEVICES > 0, "LWB_MAX_DEVICES must be greater than 0.");
+#endif
+
+/// Whether or not the source targeted by the active compiler pass is allowed to  ilwoke device kernels or methods from the LWCA runtime API.
+#ifndef LWB_RUNTIME_FUNCTION
+    #if !defined(__LWDA_ARCH__) || (__LWDA_ARCH__>= 350 && defined(__LWDACC_RDC__))
+        #define LWB_RUNTIME_ENABLED
+        #define LWB_RUNTIME_FUNCTION __host__ __device__
+    #else
+        #define LWB_RUNTIME_FUNCTION __host__
+    #endif
+#endif
+
+
+/// Number of threads per warp
+#ifndef LWB_LOG_WARP_THREADS
+    #define LWB_LOG_WARP_THREADS(arch)                      \
+        (5)
+    #define LWB_WARP_THREADS(arch)                          \
+        (1 << LWB_LOG_WARP_THREADS(arch))
+
+    #define LWB_PTX_WARP_THREADS        LWB_WARP_THREADS(LWB_PTX_ARCH)
+    #define LWB_PTX_LOG_WARP_THREADS    LWB_LOG_WARP_THREADS(LWB_PTX_ARCH)
+#endif
+
+
+/// Number of smem banks
+#ifndef LWB_LOG_SMEM_BANKS
+    #define LWB_LOG_SMEM_BANKS(arch)                        \
+        ((arch >= 200) ?                                    \
+            (5) :                                           \
+            (4))
+    #define LWB_SMEM_BANKS(arch)                            \
+        (1 << LWB_LOG_SMEM_BANKS(arch))
+
+    #define LWB_PTX_LOG_SMEM_BANKS      LWB_LOG_SMEM_BANKS(LWB_PTX_ARCH)
+    #define LWB_PTX_SMEM_BANKS          LWB_SMEM_BANKS(LWB_PTX_ARCH)
+#endif
+
+
+/// Oversubscription factor
+#ifndef LWB_SUBSCRIPTION_FACTOR
+    #define LWB_SUBSCRIPTION_FACTOR(arch)                   \
+        ((arch >= 300) ?                                    \
+            (5) :                                           \
+            ((arch >= 200) ?                                \
+                (3) :                                       \
+                (10)))
+    #define LWB_PTX_SUBSCRIPTION_FACTOR             LWB_SUBSCRIPTION_FACTOR(LWB_PTX_ARCH)
+#endif
+
+
+/// Prefer padding overhead vs X-way conflicts greater than this threshold
+#ifndef LWB_PREFER_CONFLICT_OVER_PADDING
+    #define LWB_PREFER_CONFLICT_OVER_PADDING(arch)          \
+        ((arch >= 300) ?                                    \
+            (1) :                                           \
+            (4))
+    #define LWB_PTX_PREFER_CONFLICT_OVER_PADDING    LWB_PREFER_CONFLICT_OVER_PADDING(LWB_PTX_ARCH)
+#endif
+
+
+template <
+    int NOMINAL_4B_BLOCK_THREADS,
+    int NOMINAL_4B_ITEMS_PER_THREAD,
+    typename T>
+struct RegBoundScaling
+{
+    enum {
+        ITEMS_PER_THREAD    = LWB_MAX(1, NOMINAL_4B_ITEMS_PER_THREAD * 4 / LWB_MAX(4, sizeof(T))),
+        BLOCK_THREADS       = LWB_MIN(NOMINAL_4B_BLOCK_THREADS, (((1024 * 48) / (sizeof(T) * ITEMS_PER_THREAD)) + 31) / 32 * 32),
+    };
+};
+
+
+template <
+    int NOMINAL_4B_BLOCK_THREADS,
+    int NOMINAL_4B_ITEMS_PER_THREAD,
+    typename T>
+struct MemBoundScaling
+{
+    enum {
+        ITEMS_PER_THREAD    = LWB_MAX(1, LWB_MIN(NOMINAL_4B_ITEMS_PER_THREAD * 4 / sizeof(T), NOMINAL_4B_ITEMS_PER_THREAD * 2)),
+        BLOCK_THREADS       = LWB_MIN(NOMINAL_4B_BLOCK_THREADS, (((1024 * 48) / (sizeof(T) * ITEMS_PER_THREAD)) + 31) / 32 * 32),
+    };
+};
+
+
+
+
+#endif  // Do not document
+
+}               // LWB namespace
+LWB_NS_POSTFIX  // Optional outer namespace(s)

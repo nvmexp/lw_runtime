@@ -1,0 +1,61 @@
+// Copyright LWPU Corporation 2017
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include <prodlib/bvhtools/src/common/TypesInternal.hpp>
+#include "GatherPrimBitsKernels.hpp"
+#include <prodlib/bvhtools/src/common/SharedKernelFunctions.hpp>
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(GATHER_PRIMBITS_EXEC_WARPS_PER_BLOCK * 32, GATHER_PRIMBITS_EXEC_BLOCKS_PER_SM)
+void GatherPrimBitsExec(GatherPrimBitsExecParams p)
+{
+    int i = threadIdx.x + 32 * ( threadIdx.y + GATHER_PRIMBITS_EXEC_WARPS_PER_BLOCK * ( blockIdx.x + gridDim.x * blockIdx.y ) );
+    if( i >= p.numRemaps )
+        return;
+
+    int primIdx = p.inRemap[i];
+    if( p.primBitsFormat == PRIMBITS_DIRECT_64 )
+    {
+        uint64_t* dest = make_ptr<uint64_t>(p.outPrimBits, size_t(i) * size_t(p.outPrimBitsStride));
+        uint64_t  flags = p.flags;
+        if( primIdx < 0 || p.numPrims <= primIdx )
+            *dest = ~uint64_t( 0 );
+        else if( p.inPrimBits )
+            *dest = *make_ptr<const uint64_t>(p.inPrimBits, size_t(primIdx) * size_t(p.inPrimBitsStride)) | flags;
+        else
+            *dest = primIdx | flags;
+    }
+    else // Must be PRIMBITS_LEGACY_DIRECT_32
+    {
+        uint32_t* dest = make_ptr<uint32_t>(p.outPrimBits, size_t(i) * size_t(p.outPrimBitsStride));
+        uint32_t  flags = (uint32_t)p.flags;
+        if( primIdx < 0 || p.numPrims <= primIdx )
+            *dest = ~0;
+        else if( p.inPrimBits )
+            *dest = *make_ptr<const uint32_t>(p.inPrimBits, size_t(primIdx) * size_t(p.inPrimBitsStride)) | flags;
+        else
+            *dest = primIdx | flags;
+    }
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchGatherPrimBitsExec(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const GatherPrimBitsExecParams& p)
+{
+    if (lwdaFuncSetCacheConfig(GatherPrimBitsExec, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    GatherPrimBitsExec<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

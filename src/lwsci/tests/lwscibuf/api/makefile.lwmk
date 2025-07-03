@@ -1,0 +1,275 @@
+##############################################################################
+# Copyright (c) 2019-2022, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+##############################################################################
+
+##############################################################################
+# tests/lwscibuf makefile
+##############################################################################
+
+##############################################################################
+# Identify this module to lwCommon.lwmk so it can decide the build type
+##############################################################################
+
+LW_MODULE_BUILD_TYPE_ALIASES = test_lwscibuf_api
+LW_MODULE_LOGGING_NAME = "test_lwscibuf_api"
+
+include $(LW_SOURCE)/drivers/lwsci/lwsci.lwmk
+include $(LW_SOURCE)/drivers/lwsci/tests/common/gpu_wrapper/gpuwrapper.lwmk
+include $(LW_SOURCE)/drivers/lwsci/tests/common/ipc_wrapper/ipcwrapper.lwmk
+include $(LW_SOURCE)/drivers/lwsci/tests/gtest/gtest.lwmk
+
+CFLAGS += -DBACKEND_RESMAN=$(LW_BACKEND_RESMAN)
+#tests now include lwsci.lwmk. However, since lwsci.lwmk is being included for
+#sources as well, it is very stringent and colwerts warnings to errors.
+#For test-cases, it is fine to suppress warnings for now.
+#TODO: fix all warnings are remove this flag.
+#fixing warnings for now.
+CFLAGS += -w
+
+##############################################################################
+# Path shorthands
+##############################################################################
+
+LWSCI_PATH              = $(LW_SOURCE)/drivers/lwsci
+LWSCIBUF_PATH           = $(LWSCI_PATH)/lwscibuf
+LWSCI_TESTS_PATH        = $(LWSCI_PATH)/tests
+LWSCIBUF_TESTS_PATH     = $(LWSCI_TESTS_PATH)/lwscibuf/api
+
+##############################################################################
+# define SOURCES
+##############################################################################
+
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_peer.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_accessperm.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_array.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_attribute_core.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_attributes.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_attrlist_key_value_validation.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_attrlist_reconcile.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_attrlist_validate.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_buffer_object.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_coherencysetting.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_color_colwersion.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_exportdescriptor.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_general_attribute_comparison.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_gpu_cache.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_gpu_compression.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_hardware_engine.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_image_attribute_comparison.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_image_block.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_image_pitch.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_imagepyramid.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_interprocess.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_interprocess_image.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_interprocess_tensor.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_interthread.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_ISPcolor_support.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_rawbuffer.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_RGBIRcolor_support.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_slot_count.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_tensor_attributes.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_umd.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_version_check.cpp
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_tests.cpp
+
+
+ifeq ($(LW_BACKEND_RESMAN), 0)
+ifndef LWCFG_GLOBAL_SAFETY_BUILD
+  LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_dgpu_vidmem.cpp
+else #LWCFG_GLOBAL_SAFETY_BUILD
+  LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_device_cpu_mapping.cpp
+  LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_heap_protection.cpp
+endif #LWCFG_GLOBAL_SAFETY_BUILD
+LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_c2c_pcieengine.cpp
+  LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_display.cpp
+  LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_heap_allocation.cpp
+  LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_image_tensor_interop.cpp
+  LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_integration_tegra.cpp
+  LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_selwreinterproc.cpp
+  LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_tensor.cpp
+  LWSCIBUF_TEST_SOURCES += src/cheetah/lwscibuf_test_platform.cpp
+  LWSCIBUF_TEST_SOURCES += src/cheetah/lwscibuf_test_gpu.cpp
+else #LW_BACKEND_RESMAN == 0
+  LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_emu_support.cpp
+  LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_integration_x86.cpp
+  LWSCIBUF_TEST_SOURCES += src/lwscibuf_test_dgpu_vidmem.cpp
+  LWSCIBUF_TEST_SOURCES += src/x86/lwscibuf_test_platform.cpp
+  LWSCIBUF_TEST_SOURCES += src/x86/lwscibuf_test_gpu.cpp
+endif #LW_BACKEND_RESMAN == 0
+
+SOURCES += $(addprefix $(LWSCIBUF_TESTS_PATH)/,$(LWSCIBUF_TEST_SOURCES))
+
+##############################################################################
+# define LW_INCLUDES
+##############################################################################
+
+LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc
+LW_INCLUDES += $(LWSCI_PATH)/inc/public
+LW_INCLUDES += $(LWSCI_PATH)/inc/internal
+LW_INCLUDES += $(LWSCI_PATH)/lwscicommon/inc
+LW_INCLUDES += $(LWSCIBUF_PATH)/inc
+LW_INCLUDES += $(LWSCIBUF_PATH)/common
+LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc/class
+LW_INCLUDES += $(LW_SOURCE)/drivers/lwsci/inc
+LW_INCLUDES += $(LW_SOURCE)/drivers/lwsci/inc/public
+LW_INCLUDES += $(LWSCIBUF_TESTS_PATH)/inc
+
+#include cheetah headers
+ifeq ($(LW_TEGRA_MIRROR_INCLUDES), 1)
+#get lwrm headers from sdk/inc and RMAPI_TEGRA_MIRROR if we are building
+#perforce tree.
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+else
+ifeq ($(LW_TEGRA_DIRECT_INCLUDES), 1)
+#get lwrm headers directly from core/include
+  LW_INCLUDES += $(TEGRA_TOP)/core/include
+  LW_INCLUDES += $(TEGRA_TOP)/core-private/include
+endif
+endif
+
+#include x86 headers
+ifeq ($(LW_BACKEND_RESMAN), 1)
+  include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+  LW_INCLUDES += $(LW_SOURCE)/drivers/unix/allocator/include
+  LW_INCLUDES += $(LWSCI_PATH)/lwscicommon/inc/x86
+endif
+
+
+LW_INCLUDES += $(OUTPUTDIR)
+
+#############################################################################
+# define DSO_STUBS
+#############################################################################
+include $(LWSCI_PATH)/lwscibuf/lwscibuf-dso-stub.lwmk
+include $(LWSCI_PATH)/lwscicommon/lwscicommon-dso-stub.lwmk
+
+STUB_DSO_DEPENDS += $(LWSCIBUF_DSO_STUB)
+STUB_DSO_DEPENDS += $(LWSCICOMMON_DSO_STUB)
+
+STUB_LDFLAGS += -llwscibuf-stub -llwscicommon-stub
+
+ifeq ($(LW_BACKEND_RESMAN), 0)
+	include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwrm_gpu.lwmk
+	include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwrm_mem.lwmk
+	include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwrm_sync.lwmk
+	include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwtegrahv.lwmk
+ifeq ($(LW_TARGET_OS),QNX)
+	include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwos_s3_safety.lwmk
+else ifeq ($(LW_TARGET_OS),Linux)
+	include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/dso-stubs/lwos.lwmk
+endif
+
+	STUB_DSO_DEPENDS += $(LWRM_GPU_DSO_STUB)
+	STUB_DSO_DEPENDS += $(LWRM_MEM_DSO_STUB)
+	STUB_DSO_DEPENDS += $(LWRM_SYNC_DSO_STUB)
+	STUB_DSO_DEPENDS += $(LWTEGRAHV_DSO_STUB)
+ifeq ($(LW_TARGET_OS),QNX)
+	STUB_DSO_DEPENDS += $(LWOS_S3_SAFETY_DSO_STUB)
+else ifeq ($(LW_TARGET_OS),Linux)
+	STUB_DSO_DEPENDS += $(LWOS_DSO_STUB)
+endif
+
+	STUB_LDFLAGS += \
+		-llwrm_gpu-stub \
+		-llwrm_mem-stub \
+		-llwrm_sync-stub \
+		-llwtegrahv-stub
+
+ifeq ($(LW_TARGET_OS),QNX)
+	STUB_LDFLAGS += \
+		-llwos_s3_safety-stub
+else ifeq ($(LW_TARGET_OS),Linux)
+	STUB_LDFLAGS += \
+		-llwos-stub
+endif
+
+else
+	include $(LW_SOURCE)/drivers/resman/arch/lwalloc/unix/lib/rmapi.lwmk
+endif
+
+##############################################################################
+# define LW_DEFINES
+##############################################################################
+
+# For lwmake builds, lwcfg feature flags are available to LWSCI.
+ifdef LWCFG_INITIALIZED
+  LW_DEFINES += LWCFG_ENABLED
+endif
+
+ifeq ($(LW_TEGRA_MIRROR_INCLUDES), 1)
+  LW_DEFINES += LW_SCI_DESKTOP_COMPATIBLE_HEADERS
+endif
+
+# Embedded defines this on the command line for their builds.
+LW_BUILD_EMBEDDED ?= 0
+LW_DEFINES += LW_BUILD_EMBEDDED=1
+LW_NEEDS_UNSTRIPPED = 1
+LW_SUPPORTS_SEPARATE_DEBUG_INFO = 1
+
+##############################################################################
+# library flags
+##############################################################################
+
+# Link in libpthread
+LDFLAGS += $(PTHREAD_LDFLAGS)
+
+LDFLAGS += -lm
+
+ifneq ($(LW_TARGET_OS), QNX)
+  # Link in Linux
+  LDFLAGS += -lrt
+  LDFLAGS += -lstdc++
+else
+  LDFLAGS += -lc++
+endif
+
+# library flags
+LDFLAGS += -g
+
+LDFLAGS += -L $(OUTPUTDIR) $(STUB_LDFLAGS)
+LDFLAGS += $(BIN_LDFLAGS)
+
+ifdef RMAPI_TEGRA_MIRROR_LWMK
+  # Include header from rmapi_tegra mirror
+  CFLAGS += -DRMAPI_TEGRA_MIRROR
+endif
+
+# os specific flags
+ifeq ($(LW_TARGET_OS),QNX)
+  CFLAGS += -DQNX
+else ifeq ($(LW_TARGET_OS),Linux)
+  CFLAGS += -DLINUX
+endif
+
+##############################################################################
+# link the binary
+##############################################################################
+
+TESTAPP_BIN := test_lwscibuf_api
+TESTAPP := $(OUTPUTDIR)/$(TESTAPP_BIN)
+TESTAPP_LD_TARGET = $(TESTAPP).unstripped
+TESTAPP_DEBUG_INFO = $(TESTAPP).debug
+$(eval $(call LW_DEBUG_INFO_CMD, \
+  $(TESTAPP_LD_TARGET), \
+  $(TESTAPP), \
+  $(TESTAPP_DEBUG_INFO)))
+
+build: $(TESTAPP)
+
+$(TESTAPP_LD_TARGET): $(OBJECTS) $(STUB_DSO_DEPENDS)
+	$(call quiet_cmd,LINK) $(OBJECTS) -o $(TESTAPP_LD_TARGET) $(LDFLAGS)
+
+##############################################################################
+# include definitions of tools and build rules
+##############################################################################
+
+include $(LW_COMMON)/build/lwCommonRules.lwmk

@@ -1,0 +1,64 @@
+.version 3.1
+.target sm_20
+
+.global .u32 gl;      // relocation in bank 14
+.const .u32 t;        // bank 2
+.extern .const[1] .u32 t1[];   // bank 3
+
+.global .texref mytex = { height = 64, width = 32, depth = 1 }; // descriptor in bank 14
+
+.entry main(.param .u32 p1, .param .u32 p2, .param .texref mytexparam, 
+        .param .surfref mysurfparam) // params in bank 0, byte 0x20 
+{
+    .reg .u32 a, b, c;
+
+    ld.param.u32 a, [p1];
+    ld.param.u32 b, [p2];
+    xor.b32 a, a, b;
+    ld.const.u32  b, [t];
+    xor.b32 a, a, b;
+    ld.const[1].u32 b, [t1];
+    xor.b32 a, a, b;
+    st.global.u32  [gl], a;
+
+    //prmt.b32   a, a, 0x81644664, a; // promote immediate to constant bank 16
+    st.global.u32  [gl + 4], a;
+
+    bar.sync 0;
+
+    // special registers in constant bank 0;
+    mov.u32   a, %ntid.x;  // offset 8
+    mov.u32   b, %ntid.y;  // offset 12
+    xor.b32   a, a, b;
+    mov.u32   b, %ntid.z;  // offset 16
+    xor.b32   a, a, b;
+    st.global.u32 [gl + 8], a;
+
+    mov.u32   a, %nctaid.x;  // offset 20
+    mov.u32   b, %nctaid.y;  // offset 24
+    xor.b32   a, a, b;
+    mov.u32   b, %nctaid.z;  // offset 28
+    xor.b32   a, a, b;
+    st.global.u32 [gl + 8], a;
+
+    bar.sync 0;
+
+    // Shared/local memory windows in constant bank 0
+    //cvta.u32.shared  a, 0;
+    //cvta.u32.local   b, 0;
+    xor.b32      a, a, b;
+    st.global.u32 [gl + 12], a;
+
+
+    bar.sync 0;
+    // descriptors in bank 14 or 15
+    txq.b32.width                 a, [mytex];
+    txq.b32.width                 b, [mytexparam];
+    suq.b32.width                 c, [mysurfparam];
+    and.b32 a, a, b;
+    st.global.u32 [gl + 16], a;
+
+    exit;
+}
+
+

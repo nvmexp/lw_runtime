@@ -1,0 +1,176 @@
+##############################################################################
+# define LOCAL_SOURCES
+##############################################################################
+
+
+LW_CXX_EXCEPTIONS := 0
+LW_CXX_RTTI := 0
+DCGM_BUILD_VGPU_MODULE = 1
+
+include $(LWML_DIR)/lwml_loader/lwml_loader.lwmk
+include $(LWML_DIR)/lwml_headers.lwmk
+
+LWRRENT_DIR := $(LW_SOURCE)/apps/dcgm/dcgmlib
+LWMLCOMMON_DIR = $(LW_SOURCE)/apps/lwml/common
+
+#
+# Generate versioning information based on current CL and environment
+#
+VERSION_HEADER := $(addprefix $(OUTPUTDIR)/,version.h)
+$(addprefix $(OUTPUTDIR)/,DcgmVersion.o): $(addprefix $(LW_SOURCE)/apps/dcgm/dcgmlib/,src/DcgmVersion.cpp) $(VERSION_HEADER).gen
+
+$(VERSION_HEADER).gen : $(DCGM_DIR)/dcgmlib/version.h.in
+	$(call print_gen_version_info)
+	$(call gen_version_file,$<,$(VERSION_HEADER))
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += src/LwcmApi.cpp
+LOCAL_SOURCES += src/LwcmModuleFMApi.cpp
+LOCAL_SOURCES += src/lwcm.c
+LOCAL_SOURCES += src/lwcm_etbl.c
+LOCAL_SOURCES += src/LwcmClientHandler.cpp
+LOCAL_SOURCES += src/LwcmHostEngineHandler.cpp
+LOCAL_SOURCES += src/LwcmCacheManager.cpp
+LOCAL_SOURCES += src/LwcmGroup.cpp
+LOCAL_SOURCES += src/DcgmFieldGroup.cpp
+LOCAL_SOURCES += src/DcgmError.cpp
+LOCAL_SOURCES += src/DcgmWatcher.cpp
+LOCAL_SOURCES += src/dcgm_fields.c
+LOCAL_SOURCES += src/dcgm_errors.c
+LOCAL_SOURCES += src/DcgmVersion.cpp
+LOCAL_SOURCES += ../common/DcgmLogging.cpp
+LOCAL_SOURCES += ../common/LwcmRequest.cpp
+LOCAL_SOURCES += ../common/DcgmPolicyRequest.cpp
+LOCAL_SOURCES += ../common/LwcmServerRequest.cpp
+LOCAL_SOURCES += ../common/LwcmStatus.cpp
+LOCAL_SOURCES += ../common/LwcmThread.cpp
+LOCAL_SOURCES += ../common/LwcmSettings.cpp
+LOCAL_SOURCES += ../common/LwcmClientCallbackQueue.cpp
+LOCAL_SOURCES += ../common/DcgmMutex.cpp
+LOCAL_SOURCES += ../common/DcgmFvBuffer.cpp
+LOCAL_SOURCES += ../common/DcgmTask.cpp
+LOCAL_SOURCES += ../common/DcgmTaskRunner.cpp
+LOCAL_SOURCES += ../common/DcgmUtilities.cpp
+LOCAL_SOURCES += ../common/transport/LwcmClientConnection.cpp
+LOCAL_SOURCES += ../common/transport/LwcmServerConnection.cpp
+LOCAL_SOURCES += ../common/transport/LwcmConnection.cpp
+LOCAL_SOURCES += ../common/transport/LwcmProtocol.cpp
+LOCAL_SOURCES += ../common/transport/workqueue.cpp
+LOCAL_SOURCES += ../common/protobuf/LwcmProtobuf.cpp
+
+ifdef DCGM_BUILD_LWSWITCH_MODULE
+    LOCAL_SOURCES += ../modules/lwswitch/DcgmLwSwitchApi.cpp
+endif
+
+ifdef DCGM_BUILD_VGPU_MODULE
+    LOCAL_SOURCES += ../modules/vgpu/DcgmVgpuApi.cpp
+endif
+
+LOCAL_SOURCES += ../modules/DcgmModuleApi.cpp
+LOCAL_SOURCES += ../modules/DcgmModule.cpp
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+# files in LWMLCOMMON_DIR do not need the added prefix
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/logging.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/simple_encryption.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/keyedvector.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/timeseries.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/lwcmvalue.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/timelib.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/MurmurHash3.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/hashtable.c
+LOCAL_SOURCES += $(LWMLCOMMON_DIR)/er.c
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+  # LOCAL_SOURCES += $(LWIDSTRING)
+  LOCAL_SOURCES += $(LWMLCOMMON_DIR)/Linux/lwosLinux.c
+  LOCAL_SOURCES += $(LWMLCOMMON_DIR)/lwos_common_posix.c
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+  LOCAL_SOURCES += $(LWMLCOMMON_DIR)/win32/lwoswin32.c
+endif
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+LOCAL_OBJECTS += $(lwml_loader_TARGET)
+LOCAL_OBJECTS += $(lwcmproto_TARGET)
+LOCAL_OBJECTS += $(libprotobuf_TARGET)
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(DCGM_DIR)/common/transport
+LOCAL_INCLUDES += $(DCGM_DIR)/common/protobuf
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/protobuf-2.6.0/include/
+LOCAL_INCLUDES += $(DCGM_DIR)/common
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/src/
+LOCAL_INCLUDES += $(DCGM_DIR)/modules
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/lwswitch
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/vgpu
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/introspect
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/health
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/policy
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/config
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/diag
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/profiling
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/libevent-2.0.22-stable/include/
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/libevent-2.0.22-stable/include/event2/
+LOCAL_INCLUDES += $(LWML_DIR)
+LOCAL_INCLUDES += $(LWVS_DIR)/include
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_CFLAGS += -fPIC
+endif
+
+ifdef DCGM_BUILD_LWSWITCH_MODULE
+    LOCAL_CFLAGS += -DDCGM_BUILD_LWSWITCH_MODULE
+endif
+
+ifdef DCGM_BUILD_VGPU_MODULE
+    LOCAL_CFLAGS += -DDCGM_BUILD_VGPU_MODULE
+endif
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+    DCGM_SHARED_LIBRARY_NAME:=libdcgm.so
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+    DCGM_SHARED_LIBRARY_NAME:=dcgm.dll
+endif
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS) -L$(OUTPUTDIR)
+LOCAL_LDFLAGS += -rdynamic
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS) -lstdc++ -lgcc_s -levent -lc -lm 
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+    LOCAL_LDFLAGS += -Xlinker --version-script=$(LWRRENT_DIR)/dcgmlib.linux_def
+    dcgm_DEPENDS += $(LWRRENT_DIR)/dcgmlib.linux_def
+endif
+
+ifdef DCGM_BUILD_LWSWITCH_MODULE
+    LOCAL_LDFLAGS += -lrt
+endif
+
+dcgm_TARGET  := $(OUTPUTDIR)/$(DCGM_SHARED_LIBRARY_NAME)
+dcgm_SONAME  := $(DCGM_SHARED_LIBRARY_NAME)
+dcgm_OBJECTS := $(LOCAL_OBJECTS)
+dcgm_CFLAGS  := $(LOCAL_CFLAGS)
+dcgm_LDFLAGS := $(LOCAL_LDFLAGS)
+dcgm_DEPENDS ?= $(LWML_H_OUT) $(LWML_GRID_H_OUT) 
+
+DCGM_DECODE_DB := $(OUTPUTDIR)/dcgm_decode_db.txt
+$(DCGM_DECODE_DB) : $(LOCAL_SOURCES)
+	$(GREP) -n -B 1 -A 4 -e '^\s*PRINT_' -e 'DEBUG_' $^ > $@
+
+build: $(dcgm_TARGET)
+dcgmbuildsyncpoint:: $(dcgm_TARGET)
+$(eval $(call MAKE_SHARED_LIBRARY,dcgm))
+build: $(dcgm_TARGET).guardwords
+
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

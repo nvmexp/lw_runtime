@@ -1,0 +1,63 @@
+ps_2_0
+def c10, 1.000000, 0.250000, 0.333333, 0.000000
+def c11, 0.066667, 0.000000, 0.000000, 0.000000
+dcl_pp t0.rg
+dcl_2d s0
+dcl_2d s1
+texld_pp r0, t0, s0
+mov_pp r7.rgb, r0
+mov_pp r7.a, c10.r
+dp4_pp r0.a, c9, r7
+rcp_pp r0.a, r0.a
+dp4_pp r2.r, c6, r7
+dp4_pp r2.g, c7, r7
+dp4_pp r2.b, c8, r7
+mul_pp r9.rgb, r0.a, r2
+add_pp r0.rg, r9, c0
+add_pp r4.rg, r9, c0.abgr
+add_pp r11.rg, r9, c1
+add_pp r6.rg, r9, c1.abgr
+add_pp r1.rg, r9, c2
+add_pp r8.rg, r9, c2.abgr
+add_pp r3.rg, r9, c3
+texld_pp r10, r0, s1
+texld_pp r5, r4, s1
+texld_pp r7, r11, s1
+texld_pp r2, r6, s1
+texld_pp r4, r1, s1
+texld_pp r11, r8, s1
+texld_pp r6, r3, s1
+mul_sat_pp r3.a, r0.b, c11.r
+add_pp r0.r, r9.b, -r10.r
+add_pp r0.g, r9.b, -r5.r
+add_pp r0.b, r9.b, -r7.r
+mov_pp r4.a, -r2.r
+add_pp r1.rg, r9, c3.abgr
+add_pp r8.rg, r9, c4
+add_pp r3.rg, r9, c4.abgr
+add_pp r10.rg, r9, c5
+add_pp r9.rg, r9, c5.abgr
+texld_pp r5, r1, s1
+texld_pp r7, r8, s1
+texld_pp r2, r3, s1
+texld_pp r1, r10, s1
+texld_pp r8, r9, s1
+add_pp r0.a, r9.b, r4.a
+cmp_pp r10, -r0, c10.r, c10.a
+dp4_pp r0.r, r10, c10.g
+add_pp r4.r, r9.b, -r4.r
+add_pp r4.g, r9.b, -r11.r
+add_pp r4.b, r9.b, -r6.r
+add_pp r4.a, r9.b, -r5.r
+cmp_pp r6, -r4, c10.r, c10.a
+dp4_pp r0.g, r6, c10.g
+add_pp r5.r, r9.b, -r7.r
+add_pp r5.g, r9.b, -r2.r
+add_pp r5.b, r9.b, -r1.r
+add_pp r5.a, r9.b, -r8.r
+cmp_pp r2, -r5, c10.r, c10.a
+dp4_pp r0.b, r2, c10.g
+dp3_pp r1.a, r0, c10.b
+mad_pp r11.a, r3.a, -r3.a, c10.r
+mul_pp r6, r1.a, r11.a
+mov_pp oC0, r6

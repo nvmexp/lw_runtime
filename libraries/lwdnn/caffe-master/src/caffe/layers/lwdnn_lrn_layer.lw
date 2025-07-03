@@ -1,0 +1,39 @@
+#ifdef USE_LWDNN
+#include <vector>
+
+#include "caffe/layers/lwdnn_lrn_layer.hpp"
+
+namespace caffe {
+
+template <typename Ftype, typename Btype>
+void LwDNNLRNLayer<Ftype, Btype>::Forward_gpu(const vector<Blob*>& bottom,
+    const vector<Blob*>& top) {
+  LWDNN_CHECK(lwdnnLRNCrossChannelForward(Caffe::lwdnn_handle(0),
+      norm_desc_,
+      LWDNN_LRN_CROSS_CHANNEL_DIM1,
+      lwdnn::dataType<Ftype>::one,
+      fwd_bottom_desc_, bottom[0]->gpu_data<Ftype>(),
+      lwdnn::dataType<Ftype>::zero,
+      fwd_top_desc_, top[0]->mutable_gpu_data<Ftype>()));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream()));
+}
+
+template <typename Ftype, typename Btype>
+void LwDNNLRNLayer<Ftype, Btype>::Backward_gpu(const vector<Blob*>& top,
+    const vector<bool>& propagate_down, const vector<Blob*>& bottom) {
+  LWDNN_CHECK(lwdnnLRNCrossChannelBackward(Caffe::lwdnn_handle(0),
+      norm_desc_,
+      LWDNN_LRN_CROSS_CHANNEL_DIM1,
+      lwdnn::dataType<Btype>::one,
+      bwd_top_desc_, top[0]->gpu_data<Btype>(),
+      bwd_top_desc_, top[0]->gpu_diff<Btype>(),
+      bwd_bottom_desc_, bottom[0]->gpu_data<Btype>(),
+      lwdnn::dataType<Btype>::zero,
+      bwd_bottom_desc_, bottom[0]->mutable_gpu_diff<Btype>()));
+  LWDA_CHECK(lwdaStreamSynchronize(Caffe::thread_stream()));
+}
+
+INSTANTIATE_LAYER_GPU_FUNCS_FB(LwDNNLRNLayer);
+
+}  // namespace caffe
+#endif

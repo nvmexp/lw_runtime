@@ -1,0 +1,221 @@
+// cvt.ptx is generated from cvt.ptx.template
+// please modify the template file to make changes to the test
+// colwert this to ptx using 
+// cl /EP cvt.ptx.template > cvt.ptx
+
+.version 2.0
+.target compute_20
+.global .f32  g_f32;
+.global .f16  g_f16;
+.global .s8   g_s8;
+.global .u8   g_u8;
+.global .s16  g_s16;
+.global .u16  g_u16;
+.global .s32  g_s32;
+.global .u32  g_u32;
+.global .f64  g_f64;
+.global .u64  g_u64;
+.global .s64  g_s64;
+
+#define DOCVT(t1, t2)                         \
+   ld.global.##t1 r_##t1, [g_##t1];           \
+   cvt.##t2.##t1  r_##t2, r_##t1;             \
+   st.global.##t2 [g_##t2], r_##t2;           \
+   bar.sync 0
+
+#define DOCVTS(t1, t2)                        \
+   ld.global.##t1 r_##t1, [g_##t1];           \
+   cvt.sat.##t2.##t1  r_##t2, r_##t1;         \
+   st.global.##t2 [g_##t2], r_##t2;           \
+   bar.sync 0
+
+#define DOCVTR(t1, t2, rnd)                   \
+   ld.global.##t1 r_##t1, [g_##t1];           \
+   cvt##rnd.##t2.##t1  r_##t2, r_##t1;        \
+   st.global.##t2 [g_##t2], r_##t2;           \
+   bar.sync 0
+
+#define DOCVTRS(t1, t2, rnd)                  \
+   ld.global.##t1 r_##t1, [g_##t1];           \
+   cvt##rnd.sat.##t2.##t1  r_##t2, r_##t1;    \
+   st.global.##t2 [g_##t2], r_##t2;           \
+   bar.sync 0
+
+.entry main {
+   .reg .f32 r_f32;
+   .reg .f16 r_f16;
+   .reg .s8  r_s8;
+   .reg .u8  r_u8;
+   .reg .s16 r_s16;
+   .reg .u16 r_u16;
+   .reg .s32 r_s32;
+   .reg .u32 r_u32;
+   .reg .f64 r_f64;
+   .reg .u64 r_u64;
+   .reg .s64 r_s64;
+
+   ld.global.s16 r_s16, [g_s16];
+   mov.b16       r_f16, r_s16;
+   cvt.f32.f16   r_f32, r_f16;
+   st.global.f32 [g_f32], r_f32;
+   bar.sync 0;
+
+   ld.global.f32      r_f32, [g_s32];
+   cvt.f16.f32.rz.sat r_f16, r_f32;
+   mov.b16            r_s16, r_f16;
+   st.global.s16      [g_s16], r_s16;
+   bar.sync 0;
+
+   // f16 -> f64
+   ld.global.s16 r_s16, [g_s16];
+   mov.b16       r_f16, r_s16;
+   cvt.f64.f16   r_f64, r_f16;
+   st.global.f64 [g_f64], r_f64;
+   bar.sync 0;
+
+   // f16 -> f64 (w/sat)
+   ld.global.s16   r_s16, [g_s16];
+   mov.b16         r_f16, r_s16;
+   cvt.sat.f64.f16 r_f64, r_f16;
+   st.global.f64   [g_f64], r_f64;
+   bar.sync 0;
+
+   // f64 -> f16 (rz)
+   ld.global.f64  r_f64, [g_f64];
+   cvt.rz.f16.f64 r_f16, r_f64;
+   mov.b16        r_s16, r_f16;
+   st.global.s16  [g_f16], r_s16;
+   bar.sync 0;
+
+   // f64 -> f16 (rz w/sat)
+   ld.global.f64      r_f64, [g_f64];
+   cvt.rz.sat.f16.f64 r_f16, r_f64;
+   mov.b16            r_s16, r_f16;
+   st.global.s16      [g_f16], r_s16;
+   bar.sync 0;
+
+   // f64 -> f16 (rn)
+   ld.global.f64  r_f64, [g_f64];
+   cvt.rn.f16.f64 r_f16, r_f64;
+   mov.b16        r_s16, r_f16;
+   st.global.s16  [g_f16], r_s16;
+   bar.sync 0;
+
+   // f64 -> f16 (rn w/sat)
+   ld.global.f64      r_f64, [g_f64];
+   cvt.rn.sat.f16.f64 r_f16, r_f64;
+   mov.b16            r_s16, r_f16;
+   st.global.s16      [g_f16], r_s16;
+   bar.sync 0;
+
+   // f64 -> f16 (rp)
+   ld.global.f64  r_f64, [g_f64];
+   cvt.rp.f16.f64 r_f16, r_f64;
+   mov.b16        r_s16, r_f16;
+   st.global.s16  [g_f16], r_s16;
+   bar.sync 0;
+
+   // f64 -> f16 (rp w/sat)
+   ld.global.f64      r_f64, [g_f64];
+   cvt.rp.sat.f16.f64 r_f16, r_f64;
+   mov.b16            r_s16, r_f16;
+   st.global.s16      [g_f16], r_s16;
+   bar.sync 0;
+
+   // f64 -> f16 (rm)
+   ld.global.f64  r_f64, [g_f64];
+   cvt.rm.f16.f64 r_f16, r_f64;
+   mov.b16        r_s16, r_f16;
+   st.global.s16  [g_f16], r_s16;
+   bar.sync 0;
+
+   // f64 -> f16 (rm w/sat)
+   ld.global.f64      r_f64, [g_f64];
+   cvt.rm.sat.f16.f64 r_f16, r_f64;
+   mov.b16            r_s16, r_f16;
+   st.global.s16      [g_f16], r_s16;
+   bar.sync 0;
+
+   // f16 -> u64
+   ld.global.s16   r_s16, [g_s16];
+   mov.b16         r_f16, r_s16;
+   cvt.rzi.u64.f16 r_u64, r_f16;
+   st.global.u64   [g_u64], r_u64;
+   bar.sync 0;
+
+   // f16 -> s64
+   ld.global.s16   r_s16, [g_s16];
+   mov.b16         r_f16, r_s16;
+   cvt.rzi.s64.f16 r_s64, r_f16;
+   st.global.s64   [g_s64], r_s64;
+   bar.sync 0;
+
+   // u32 -> f16
+   ld.global.u32  r_u32, [g_u32];
+   cvt.rz.f16.u32 r_f16, r_u32;
+   mov.b16        r_s16, r_f16;
+   st.global.s16  [g_f16], r_s16;
+   bar.sync 0;
+
+   // s32 -> f16
+   ld.global.s32  r_s32, [g_s32];
+   cvt.rz.f16.s32 r_f16, r_s32;
+   mov.b16        r_s16, r_f16;
+   st.global.s16  [g_f16], r_s16;
+   bar.sync 0;
+
+   // u64 -> f16
+   ld.global.u64  r_u64, [g_u64];
+   cvt.rz.f16.u64 r_f16, r_u64;
+   mov.b16        r_s16, r_f16;
+   st.global.s16  [g_f16], r_s16;
+   bar.sync 0;
+
+   // s64 -> f16
+   ld.global.s64  r_s64, [g_s64];
+   cvt.rz.f16.s64 r_f16, r_s64;
+   mov.b16        r_s16, r_f16;
+   st.global.s16  [g_f16], r_s16;
+   bar.sync 0;
+
+
+   DOCVT   (f32, f64);
+   DOCVTRS (f64, f32, .rz);
+   DOCVTS  (f32, f64);
+   DOCVTR  (f32, s32, .rzi);
+   DOCVTR  (s32, f32, .rp);
+   DOCVTR  (s32, f64, .rm);
+   DOCVTRS (s32, f64, .rm);
+   DOCVTRS (f64, s32, .rmi);
+   DOCVTR  (f32, u32, .rzi);
+   DOCVTR  (u32, f32, .rp);
+   DOCVTR  (u32, f64, .rm);
+   DOCVTRS (s32, f64, .rm);
+   DOCVTRS (f64, u32, .rmi);
+   DOCVTR  (u64, f64, .rp);
+   DOCVTRS (u64, f64, .rp);
+   DOCVT   (u32, u64);
+   DOCVT   (s32, s64);
+   DOCVT   (u64, u32);
+   DOCVTR  (f64, u16, .rzi);
+   DOCVTR  (f64, s16, .rzi);
+   DOCVTR  (u8, f64, .rz);
+   DOCVTR  (s8, f64, .rz);
+   DOCVTR  (u16, f64, .rz);
+   DOCVTR  (s16, f64, .rz);
+
+   // cvt with immediate arguments
+   cvt.f32.f64.rn    r_f32, 1.0;
+   st.global.f32     [g_f32], r_f32;
+   bar.sync 0;
+
+   cvt.u32.f64.rzi   r_u32, 2.0;
+   st.global.u32     [g_u32], r_u32;
+   bar.sync 0;
+
+   cvt.f64.u64.rp    r_f64, 30;
+   st.global.f64     [g_f64], r_f64;
+   bar.sync 0;
+
+   exit;
+}

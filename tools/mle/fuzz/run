@@ -1,0 +1,19 @@
+#!/bin/bash
+
+set -e
+
+JOBS=$(grep -c ^processor /proc/cpuinfo)
+
+[[ -n $CC ]] || CC=clang
+export CC
+make clean
+make
+
+EXTRA=( )
+if [[ ! -d corpus ]]; then
+    [[ -d corpus_gen ]] || ./gen_corpus
+    EXTRA+=( corpus_gen )
+    mkdir -p corpus
+fi
+
+exec ./fuzz_mle -jobs=$JOBS -max_len=4096 -workers=$JOBS corpus "${EXTRA[@]}" "$@"

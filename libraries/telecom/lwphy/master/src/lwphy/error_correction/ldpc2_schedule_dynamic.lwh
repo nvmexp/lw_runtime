@@ -1,0 +1,308 @@
+/*
+ * Copyright (c) 2019, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#if !defined(LDPC2_SCHEDULE_DYNAMIC_LWH_INCLUDED_)
+#define LDPC2_SCHEDULE_DYNAMIC_LWH_INCLUDED_
+
+namespace ldpc2
+{
+
+////////////////////////////////////////////////////////////////////////
+// ldpc_schedule_dynamic_base
+// Schedule class for kernel ilwocations that will work for more than
+// one code rate (i.e. more than one number of parity nodes).
+// Derived class, specialized on the base graph, will perform the loop
+// structure, whereas this class provides the invocation of the address
+// and C2V processing.
+template <class TAPPLoc,
+          class TC2VCache>
+struct ldpc_schedule_dynamic_base
+{
+    typedef TAPPLoc   app_loc_t;
+    typedef TC2VCache c2v_cache_t;
+    
+    template <int CHECK_IDX, int MAX_ROW_DEGREE, int MAX_APP_WORDS>
+    __device__
+    void process_first_iter(const LDPC_kernel_params& params,
+                            int                       (&app_addr)[MAX_ROW_DEGREE],
+                            word_t                    (&app)[MAX_APP_WORDS])
+    {
+        if(thread_is_active<TAPPLoc::Z>::value())
+        {
+            // Generate APP locations/address
+            app_loc.template generate<CHECK_IDX>(params, app_addr);
+            // Process the C2V message for this row
+            c2v_cache.process_row_init<CHECK_IDX>(params, app, app_addr);
+        }
+        __syncthreads();
+    }
+    template <int CHECK_IDX, int MAX_ROW_DEGREE, int MAX_APP_WORDS>
+    __device__
+    void process(const LDPC_kernel_params& params,
+                 int                       (&app_addr)[MAX_ROW_DEGREE],
+                 word_t                    (&app)[MAX_APP_WORDS])
+    {
+        if(thread_is_active<TAPPLoc::Z>::value())
+        {
+            // Generate APP locations/address
+            app_loc.template generate<CHECK_IDX>(params, app_addr);
+            // Process the C2V message for this row
+            c2v_cache.process_row<CHECK_IDX>(params, app, app_addr);
+        }
+        __syncthreads();
+    }
+    // Data
+    app_loc_t   app_loc;
+    c2v_cache_t c2v_cache;
+};
+
+////////////////////////////////////////////////////////////////////////
+// ldpc_schedule_dynamic
+template <int BG,
+          class TAPPLoc,
+          class TC2VCache>
+struct ldpc_schedule_dynamic;
+
+// ldpc_schedule_dynamic specialization for base graph 1
+template <class TAPPLoc,
+          class TC2VCache>
+struct ldpc_schedule_dynamic<1,
+                             TAPPLoc,
+                             TC2VCache> :
+    public ldpc_schedule_dynamic_base<TAPPLoc, TC2VCache>
+{
+    typedef ldpc_schedule_dynamic_base<TAPPLoc, TC2VCache> inherited;
+    typedef typename TC2VCache::app_t app_t;
+    //------------------------------------------------------------------
+    // do_first_iteration()
+    __device__
+    void do_first_iteration(const LDPC_kernel_params& params,
+                            int                       (&app_addr)[max_row_degree<1>::value],
+                            word_t                    (&app)[app_max_words<app_t, 1>::value])
+    {
+        (*this).template process_first_iter<0> (params, app_addr, app);
+        (*this).template process_first_iter<1> (params, app_addr, app);
+        (*this).template process_first_iter<2> (params, app_addr, app);
+        (*this).template process_first_iter<3> (params, app_addr, app); if(4  == params.num_parity_nodes) return;
+        (*this).template process_first_iter<4> (params, app_addr, app); if(5  == params.num_parity_nodes) return;
+        (*this).template process_first_iter<5> (params, app_addr, app); if(6  == params.num_parity_nodes) return;
+        (*this).template process_first_iter<6> (params, app_addr, app); if(7  == params.num_parity_nodes) return;
+        (*this).template process_first_iter<7> (params, app_addr, app); if(8  == params.num_parity_nodes) return;
+        (*this).template process_first_iter<8> (params, app_addr, app); if(9  == params.num_parity_nodes) return;
+        (*this).template process_first_iter<9> (params, app_addr, app); if(10 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<10>(params, app_addr, app); if(11 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<11>(params, app_addr, app); if(12 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<12>(params, app_addr, app); if(13 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<13>(params, app_addr, app); if(14 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<14>(params, app_addr, app); if(15 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<15>(params, app_addr, app); if(16 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<16>(params, app_addr, app); if(17 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<17>(params, app_addr, app); if(18 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<18>(params, app_addr, app); if(19 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<19>(params, app_addr, app); if(20 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<20>(params, app_addr, app); if(21 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<21>(params, app_addr, app); if(22 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<22>(params, app_addr, app); if(23 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<23>(params, app_addr, app); if(24 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<24>(params, app_addr, app); if(25 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<25>(params, app_addr, app); if(26 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<26>(params, app_addr, app); if(27 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<27>(params, app_addr, app); if(28 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<28>(params, app_addr, app); if(29 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<29>(params, app_addr, app); if(30 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<30>(params, app_addr, app); if(31 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<31>(params, app_addr, app); if(32 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<32>(params, app_addr, app); if(33 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<33>(params, app_addr, app); if(34 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<34>(params, app_addr, app); if(35 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<35>(params, app_addr, app); if(36 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<36>(params, app_addr, app); if(37 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<37>(params, app_addr, app); if(38 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<38>(params, app_addr, app); if(39 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<39>(params, app_addr, app); if(40 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<40>(params, app_addr, app); if(41 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<41>(params, app_addr, app); if(42 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<42>(params, app_addr, app); if(43 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<43>(params, app_addr, app); if(44 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<44>(params, app_addr, app); if(45 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<45>(params, app_addr, app);
+    }
+    //------------------------------------------------------------------
+    // do_iteration()
+    __device__
+    void do_iteration(const LDPC_kernel_params& params,
+                      int                       (&app_addr)[max_row_degree<1>::value],
+                      word_t                    (&app)[app_max_words<app_t, 1>::value])
+    {
+        (*this).template process<0> (params, app_addr, app);
+        (*this).template process<1> (params, app_addr, app);
+        (*this).template process<2> (params, app_addr, app);
+        (*this).template process<3> (params, app_addr, app); if(4  == params.num_parity_nodes) return;
+        (*this).template process<4> (params, app_addr, app); if(5  == params.num_parity_nodes) return;
+        (*this).template process<5> (params, app_addr, app); if(6  == params.num_parity_nodes) return;
+        (*this).template process<6> (params, app_addr, app); if(7  == params.num_parity_nodes) return;
+        (*this).template process<7> (params, app_addr, app); if(8  == params.num_parity_nodes) return;
+        (*this).template process<8> (params, app_addr, app); if(9  == params.num_parity_nodes) return;
+        (*this).template process<9> (params, app_addr, app); if(10 == params.num_parity_nodes) return;
+        (*this).template process<10>(params, app_addr, app); if(11 == params.num_parity_nodes) return;
+        (*this).template process<11>(params, app_addr, app); if(12 == params.num_parity_nodes) return;
+        (*this).template process<12>(params, app_addr, app); if(13 == params.num_parity_nodes) return;
+        (*this).template process<13>(params, app_addr, app); if(14 == params.num_parity_nodes) return;
+        (*this).template process<14>(params, app_addr, app); if(15 == params.num_parity_nodes) return;
+        (*this).template process<15>(params, app_addr, app); if(16 == params.num_parity_nodes) return;
+        (*this).template process<16>(params, app_addr, app); if(17 == params.num_parity_nodes) return;
+        (*this).template process<17>(params, app_addr, app); if(18 == params.num_parity_nodes) return;
+        (*this).template process<18>(params, app_addr, app); if(19 == params.num_parity_nodes) return;
+        (*this).template process<19>(params, app_addr, app); if(20 == params.num_parity_nodes) return;
+        (*this).template process<20>(params, app_addr, app); if(21 == params.num_parity_nodes) return;
+        (*this).template process<21>(params, app_addr, app); if(22 == params.num_parity_nodes) return;
+        (*this).template process<22>(params, app_addr, app); if(23 == params.num_parity_nodes) return;
+        (*this).template process<23>(params, app_addr, app); if(24 == params.num_parity_nodes) return;
+        (*this).template process<24>(params, app_addr, app); if(25 == params.num_parity_nodes) return;
+        (*this).template process<25>(params, app_addr, app); if(26 == params.num_parity_nodes) return;
+        (*this).template process<26>(params, app_addr, app); if(27 == params.num_parity_nodes) return;
+        (*this).template process<27>(params, app_addr, app); if(28 == params.num_parity_nodes) return;
+        (*this).template process<28>(params, app_addr, app); if(29 == params.num_parity_nodes) return;
+        (*this).template process<29>(params, app_addr, app); if(30 == params.num_parity_nodes) return;
+        (*this).template process<30>(params, app_addr, app); if(31 == params.num_parity_nodes) return;
+        (*this).template process<31>(params, app_addr, app); if(32 == params.num_parity_nodes) return;
+        (*this).template process<32>(params, app_addr, app); if(33 == params.num_parity_nodes) return;
+        (*this).template process<33>(params, app_addr, app); if(34 == params.num_parity_nodes) return;
+        (*this).template process<34>(params, app_addr, app); if(35 == params.num_parity_nodes) return;
+        (*this).template process<35>(params, app_addr, app); if(36 == params.num_parity_nodes) return;
+        (*this).template process<36>(params, app_addr, app); if(37 == params.num_parity_nodes) return;
+        (*this).template process<37>(params, app_addr, app); if(38 == params.num_parity_nodes) return;
+        (*this).template process<38>(params, app_addr, app); if(39 == params.num_parity_nodes) return;
+        (*this).template process<39>(params, app_addr, app); if(40 == params.num_parity_nodes) return;
+        (*this).template process<40>(params, app_addr, app); if(41 == params.num_parity_nodes) return;
+        (*this).template process<41>(params, app_addr, app); if(42 == params.num_parity_nodes) return;
+        (*this).template process<42>(params, app_addr, app); if(43 == params.num_parity_nodes) return;
+        (*this).template process<43>(params, app_addr, app); if(44 == params.num_parity_nodes) return;
+        (*this).template process<44>(params, app_addr, app); if(45 == params.num_parity_nodes) return;
+        (*this).template process<45>(params, app_addr, app);
+    }
+};
+
+// ldpc_schedule_dynamic specialization for base graph 2
+template <class TAPPLoc,
+          class TC2VCache>
+struct ldpc_schedule_dynamic<2,
+                             TAPPLoc,
+                             TC2VCache> :
+    public ldpc_schedule_dynamic_base<TAPPLoc, TC2VCache>
+{
+    typedef ldpc_schedule_dynamic_base<TAPPLoc, TC2VCache> inherited;
+    typedef typename TC2VCache::app_t app_t;
+    //------------------------------------------------------------------
+    // do_first_iteration()
+    __device__
+    void do_first_iteration(const LDPC_kernel_params& params,
+                            int                       (&app_addr)[max_row_degree<2>::value],
+                            word_t                    (&app)[app_max_words<app_t, 2>::value])
+    {
+        (*this).template process_first_iter<0> (params, app_addr, app);
+        (*this).template process_first_iter<1> (params, app_addr, app);
+        (*this).template process_first_iter<2> (params, app_addr, app);
+        (*this).template process_first_iter<3> (params, app_addr, app); if(4  == params.num_parity_nodes) return;
+        (*this).template process_first_iter<4> (params, app_addr, app); if(5  == params.num_parity_nodes) return;
+        (*this).template process_first_iter<5> (params, app_addr, app); if(6  == params.num_parity_nodes) return;
+        (*this).template process_first_iter<6> (params, app_addr, app); if(7  == params.num_parity_nodes) return;
+        (*this).template process_first_iter<7> (params, app_addr, app); if(8  == params.num_parity_nodes) return;
+        (*this).template process_first_iter<8> (params, app_addr, app); if(9  == params.num_parity_nodes) return;
+        (*this).template process_first_iter<9> (params, app_addr, app); if(10 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<10>(params, app_addr, app); if(11 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<11>(params, app_addr, app); if(12 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<12>(params, app_addr, app); if(13 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<13>(params, app_addr, app); if(14 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<14>(params, app_addr, app); if(15 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<15>(params, app_addr, app); if(16 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<16>(params, app_addr, app); if(17 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<17>(params, app_addr, app); if(18 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<18>(params, app_addr, app); if(19 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<19>(params, app_addr, app); if(20 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<20>(params, app_addr, app); if(21 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<21>(params, app_addr, app); if(22 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<22>(params, app_addr, app); if(23 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<23>(params, app_addr, app); if(24 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<24>(params, app_addr, app); if(25 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<25>(params, app_addr, app); if(26 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<26>(params, app_addr, app); if(27 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<27>(params, app_addr, app); if(28 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<28>(params, app_addr, app); if(29 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<29>(params, app_addr, app); if(30 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<30>(params, app_addr, app); if(31 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<31>(params, app_addr, app); if(32 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<32>(params, app_addr, app); if(33 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<33>(params, app_addr, app); if(34 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<34>(params, app_addr, app); if(35 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<35>(params, app_addr, app); if(36 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<36>(params, app_addr, app); if(37 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<37>(params, app_addr, app); if(38 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<38>(params, app_addr, app); if(39 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<39>(params, app_addr, app); if(40 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<40>(params, app_addr, app); if(41 == params.num_parity_nodes) return;
+        (*this).template process_first_iter<41>(params, app_addr, app);
+    }
+    //------------------------------------------------------------------
+    // do_iteration()
+    __device__
+    void do_iteration(const LDPC_kernel_params& params,
+                      int                       (&app_addr)[max_row_degree<2>::value],
+                      word_t                    (&app)[app_max_words<app_t, 2>::value])
+    {
+        (*this).template process<0> (params, app_addr, app);
+        (*this).template process<1> (params, app_addr, app);
+        (*this).template process<2> (params, app_addr, app);
+        (*this).template process<3> (params, app_addr, app); if(4  == params.num_parity_nodes) return;
+        (*this).template process<4> (params, app_addr, app); if(5  == params.num_parity_nodes) return;
+        (*this).template process<5> (params, app_addr, app); if(6  == params.num_parity_nodes) return;
+        (*this).template process<6> (params, app_addr, app); if(7  == params.num_parity_nodes) return;
+        (*this).template process<7> (params, app_addr, app); if(8  == params.num_parity_nodes) return;
+        (*this).template process<8> (params, app_addr, app); if(9  == params.num_parity_nodes) return;
+        (*this).template process<9> (params, app_addr, app); if(10 == params.num_parity_nodes) return;
+        (*this).template process<10>(params, app_addr, app); if(11 == params.num_parity_nodes) return;
+        (*this).template process<11>(params, app_addr, app); if(12 == params.num_parity_nodes) return;
+        (*this).template process<12>(params, app_addr, app); if(13 == params.num_parity_nodes) return;
+        (*this).template process<13>(params, app_addr, app); if(14 == params.num_parity_nodes) return;
+        (*this).template process<14>(params, app_addr, app); if(15 == params.num_parity_nodes) return;
+        (*this).template process<15>(params, app_addr, app); if(16 == params.num_parity_nodes) return;
+        (*this).template process<16>(params, app_addr, app); if(17 == params.num_parity_nodes) return;
+        (*this).template process<17>(params, app_addr, app); if(18 == params.num_parity_nodes) return;
+        (*this).template process<18>(params, app_addr, app); if(19 == params.num_parity_nodes) return;
+        (*this).template process<19>(params, app_addr, app); if(20 == params.num_parity_nodes) return;
+        (*this).template process<20>(params, app_addr, app); if(21 == params.num_parity_nodes) return;
+        (*this).template process<21>(params, app_addr, app); if(22 == params.num_parity_nodes) return;
+        (*this).template process<22>(params, app_addr, app); if(23 == params.num_parity_nodes) return;
+        (*this).template process<23>(params, app_addr, app); if(24 == params.num_parity_nodes) return;
+        (*this).template process<24>(params, app_addr, app); if(25 == params.num_parity_nodes) return;
+        (*this).template process<25>(params, app_addr, app); if(26 == params.num_parity_nodes) return;
+        (*this).template process<26>(params, app_addr, app); if(27 == params.num_parity_nodes) return;
+        (*this).template process<27>(params, app_addr, app); if(28 == params.num_parity_nodes) return;
+        (*this).template process<28>(params, app_addr, app); if(29 == params.num_parity_nodes) return;
+        (*this).template process<29>(params, app_addr, app); if(30 == params.num_parity_nodes) return;
+        (*this).template process<30>(params, app_addr, app); if(31 == params.num_parity_nodes) return;
+        (*this).template process<31>(params, app_addr, app); if(32 == params.num_parity_nodes) return;
+        (*this).template process<32>(params, app_addr, app); if(33 == params.num_parity_nodes) return;
+        (*this).template process<33>(params, app_addr, app); if(34 == params.num_parity_nodes) return;
+        (*this).template process<34>(params, app_addr, app); if(35 == params.num_parity_nodes) return;
+        (*this).template process<35>(params, app_addr, app); if(36 == params.num_parity_nodes) return;
+        (*this).template process<36>(params, app_addr, app); if(37 == params.num_parity_nodes) return;
+        (*this).template process<37>(params, app_addr, app); if(38 == params.num_parity_nodes) return;
+        (*this).template process<38>(params, app_addr, app); if(39 == params.num_parity_nodes) return;
+        (*this).template process<39>(params, app_addr, app); if(40 == params.num_parity_nodes) return;
+        (*this).template process<40>(params, app_addr, app); if(41 == params.num_parity_nodes) return;
+        (*this).template process<41>(params, app_addr, app);
+    }
+};
+
+
+} // namespace ldpc2
+
+#endif // !defined(LDPC2_SCHEDULE_DYNAMIC_LWH_INCLUDED_)

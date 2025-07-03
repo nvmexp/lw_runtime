@@ -1,0 +1,14 @@
+ps_1_4
+texld r0, t0
+texld r1, t1
+texcrd r3.rgb, t2
+texcrd r4.rgb, t3
+texcrd r5.rgb, t4
+dp3 r2.r, r1_bx2, r3
+dp3 r2.g, r1_bx2, r4
+dp3 r2.b, r1_bx2, r5
+phase
+texld r2, r2
+texcrd r5.rgb, t5
+mul r0.rgb, r0, r2
++mov r0.a, r5.b

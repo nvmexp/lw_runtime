@@ -1,0 +1,200 @@
+pass_template: 
+    samplerstates:
+        colorLinearSampler:
+            filter: MIN_MAG_LINEAR_MIP_POINT
+            addressU: CLAMP
+            addressV: CLAMP
+        colorLinearSamplerWrap:
+            filter: MIN_MAG_LINEAR_MIP_POINT
+            addressU: WRAP
+            addressV: WRAP
+    type: match-color-input
+    constant-buffers: 
+        globalParams: {screenSize: SCREEN_SIZE, elapsedTime: ELAPSED_TIME}
+        ControlBuf:
+            g_chkEnable: chkEnable
+            g_chkBloom: chkBloom
+            g_chkLumaSharpen: chkLumaSharpen
+            g_sldLumaSharpen: sldLumaSharpen
+            g_sldLumaSharpenRad: sldLumaSharpenRad
+            g_chkVibrance: chkVibrance
+            g_chkVignette: chkVignette
+            g_chkTonemap: chkTonemap
+            g_chkClarity: chkClarity
+            g_chkChromAb: chkChromAb
+            g_chkChromAbBlur: chkChromAbBlur
+
+typical_slider:
+      type: float
+      minimum-value: 0.0
+      maximum-value: 1.0
+      default-value: 0.5
+      ui-value-unit: "%"
+      ui-value-min: 0
+      ui-value-max: 100
+      ui-sticky-value: 0.5
+      ui-sticky-region: 0.01
+      
+user-constants:
+    - name: chkEnable
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "Enable"
+      default-value: false
+    - name: chkBloom
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "Bloom"
+      default-value: true
+    - name: chkLumaSharpen
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "Luma sharpen"
+      default-value: true
+    - name: sldLumaSharpen
+      ui-hint: "Use this to scale LUT effect: 0 is 0%, 1 is 100%"
+      ui-label: "Strength"
+      import: [typical_slider]
+    - name: sldLumaSharpenRad
+      ui-hint: "Use this to scale LUT effect: 0 is 0%, 1 is 100%"
+      ui-label: "Radius"
+      import: [typical_slider]
+    - name: chkVibrance
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "Vibrance"
+      default-value: true
+    - name: chkVignette
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "Vignette"
+      default-value: true
+    - name: chkTonemap
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "Tonemap"
+      default-value: true
+    - name: chkClarity
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "Clarity"
+      default-value: true
+    - name: chkChromAb
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "ChromAb"
+      default-value: true
+    - name: chkChromAbBlur
+      type: bool  
+      ui-hint: "Use this to enable Gaussian Anamflare"
+      ui-label: "ChromAb blur"
+      default-value: true
+    
+# chromAbRadialBlur:
+main:
+    import: [pass_template]
+    shader: PS_ChromAbRadialBlur2@th/th.yfx
+    textures:
+        inputColor:
+            import: [chromAb]
+        originalColor:
+            channel: PIPE_INPUTS_COLOR
+      
+chromAb:
+    import: [pass_template]
+    shader: PS_ChromAbFinal@th/th.yfx
+    textures:
+        inputColor:
+            import: [clarityFinalize]
+      
+clarityFinalize:
+    import: [pass_template]
+    shader: PS_ClarityFinal@th/th.yfx
+    textures:
+        ceBlurSamplerPing:
+            import: [clarityBlurX]
+        inputColor:
+            import: [FXAA]
+      
+clarityBlurX:
+    import: [pass_template]
+    shader: PS_ClarityBlurX@th/th.yfx
+    # Uncomment to trade off quality vs speed
+    #scale-width: 0.25
+    #scale-height: 0.25
+    textures:
+        inputColor:
+            import: [FXAA]
+
+FXAA:
+    import: [pass_template]
+    shader: PS_FXAA@th/th.yfx
+    textures:
+        inputColor:
+            import: [lumaSharpen]
+lumaSharpen:
+    import: [pass_template]
+    shader: PS_LumaSharpen@th/th.yfx
+    textures:
+        inputColor:
+            import: [tonemapping]
+
+tonemapping:
+    import: [pass_template]
+    shader: PS_Tonemapping@th/th.yfx
+    textures:
+        inputColor:
+            import: [light_combine]
+
+            
+            
+            
+# Combining pass
+light_combine:
+    import: [pass_template]
+    shader: PS_LightingCombine@th/th.yfx
+    textures:
+        SamplerBloom5:
+            import: [pass_meBloom4]
+        SamplerBloom3:
+            import: [pass_meBloom2]
+        inputColor:
+            channel: PIPE_INPUTS_COLOR
+
+# Bloom passes
+pass_meBloom4:
+    import: [pass_template]
+    shader: PS_ME_BloomPass4@th/th.yfx
+    scale-width: 0.125
+    scale-height: 0.125
+    textures:
+        SamplerBloom4:
+            import: [pass_meBloom3]
+pass_meBloom3:
+    import: [pass_template]
+    shader: PS_ME_BloomPass3@th/th.yfx
+    scale-width: 0.25
+    scale-height: 0.25
+    textures:
+        SamplerBloom3:
+            import: [pass_meBloom2]
+pass_meBloom2:
+    import: [pass_template]
+    shader: PS_ME_BloomPass2@th/th.yfx
+    scale-width: 0.5
+    scale-height: 0.5
+    textures:
+        SamplerBloom2:
+            import: [pass_meBloom1]
+pass_meBloom1:
+    import: [pass_template]
+    shader: PS_ME_BloomPass1@th/th.yfx
+    textures:
+        SamplerBloom1:
+            import: [pass_meBloom_prepass]
+pass_meBloom_prepass:
+    import: [pass_template]
+    shader: PS_ME_BloomPrePass@th/th.yfx
+    textures:
+        inputColor:
+            channel: PIPE_INPUTS_COLOR

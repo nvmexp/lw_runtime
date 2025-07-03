@@ -1,0 +1,35 @@
+!!FP1.0
+# cgc version 1.2.1001, build date Apr  7 2004 15:05:10
+# command line args: -profile fp30
+# source file: gem_tex_1.cg
+#vendor LWPU Corporation
+#version 1.0.02
+#profile fp30
+#program main
+#semantic main.whocares : SAMPLER0
+#semantic main.whocares2 : SAMPLER1
+#semantic main.randomTex : SAMPLER2
+#semantic main.imageTex : SAMPLER3
+#var fixed4 color : $vin.COL0 : COL0 : 0 : 1
+#var float4 UV : $vin.TEX1 : TEX1 : 1 : 1
+#var sampler2D whocares : SAMPLER0 : texunit 0 : 2 : 0
+#var sampler2D whocares2 : SAMPLER1 : texunit 1 : 3 : 0
+#var sampler2D randomTex : SAMPLER2 : texunit 2 : 4 : 1
+#var sampler2D imageTex : SAMPLER3 : texunit 3 : 5 : 1
+#var float4 main : $vout.COL : COL : -1 : 1
+MULR  R0.xy, f[TEX1], {10, 0, 0, 0}.x;
+FLRR  R0.zw, R0.xyxy;
+ADDR  R0.xy, R0, -R0.zwzw;
+MULR  R0.zw, R0, {0.037, 0.119, 0, 0}.xyxy;
+TEX   H0, R0.zwzw, TEX2, 2D;
+MOVX  H0.xy, H0;
+ADDR  R0.xy, R0, -H0;
+TEX   H0, R0, TEX3, 2D;
+MOVRC HC.x, H0.w;
+MOVX  o[COLR], H0;
+MOVX  o[COLR](LE.x), f[COL0];
+END
+# 11 instructions, 1 R-regs, 1 H-regs
+# 11 inst, (2 mov, 2 tex, 0 complex, 7 math)
+# non-mov args: 0 1 7 0 1
+# mov args:     0 0 1 0 1

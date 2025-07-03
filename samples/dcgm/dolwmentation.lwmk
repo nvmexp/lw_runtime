@@ -1,0 +1,107 @@
+##############################################################################
+# Define the rule to generate documentation
+##############################################################################
+
+DOXY_OUT_DIR := $(OUTPUTDIR)/doxygen
+DOXYGEN_TARGET := $(DOXY_OUT_DIR)/doxygen.timestamp
+DOXY_CONF := $(OUTPUTDIR)/doxygen.cfg
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+ PDFLATEX  := $(LW_TOOLS)/win32/texlive/2008/bin/win32/pdflatex.exe -halt-on-error -interaction=nonstopmode
+ MAKEINDEX := $(LW_TOOLS)/win32/texlive/2008/bin/win32/makeindex.exe
+else ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+ PDFLATEX  := $(LW_TOOLS)/unix/hosts/Linux-x86/texlive-2011/bin/i386-linux/pdflatex -halt-on-error -interaction=nonstopmode
+ MAKEINDEX := $(LW_TOOLS)/unix/hosts/Linux-x86/texlive-2011/bin/i386-linux/makeindex
+else
+ $(error Unknown Architecture!)
+endif
+
+DCGM_VERSION_FILTER_SCRIPT = $(PYTHON) $(DCGM_DIR)/build/version_filter.py -v $(DCGM_VERSION)
+
+$(OUTPUTDIR)/%: %._vf 
+	@$(ECHO) Colwerting $< to $@
+	$(MKDIR) $(dir $@) 
+	$(DCGM_VERSION_FILTER_SCRIPT) $< $@
+	$(call LW_CHECK_GUARDWORDS_CMD,$@)
+
+# Generate dcgmlib change log
+$(OUTPUTDIR)/dcgmlib_changelog.txt: $(OUTPUTDIR)/doc/dcgmlib_changelog.txt
+	@$(ECHO) Generating public dcgmlib changelog
+	$(SED) -n "s/^<P>.*/&/p" $< > $@.$$
+	$(SED) "s/^<P>//" $@.$$ > $@
+	$(call LW_CHECK_GUARDWORDS_CMD,$@)
+
+# Generate dcgmi change log
+$(OUTPUTDIR)/dcgmi_changelog.txt: $(OUTPUTDIR)/doc/dcgmi_changelog.txt
+	@$(ECHO) Generating public dcgmi changelog
+	$(SED) -n "s/^<P>.*/&/p" $< > $@.$$
+	$(SED) "s/^<P>//" $@.$$ > $@
+	$(call LW_CHECK_GUARDWORDS_CMD,$@)
+
+#build: $(OUTPUTDIR)/dcgmlib_changelog.txt $(OUTPUTDIR)/dcgmi_changelog.txt $(DOXY_CONF)
+
+# Generate doxygen configuration
+$(DOXY_CONF) : documentation.lwmk
+	@$(ECHO) @INCLUDE=doc/dcgm.cfg > $@
+	@$(ECHO) @OUTPUT_DIRECTORY=$(DOXY_OUT_DIR) >> $@
+	@$(ECHO) @INPUT=$(OUTPUTDIR)/dcgm_structs.h $(OUTPUTDIR)/dcgm_agent.h $(OUTPUTDIR)/dcgm_fields.h $(OUTPUTDIR)/dcgmlib_changelog.txt >> $@
+#	@$(ECHO) @INPUT=$(OUTPUTDIR)/dcgmlib_changelog.txt >> $@
+	@$(ECHO) @IMAGE_PATH=doc/ >> $@
+	@$(ECHO) LATEX_HEADER = "$(OUTPUTDIR)/latex_header.tex" >> $@
+
+# Generate doxygen documentation in man and latex formats
+$(DOXYGEN_TARGET): $(OUTPUTDIR)/latex_header.tex
+$(DOXYGEN_TARGET): $(OUTPUTDIR)/latex_header.tex.guardwords
+$(DOXYGEN_TARGET): $(OUTPUTDIR)/dcgmlib_changelog.txt
+$(DOXYGEN_TARGET): $(OUTPUTDIR)/dcgmlib_changelog.txt.guardwords
+$(DOXYGEN_TARGET): $(OUTPUTDIR)/dcgm_agent.h.guardwords
+$(DOXYGEN_TARGET): $(OUTPUTDIR)/dcgm_structs.h.guardwords
+$(DOXYGEN_TARGET): $(OUTPUTDIR)/dcgm_fields.h.guardwords
+$(DOXYGEN_TARGET): $(OUTPUTDIR)/dcgm_agent.h $(OUTPUTDIR)/dcgm_structs.h $(OUTPUTDIR)/dcgm_fields.h doc/dcgm.cfg $(DOXY_CONF)
+	@$(ECHO) Generating doxygen documentation
+	@$(RMDIR) -rf $(DOXY_OUT_DIR)/man
+	@$(DOXYDIR)/doxygen $(DOXY_CONF)
+# Prepare man out dir, remove files that represent links to struct fields so that we wouldn't
+# clobber man namespace with files like "domain.3" or "bus.3" 
+	@$(PERL) -e "foreach (glob '$(DOXY_OUT_DIR)/man/man3/*') { unless (/dcgm/i) { unlink } }"
+# Finish
+	@$(TOUCH) $@
+
+# Generate latex_header.tex
+$(OUTPUTDIR)/latex_header.tex: doc/latex_header.tex
+	$(SED) "s/<<TITLE>>/DCGM REFERENCE MANUAL/" $< > $@.1
+	$(SED) "s/<<VERSION>>/$(DCGM_VERSION)/" $@.1 > $@
+	$(call LW_CHECK_GUARDWORDS_CMD,$@)
+# Create target LATEX file and prepare environment
+build: $(DOXY_OUT_DIR)/latex/dcgmlib.tex
+$(DOXY_OUT_DIR)/latex/dcgmlib.tex: $(DOXYGEN_TARGET) doc/latex_footer.tex 
+	@$(ECHO) Generating latex for $@...
+	@$(SED) "/\\end{document}/d" $(DOXY_OUT_DIR)/latex/refman.tex > $(DOXY_OUT_DIR)/latex/dcgmlib.tex
+	@$(CAT) doc/latex_footer.tex >> $(DOXY_OUT_DIR)/latex/dcgmlib.tex
+	@$(COPY) doc/DCGMCoverFront.jpg $(DOXY_OUT_DIR)/latex/DCGMCoverFront.jpg
+	@$(COPY) doc/DCGMCoverBack.jpg $(DOXY_OUT_DIR)/latex/DCGMCoverBack.jpg
+	@$(COPY) doc/latex/eso-pic.sty $(DOXY_OUT_DIR)/latex/eso-pic.sty
+	@$(COPY) doc/latex/multirow.sty $(DOXY_OUT_DIR)/latex/multirow.sty
+	@$(COPY) doc/latex/pifont.sty $(DOXY_OUT_DIR)/latex/pifont.sty
+	$(call LW_CHECK_GUARDWORDS_CMD,$@)
+
+DOC_DCGMLIB_OUT_PDF := $(DOXY_OUT_DIR)/latex/dcgmlib.pdf
+build: $(DOC_DCGMLIB_OUT_PDF)
+	@$(COPY) doc/DCGM_User_Guide.pdf $(OUTPUTDIR)/doc/
+	@$(COPY) doc/EULA.pdf $(OUTPUTDIR)/doc/
+	@$(COPY) doc/THIRD-PARTY-NOTICES.txt $(OUTPUTDIR)/doc/
+	@$(COPY) doc/DCGM_Release_Notes.pdf $(OUTPUTDIR)/doc/
+
+# Generate PDF documentation
+PDFLATEX_LOG := $(DOXY_OUT_DIR)/latex/log.txt
+$(DOC_DCGMLIB_OUT_PDF): $(DOXY_OUT_DIR)/latex/dcgmlib.tex $(DOXY_OUT_DIR)/latex/dcgmlib.tex.guardwords doc/DCGMCoverFront.jpg doc/DCGMCoverBack.jpg
+	@$(ECHO) Generating documentation for $@...
+	@(cd $(DOXY_OUT_DIR)/latex && $(PDFLATEX) dcgmlib.tex) > $(PDFLATEX_LOG) 2>&1
+	@(cd $(DOXY_OUT_DIR)/latex && $(MAKEINDEX) dcgmlib.idx) > $(PDFLATEX_LOG) 2>&1
+# Run PDFLATEX several time to make sure that all the indexes are properly updated
+	@(cd $(DOXY_OUT_DIR)/latex && $(PDFLATEX) dcgmlib.tex) > $(PDFLATEX_LOG) 2>&1 
+	@(cd $(DOXY_OUT_DIR)/latex && $(PDFLATEX) dcgmlib.tex) > $(PDFLATEX_LOG) 2>&1 
+	$(call LW_CHECK_GUARDWORDS_CMD,$@)
+
+clean:
+	$(RMDIR) -rf $(DOXY_OUT_DIR)
+	$(RM) $(OUTPUTDIR)/doxy.txt

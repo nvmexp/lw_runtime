@@ -1,0 +1,48 @@
+/*
+ * LWIDIA_COPYRIGHT_BEGIN
+ *
+ * Copyright 2010-2010 by LWPU Corporation.  All rights reserved.  All
+ * information contained herein is proprietary and confidential to LWPU
+ * Corporation.  Any use, reproduction, or disclosure without the written
+ * permission of LWPU Corporation is prohibited.
+ *
+ * LWIDIA_COPYRIGHT_END
+ */
+
+#ifndef _cl_kepler_a_sw_h_
+#define _cl_kepler_a_sw_h_
+
+/* This file is *not* auto-generated. */
+
+/* LwNotification[] elements */
+#define LWA097_NOTIFIERS_NOTIFY                                     (0)
+#define LWA097_NOTIFIERS_NONSTALL                                   (1)
+#define LWA097_NOTIFIERS_SET_MEMORY_SURFACE_ATTR                    (0)
+#define LWA097_NOTIFIERS_DEBUG_INTR                                 (2)
+#define LWA097_NOTIFIERS_MAXCOUNT                                   (3)
+
+/* LwNotification[] fields and values */
+#define LWA097_NOTIFICATION_STATUS_IN_PROGRESS                      (0x8000)
+#define LWA097_NOTIFICATION_STATUS_ERROR_PROTECTION_FAULT           (0x4000)
+#define LWA097_NOTIFICATION_STATUS_ERROR_BAD_ARGUMENT               (0x2000)
+#define LWA097_NOTIFICATION_STATUS_ERROR_ILWALID_STATE              (0x1000)
+#define LWA097_NOTIFICATION_STATUS_ERROR_STATE_IN_USE               (0x0800)
+#define LWA097_NOTIFICATION_STATUS_DONE_SUCCESS                     (0x0000)
+
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_STATUS            0:0
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_STATUS_FAILED     (0x0000)
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_STATUS_SUCCESS    (0x0001)
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_COMPR             2:2
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_COMPR_DISABLED    (0x0000)
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_COMPR_ENABLED     (0x0001)
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_SHARED            4:4
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_SHARED_DISABLED   (0x0000)
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_SHARED_ENABLED    (0x0001)
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_LOWER             5:5
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_LOWER_DISABLED    (0x0000)
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_LOWER_ENABLED     (0x0001)
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_TILE_FORMAT       11:8
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_TILE_REGION       15:12
+#define LWA097_NOTIFICATION_SET_MEMORY_SURFACE_ATTR_INFO32_COMPR_COVG        31:16
+
+#endif /* _cl_kepler_a_sw_h_ */

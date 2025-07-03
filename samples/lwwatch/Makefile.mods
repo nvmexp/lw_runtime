@@ -1,0 +1,153 @@
+#
+# LWIDIA_COPYRIGHT_BEGIN
+#
+# Copyright 1999-2017 by LWPU Corporation.  All rights reserved.  All
+# information contained herein is proprietary and confidential to LWPU
+# Corporation.  Any use, reproduction, or disclosure without the written
+# permission of LWPU Corporation is prohibited.
+#
+# LWIDIA_COPYRIGHT_END
+#
+
+#
+# Build lwwatch.so which is the lwwatch version for arch mods.  It is used
+# while debugging mods/rm under gdb.
+#
+
+# Set variables to their default state if they are not already set.
+#MODS_DIR ?= ../../../../../dev/gpu_drv/chips_a/diag/mods
+MODS_DIR ?= ../../diag/mods
+LWTOPDIR ?= $(MODS_DIR)/../..
+RESMAN_ROOT ?= $(LWTOPDIR)/drivers/resman
+PMU_DEBUG = 0
+
+dll_build = true
+base_name = liblwwatch
+
+ifeq "$(BUILD_OS)" "winsim"
+dll_build = false
+endif
+
+ifeq "$(BUILD_OS)" "linuxmfg"
+dll_build = false
+endif
+
+include $(MODS_DIR)/makedefs.inc
+
+# LWWATCH config definitions
+LWWATCHCFG_DIR = ./config
+LWWATCHCFG_OUTPUTDIR = $(o_dir)
+LWWATCHCFG_LWWATCH_ROOT = .
+LWWATCHCFG_RESMAN_ROOT = $(RESMAN_ROOT)
+LWWATCHCFG_VERBOSE = default
+LWWATCHCFG_CHIPCFG_ROOT ?= $(LWTOPDIR)/drivers/common/chip-config
+
+
+LW_SOURCE = $(LWTOPDIR)
+LWCFG_OUTPUTDIR = $(LWWATCHCFG_OUTPUTDIR)
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+
+# Set this to 1 to enable sigdump on Linux lwwatch
+# (not lwrrently expected to work)
+SIGDUMP_SUPPORT = 0
+
+include_dirs += .
+include_dirs += inc
+include_dirs += os/mods/inc
+#include_dirs += /home/msdec/tools/PTX/080813/i686_Linux/include
+include_dirs += $(LWWATCHCFG_OUTPUTDIR)
+include_dirs += $(LWTOPDIR)/drivers/common/inc
+include_dirs += $(LWTOPDIR)/drivers/common/inc/swref
+include_dirs += $(LWTOPDIR)/drivers/common/inc/hwref
+include_dirs += $(LWTOPDIR)/drivers/common/inc/displayport
+include_dirs += $(LWTOPDIR)/drivers/common/shared/inc
+include_dirs += $(RESMAN_ROOT)/kernel/inc
+include_dirs += $(RESMAN_ROOT)/arch/lwalloc/common/inc
+include_dirs += $(RESMAN_ROOT)/arch/lwalloc/mods/inc
+include_dirs += $(RESMAN_ROOT)/arch/lwalloc/unix/include
+include_dirs += $(MODS_DIR)
+include_dirs += $(LWTOPDIR)/sdk/lwpu/inc
+include_dirs += $(LWTOPDIR)/diag/js1.7
+ifeq ($(SIGDUMP_SUPPORT),1)
+include_dirs += $(LWTOPDIR)/tools/pmlsplitter/bin/include
+endif
+
+defines += -DFERMI
+defines += -DTESLA
+defines += -DLWWATCH
+
+ifeq ($(PMU_DEBUG), 1)
+LDFLAGS += -Llib -lfalconDebug
+endif
+
+ifeq ($(PMU_DEBUG), 1)
+CFLAGS += -D PMU_DEBUG
+endif
+
+ifeq ($(SIGDUMP_SUPPORT),1)
+CFLAGS += -D SIGDUMP_ENABLE
+endif
+
+ifeq "$(toolchain)" "msvc"
+    defines += -DXP_PC
+    CFLAGS += /EHsc
+    LWWATCHCFG_PROFILE = mods-windows
+else
+    CFLAGS += -D OS_Linux
+    warnings += -Wno-multichar
+    LWWATCHCFG_PROFILE = mods-unix
+endif
+defines += -DLWWATCH
+
+
+
+# This will run the lwwatch-config script needed for the build
+include $(LWWATCHCFG_DIR)/makefile.mk
+
+ifdef LWWATCHCFG_INITIALIZED
+  include $(LWWATCHCFG_OUTPUTDIR)/g_sources.mk
+  c_files := $(LWWATCHSRC_ALL_CFILES)
+  cpp_files := $(LWWATCHSRC_ALL_CPPFILES)
+
+  # Some of the shared makefiles depend on LW_SOURCE, which may not be set
+  LW_SOURCE := $(LWTOPDIR)
+  # sync module required to include various RM headers
+  LWPORT_ENABLED_MODULES += sync
+  LW_RMSHARED_DISABLE_RESSERV := 1
+  LW_RMSHARED_DISABLE_LWTLS := 1
+  LW_RMSHARED_DISABLE_LWLOCKVAL := 1
+  include $(LW_SOURCE)/drivers/common/shared/shared.lwmk
+  # Append the shared sources/includes/defines to the main variables
+
+  defines += $(addprefix -D,$(LW_RMSHARED_DEFINES))
+  include_dirs += $(LW_RMSHARED_INCLUDES)
+  c_files += $(LW_RMSHARED_SOURCES)
+  LDFLAGS += $(LW_RMSHARED_LDFLAGS)
+endif # LWWATCHCFG_INITIALIZED
+
+# Generic rules for a library build
+include $(MODS_DIR)/makelib.inc
+include $(MODS_DIR)/makerule.inc
+
+# Wait for the config files to be generated:
+$(c_files): _lwwatch_config_all
+$(cpp_files): _lwwatch_config_all
+
+# copy the gdb script file to MODS_RUNSPACE directory
+install: lwwatch_install
+build_install: lwwatch_install
+
+lwwatch_install:
+	@echo "Copying lwwatch.gdb and lwwatch.py to $(install_target_dir)..."
+	$(Q)$(MKDIR_P) $(install_target_dir)
+	$(Q)$(CP_IF_CHANGED) -f lwwatch.gdb $(install_target_dir)/lwwatch.gdb
+	$(Q)$(CP_IF_CHANGED) -f lwwatch.py $(install_target_dir)/lwwatch.py
+ifeq ($(PMU_DEBUG), 1)
+	@echo "Copying FALCON.md and libfalconDebug.so to $(install_target_dir)..."
+	$(Q)$(CP_IF_CHANGED) lib/FALCON.md $(install_target_dir)/FALCON.md
+	$(Q)$(CP_IF_CHANGED) lib/libfalconDebug.so $(install_target_dir)/libfalconDebug.so
+endif
+
+# Include dependency information.
+-include $(depend_files)

@@ -1,0 +1,67 @@
+###############################################################################
+#
+# Copyright (c) 2019-2021 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+#
+###############################################################################
+
+#
+# This file should be included in order to use IpcWrapper code.
+#
+
+LW_BACKEND_RESMAN := 0
+ifeq ($(LW_TARGET_ARCH), amd64)
+  ifeq ($(LW_TARGET_OS), Linux)
+    LW_BACKEND_RESMAN = 1
+  endif
+endif
+
+# Path shorthands
+LWSCI_PATH = $(LW_SOURCE)/drivers/lwsci
+LWSCI_IPC_WRAPPER_DIR = $(LW_SOURCE)/drivers/lwsci/tests/common/ipc_wrapper
+
+# Includes
+LW_INCLUDES += $(LWSCI_IPC_WRAPPER_DIR)/inc/
+LW_INCLUDES += $(LWSCI_PATH)/lwscicommon/inc/
+ifeq ($(LW_TEGRA_MIRROR_INCLUDES), 1)
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+else
+ifeq ($(LW_TEGRA_DIRECT_INCLUDES), 1)
+  LW_INCLUDES += $(TEGRA_TOP)/lwscic2c/include/public
+endif
+endif
+
+# Coverity specific includes
+ifeq ($(LW_BUILD_CONFIGURATION_IS_COVERITY),1)
+  LW_INCLUDES += $(LWSCI_PATH)/lwscicommon/inc/covanalysis_enable
+else
+  LW_INCLUDES += $(LWSCI_PATH)/lwscicommon/inc/covanalysis_disable
+endif
+
+# Sources
+SOURCES += $(LWSCI_IPC_WRAPPER_DIR)/src/ipc_wrapper.cpp
+ifeq ($(LW_TARGET_OS),Linux)
+  SOURCES += $(LWSCI_IPC_WRAPPER_DIR)/src/ipc_wrapper_linux.cpp
+endif
+ifeq ($(LW_TARGET_OS),QNX)
+  SOURCES += $(LWSCI_IPC_WRAPPER_DIR)/src/ipc_wrapper_qnx.cpp
+endif
+
+include $(LWSCI_PATH)/lwsciipc/lwsciipc-dso-stub.lwmk
+STUB_DSO_DEPENDS += $(LWSCIIPC_DSO_STUB)
+
+STUB_LDFLAGS += \
+  -llwsciipc-stub
+
+# os specific flags
+ifeq ($(LW_TARGET_OS),QNX)
+  CFLAGS += -DQNX
+else ifeq ($(LW_TARGET_OS),Linux)
+  CFLAGS += -DLINUX
+endif

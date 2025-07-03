@@ -1,0 +1,63 @@
+##############################################################################
+# define SOURCES
+##############################################################################
+
+LWRRENT_DIR := $(DCGM_DIR)/lwda_loader
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += lwca-loader.c
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_SOURCES += $(LWML_DIR)/common/lwml_lwos_wrapper.c
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+  LOCAL_SOURCES += $(LWML_DIR)/common/Linux/lwosLinux.c
+  LOCAL_SOURCES += $(LWML_DIR)/common/lwos_common_posix.c
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+  LOCAL_SOURCES += $(LWML_DIR)/common/win32/lwoswin32.c
+  LOCAL_SOURCES += $(LW_SOURCE)/drivers/common/src/lwSelwreLoadLibrary.c
+endif
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES)) 
+
+##############################################################################
+# define LOCAL_CFLAGS
+##############################################################################
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(LWML_DIR)/common
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+  LOCAL_INCLUDES += $(LW_TOOLS)/win32/msvc120/VC/include
+endif
+
+LOCAL_CFLAGS := $(addprefix -I,$(LOCAL_INCLUDES))
+LOCAL_CFLAGS += -D__LWDA_API_VERSION_INTERNAL
+
+##############################################################################
+# define LOCAL_LDFLAGS
+##############################################################################
+
+LOCAL_LDFLAGS :=
+
+##############################################################################
+# build
+##############################################################################
+
+LWDA_LOADER_LIB := lwda_loader$(STATIC_LIBSUFFIX)
+
+lwda_loader_TARGET  := $(OUTPUTDIR)/$(LWDA_LOADER_LIB)
+lwda_loader_OBJECTS := $(LOCAL_OBJECTS)
+lwda_loader_CFLAGS  := $(LOCAL_CFLAGS)
+lwda_loader_LDFLAGS := $(LOCAL_LDFLAGS)
+lwda_loader_DEPENDS ?=
+
+build: $(lwda_loader_TARGET)
+$(eval $(call MAKE_STATIC_LIBRARY,lwda_loader))
+
+clean:
+
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

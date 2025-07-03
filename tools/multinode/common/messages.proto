@@ -1,0 +1,263 @@
+// LWIDIA_COPYRIGHT_BEGIN
+//
+// Copyright 2020-2021 by LWPU Corporation.  All rights reserved.  All
+// information contained herein is proprietary and confidential to LWPU
+// Corporation.  Any use, reproduction, or disclosure without the written
+// permission of LWPU Corporation is prohibited.
+//
+// LWIDIA_COPYRIGHT_END
+
+syntax = "proto3";
+
+message Messages
+{
+    // mods_keyword container ;
+    Version             version                 = 1;
+    Shutdown            shutdown                = 2;
+    HeartBeat           heartbeat               = 3;
+    Register            register_app            = 4;
+    UnRegister          unregister_app          = 5;
+    RegistrationId      registration_id         = 6;
+    MissingHeartBeat    missing_heartbeat       = 7;
+    ShutdownAck         shutdown_ack            = 8;
+    GetNumGpu           get_num_gpu             = 9;
+    RetNumGpu           ret_num_gpu             = 10;
+    GetNumLwSwitch      get_num_lw_switch       = 11;
+    RetNumLwSwitch      ret_num_lw_switch       = 12;
+    GetGfmGpuMaxLwLinks get_gfm_max_lwlinks     = 13;
+    RetGfmGpuMaxLwLinks ret_gfm_max_lwlinks     = 14;
+    GetGfmPhysicalId    get_gfm_physical_id     = 15;
+    RetGfmPhysicalId    ret_gfm_physical_id     = 16;
+    GetGfmGpuEnumIdx    get_gfm_gpu_enum_idx    = 17;
+    RetGfmGpuEnumIdx    ret_gfm_gpu_enum_idx    = 18;
+    GetGfmGpuPciBdf     get_gfm_pci_bdf         = 19;
+    RetGfmGpuPciBdf     ret_gfm_pci_bdf         = 20;
+    
+}
+
+message MessageHeader
+{
+    enum AppType {
+        unknown  = 0;
+        gdm      = 1;
+        onediag  = 2;
+        mods     = 3;
+    }
+    uint32       node_id     = 1;
+    uint32       app_type    = 2;
+}
+
+message Version {
+    // mods_keyword handler;
+    MessageHeader header        = 1;
+    uint32        major_version = 2;
+    uint32        minor_version = 3;
+}
+
+message Shutdown {
+    // mods_keyword handler;
+    MessageHeader header = 1;
+    uint32        status = 2;
+}
+
+message HeartBeat {
+    // mods_keyword handler;
+    MessageHeader header      = 1;
+    sint64  hb_reg_id         = 2;
+}
+
+message Register {
+    // mods_keyword handler;
+    MessageHeader header      = 1;
+    string app_version        = 2;
+    string app_cmd_line       = 3;
+    uint32 gpu_count          = 4;
+    uint32 lwswitch_count     = 5;
+    uint32 heart_beat_period  = 6;
+}
+
+message UnRegister {
+    // mods_keyword handler;
+    MessageHeader header      = 1;
+    sint64  hb_reg_id         = 2;
+}
+
+message RegistrationId {
+    // mods_keyword handler;
+    MessageHeader header          = 1;
+    sint64 registraion_id         = 2;
+}
+
+message MissingHeartBeat {
+    // mods_keyword handler;
+    MessageHeader header          = 1;
+}
+
+message ShutdownAck {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+    bool          shutdown_success = 2;
+}
+
+// Messages to derive GPU/LwSwitch Size
+message GetNumGpu {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+}
+
+message RetNumGpu {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+    uint32 num_gpus                = 2;
+}
+
+message GetNumLwSwitch {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+}
+
+message RetNumLwSwitch {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+    uint32 num_lw_switch           = 2;
+}
+
+// Messages to derive GPU Max LwLinks
+message GetGfmGpuMaxLwLinks {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+    uint32 physical_id              = 2;
+}
+
+message RetGfmGpuMaxLwLinks {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+    uint32 physical_id             = 2;
+    uint32 max_lw_links            = 3;
+}
+
+// Messages to derive GPU Physical ID
+message GetGfmPhysicalId {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+    uint32 index                   = 2;
+    bool gpu                       = 3;
+}
+
+message RetGfmPhysicalId {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+    uint32 index                   = 2;
+    uint32 physical_id             = 3;
+    bool gpu                       = 4;
+}
+
+// Messages to derive GPU enum index
+message GetGfmGpuEnumIdx {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+    uint32 node_id                 = 2;
+    uint32 physical_id             = 3;
+    bool gpu                       = 4;
+}
+
+message RetGfmGpuEnumIdx {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+    uint32 node_id                 = 2;
+    uint32 physical_id             = 3;
+    uint32 enum_idx                = 4;
+    bool found                     = 5;
+    bool gpu                       = 6;
+}
+
+message PciInfo {
+    uint32 domain = 1;
+    uint32 bus = 2;
+    uint32 device = 3;
+    uint32 function = 4;
+}
+
+// Messages to derive GPU PCI BDF
+message GetGfmGpuPciBdf {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+    uint32 node_id                 = 2;
+    uint32 enum_idx                = 3;
+    bool gpu                       = 4;
+}
+
+message RetGfmGpuPciBdf {
+    // mods_keyword handler;
+    MessageHeader header           = 1;
+    uint32 node_id                 = 2;
+    uint32 enum_idx                = 3;
+    PciInfo pci_info               = 4;
+    bool found                     = 5;
+    bool gpu                       = 6;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

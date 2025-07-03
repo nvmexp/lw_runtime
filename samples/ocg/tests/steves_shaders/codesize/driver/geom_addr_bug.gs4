@@ -1,0 +1,67 @@
+gs_4_0
+dcl_input v[6][0].xyzw
+dcl_input v[6][1].xyz
+dcl_input v[6][2].xy
+dcl_output_siv o0.xyzw , position
+dcl_output o1.xyz
+dcl_output o2.xy
+dcl_constantbuffer cb0[17], immediateIndexed
+dcl_temps 4
+dcl_inputprimitive triangleadj 
+dcl_outputtopology linestrip 
+dcl_maxout 6
+add r0.xyz, v[2][0].zxyz, -v[0][0].zxyz
+add r1.xyz, v[4][0].yzxy, -v[0][0].yzxy
+mul r2.xyz, r0.xyzx, r1.xyzx
+mad r0.xyz, r0.zxyz, r1.yzxy, -r2.xyzx
+dp3 r0.w, r0.xyzx, r0.xyzx
+rsq r0.w, r0.w
+mul r0.xyz, r0.xyzx, r0.wwww
+dp3 r0.x, r0.xyzx, cb0[16].xyzx
+lt r0.x, l(0.000000), r0.x
+if_nz r0.x
+  mov r0.x, l(0)
+  loop 
+    uge r0.y, r0.x, l(6)
+    breakc_nz r0.y
+    iadd r0.y, r0.x, l(2)
+    iadd r0.z, r0.y, l(6)
+    add r1.xyz, -v[r0.x + 0][0].zxyz, v[r0.x + 1][0].zxyz
+    add r2.xyz, -v[r0.x + 0][0].yzxy, v[r0.z + 0][0].yzxy
+    mul r3.xyz, r1.xyzx, r2.xyzx
+    mad r1.xyz, r1.zxyz, r2.yzxy, -r3.xyzx
+    dp3 r0.w, r1.xyzx, r1.xyzx
+    rsq r0.w, r0.w
+    mul r1.xyz, r1.xyzx, r0.wwww
+    dp3 r0.w, r1.xyzx, cb0[16].xyzx
+    ge r0.w, l(0.000000), r0.w
+    if_nz r0.w
+      dp4 r0.w, v[r0.x + 0][0].xyzw, cb0[12].xyzw
+      dp4 r1.x, v[r0.x + 0][0].xyzw, cb0[13].xyzw
+      dp4 r1.y, v[r0.x + 0][0].xyzw, cb0[14].xyzw
+      dp4 r1.z, v[r0.x + 0][0].xyzw, cb0[15].xyzw
+      mov o0.x, r0.w
+      mov o0.y, r1.x
+      mov o0.z, r1.y
+      mov o0.w, r1.z
+      mov o1.xyz, v[r0.x + 0][1].xyzx
+      mov o2.xy, v[r0.x + 0][2].xyxx
+      emit 
+      dp4 r0.w, v[r0.z + 0][0].xyzw, cb0[12].xyzw
+      dp4 r1.x, v[r0.z + 0][0].xyzw, cb0[13].xyzw
+      dp4 r1.y, v[r0.z + 0][0].xyzw, cb0[14].xyzw
+      dp4 r1.z, v[r0.z + 0][0].xyzw, cb0[15].xyzw
+      mov o0.x, r0.w
+      mov o0.y, r1.x
+      mov o0.z, r1.y
+      mov o0.w, r1.z
+      mov o1.xyz, v[r0.z + 0][1].xyzx
+      mov o2.xy, v[r0.z + 0][2].xyxx
+      emit 
+      cut 
+    endif 
+    mov r0.x, r0.y
+  endloop 
+endif 
+ret 
+// Approximately 54 instruction slots used

@@ -1,0 +1,176 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+LW_LINK_DSO_USE_DEFAULT_LIBS = 1
+OPTIX_LFLAGS += -static-libstdc++ -static-libgcc
+OPTIX_LFLAGS += -lpthread
+
+# Copied from drivers/rtcore/rtcoreUnix.lwmk
+OPTIX_LWVM_LIBRARY_DIRS = $(sort $(dir $(LWVM_LIBRARIES)))
+OPTIX_LWVM_LIBRARIES    = $(LWVM_LIBRARIES)
+OPTIX_LWVM_LDFLAGS      = -Wl,--start-group \
+                          $(addprefix -L,$(OPTIX_LWVM_LIBRARY_DIRS)) \
+                          $(addprefix -l:,$(notdir $(OPTIX_LWVM_LIBRARIES))) \
+                          -Wl,--end-group
+OPTIX_LFLAGS += $(OPTIX_LWVM_LDFLAGS)
+OPTIX_LFLAGS += $(OUTPUTDIR)/Corelib.a
+
+
+# LWVM link flags for host libraries
+OPTIX_HOST_LWVM_LIBRARY_DIRS = $(sort $(dir $(LWVM_LIBRARIES_GPGPU_HOST)))
+OPTIX_HOST_LWVM_LIBRARIES    = $(LWVM_LIBRARIES_GPGPU_HOST)
+# Disable -fdebug-types-section when lwvm70 is used for now, because it
+# causes the build to fail when ld runs out of memory.
+LW_DEBUG_TYPES_SECTION =
+OPTIX_HOST_LWVM_LDFLAGS      = -Wl,--start-group \
+                               $(addprefix -L,$(OPTIX_HOST_LWVM_LIBRARY_DIRS)) \
+                               $(addprefix -l:,$(notdir $(OPTIX_HOST_LWVM_LIBRARIES))) \
+                               -Wl,--end-group
+
+##############################################################################
+# define the export list for liblwoptix.so
+##############################################################################
+
+OPTIX_EXPORTS_FILE = $(OUTPUTDIR)/lib$(DRIVER_BASE_NAME)-exports.txt
+
+# Contents of the exports file
+define LWOPTIX_EXPORTS_CONTENTS
+$(foreach f,$(1),$(f) func$(_newline))
+endef
+
+# Generate the exports file from the single source of truth
+$(OPTIX_EXPORTS_FILE): $(LWOPTIX_EXPORTED_SYMBOL_FILE)
+	$(info Creating exports file $(subst $(OUTPUTDIR)/,,$(@)))
+	$(eval $(call SET_LWOPTIX_EXPORTED_SYMBOLS))
+	$(file >$(@),$(call LWOPTIX_EXPORTS_CONTENTS,$(LWOPTIX_EXPORTED_SYMBOLS)))
+
+##############################################################################
+# define how to mangle liblwoptix.so
+##############################################################################
+
+# XXX some objects are listed multiple times. Use $(sort) to remove duplicates.
+SORTED_OBJECTS = $(sort $(ALL_OBJECTS))
+
+ifeq ($(LW_MANGLE_SYMBOLS),1)
+
+  # define OPTIX_MANGLE_FILE: this file will list what to mangle
+  OPTIX_MANGLE_FILE = $(OUTPUTDIR)/lib$(DRIVER_BASE_NAME)-mangle-list.txt
+
+  # when we link liblwoptix.so, use the mangled object files
+  LINK_OBJECTS = $(call BUILD_MANGLED_OBJECT_LIST,$(SORTED_OBJECTS))
+
+  OPTIX_MANGLE_ARGS =
+
+  # define how to generate the mangle list
+  $(eval $(call MANGLE_LIST_RULE,\
+           $(OPTIX_MANGLE_FILE), \
+           $(OPTIX_EXPORTS_FILE), \
+           $(OPTIX_MANGLE_ARGS), \
+           optix,))
+
+  # define how to mangle the object files
+  $(foreach obj, $(SORTED_OBJECTS), \
+    $(eval $(call MANGLE_OBJECT_FILE_RULE,$(obj),$(OPTIX_MANGLE_FILE))))
+
+else
+
+  # otherwise, if not symbol mangling, the LINK_OBJECTS are just the normal
+  # object files, and OPTIX_MANGLE_FILE is empty
+  LINK_OBJECTS = $(SORTED_OBJECTS)
+  OPTIX_MANGLE_FILE =
+
+endif
+
+##############################################################################
+# WSL Specific build checks
+##############################################################################
+
+# Disable the publishing of the library in case we are building a WSL library
+# and WSL has been LWCFG off
+
+LIBLWOPTIX_PUBLISHED := 1
+
+ifdef LW_TARGET_OS_VARIANT
+  ifeq ($(LW_TARGET_OS_VARIANT), wsl)
+    ifdef LWCFG_GLOBAL_FEATURE_WSL
+      ifneq ($(LWCFG_GLOBAL_FEATURE_WSL), 1)
+        LIBLWOPTIX_PUBLISHED := 0
+      endif
+    else
+      LIBLWOPTIX_PUBLISHED := 0
+    endif
+  endif
+endif
+
+##############################################################################
+# define how to build the linker script used when linking liblwoptix.so
+##############################################################################
+
+OPTIX_LINKER_SCRIPT = $(OUTPUTDIR)/optix.map$(MANGLE_SUFFIX)
+
+$(eval $(call LINKER_SCRIPT_RULE, \
+  $(OPTIX_LINKER_SCRIPT), \
+  $(OPTIX_EXPORTS_FILE), \
+  $(OPTIX_MANGLE_FILE)))
+
+##############################################################################
+# define how to link liblwoptix.so
+##############################################################################
+
+LIBLWOPTIX = $(OUTPUTDIR)/$(LWOPTIX_FILENAME)
+LIBLWOPTIX_LD_TARGET = $(LIBLWOPTIX).unstripped
+LIBLWOPTIX_DEBUG_INFO = $(LIBLWOPTIX).debug
+
+# In order to still get all the errors on DVS if needed and to be able to build
+# locally the publish rule is there to still force the generation of liboptix.so
+# just under the name liboptix.so.not_published
+ifeq ($(LIBLWOPTIX_PUBLISHED), 1)
+  LIBLWOPTIX_STAGING_TARGET = $(LIBLWOPTIX)
+
+else
+  LIBLWOPTIX_STAGING_TARGET =  $(LIBLWOPTIX).not_published
+
+# NOTE: Like for LWCA and DirectX the dummy library needs to be not empty to
+#       pass the sign check when packaged on Windows (WSL). so we put the word
+#       <DISABLED> in it and publish that one instead.
+ 
+  $(LIBLWOPTIX): $(LIBLWOPTIX_STAGING_TARGET)
+	$(ECHO) "Generating empty library $(LIBLWOPTIX) ..."
+	$(ECHO) -n "<DISABLED>" > $(LIBLWOPTIX)
+
+endif
+
+LW_SUPPORTS_SEPARATE_DEBUG_INFO = 1
+$(eval $(call LW_DEBUG_INFO_CMD,$(LIBLWOPTIX_LD_TARGET),$(LIBLWOPTIX_STAGING_TARGET),$(LIBLWOPTIX_DEBUG_INFO)))
+
+$(LIBLWOPTIX_LD_TARGET): LW_ELIMINATE_DEAD_CODE = 1
+
+# Note that OPTIX_LFLAGS contains the LWVM libraries (e.g. -l:libLWVMCodeGen.a)
+$(LIBLWOPTIX_LD_TARGET): $(LINK_OBJECTS) $(OPTIX_LINKER_SCRIPT) $(LWVM_LIBRARIES) $(OUTPUTDIR)/Corelib.a
+	$(call quiet_cmd,LINKXX) \
+      $(LINK_OBJECTS) \
+      -o $@ \
+      -Wl,--no-undefined \
+      -Wl,-soname -Wl,$(LWOPTIX_FILENAME) \
+      -Wl,--version-script=$(OPTIX_LINKER_SCRIPT) \
+      $(LINK_LDFLAGS) \
+      $(OPTIX_LFLAGS) \
+      $(LINK_DSO_LDFLAGS)
+
+lwoptix: $(LIBLWOPTIX)

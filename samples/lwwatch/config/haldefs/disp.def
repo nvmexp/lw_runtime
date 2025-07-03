@@ -1,0 +1,1163 @@
+# -*- mode: perl; -*-
+
+# DISP Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $dispHal = [
+
+    # per-GPU defaults for DISP engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, DISPLAYLESS, -T234_and_later, ],
+    ],
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+        GET_MAX_CHAN => [
+            DESCRIPTION   => "DispGetMaXChan ",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _v02_01       => [ MAXWELL, GP100, -CHEETAH, ],
+            _v02_07       => [ GP102_and_later, -VOLTA_and_later, ],
+            _v03_00       => [ dVOLTA_and_later, ],
+            _v04_02       => [ T234_and_later, ],
+        ],
+
+        PRINT_CHAN_STATE => [
+            DESCRIPTION   => "Disp print chan state ",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32",
+
+            _v02_01       => [ dMAXWELL_and_later, -dVOLTA_and_later, ],
+            _v03_00       => [ dVOLTA_and_later, ],
+            _v04_02       => [ T234_and_later, ],
+        ],
+
+        GET_CHAN_NUM => [
+            DESCRIPTION   => "Disp get chan num ",
+            RETURN_TYPE   => LwS32,
+            ARGUMENTS     => "char* , LwU32",
+            STUB_RETURNS  => NEG1,
+
+            LIKE_INTERFACE => PRINT_CHAN_STATE,
+        ],
+
+        PRINT_CHAN_NAME => [
+            DESCRIPTION   => "Disp print chan num ",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32",
+
+            _v02_01       => [ dMAXWELL_and_later, -VOLTA_and_later,],
+            _v03_00       => [ dVOLTA_and_later, ],
+            _v04_02       => [ T234_and_later, ],
+        ],
+
+        GET_CHAN_TYPE => [
+            DESCRIPTION   => "Disp get channel type and head number based on chan number",
+            RETURN_TYPE   => LwS32,
+            ARGUMENTS     => "LwU32 , LwU32*",
+            STUB_RETURNS  => NEG1,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        GET_DEBUG_MODE => [
+            DESCRIPTION   => "Disp get debug mode ",
+            RETURN_TYPE   => LwS32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => NEG1,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        SET_DEBUG_MODE => [
+            DESCRIPTION   => "Disp set debug mode  ",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32, BOOL",
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        INJECT_METHOD => [
+            DESCRIPTION   => "Disp GF11 method  ",
+            RETURN_TYPE   =>  LwS32,
+            ARGUMENTS     => "LwU32, LwU32, LwU32 ",
+            STUB_RETURNS  => NEG1,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        MATCH_METHOD => [
+            DESCRIPTION   => "Disp match method  ",
+            RETURN_TYPE   =>  LwS32,
+            ARGUMENTS     => "LwU32, LwU32, char*, LwU32*, LwU32*, LwU32*, LwU32* ",
+            STUB_RETURNS  => NEG1,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        DISP_OWNER => [
+            DESCRIPTION   => "Disp owner",
+            RETURN_TYPE   =>  LwS32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => NEG1,
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        GET_CHAN_DESCRIPTOR => [
+            DESCRIPTION   => "Disp get channel descriptor",
+            RETURN_TYPE   =>  LwS32,
+            ARGUMENTS     => "LwU32, void **chan_desc",
+            STUB_RETURNS  => NEG1,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        PRINT_CHAN_METHOD_STATE => [
+            DESCRIPTION   => "Disp print channel method state",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LwU32, BOOL, BOOL, LwS32, LwS32",
+
+            _v02_01       => [ USED_BY_v02_04, ],
+            _v02_04       => [ GM10X, ],
+            _v02_05       => [ GM20X, ],
+            _v02_06       => [ GP100, ],
+            _v02_07       => [ GP10X, -GP100, ],
+            _v03_00       => [ GV100, ],
+            _v04_00       => [ TURING, ],
+            _v04_01       => [ AMPERE_and_later, -T234_and_later, ],
+            _v04_02       => [ T234_and_later, ],
+        ],
+
+        DUMP_PB => [
+            DESCRIPTION   => "Disp dump PB",
+            INTERFACE_TAG => "dispDumpPB",  #PB instead of Pb
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32, LwS32, LwS32, LwS32, LwU32",
+            STUB_RETURNS  => ERROR,
+
+            _v02_01        => [ dMAXWELL_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        GET_CHN_AND_PB_CTL_REG_OFFSETS => [
+            DESCRIPTION   => "Get CHN/PB CTL offsets",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32, LwU32, LwU32*, PBCTLOFFSET*",
+            STUB_RETURNS  => ERROR,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        READ_OR_OWNER_AND_PROTOCOL => [
+            DESCRIPTION   => "Disp read or owner and protocol",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "LWOR orType, LwU32 orNum, HEAD * orOwner, ORPROTOCOL * orProtocol",
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        GET_OR_PROTOCOL => [
+            DESCRIPTION   => "Translate from device class protocol value to enum",
+            RETURN_TYPE   => ORPROTOCOL,
+            ARGUMENTS     => "LWOR orType, LwU32 protocolValue",
+            STUB_RETURNS  => protocolError,
+
+            _v02_01       => [ GF11X_thru_PASCAL, -CHEETAH, ],
+            _v03_00       => [ dVOLTA_thru_TURING, ],
+            _v04_01       => [ dAMPERE_and_later, T234_and_later, ],
+        ],
+
+        GET_NUM_ORS => [
+            DESCRIPTION   => "Disp get NumOrs",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "LWOR type",
+            STUB_RETURNS  => ZERO,
+
+            _v02_01       => [ ],
+            _v02_02       => [ dMAXWELL, dPASCAL, -GP100, ],
+            _v02_07       => [ GP100, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        GET_NUM_HEADS => [
+            DESCRIPTION   => "Disp get NumHeads",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  =>  ZERO,
+
+            _v02_01       => [ dMAXWELL_thru_PASCAL, -CHEETAH, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        RESOURCE_EXISTS   => [
+            DESCRIPTION   => "whether the given SOR/PIOR exists on chip",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LWOR orType, LwU32 index",
+            STUB_RETURNS  =>  CUSTOM,
+
+            _v02_01       => [ GF11X_thru_PASCAL, -CHEETAH, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        GET_PIOR_SEQ_CTL_PWR_AND_BLANK_REGS => [
+            DESCRIPTION   => "Get the reg offsets for pior SEQ_CTL, PWR and BLANK regs",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 piorIndex, LwU32 *pSeqCtlReg, LwU32 *pPwrReg, LwU32 *pBlankReg",
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _STUB         => [ VOLTA_and_later, ], 
+        ],
+
+        HEAD_SOR_CONNECTION => [
+            DESCRIPTION   => "Disp head SOR connection",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ dMAXWELL_thru_PASCAL, -CHEETAH, ],
+            _v03_00       => [ dVOLTA, ],
+            _v04_00       => [ TURING_and_later, ],
+        ],
+
+        HEAD_OR_CONNECTION => [
+            DESCRIPTION   => "Disp head or connection",
+            INTERFACE_TAG => "dispHeadORConnection",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ dMAXWELL_thru_PASCAL, -CHEETAH, ],
+            _v03_00       => [ dVOLTA, ],
+            _v04_00       => [ TURING_and_later, ],
+        ],
+
+        HEAD_OR_CONN_ASCII_DATA => [
+            DESCRIPTION   => "Disp head or conn ascii data",
+            INTERFACE_TAG => "dispHeadOrConnAsciiData",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LWOR, LwU32*, LwU32*",
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        CTX_DMA_DESCRIPTION => [
+            DESCRIPTION   => "Disp ctX dma description",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32, LwS32, BOOL",
+
+            _v02_01       => [ dMAXWELL_thru_PASCAL, -CHEETAH, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        DISPLAY_PORT_INFO => [
+            DESCRIPTION   => "Disp display port Info",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32, LwU32, LwU32",
+
+            _v02_01       => [ ],
+            _v02_03       => [ ],
+            _v02_04       => [ GM10X, -DISPLAYLESS, ],
+            _v02_05       => [ GM20X_and_later, -DISPLAYLESS, T234_and_later, ],
+            _STUB         => [ DISPLAYLESS, ],
+        ],
+
+        GET_CONSTANT => [
+            DESCRIPTION   => "Get a display engine manual constant",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "DISP_CONSTANT select, LwU32 param",
+            STUB_RETURNS  => ZERO,
+
+            ###
+            # GF11X_and_later is intentionally set to STUB since SC read mechanism on GF11X_and_later is completely different.
+            # We read from base + method offset as opposed to LW_907[A-E]_SC_*.
+            _STUB         => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        ANALYZE_BLANK => [
+            DESCRIPTION   => "Disp analyize blank",
+            RETURN_TYPE   =>  LwS32,
+            ARGUMENTS     => "LwS32",
+            STUB_RETURNS  => ZERO,
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        ANALYZE_INTERRUPTS => [
+            DESCRIPTION   => "Disp analyze Interrupts",
+            RETURN_TYPE   => "void",
+            ARGUMENTS     => "LwU32, LwU32, LwU32, LwU32",
+
+            _v02_01       => [ MAXWELL, GP100, -CHEETAH, ],
+            _v02_07       => [ GP102_thru_PASCAL, -CHEETAH, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        TIMINGS => [
+            DESCRIPTION   => "Disp Timings",
+            RETURN_TYPE   => "void",
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ dMAXWELL_thru_PASCAL, -CHEETAH, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        PRINT_CHAN_VARS => [
+            DESCRIPTION   => "Print Channel Vars",
+            RETURN_TYPE   => "void",
+            ARGUMENTS     => "LwS32, BOOL",
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        ANALYZE_HANG => [
+            DESCRIPTION   => "Disp analyze hang",
+            RETURN_TYPE   => "void",
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ dMAXWELL_and_later, -dVOLTA_and_later, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        ANALYZE_HANG_USUB_SM => [
+            DESCRIPTION   => "Disp analyze hang",
+            RETURN_TYPE   => "void",
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+         ANALYZE_HANG_POST_SM => [
+            DESCRIPTION   => "Disp analyze hang",
+            RETURN_TYPE   => "void",
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+
+        ANALYZE_HANG_PRE_SM => [
+            DESCRIPTION   => "Disp analyze hang",
+            RETURN_TYPE   => "void",
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        ANALYZE_HANG_CMGR_SM => [
+            DESCRIPTION   => "Disp analyze hang",
+            RETURN_TYPE   => "void",
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        ANALYZE_CORE_UPD_SM  => [
+            DESCRIPTION   => "Analyze Core update state mechine for given head",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32 head",
+            STUB_RETURNS  => ERROR,
+
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        ANALYZE_CORE_UPD_USUB_SM => [
+            DESCRIPTION   => "Analyze Core update state mechine for given head",
+
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32 head",
+            STUB_RETURNS  => ERROR,
+
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        ANALYZE_CORE_UPD_POST1_SM => [
+            DESCRIPTION   => "Analyze Core update post state mechine for given head",
+
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32 head",
+            STUB_RETURNS  => ERROR,
+
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        ANALYZE_CORE_UPD_POST2_SM => [
+            DESCRIPTION   => "Analyze Core update post state mechine for given head",
+
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32 head",
+            STUB_RETURNS  => ERROR,
+
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        ANALYZE_CORE_UPD_PRE_SM => [
+            DESCRIPTION   => "Analyze Core update Pre state mechine for given head",
+
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32 head",
+            STUB_RETURNS  => ERROR,
+
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        ANALYZE_CORE_UPD_CMGR_SM => [
+            DESCRIPTION   => "Analyze clock manager state mechine",
+
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ERROR,
+
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        UPDATE_NUM_SINKS => [
+            DESCRIPTION   => "Update the number sinks owned by a head",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32 headNum, LWOR orType, LwU32* pNumSinks",
+            STUB_RETURNS  => ERROR,
+
+            _v02_01        => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        GET_NUM_SURF_PER_HEAD => [
+            DESCRIPTION   => "Disp get num of surfaces per head for given channel type",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "void *",
+            STUB_RETURNS  => ZERO,
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        READ_SURF_CTX_DMA_HANDLE => [
+            DESCRIPTION   => "Disp read surface context dma iso handle",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void *, LwU32, LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        READ_OR_SET_CONTROL_ARM => [
+            DESCRIPTION   => "Reads an OR set control arm register",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LWOR orType, LwU32 idx",
+            STUB_RETURNS  => ZERO,
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        DUMP_SLI_CONFIG => [
+            DESCRIPTION   => "Display SLI Information",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => void,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, ],
+            _STUB         => [ T234_and_later, ],
+        ],
+
+        GET_SLI_DATA => [
+            DESCRIPTION   => "Read SLI Register Configuration",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32, DSLI_DATA *pDsliData",
+            STUB_RETURNS  => void,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, -DISPLAYLESS,  ],
+            _v03_00       => [ dVOLTA, -DISPLAYLESS, ],
+            _v04_00       => [ dTURING, -DISPLAYLESS ],
+            _v04_01       => [ dAMPERE_and_later, -DISPLAYLESS ],
+            _STUB         => [ T234_and_later, DISPLAYLESS, ],
+        ],
+
+        GET_CLOCK_DATA => [
+            DESCRIPTION   => "Read SLI-CLOCK Configuration",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "DSLI_DATA *pDsliData",
+            STUB_RETURNS  => void,
+
+            _v02_01       => [ dMAXWELL_and_later, -DISPLAYLESS, ],
+            _STUB         => [ T234_and_later, DISPLAYLESS, ],
+        ],
+
+        GET_CLOCK_REG_BNK_INFO => [
+            DESCRIPTION   => "Read SLI-CLOCK Configuration",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 head, DSLI_DATA *pDsliData",
+            STUB_RETURNS  => void,
+
+            _v02_01       => [ dMAXWELL_thru_dTURING, ],
+            _STUB         => [ T234_and_later, dAMPERE_and_later, ],
+        ],
+
+        GET_PIOR_DATA => [
+            DESCRIPTION   => "Read SLI-PIOR Configuration",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32, DSLI_DATA *pDsliData, DSLI_PIOR_DATA *pDsliPiorData",
+            STUB_RETURNS  => void,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _STUB         => [ VOLTA_and_later, ],
+        ],
+
+        PRINT_HEAD_DATA => [
+            DESCRIPTION   => "print SLI-HEAD config data",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 numHead, DSLI_DATA *pDsliData, DSLI_PRINT_PARAM *pDsliPrintData, LwU32 verbose",
+            STUB_RETURNS  => void,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        PRINT_PIN_DATA => [
+            DESCRIPTION   => "print SLI-PIN config data",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 numPin, DSLI_PIOR_DATA *pDsliPiorData",
+            STUB_RETURNS  => void,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        PRINT_CLK_DATA => [
+            DESCRIPTION   => "print SLI-CLOCK config data",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 Head, DSLI_DATA *pDsliData, DSLI_PRINT_PARAM *pDsliPrintData, LwU32 verbose",
+            STUB_RETURNS  => void,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL,-GP102,-GP104,-GP106, ],
+            _v03_00       => [ dVOLTA, ],
+            _v04_00       => [ TURING_and_later, -dAMPERE_and_later, ],
+            _STUB         => [ dAMPERE_and_later,GP102,GP104,GP106, ],
+        ],
+
+        PRINT_SLI_REGISTERS => [
+            DESCRIPTION   => "print SLI registers",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 numHead, LwU32 numPior, DSLI_DATA *pDsliData, DSLI_PIOR_DATA *pDsliPiorData",
+            STUB_RETURNS  => void,
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _STUB         => [ VOLTA_and_later, ],
+        ],
+
+        PRINT_EXCEPT_PENDING => [
+            DESCRIPTION   => "Print if pending exceptions are there",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => void,
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        GET_DMI_MEMACC_OFFSET => [
+            DESCRIPTION   => "Get the DMI_MEMACC offset",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        PRINT_SCANOUT_OWNER => [
+            DESCRIPTION   => "Disp print scanout owner",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ dMAXWELL_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dMAXWELL_and_later, -T234_and_later, ],
+        ],
+
+        TEST_DISPLAY_STATE => [
+            DESCRIPTION   => "This function analyzes display state by walking through all display sub units",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ERROR,
+
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ GF11X_thru_PASCAL, ],
+        ],
+
+        READ_HDMI_DECODER => [
+            DESCRIPTION   => "read HDMI decoder on emulation",
+            INTERFACE_TAG => "dispReadHDMIDecoder",  #HDMI instead of Hdmi
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32, LwU32",
+
+            _STUB         => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        WRITE_HDMI_DECODER => [
+            DESCRIPTION   => "write HDMI decoder on emulation",
+            INTERFACE_TAG => "dispWriteHDMIDecoder",  #HDMI instead of Hdmi
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => "LwU32, LwU32, LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _STUB         => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        GET_REM_VPLL_CFG_SIZE => [
+            DESCRIPTION   => "get Vpll Cfg Size",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _v02_01        => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        HDCP_GET_OR_OWNER => [
+            DESCRIPTION   => "HDCP get OR owner",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LWOR orType, LwU32 orNum, LwU32 *pOwnerMask, LwU32 *pData32",
+            STUB_RETURNS  => void,
+
+            _v02_01       => [ dMAXWELL_and_later, -dVOLTA_and_later, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        HDCP_GET_OR_PROTOCOL => [
+            DESCRIPTION   => "HDCP get OR Protocol",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LWOR orType, LwU32 data32, ORPROTOCOL *pOrProtocol",
+            STUB_RETURNS  => void,
+
+            _v02_01       => [ dMAXWELL_and_later, -dVOLTA_and_later, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        HDCP_PRINT_STATUS => [
+            DESCRIPTION   => "print HDCP status",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ERROR,
+
+            _v02_01       => [ dMAXWELL_and_later, -dVOLTA_and_later, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        HDCP22_PRINT_SST_DP_TYPE_REG_INFO => [
+            DESCRIPTION   => "print HDCP SST Dp type Reg Info",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU8 sorIndex, LwU8 totalLinks",
+            STUB_RETURNS  => void,
+
+            _v02_05       => [ dMAXWELL_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dMAXWELL_and_later, -T234_and_later, ],
+        ],
+
+        HDCP22_PRINT_DEBUG_REG_INFO => [
+            DESCRIPTION   => "print HDCP Debug Reg Info",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU8 sorIndex, LwU8 totalLinks",
+            STUB_RETURNS  => void,
+
+            _v02_05       => [ dMAXWELL_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dMAXWELL_and_later, -T234_and_later, ],
+        ],    
+
+        HDCP22_PRINT_STATUS_REG_INFO => [
+            DESCRIPTION   => "print HDCP Status Reg Info",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU8 sorIndex, LwU8 totalLinks",
+            STUB_RETURNS  => void,
+
+            _v02_05       => [ dMAXWELL_and_later, -dAMPERE_and_later, ],
+            _v04_01       => [ dAMPERE_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dMAXWELL_and_later, -T234_and_later, ],
+        ],
+
+        HDCP22_PRINT_CTRL_REG_INFO => [
+            DESCRIPTION   => "print HDCP Ctrl Reg Info",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU8 sorIndex, LwU8 totalLinks",
+            STUB_RETURNS  => void,
+
+            _v02_05       => [ dMAXWELL_and_later, -dAMPERE_and_later, ],
+            _v04_01       => [ dAMPERE_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dMAXWELL_and_later, -T234_and_later, ],
+        ],
+
+        HDCP22_PRINT_DP_TYPE_REG_INFO => [
+            DESCRIPTION   => "print HDCP DP type reg Info",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU8 sorIndex",
+            STUB_RETURNS  => void,
+
+            _v02_05       => [ dMAXWELL_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dMAXWELL_and_later, -T234_and_later, ],
+        ],
+
+        HDCP22_PRINT_HDMI_TYPE_REG_INFO => [
+            DESCRIPTION   => "print HDCP Hdmi type reg Info",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU8 sorIndex",
+            STUB_RETURNS  => void,
+
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        HDCP_PRINT_SOR_STATUS => [
+            DESCRIPTION   => "print HDCP SOR status",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU8 sorIndex",
+            STUB_RETURNS  => void,
+
+            _v02_05       => [ dMAXWELL_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dMAXWELL_and_later, -T234_and_later, ],
+        ],
+
+        HDCP_PRINT_OR_STATUS => [
+            DESCRIPTION   => "print HDCP status based on OR type",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32, char*",
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        HDCP_READ_UPSTREAM_S_PRIME => [
+            DESCRIPTION   => "read SPrime register",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32, LwU32, LwU8*",
+            STUB_RETURNS  => ERROR,
+
+             _v02_01      => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+       HDCP_READ_UPSTREAM_S_PRIME_VALID => [
+            DESCRIPTION   => "set SPrime register to read",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32, LwU32",
+            STUB_RETURNS  => ERROR,
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        HDCP_READ_UPSTREAM_S_PRIME_REGS => [
+            DESCRIPTION   => "read SPrime register",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU8*",
+            STUB_RETURNS  => ERROR,
+
+            _v02_01       => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+        
+        HDCP_IS_KFUSE_READY => [
+            DESCRIPTION   => "Hdcp check if Kfuse is ready",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v04_01       => [ dAMPERE_and_later, -DISPLAYLESS, ],
+            _v04_02       => [ T234_and_later, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, -T234_and_later, DISPLAYLESS, ],
+        ],
+
+        HDCP_KEYDECRYPTION_STATUS => [
+            DESCRIPTION   => "Hdcp keydecryption status",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v04_01       => [ dAMPERE_and_later, T234_and_later, -DISPLAYLESS, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, -T234_and_later, DISPLAYLESS, ],
+        ],
+
+        HDCP_KEYDECRYPTION_REG_INFO => [
+            DESCRIPTION   => "print HDCP Keydecryption Reg Info",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => void,
+
+            _v04_01       => [ dAMPERE_and_later, T234_and_later, -DISPLAYLESS, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, -T234_and_later, DISPLAYLESS, ],
+        ],
+
+        HDCP_KEYDECRYPTION_TRIGGER => [
+            DESCRIPTION   => "Hdcp keydecryption trigger",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v04_01       => [ dAMPERE_and_later, T234_and_later, -DISPLAYLESS, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, -T234_and_later, DISPLAYLESS, ],
+        ],
+
+        PRINT_FUSE_CRC_STATUS => [
+            DESCRIPTION   => "print Fuse CRC Status",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => void,
+
+            _v04_01       => [ dAMPERE_and_later, -DISPLAYLESS, ],
+            _v04_02       => [ T234_and_later, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, -T234_and_later, DISPLAYLESS, ],
+        ],
+
+        FUSE_CRC_STATUS => [
+            DESCRIPTION   => "Fuse CRC status",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v04_01       => [ dAMPERE_and_later, -DISPLAYLESS, ],
+            _v04_02       => [ T234_and_later, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, -T234_and_later, DISPLAYLESS, ],
+        ],
+
+        FUSE_OPT_HDCP_EN_STATUS => [
+            DESCRIPTION   => "Fuse opt hdcp en status",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v04_01       => [ dAMPERE_and_later, -DISPLAYLESS, ],
+            _v04_02       => [ T234_and_later, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, -T234_and_later, DISPLAYLESS, ],
+        ],
+
+        ENABLE_FUSE_CLOCKS => => [
+            DESCRIPTION   => "Enable fuse clocks",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_OK,
+
+            _v04_02       => [ T234_and_later, ],
+            _STUB         => [ ALL, -T234_and_later, ],
+        ],
+
+        DISABLE_FUSE_CLOCKS => => [
+            DESCRIPTION   => "Disable fuse clocks",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => LW_OK,
+
+            _v04_02       => [ T234_and_later, ],
+            _STUB         => [ ALL, -T234_and_later, ],
+        ],        
+
+        READ_DP_LINK_CTL => [
+            DESCRIPTION   => "Add DP LINKCTL info into protocol string",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32, LwU32, char *",
+
+            _v02_04       => [ dMAXWELL_and_later, T234_and_later, ],
+            _STUB         => [ pre_dMAXWELL, ],
+        ],
+
+        GET_DSI_INFO => [
+            DESCRIPTION   => "get DSI information",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32",
+
+            _T124         => [ T234_and_later, ],
+            _STUB         => [ ALL, -T234_and_later, ],
+        ],
+
+        OR_PADLINK_CONNECTION => [
+            DESCRIPTION   => "Print OR Padlink connection",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _v02_05       => [ GM20X_thru_dPASCAL, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -GM20X_and_later, -T234_and_later, ],
+        ],
+
+        DISPLAY_PORT_ENUM => [
+            DESCRIPTION   => "Enumerate displayport pipes",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ GM10X, -DISPLAYLESS, ],
+            _v02_05       => [ GM20X_thru_dVOLTA, -DISPLAYLESS, ],
+            _v04_00       => [ TURING_and_later, -DISPLAYLESS, T234_and_later, ],
+            _STUB         => [ ALL, -dMAXWELL_and_later, DISPLAYLESS, -T234_and_later, ],
+        ],
+
+        GET_LINK_BY_SOR => [
+            DESCRIPTION   => "Get links of specified SOR",
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => "LwU32, LwU32*",
+            STUB_RETURNS  => FALSE,
+
+            _v02_01       => [ ],
+            _v02_04       => [ GM10X, -DISPLAYLESS, ],
+            _v02_05       => [ GM20X_and_later, -DISPLAYLESS, T234_and_later, ],
+            _STUB         => [ ALL , -dMAXWELL_and_later, DISPLAYLESS, -T234_and_later, ],
+        ],
+
+        GET_AUX_PORT_BY_LINK => [
+            DESCRIPTION   => "Get dpaux port of specified link",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => -1,
+
+            _v02_01       => [ GM10X, -DISPLAYLESS, ],
+            _v02_05       => [ GM20X_thru_dPASCAL, -DISPLAYLESS, ],
+            _v03_00       => [ dVOLTA_and_later, -DISPLAYLESS, T234_and_later, ],
+            _STUB         => [ ALL, -GM10X, -GM20X_and_later, DISPLAYLESS, -T234_and_later, ],
+        ],
+
+        GET_NUM_AUX_PORTS => [
+            DESCRIPTION   => "Get number of aux ports",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _v02_01       => [ GM10X, -DISPLAYLESS, ],
+            _v02_05       => [ GM20X_and_later, -DISPLAYLESS, T234_and_later, ],
+            _STUB         => [ ALL, -GM10X, -GM20X_and_later, DISPLAYLESS, -T234_and_later, ],
+        ],
+
+        GET_NUM_SFS => [
+            DESCRIPTION   => "Get number of SF",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _v02_01       => [ dMAXWELL_and_later, -DISPLAYLESS, T234_and_later, ],
+            _STUB         => [ ALL, -dMAXWELL_and_later, DISPLAYLESS, -T234_and_later, ],
+        ],
+
+        PRINT_HDCP22_STATUS => [
+            DESCRIPTION   => "Print HDCP 2.2 status",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "char *numSor",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v02_05       => [ GM20X_and_later, -dVOLTA_and_later, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -GM20X_and_later, -T234_and_later, ],
+        ],
+
+        DUMP_CHANNEL_STATE => [
+            DESCRIPTION   => "Dump Channel State ",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "char *chName, LwS32 headNum, LwS32 winNum, BOOL printHeadless, BOOL printRegsWithoutEquivMethod",
+
+            _v02_01        => [ ALL, -VOLTA_and_later, -CHEETAH, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        GET_CHANNEL_STATE_CACHE_VALUE => [
+            DESCRIPTION   => "Get Display Channel State Cache",
+            RETURN_TYPE   => LwU32,
+            STUB_RETURNS  => ~0,
+            ARGUMENTS     => "LwU32 chNum, BOOL isArmed, LwU32 offset",
+
+            _v02_01       => [ ALL, -VOLTA_and_later, -CHEETAH, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        GET_WIN_ID => [
+            DESCRIPTION   => "Get window ID from channel number",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => -1,
+
+            _v03_00       => [ dVOLTA_and_later, ],
+            _v04_02       => [ T234_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        READ_DISP_CLK_SETTINGS => [
+
+            DESCRIPTION   => "Read the DispClk settings",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _v02_01        => [ dMAXWELL_and_later, T234_and_later, ],
+        ],
+
+        READ_PIXEL_CLK_SETTINGS => [
+
+            DESCRIPTION   => "Read the PixelClk settings",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ dMAXWELL, GP100, ],
+            _v02_07       => [ dPASCAL, -GP100, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        READ_SOR_CLK_SETTINGS => [
+
+            DESCRIPTION   => "Read the SorClk settings",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _v02_01       => [ dMAXWELL, GP100, ],
+            _v02_07       => [ dPASCAL, -GP100, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+        ],
+
+        GET_NUM_WINDOWS => [
+
+            DESCRIPTION   => "Query the number of windows",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        DUMP_GET_DEBUG_MODE => [
+            DESCRIPTION   => "Get debug mode of specified channel",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "char *chName, LwS32 headNum, LwU32 dArgc",
+
+            _v02_01       => [ ALL, -VOLTA_and_later, -CHEETAH, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            #_STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        DUMP_SET_DEBUG_MODE => [
+            DESCRIPTION   => "Set debug mode of specified channel",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "char *chName, LwS32 headNum, LwU32 dArgc",
+
+            _v02_01       => [ ALL, -VOLTA_and_later, -CHEETAH, ],
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            #_STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        PRINT_CHN_FE_STATE => [
+            DESCRIPTION   => "Parse Core/Win/Winimm state registers",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 chanNum",
+
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        PARSE_HLS => [
+            DESCRIPTION   => "Parse HLS file",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwBool isCore, LwU32 errNum",
+
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        DUMP_PENDING_EXC_HLS => [
+            DESCRIPTION   => "DUMP MATCHING HLS file",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwBool isCore, LwBool isWindow",
+
+            _v03_00       => [ dVOLTA_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, -T234_and_later, ],
+        ],
+
+        READ_DSC_STATUS => [
+            DESCRIPTION   => "Read DSC status of head/heads",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32",
+
+            _v04_00       => [ TURING_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -TURING_and_later, ],
+        ],
+
+        TRANSLATE_GPU_REG_ADDR_TO_SOC => [
+            DESCRIPTION   => "Translate display address in GPU aperture to SOC aperture",
+            RETURN_TYPE   =>  LwU64,
+            ARGUMENTS     => "LwU64 gpuAddress",
+            STUB_RETURNS  => gpuAddress,
+
+            _v04_02       => [ T234_and_later ],
+            _STUB         => [ ALL, -T234_and_later, ],
+        ],
+
+        READ_DISPLAY_LOW_POWER_STATUS => [
+            DESCRIPTION   => "Read Display Low Power status",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _v04_01       => [ dAMPERE_and_later, -DISPLAYLESS, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, DISPLAYLESS,],
+        ],
+
+        ANALYZE_DISPLAY_LOW_POWER_MSCG => [
+            DESCRIPTION   => "Analyze Display Low Power MSCG",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _v04_01       => [ dAMPERE_and_later, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, ],
+        ],
+
+        CLEAR_DISPLAY_LOW_POWER_MSCG_COUNTERS => [
+            DESCRIPTION   => "Clear Display Low Power MSCG Counters",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _v04_01       => [ dAMPERE_and_later, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, ],
+        ],
+
+        PRINT_DISPLAY_LOW_POWER_MSCG_COUNTERS => [
+            DESCRIPTION   => "Print Display Low Power MSCG Counters",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _v04_01       => [ dAMPERE_and_later, -DISPLAYLESS,],
+            _STUB         => [ ALL, -dAMPERE_and_later, DISPLAYLESS,],
+        ],
+
+        IS_CHANNEL_ALLOCATED => [
+            DESCRIPTION   => "Checks channel allocated or unallocated",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "ChnType_Lwdisplay, LwU32",
+            STUB_RETURNS  => LW_TRUE,
+
+            _v04_01       => [ dAMPERE_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, -T234_and_later ],
+        ],
+
+        GET_CHANNEL_CTL_REGS => [
+            DESCRIPTION   => "Returns channel ctl regs",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "ChnType_Lwdisplay, LwU32, LwU32*",
+            STUB_RETURNS  => LW_OK,
+
+            _v04_01       => [ dAMPERE_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, -T234_and_later ],
+        ],                
+
+        CHECK_HDMIFRL_STATUS => [
+            DESCRIPTION   => "Print HDMI FRL register value",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _v04_01       => [ dAMPERE_and_later, T234_and_later, ],
+            _STUB         => [ ALL, -dAMPERE_and_later, -T234_and_later ],
+        ],                
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $dispHal;

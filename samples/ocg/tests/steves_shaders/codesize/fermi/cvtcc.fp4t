@@ -1,0 +1,73 @@
+shaderType: pixel
+optFlags: 0x1
+optLevel: 4
+oriControl: 0
+debugOutputMask: 0
+bAssume0: 0
+bInitOutputs: 0
+bCanPromoteFixed: 0
+bCanPromoteHalf: 1
+bCanReorderFixedWithCheck: 0
+bCanReorderHalf: 1
+bCanReorderFloat: 1
+bCanIgnoreNan: 0
+bCanDemoteNonFP32Targets: 0
+bCanUseNrmhAlways: 0
+bCanFudgeSqrtSign: 0
+eOutputMode: R0
+dwOutputMask: 0xf
+bUseDepth: 0
+bUseCoverage: 0
+dwNumCombiners: 0
+dwLevel: 0
+dwSupportsSignedRemap: 0x0
+dwTextureRange: 0x0
+dwPartialTexType: 0x0
+wTextureRemap: 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210 0x3210
+numTextures: 16
+normalizationLwbemap: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
+bUsingLRPD: 0
+dwConstIsInZeroOneRange: 0x0
+bUseDX10SAT: 0
+maxCallDepthAllowed: 128
+maxDivergenceLevelAllowed: 32
+regAllocationMode: 0
+ApplyTXLLODWar: 1
+iStartInst: 0
+fmtFlags: 0x0
+paramFlags: 0x0
+optimizerConstBank: 4
+deadOutputMask: 0x0 0x0
+mrtMask: 0x0
+l0:
+// Test CVT instructions with various types
+// For small integer types and half types, we don't have small sized
+// registers in lwInst. So reads/writes to these need to reference
+// a bigger registers. Half allows only a 32-bit register to be
+// referenced instead. 
+movr (r) r1.x, (r) c[1][0]
+movr (r) r2.x, (r) c[1][1]
+cvt_rounds64.c (s64) q2.x, (s16) r2
+kil   EQ.x
+
+cvt_rounds64.c (s64) q2.x, (s8) r2
+kil   LT.x
+
+cvt_roundh.c  (h) r3.y, (r) r2.x
+kil   NAN.y
+
+cvt_roundr.c  (r) r3.y, (h) r2.x
+kil   GE.y
+
+cvt_roundh.c  (h) r3.y, (u16) r3.x
+kil  NAN.y
+
+cvt_roundf64.c  (f64) q3.x, (u32) r3.x
+kil  GT.x
+
+cvt_roundu16.c  (u16) r3.y, (f64) q3.x
+kil   GT.y;
+
+i2fs32 (r) r0, (s32) constant (0,0,0,0)
+ret 
+end

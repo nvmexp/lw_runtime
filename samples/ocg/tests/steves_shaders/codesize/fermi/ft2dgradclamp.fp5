@@ -1,0 +1,65 @@
+!!LWfp5.0
+OPTION LW_internal;
+OPTION EXT_sparse_texture2;
+# cgc version 3.4.0001, build date May 23 2017
+# command line args: -profile gp5fp -internal -oglsl
+# source file: footprint/ft2dgradclamp.glsl
+#vendor LWPU Corporation
+#version 3.4.0.1 COP Build Date May 23 2017
+#profile gp5fp
+#program main
+#semantic block : BUFFER[0]
+#semantic sam
+#semantic isam
+#semantic usam
+#var int granularity : BUFFER[0] : buffer[0][0] : -1 : 1
+#var float2 ddx : BUFFER[0] : buffer[0][8] : -1 : 1
+#var float2 ddy : BUFFER[0] : buffer[0][16] : -1 : 1
+#var float lodclamp : BUFFER[0] : buffer[0][24] : -1 : 1
+#var sampler2D sam :  : texunit 0 : -1 : 1
+#var sampler2D isam :  : texunit 1 : -1 : 1
+#var sampler2D usam :  : texunit 2 : -1 : 1
+#var float4 Color : $vout.COL00 : COL0[0] : -1 : 1
+CBUFFER buf0[] = { program.buffer[0] };
+TEMP R0, R1, R2, R3, R4;
+TEMP RC, HC;
+OUTPUT result_color0 = result.color;
+TEXTURE texture0 = texture[0];
+TEXTURE texture1 = texture[1];
+TEXTURE texture2 = texture[2];
+LDC.F32 R1.x, buf0[24];
+LDC.S32 R2.x, buf0[0];
+LDC.F32X2 R3.xy, buf0[8];
+MOV.F R4.z, R2.x;
+MOV.F R0.w, R1.x;
+MOV.F R4.xy, {0.5, 0, 0, 0}.x;
+LDC.F32X2 R0.xy, buf0[16];
+TXD.FOOTPRINT.FOOTPRINTPRED.U.LODCLAMP R2, R4.xyzz, R3, R0, texture0, 2D;
+MOV.U.CC HC.x, 0;
+MOV.U.CC HC.x (SINGLELOD), 0xffffffff;
+TXD.FOOTPRINT.FOOTPRINTPRED.U.LODCLAMP.COARSELEVEL R1, R4.xyzz, R3, R0, texture1, 2D;
+MOV.U R4.w, 0;
+MOV.U R4.w (SINGLELOD), 0xffffffff;
+TXD.FOOTPRINT.FOOTPRINTPRED.U.LODCLAMP.COARSELEVEL R0, R4.xyzz, R3, R0, texture2, 2D;
+I2F.U R3, R0;
+I2F.U R2, R2;
+I2F.U R1, R1;
+ADD.F R1, R2, R1;
+ADD.F R1, R1, R3;
+MOV.F R2.xyz, R1.yzww;
+MOV.F result_color0, R1;
+MOV.U R0.x, 0;
+MOV.U R0.x (SINGLELOD), 0xffffffff;
+IF    NE.x;
+ADD.F result_color0.w, R2.z, {1, 0, 0, 0}.x;
+ENDIF;
+MOV.U.CC RC.x, R4.w;
+IF    NE.x;
+ADD.F result_color0.z, R2.y, {1, 0, 0, 0}.x;
+ENDIF;
+MOV.U.CC RC.x, R0;
+IF    NE.x;
+ADD.F result_color0.y, R2.x, {1, 0, 0, 0}.x;
+ENDIF;
+END
+# 31 instructions, 5 R-regs

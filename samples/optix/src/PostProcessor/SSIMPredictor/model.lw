@@ -1,0 +1,1643 @@
+/******************************************************************************
+ * Copyright 2019 LWPU Corporation. All rights reserved.
+ *****************************************************************************/
+
+#include <cmath>
+
+#include <algorithm>
+#include <map>
+#include <memory>
+#include <vector>
+
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+
+#include "model.h"
+#include "util.h"
+
+// #define HAS_LWDNN_BN
+// #define HAS_LWDNN_POOL
+// #define HAS_LWDNN_TRANSFORM
+// #define HAS_LWDNN_ACTIVATION
+
+#ifndef HAS_LWDNN_POOL
+#include <thrust/device_vector.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/reduce.h>
+#endif
+
+namespace {
+
+// colwolution padding policy. default is no padding
+template <typename T>
+unsigned int colw_pad( unsigned int in,         // input channels
+                       unsigned int out,        // out channels
+                       bool         depthwise,  // depthwise colwolutions ?
+                       bool         nhwc )      // nhwc tensor?
+{
+    return 0;
+}
+
+// specialization for half
+template <>
+unsigned int colw_pad<__half>( unsigned int in,         // input channels
+                               unsigned int out,        // out channels
+                               bool         depthwise,  // depthwise colwolutions ?
+                               bool         nhwc )      // nhwc tensor?
+{
+    if( !nhwc )
+        return 0;
+
+    // pad layers with many channels which are not divisible by 8
+    if( out > 8 && !( out % 8 == 0 ) )
+        return 8 - out % 8;
+
+    return 0;
+}
+
+
+}  // anonymous namespace
+
+namespace LW {
+namespace SSIM {
+
+Layer_base::Layer_base( const char* name, lwdnnHandle_t lwdnn )
+    : m_lwdnn( lwdnn )
+    , m_input( nullptr )
+    , m_width( 0 )
+    , m_height( 0 )
+    , m_outWidth( 0 )
+    , m_outHeight( 0 )
+    , m_outChannels( 0 )
+    , m_outPad( 0 )
+    , m_outData( nullptr )
+    , m_name( name )
+    , m_multi_output( false )
+    , m_start_event( nullptr )
+    , m_stop_event( nullptr )
+{
+    checkLWDNN( lwdnnCreateTensorDescriptor( &m_outTensorDesc ) );
+
+    lwdnnGetStream( m_lwdnn, &m_stream );
+
+    lwdaEventCreate( &m_start_event );
+    lwdaEventCreate( &m_stop_event );
+    m_evaltime = 0.f;
+}
+
+Layer_base::~Layer_base()
+{
+    if( m_outTensorDesc != nullptr )
+    {
+        checkLWDNN( lwdnnDestroyTensorDescriptor( m_outTensorDesc ) );
+        m_outTensorDesc = nullptr;
+    }
+
+    m_lwdnn = nullptr;
+
+    if( m_start_event )
+        checkLwdaErrors( lwdaEventDestroy( m_start_event ) );
+
+    if( m_stop_event )
+        checkLwdaErrors( lwdaEventDestroy( m_stop_event ) );
+}
+
+template <typename T>
+Layer<T>::Layer( const char* name, lwdnnHandle_t lwdnn )
+    : Layer_base( name, lwdnn )
+    , m_scratch_buffer( nullptr )
+
+{
+}
+
+template <typename T>
+Layer<T>::~Layer()
+{
+    if( m_scratch_buffer )
+    {
+        checkLwdaErrors( lwdaFree( m_scratch_buffer ) );
+        m_scratch_buffer = 0;
+    }
+
+    // note: this part is not thread-safe
+    if( s_device_buffer != nullptr )
+    {
+        checkLwdaErrors( lwdaFree( s_device_buffer ) );
+        s_device_buffer      = nullptr;
+        s_device_buffer_size = 0;
+    }
+}
+
+template <typename T>
+lwdaError Layer<T>::assure_buffer_size( size_t size )
+{
+    lwdaError ret = lwdaSuccess;
+    if( s_device_buffer_size < size )
+    {
+        // alloc / realloc
+        if( s_device_buffer != nullptr )
+        {
+            this->checkLwdaErrors( lwdaFree( s_device_buffer ) );
+            s_device_buffer      = nullptr;
+            s_device_buffer_size = 0;
+        }
+
+        ret                  = lwdaMalloc( &s_device_buffer, size );
+        s_device_buffer_size = size;
+    }
+
+    return ret;
+}
+
+
+// Poor man tensor colwersion.
+// Taken from transform_tensor.hxx in lwDNN
+
+template <typename T_IN, typename T_OUT>
+__launch_bounds__( 256 ) static __global__
+    void k_nchw2nhwc( int n, int cOut, int c, int h, int w, const T_IN* input, T_OUT* output )
+{
+    __shared__ T_IN shbuf[32 * ( 32 + 1 )];  // +1 to avoid bank conflicts
+    // Each CTA is responsible for 32 elements per hw image and 32 c values. Each warp reads
+    // 32 contiguous elements in HW space, and each CTA reads 8 c's per iteration, looping at
+    // most 4 times to complete it's assigned quota of reads.
+    // blockIdx.x keeps track of which 32-element hw chunk the current CTA is working on.
+    // blockIdx.y keeps track of which 32-deep c chunk the current CTA is working on.
+    int tid           = threadIdx.x;
+    int wid           = tid / 32;  // 8-warp CTA
+    int withinWarpTid = tid % 32;
+    int ci_start      = blockIdx.y * 32;
+    int cStride       = h * w;
+    int hwi_start     = blockIdx.x * 32;
+    int ni            = blockIdx.z;
+    int nStride       = c * h * w;
+
+    const T_IN* A = &( input[( ci_start + wid ) * cStride + hwi_start + ni * nStride] );
+    if( hwi_start + withinWarpTid < h * w )
+    {
+        if( ( ci_start + 32 ) < c )
+        {
+            int ci = wid;  // between 0 and 7
+#pragma unroll 4
+            for( int cLoopIdx = 0; cLoopIdx < 4; cLoopIdx++ )
+            {  // Again. 8 warp-CTA.
+                shbuf[withinWarpTid * 33 + ci] = A[withinWarpTid];
+                A                              = &A[8 * cStride];
+                ci += 8;
+            }
+        }
+        else
+        {
+            for( int ci = wid; ci < 32; ci += 8 )
+            {  // Again. 8 warp-CTA.
+                if( ( ci + ci_start ) < c )
+                {
+                    shbuf[withinWarpTid * 33 + ci] = A[withinWarpTid];
+                }
+                A = &A[8 * cStride];
+            }
+        }
+    }
+    __syncthreads();
+
+    int ciOut      = ci_start + withinWarpTid;
+    int nStrideOut = cOut * h * w;
+    if( ciOut < c )
+    {
+        if( hwi_start + 32 < h * w )
+        {
+            int hwI = wid;
+#pragma unroll 4
+            for( int hwLoopIdx = 0; hwLoopIdx < 4; ++hwLoopIdx )
+            {
+                T_OUT* outputAddr = &output[ni * nStrideOut + ( hwi_start + hwI ) * cOut + ciOut];
+                T_IN*  inputAddr  = &shbuf[(hwI)*33 + withinWarpTid];
+                *outputAddr       = *inputAddr;
+                hwI += 8;
+            }
+        }
+        else
+        {
+            for( int hwI = wid; hwI < 32; hwI += 8 )
+            {
+                if( hwi_start + hwI < h * w )
+                {
+                    T_OUT* outputAddr = &output[ni * nStrideOut + ( hwi_start + hwI ) * cOut + ciOut];
+                    T_IN*  inputAddr  = &shbuf[(hwI)*33 + withinWarpTid];
+                    *outputAddr       = *inputAddr;
+                }
+            }
+        }
+    }
+}
+
+template <typename IN, typename OUT>
+void nchw2nhwc( OUT* dst, const IN* src, int n, int c, int h, int w, lwdaStream_t stream )
+
+{
+    dim3 block( 256, 1, 1 );
+    int  num_hw = RoundUp( h * w, 32 );
+    int  num_c  = RoundUp( c, 32 );
+    dim3 grid( num_hw, num_c, n );
+
+    k_nchw2nhwc<IN, OUT><<<grid, block, 0, stream>>>( n, c, c, h, w, src, dst );
+}
+
+
+// Taken from transform_tensor.hxx in lwDNN, dropped alpha and beta from the code
+template <typename T_IN, typename T_OUT>
+__launch_bounds__( 256 ) static __global__ void k_nhwc2nchw( int n, int c, int h, int w, const T_IN* input, T_OUT* output )
+{
+    __shared__ T_IN shbuf[32 * ( 32 + 1 )];  // +1 to avoid bank conflicts
+    // Each CTA is responsible for 32 elements per hw image and 32 c values. Each warp reads
+    // 32 contiguous elements in HW space, and each CTA reads 8 c's per iteration, looping at
+    // most 4 times to complete it's assigned quota of reads.
+    // blockIdx.x keeps track of which 32-element hw chunk the current CTA is working on.
+    // blockIdx.y keeps track of which 32-deep c chunk the current CTA is working on.
+    int tid           = threadIdx.x;
+    int wid           = tid / 32;  // 8-warp CTA
+    int withinWarpTid = tid % 32;
+    int ci_start      = blockIdx.y * 32;
+    int cStride       = h * w;
+    int hwi_start     = blockIdx.x * 32;
+    int ni            = blockIdx.z;
+    int nStride       = c * h * w;
+    int cIn           = c;
+    int nStrideIn     = cIn * h * w;
+
+    int ciOut = ci_start + withinWarpTid;
+    if( ciOut < c )
+    {
+        const T_IN* A = &( input[ni * nStrideIn + hwi_start * cIn + ciOut] );
+        if( hwi_start + 32 < h * w )
+        {
+            int hwI = wid;
+#pragma unroll 4
+            for( int hwLoopIdx = 0; hwLoopIdx < 4; ++hwLoopIdx )
+            {
+                shbuf[(hwI)*33 + withinWarpTid] = A[hwI * cIn];
+                hwI += 8;
+            }
+        }
+        else
+        {
+            for( int hwI = wid; hwI < 32; hwI += 8 )
+            {
+                if( hwi_start + hwI < h * w )
+                {
+                    shbuf[(hwI)*33 + withinWarpTid] = A[hwI * cIn];
+                }
+            }
+        }
+    }
+    __syncthreads();
+
+    T_OUT* B = &( output[( ci_start + wid ) * cStride + hwi_start + ni * nStride] );
+    if( hwi_start + withinWarpTid < h * w )
+    {
+        if( ( ci_start + 32 ) < c )
+        {
+            int ci = wid;  // between 0 and 7
+#pragma unroll 4
+            for( int cLoopIdx = 0; cLoopIdx < 4; cLoopIdx++ )
+            {  // Again. 8 warp-CTA.
+                T_OUT* outputAddr = &( B[withinWarpTid] );
+                T_IN*  inputAddr  = &( shbuf[withinWarpTid * 33 + ci] );
+                *outputAddr       = *inputAddr;
+                B                 = &B[8 * cStride];
+                ci += 8;
+            }
+        }
+        else
+        {
+            for( int ci = wid; ci < 32; ci += 8 )
+            {  // Again. 8 warp-CTA.
+                if( ( ci + ci_start ) < c )
+                {
+                    T_OUT* outputAddr = &( B[withinWarpTid] );
+                    T_IN*  inputAddr  = &( shbuf[withinWarpTid * 33 + ci] );
+                    *outputAddr       = *inputAddr;
+                }
+                B = &B[8 * cStride];
+            }
+        }
+    }
+}
+
+
+template <typename IN, typename OUT>
+void nhwc2nchw( OUT* dst, const IN* src, int n, int c, int h, int w, lwdaStream_t stream )
+{
+    dim3 block( 256, 1, 1 );
+    int  num_hw = RoundUp( h * w, 32 );
+    int  num_c  = RoundUp( c, 32 );
+    dim3 grid( num_hw, num_c, n );
+
+    k_nhwc2nchw<IN, OUT><<<grid, block, 0, stream>>>( n, c, h, w, src, dst );
+}
+
+
+// kernel to copy and colwert data type
+template <typename T>
+static __global__ void k_colwert( T* out, const float* in, size_t count )
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if( x < count )
+        out[x] = in[x];  // data type colwersions
+}
+
+// function template for coping
+template <typename T>
+lwdaError_t Layer<T>::copy_weight_data( T*           dst,     // device
+                                        const float* src,     // host, typically floats
+                                        size_t       count )  // number of elements
+{
+    size_t size = count * sizeof( float );
+
+    if( sizeof( float ) == sizeof( T ) )
+    {
+        return lwdaMemcpyAsync( dst, src, sizeof( T ) * count, lwdaMemcpyHostToDevice, this->m_stream );
+    }
+    else
+    {
+
+        // data type colwerion requied
+
+        checkLwdaErrors( assure_buffer_size( size ) );
+
+        // copy data to temp buffer
+        checkLwdaErrors( lwdaMemcpyAsync( s_device_buffer, src, size, lwdaMemcpyHostToDevice, this->m_stream ) );
+
+        dim3 dimBlock( LWDA_BLOCK * LWDA_BLOCK );
+        dim3 blockGrid = dim3( RoundUp( (unsigned int)count, dimBlock.x ) );
+        k_colwert<T><<<blockGrid, dimBlock, 0, this->m_stream>>>( dst, static_cast<float*>( s_device_buffer ), count );
+
+        return this->m_status;
+    }
+}
+
+template <typename T>
+lwdaError_t Layer<T>::copy_float_weight_data( float*       dst,     // device
+                                              const float* src,     // host, typically floats
+                                              size_t       count )  // number of elements
+{
+    return lwdaMemcpyAsync( dst, src, sizeof( float ) * count, lwdaMemcpyHostToDevice, this->m_stream );
+}
+
+
+template <typename T>
+const char* Colwolution_layer<T>::algo_name( lwdnnColwolutionFwdAlgo_t algo )
+{
+    switch( algo )
+    {
+        case LWDNN_COLWOLUTION_FWD_ALGO_IMPLICIT_GEMM:
+            return "IGM";
+        case LWDNN_COLWOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM:
+            return "IPG";
+        case LWDNN_COLWOLUTION_FWD_ALGO_GEMM:
+            return "GEM";
+        case LWDNN_COLWOLUTION_FWD_ALGO_DIRECT:
+            return "CLW";
+        case LWDNN_COLWOLUTION_FWD_ALGO_FFT:
+            return "FFT";
+        case LWDNN_COLWOLUTION_FWD_ALGO_FFT_TILING:
+            return "FTT";
+        case LWDNN_COLWOLUTION_FWD_ALGO_WINOGRAD:
+            return "WGD";
+        case LWDNN_COLWOLUTION_FWD_ALGO_WINOGRAD_NONFUSED:
+            return "WGN";
+        default:
+            return "Error";
+    }
+}
+
+template <typename T>
+Colwolution_layer<T>::Colwolution_layer( const char*       name,
+                                         int               algorithm,
+                                         lwdnnHandle_t     lwdnn,
+                                         const Layer_base* input,
+                                         unsigned int      kernelSize,
+                                         unsigned int      stride,
+                                         unsigned int      padding,
+                                         bool              depthwise,
+                                         unsigned int      outChannels,
+                                         bool              bias,
+                                         bool              alloc,
+                                         ILogger*          logger )
+    : Layer<T>( name, lwdnn )
+    , m_kernelSize( kernelSize )
+    , m_padding( padding )
+    , m_stride( stride )
+    , m_filterDesc( nullptr )
+    , m_colwDesc( nullptr )
+    , m_filterWeights( nullptr )
+    , m_has_bias( bias )
+    , m_bias( nullptr )
+{
+    this->set_logger( logger );
+    this->m_input         = input;
+    this->m_tensor_format = input->m_tensor_format;
+
+
+    m_groupCount = depthwise ? this->m_input->m_outChannels : 1;
+
+    this->m_outPad = colw_pad<T>( this->m_input->m_outChannels, outChannels, depthwise, this->m_tensor_format == LWDNN_TENSOR_NHWC );
+
+    outChannels += this->m_outPad;
+
+    // Allocate descriptors
+    this->checkLWDNN( lwdnnCreateFilterDescriptor( &m_filterDesc ) );
+    this->checkLWDNN( lwdnnCreateColwolutionDescriptor( &m_colwDesc ) );
+
+    const int fdims[] = {int( outChannels ), int( this->m_input->m_outChannels / m_groupCount ),
+                         int( this->m_kernelSize ), int( this->m_kernelSize )};
+    this->checkLWDNN( lwdnnSetFilterNdDescriptor( m_filterDesc, this->LWDNN_DTYPE, this->m_tensor_format, 4, fdims ) );
+
+    const int pad[] = {int( padding ), int( padding )};
+    const int str[] = {int( stride ), int( stride )};
+    const int dil[] = {1, 1};
+    this->checkLWDNN( lwdnnSetColwolutionNdDescriptor( m_colwDesc, 2, pad, str, dil, LWDNN_CROSS_CORRELATION, this->LWDNN_DTYPE ) );
+
+    // ignore errors, if not suppoted (lwdnn falls back to the defailt mode)
+    if( this->m_tensor_format == LWDNN_TENSOR_NHWC )
+        lwdnnSetColwolutionMathType( m_colwDesc, LWDNN_TENSOR_OP_MATH );
+
+    if( m_groupCount != 1 )
+        this->checkLWDNN( lwdnnSetColwolutionGroupCount( m_colwDesc, m_groupCount ) );
+
+    int cdims[4];
+    this->checkLWDNN( lwdnnGetColwolutionNdForwardOutputDim( m_colwDesc, this->m_input->m_outTensorDesc,
+                                                             this->m_filterDesc, 4, cdims ) );
+    unsigned int n      = cdims[0];
+    this->m_outChannels = cdims[1];
+    this->m_outHeight   = cdims[2];
+    this->m_outWidth    = cdims[3];
+
+    if( !( n == 1 && this->m_outChannels == outChannels ) )
+        this->log_error( "Layer %s: wrong output dimensions", this->m_name.c_str() );
+
+    const int dims[] = {1, (int)this->m_outChannels, (int)this->m_outHeight, (int)this->m_outWidth};
+    this->checkLWDNN( lwdnnSetTensorNdDescriptorEx( this->m_outTensorDesc, this->m_tensor_format, this->LWDNN_DTYPE, 4, dims ) );
+
+    if( algorithm == -1 )
+    {
+        int                           requestedAlgoCount = 4;
+        int                           returnedAlgoCount[1];
+        lwdnnColwolutionFwdAlgoPerf_t results[4];
+        this->checkLWDNN( lwdnnGetColwolutionForwardAlgorithm_v7( this->m_lwdnn, this->m_input->m_outTensorDesc,
+                                                                  m_filterDesc, m_colwDesc, this->m_outTensorDesc,
+                                                                  requestedAlgoCount, returnedAlgoCount, results ) );
+
+        this->log_debug( "determining colwolution algorithm for colw layer %s (found %d algorithms)",
+                         this->m_name.c_str(), *returnedAlgoCount );
+        m_colwFwdAlgo       = LWDNN_COLWOLUTION_FWD_ALGO_COUNT;
+        unsigned int memmax = 100 * 1024 * 1024;
+
+        char* mm;
+        if( mm = getelw( "SSIM_MEMORY" ) )
+            sscanf( mm, "%d", &memmax );
+
+        for( int algoIndex = 0; algoIndex < *returnedAlgoCount; ++algoIndex )
+        {
+            this->log_debug( "colw algorithm %s (%i): %f time requiring %.1f MiB memory, math %d",
+                             algo_name( results[algoIndex].algo ), results[algoIndex].algo, results[algoIndex].time,
+                             results[algoIndex].memory / 1000000.0, (int)results[algoIndex].mathType );
+            if( (unsigned int)results[algoIndex].memory <= memmax )
+            {
+                this->log_debug( "--> using this kernel, %u", (unsigned)results[algoIndex].memory );
+                m_colwFwdAlgo = results[algoIndex].algo;
+                break;
+            }
+        }
+        if( m_colwFwdAlgo == LWDNN_COLWOLUTION_FWD_ALGO_COUNT )
+        {
+            m_colwFwdAlgo = LWDNN_COLWOLUTION_FWD_ALGO_WINOGRAD;
+            this->log_debug( "--> using Winograd kernel, default" );
+        }
+    }
+    else
+    {
+        m_colwFwdAlgo = (lwdnnColwolutionFwdAlgo_t)algorithm;
+    }
+
+
+    if( alloc )
+    {
+        if( bias )
+            this->checkLwdaErrors( lwdaMalloc( &m_bias, sizeof( T ) * this->m_outChannels ) );
+
+        int nWeights = m_kernelSize * m_kernelSize * this->m_input->m_outChannels * this->m_outChannels;
+        this->checkLwdaErrors( lwdaMalloc( &m_filterWeights, sizeof( T ) * nWeights ) );
+    }
+}
+
+template <typename T>
+Colwolution_layer<T>::~Colwolution_layer()
+{
+    if( m_filterWeights != nullptr )
+    {
+        this->checkLwdaErrors( lwdaFree( m_filterWeights ) );
+        m_filterWeights = nullptr;
+    }
+    if( m_bias != nullptr )
+    {
+        this->checkLwdaErrors( lwdaFree( m_bias ) );
+        m_bias = nullptr;
+    }
+    if( m_filterDesc != nullptr )
+    {
+        this->checkLWDNN( lwdnnDestroyFilterDescriptor( m_filterDesc ) );
+        m_filterDesc = nullptr;
+    }
+    if( m_colwDesc != nullptr )
+    {
+        this->checkLWDNN( lwdnnDestroyColwolutionDescriptor( m_colwDesc ) );
+        m_colwDesc = nullptr;
+    }
+}
+
+
+template <typename T>
+bool Colwolution_layer<T>::set_weights( const std::vector<float>& weights,
+                                        const std::vector<float>& bias )  //optional, no bias if empty
+{
+    this->reset_error();
+
+    if( weights.size()
+        != m_kernelSize * m_kernelSize * ( ( this->m_input->m_outChannels - this->m_input->m_outPad ) / m_groupCount )
+               * ( this->m_outChannels - this->m_outPad ) )
+    {
+        this->log_error( "Colw Layer %s: size of weights vector wrong", this->m_name.c_str() );
+        return false;
+    }
+
+    // no need to swap for depthwise colwolutions?
+    if( this->m_tensor_format == LWDNN_TENSOR_NHWC )
+    {
+        T* buf;
+        size_t sz = this->m_kernelSize * this->m_kernelSize * ( this->m_input->m_outChannels / m_groupCount ) * this->m_outChannels;
+
+        if( weights.size() < sz )
+            this->log_debug( "Colw Layer %s: weights tensor size does not match, padding slices with zero", this->m_name.c_str() );
+        this->checkLwdaErrors( lwdaMalloc( &buf, sizeof( T ) * sz ) );
+        this->checkLwdaErrors( lwdaMemset( buf, 0, sizeof( T ) * sz ) );
+        if( this->m_input->m_outPad > 0 )
+        {
+            // not partilwlarly efficient, but ok for init
+            size_t in_lsize = ( ( this->m_input->m_outChannels - this->m_input->m_outPad ) / m_groupCount )
+                              * this->m_kernelSize * this->m_kernelSize;
+            size_t out_lsize = ( this->m_input->m_outChannels / m_groupCount ) * this->m_kernelSize * this->m_kernelSize;
+
+            for( size_t i = 0; i < this->m_outChannels; ++i )
+            {
+                this->checkLwdaErrors( this->copy_weight_data( buf + i * out_lsize, &weights[i * in_lsize], in_lsize ) );
+            }
+        }
+        else
+        {
+            this->checkLwdaErrors( this->copy_weight_data( buf, &weights[0], weights.size() ) );
+        }
+
+        const int dims[] = {int( this->m_outChannels ), int( this->m_input->m_outChannels / this->m_groupCount ),
+                            int( this->m_kernelSize ), int( this->m_kernelSize )};
+
+#ifdef HAS_LWDNN_TRANSFORM
+        lwdnnTensorDescriptor_t in;
+        lwdnnTensorDescriptor_t out;
+
+        this->checkLWDNN( lwdnnCreateTensorDescriptor( &in ) );
+        this->checkLWDNN( lwdnnCreateTensorDescriptor( &out ) );
+
+        this->checkLWDNN( lwdnnSetTensorNdDescriptorEx( in, LWDNN_TENSOR_NCHW, this->LWDNN_DTYPE, 4, dims ) );
+
+        this->checkLWDNN( lwdnnSetTensorNdDescriptorEx( out, LWDNN_TENSOR_NHWC, this->LWDNN_DTYPE, 4, dims ) );
+
+        float alpha = 1.0f;
+        float beta  = 0.0f;
+        this->checkLWDNN( lwdnnTransformTensor( this->m_lwdnn, &alpha, in, buf, &beta, out, m_filterWeights ) );
+#else
+        nchw2nhwc( m_filterWeights, buf, dims[0], dims[1], dims[2], dims[3], this->m_stream );
+#endif
+
+        this->checkLwdaErrors( lwdaFree( buf ) );
+
+#ifdef HAS_LWDNN_TRANSFORM
+        this->checkLWDNN( lwdnnDestroyTensorDescriptor( out ) );
+        this->checkLWDNN( lwdnnDestroyTensorDescriptor( in ) );
+#endif
+    }
+    else
+    {
+        MI_ASSERT( this->m_outPad == 0 );  // pad not used/not implemented
+        this->checkLwdaErrors( this->copy_weight_data( m_filterWeights, &weights[0], weights.size() ) );
+    }
+
+
+    if( !bias.empty() )
+    {
+        if( bias.size() != ( this->m_outChannels - this->m_outPad ) / m_groupCount )
+        {
+            this->log_error( "Layer %s: size of bias vector wrong", this->m_name.c_str() );
+            return false;
+        }
+
+        MI_ASSERT( m_bias );
+        this->checkLwdaErrors( this->copy_weight_data( m_bias, &bias[0], this->m_outChannels ) );
+    }
+
+    return true;
+}
+
+template <typename T>
+size_t Colwolution_layer<T>::get_weights_size( Eval_mode mode ) const
+{
+    size_t n_weights = m_kernelSize * m_kernelSize * this->m_input->m_outChannels * this->m_outChannels;
+    return sizeof( T ) * n_weights + ( m_has_bias ? sizeof( T ) * this->m_outChannels : 0 );
+}
+
+template <typename T>
+size_t Colwolution_layer<T>::get_workspace_size( Eval_mode mode )
+{
+    size_t fwd = 0;
+
+    if( mode & EVAL_FWD )
+        this->checkLWDNN( lwdnnGetColwolutionForwardWorkspaceSize( this->m_lwdnn, this->m_input->m_outTensorDesc, m_filterDesc,
+                                                                   m_colwDesc, this->m_outTensorDesc, m_colwFwdAlgo, &fwd ) );
+    this->m_status = lwdaSuccess;
+
+    return fwd;
+}
+
+
+template <typename T>
+Batchnorm_layer<T>::Batchnorm_layer( const char* name, lwdnnHandle_t lwdnn, const Layer_base* input, bool alloc, ILogger* logger )
+    : Layer<T>( name, lwdnn )
+    , m_bnDesc( nullptr )
+    , m_alpha( nullptr )
+    , m_beta( nullptr )
+    , m_mean( nullptr )
+    , m_var( nullptr )
+{
+    this->set_logger( logger );
+
+    this->m_input         = input;
+    this->m_tensor_format = input->m_tensor_format;
+    this->m_width         = input->m_outWidth;
+    this->m_height        = input->m_outHeight;
+    this->m_outWidth      = input->m_outWidth;
+    this->m_outHeight     = input->m_outHeight;
+    this->m_outChannels   = input->m_outChannels;
+    this->m_outPad        = input->m_outPad;
+
+// Allocate descriptors
+#ifdef HAS_LWDNN_BN
+    this->checkLWDNN( lwdnnCreateTensorDescriptor( &m_bnDesc ) );
+    // lwdnn docs say the created descriptor is float if data inpuy is half
+    this->checkLWDNN( lwdnnDeriveBNTensorDescriptor( m_bnDesc, input->m_outTensorDesc, LWDNN_BATCHNORM_SPATIAL ) );
+#endif
+
+    // clone descriptor
+    this->checkLWDNN( lwdnnCreateTensorDescriptor( &this->m_outTensorDesc ) );
+    const int dims[] = {1, int( this->m_outChannels ), int( this->m_outHeight ), int( this->m_outWidth )};
+    this->checkLWDNN( lwdnnSetTensorNdDescriptorEx( this->m_outTensorDesc, this->m_tensor_format, this->LWDNN_DTYPE, 4, dims ) );
+
+
+    // Batchnorm weights are always float
+    if( alloc )
+    {
+        this->checkLwdaErrors( lwdaMalloc( &m_alpha, sizeof( float ) * this->m_outChannels ) );
+        this->checkLwdaErrors( lwdaMalloc( &m_beta, sizeof( float ) * this->m_outChannels ) );
+        this->checkLwdaErrors( lwdaMalloc( &m_mean, sizeof( float ) * this->m_outChannels ) );
+        this->checkLwdaErrors( lwdaMalloc( &m_var, sizeof( float ) * this->m_outChannels ) );
+    }
+}
+
+template <typename T>
+Batchnorm_layer<T>::~Batchnorm_layer()
+{
+    if( m_bnDesc != nullptr )
+    {
+        this->checkLWDNN( lwdnnDestroyTensorDescriptor( m_bnDesc ) );
+        m_bnDesc = nullptr;
+    }
+
+
+    if( m_alpha != nullptr )
+    {
+        this->checkLwdaErrors( lwdaFree( m_alpha ) );
+        m_alpha = nullptr;
+    }
+
+    if( m_beta != nullptr )
+    {
+        this->checkLwdaErrors( lwdaFree( m_beta ) );
+        m_beta = nullptr;
+    }
+
+    if( m_mean != nullptr )
+    {
+        this->checkLwdaErrors( lwdaFree( m_mean ) );
+        m_mean = nullptr;
+    }
+
+    if( m_var != nullptr )
+    {
+        this->checkLwdaErrors( lwdaFree( m_var ) );
+        m_var = nullptr;
+    }
+}
+
+template <typename T>
+bool Batchnorm_layer<T>::set_weights( const std::vector<float>& alpha,
+                                      const std::vector<float>& beta,
+                                      const std::vector<float>& mean,
+                                      const std::vector<float>& var,
+                                      float                     eps )
+{
+    this->reset_error();
+
+    if( alpha.size() != this->m_outChannels - this->m_outPad || beta.size() != this->m_outChannels - this->m_outPad
+        || mean.size() != this->m_outChannels - this->m_outPad || var.size() != this->m_outChannels - this->m_outPad )
+    {
+        this->log_error( "BN Layer %s:  size of weights vector wrong", this->m_name.c_str() );
+        return false;
+    }
+
+    // Copy floats is a float tensor for half bactchnorm
+    this->checkLwdaErrors( this->copy_float_weight_data( m_alpha, &alpha[0], alpha.size() ) );
+    this->checkLwdaErrors( this->copy_float_weight_data( m_beta, &beta[0], beta.size() ) );
+    this->checkLwdaErrors( this->copy_float_weight_data( m_mean, &mean[0], mean.size() ) );
+    this->checkLwdaErrors( this->copy_float_weight_data( m_var, &var[0], var.size() ) );
+
+    // LWDNN batchnorm does not work with smaller epsilons
+    this->m_eps = double( eps ) < 1e-5 ? 1e-5 : double( eps );
+
+    return true;
+}
+
+template <typename T>
+size_t Batchnorm_layer<T>::get_weights_size( Eval_mode mode ) const
+{
+    return 4 * sizeof( float ) * this->m_outChannels;
+}
+
+template <typename T>
+size_t Batchnorm_layer<T>::get_workspace_size( Eval_mode mode )
+{
+    return 0;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////
+// LWCA kernels
+
+template <typename T>
+static __global__ void k_ReLu( T* inout, int width, int height, int channels )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z * blockDim.z + threadIdx.z;
+
+    if( x < width && y < height && c < channels )
+    {
+        T val                                     = inout[c * height * width + y * width + x];
+        val                                       = max( val, 0.0f );
+        inout[c * height * width + y * width + x] = val;
+    }
+}
+
+// moving kernel
+template <typename T>
+static __global__ void k_ReLu2( T* out, const T* in, int width, int height, int channels )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z * blockDim.z + threadIdx.z;
+
+    if( x < width && y < height && c < channels )
+    {
+        T val                                   = in[c * height * width + y * width + x];
+        val                                     = max( val, 0.0f );
+        out[c * height * width + y * width + x] = val;
+    }
+}
+
+
+template <typename T>
+static __global__ void k_Bias( const T* in, const T* bias, T* out, bool nhwc, int width, int height, int channels )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z * blockDim.z + threadIdx.z;
+
+
+// arithmetic half operators are first defined for sm53
+#if __LWDA_ARCH__ >= 530
+    typedef T C;
+#else
+    typedef float C;
+#endif
+
+    if( x < width && y < height && c < channels )
+    {
+        if( nhwc )
+        {
+            C ilwal                                      = in[y * width * channels + x * channels + c];
+            C outVal                                     = ilwal + C( bias[c] );
+            out[y * width * channels + x * channels + c] = outVal;
+        }
+        else
+        {
+            C ilwal                                 = in[c * height * width + y * width + x];
+            C outVal                                = ilwal + C( bias[c] );
+            out[c * height * width + y * width + x] = outVal;
+        }
+    }
+}
+
+
+template <typename T>
+void Colwolution_layer<T>::fwd_eval( void* workspace, size_t workspaceSize )
+{
+    this->reset_error();
+
+    lwdaEventRecord( this->m_start_event );
+
+    float alpha = 1.0f;
+    float beta  = 0.0f;
+
+    this->checkLWDNN( lwdnnColwolutionForward( this->m_lwdnn, &alpha, this->m_input->m_outTensorDesc, this->m_input->m_outData,
+                                               m_filterDesc, m_filterWeights, m_colwDesc, m_colwFwdAlgo, workspace,
+                                               workspaceSize, &beta, this->m_outTensorDesc, this->m_outData ) );
+
+//#define DEBUG_COLW
+#ifdef DEBUG_COLW
+    // Note: activations are not implemented
+
+    MI_ASSERT( this->m_input->m_outWidth / this->m_stride == this->m_outWidth );
+    MI_ASSERT( this->m_input->m_outHeight / this->m_stride == this->m_outHeight );
+
+
+    size_t pxin     = this->m_input->m_outWidth * this->m_input->m_outHeight * this->m_input->m_outChannels;
+    size_t pxin_pad = ( this->m_input->m_outWidth + 2 * this->m_padding )
+                      * ( this->m_input->m_outHeight + 2 * this->m_padding ) * this->m_input->m_outChannels;
+    size_t pxout = this->m_outWidth * this->m_outHeight * this->m_outChannels;
+
+    std::vector<T> in( pxin_pad, 0 );
+    std::vector<T> out( pxout );
+
+
+    this->checkLwdaErrors( lwdaMemcpy( &in[0], this->m_input->m_outData, pxin * sizeof( T ), lwdaMemcpyDeviceToHost ) );
+
+    if( this->m_padding > 0 )
+    {
+        // unpad, from the tail
+        for( int c = this->m_input->m_outChannels - 1; c >= 0; --c )
+        {
+            for( int h = this->m_input->m_outHeight - 1; h >= 0; --h )
+            {
+                for( int w = this->m_input->m_outWidth - 1; w >= 0; --w )
+                {
+                    int idx_pad =
+                        c * ( this->m_input->m_outWidth + 2 * this->m_padding ) * ( this->m_input->m_outHeight + 2 * this->m_padding )
+                        + ( h + this->m_padding ) * ( this->m_input->m_outWidth + 2 * this->m_padding ) + w + this->m_padding;
+                    int idx = c * this->m_input->m_outWidth * this->m_input->m_outHeight + h * this->m_input->m_outWidth + w;
+                    from_float( in[idx_pad], to_float( in[idx] ) );
+                    from_float( in[idx], 0.0f );
+                }
+            }
+        }
+    }
+
+    std::vector<T> weights( this->m_kernelSize * this->m_kernelSize
+                            * ( ( this->m_outChannels * this->m_input->m_outChannels ) / this->m_groupCount ) );
+    this->checkLwdaErrors( lwdaMemcpy( &weights[0], this->m_filterWeights, sizeof( T ) * weights.size(), lwdaMemcpyDeviceToHost ) );
+
+
+    int ksh = ( this->m_kernelSize - 1 ) / 2;  // kernel size half
+
+    if( this->m_groupCount > 1 )
+    {
+        for( int c = 0; c < this->m_outChannels; ++c )
+        {
+            for( int h = 0; h < this->m_outHeight; ++h )
+            {
+                for( int w = 0; w < this->m_outWidth; ++w )
+                {
+                    float sum = 0.0f;
+                    for( int j = -ksh; j <= ksh; ++j )
+                    {
+                        for( int i = -ksh; i <= ksh; ++i )
+                        {
+                            int idx = c * ( this->m_input->m_outWidth + 2 * this->m_padding )
+                                          * ( this->m_input->m_outHeight + 2 * this->m_padding )
+                                      + ( h * this->m_stride + j + this->m_padding ) * ( this->m_input->m_outWidth + 2 * this->m_padding )
+                                      + w * this->m_stride + i + this->m_padding;
+                            MI_ASSERT( idx >= 0 );
+                            MI_ASSERT( idx < pxin_pad );
+                            sum += to_float( in[idx] )
+                                   * to_float( weights[c * this->m_kernelSize * this->m_kernelSize + ( j + ksh ) * this->m_kernelSize + i + ksh] );
+                        }
+                    }
+                    from_float( out[c * this->m_outHeight * this->m_outWidth + h * this->m_outWidth + w], sum );
+                }
+            }
+        }
+    }
+    else
+    {
+        for( int c = 0; c < this->m_outChannels; ++c )
+        {
+            for( int h = 0; h < this->m_outHeight; ++h )
+            {
+                for( int w = 0; w < this->m_outWidth; ++w )
+                {
+                    float sum = 0.0f;
+                    for( int ic = 0; ic < this->m_input->m_outChannels; ++ic )
+                    {
+                        for( int j = -ksh; j <= ksh; ++j )
+                        {
+                            for( int i = -ksh; i <= ksh; ++i )
+                            {
+                                int idx = ic * ( this->m_input->m_outWidth + 2 * this->m_padding )
+                                              * ( this->m_input->m_outHeight + 2 * this->m_padding )
+                                          + ( h * this->m_stride + j + this->m_padding )
+                                                * ( this->m_input->m_outWidth + 2 * this->m_padding )
+                                          + w * m_stride + i + m_padding;
+                                MI_ASSERT( idx >= 0 );
+                                MI_ASSERT( idx < pxin_pad );
+                                sum += to_float( in[idx] )
+                                       * to_float( weights[c * this->m_kernelSize * this->m_kernelSize * this->m_input->m_outChannels
+                                                           + ic * this->m_kernelSize * this->m_kernelSize + ( j + ksh ) * this->m_kernelSize + i + ksh] );
+                            }
+                        }
+                    }
+                    from_float( out[c * this->m_outHeight * this->m_outWidth + h * this->m_outWidth + w], sum );
+                }
+            }
+        }
+    }
+
+    lwdaMemcpy( this->m_outData, &out[0], pxout * sizeof( T ), lwdaMemcpyHostToDevice );
+#endif
+
+    if( this->m_status == lwdaSuccess )
+    {
+        if( m_bias )
+        {
+            dim3 dimBlock( LWDA_BLOCK * 4, LWDA_BLOCK / 4, 1 );
+            dim3 blockGrid =
+                dim3( RoundUp( this->m_outWidth, dimBlock.x ), RoundUp( this->m_outHeight, dimBlock.y ), this->m_outChannels );
+            k_Bias<<<blockGrid, dimBlock, 0, this->m_stream>>>( static_cast<T*>( this->m_outData ), this->m_bias,
+                                                                static_cast<T*>( this->m_outData ),
+                                                                this->m_tensor_format == LWDNN_TENSOR_NHWC,
+                                                                this->m_outWidth, this->m_outHeight, this->m_outChannels );
+        }
+    }
+
+    lwdaEventRecord( this->m_stop_event );
+    lwdaEventSynchronize( this->m_stop_event );
+    this->m_evaltime = 0.f;
+    lwdaEventElapsedTime( &this->m_evaltime, this->m_start_event, this->m_stop_event );
+}
+
+
+template <typename T>
+void Classifier_layer<T>::fwd_eval( void* workspace, size_t workspaceSize )
+{
+    // Superclass call to do whole work
+    Colwolution_layer<T>::fwd_eval( workspace, workspaceSize );
+
+    // Keep ssim value for grabbing
+    T out;
+    this->checkLwdaErrors( lwdaMemcpy( &out, this->m_outData, sizeof( out ), lwdaMemcpyDeviceToHost ) );
+    float fout = to_float<T>( out );
+
+
+    m_last_ssim = fout;
+}
+
+// Direct LWCA core BN implementation
+template <typename T>
+static __global__ void k_BatchnormFwd( const T*     in,
+                                       T*           out,
+                                       const float* alpha,
+                                       const float* beta,
+                                       const float* mean,
+                                       const float* var,
+                                       float        eps,
+                                       bool         nhwc,
+                                       int          width,
+                                       int          height,
+                                       int          channels )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z * blockDim.z + threadIdx.z;
+
+
+// arithmetic half operators are first defined for sm53
+#if __LWDA_ARCH__ >= 530
+    typedef T C;
+#else
+    typedef float C;
+#endif
+
+    if( x < width && y < height && c < channels )
+    {
+        int   ind = nhwc ? y * width * channels + x * channels + c : c * height * width + y * width + x;
+        float xi  = in[ind];
+        float mi  = mean[c];
+
+        float ai = alpha[c];
+        float bi = beta[c];
+        float vi = var[c];
+
+        C res = ai * ( xi - mi ) * rsqrtf( eps + vi ) + bi;
+        // ReLu
+        //if (res < C(0.0f))
+        //    res = C(0.0f);
+
+        out[ind] = res;
+    }
+}
+
+
+template <typename T>
+void Batchnorm_layer<T>::fwd_eval( void* workspace, size_t workspaceSize )
+{
+    this->reset_error();
+
+    lwdaEventRecord( this->m_start_event );
+
+//#define DEBUG_BN
+#ifndef DEBUG_BN
+#ifdef HAS_LWDNN_BN
+    float bnalpha = 1.0f;
+    float bnbeta  = 0.0f;
+
+    this->checkLWDNN( lwdnnBatchNormalizationForwardInference(
+        this->m_lwdnn, LWDNN_BATCHNORM_SPATIAL, &bnalpha, &bnbeta, this->m_input->m_outTensorDesc, this->m_input->m_outData,
+        this->m_outTensorDesc, this->m_outData, m_bnDesc, m_alpha, m_beta, m_mean, m_var, m_eps ) );
+#else  // direct LWCA core implementation
+
+    dim3 dimBlock( LWDA_BLOCK * 4, LWDA_BLOCK / 4, 1 );
+    dim3 blockGrid = dim3( RoundUp( this->m_outWidth, dimBlock.x ), RoundUp( this->m_outHeight, dimBlock.y ), this->m_outChannels );
+    k_BatchnormFwd<<<blockGrid, dimBlock, 0, this->m_stream>>>(
+        static_cast<T*>( this->m_input->m_outData ), static_cast<T*>( this->m_outData ), this->m_alpha, this->m_beta,
+        this->m_mean, this->m_var, float( this->m_eps ), this->m_tensor_format == LWDNN_TENSOR_NHWC,
+        this->m_input->m_outWidth, this->m_input->m_outHeight, this->m_outChannels );
+
+#endif
+#else  // DEBUG_BN
+    size_t        px  = this->m_input->m_outWidth * this->m_input->m_outHeight * this->m_outChannels;
+    T*            in  = new T[px];
+    T*            out = new T[px];
+
+    float* alpha = new float[this->m_outChannels];
+    float* beta  = new float[this->m_outChannels];
+    float* mean  = new float[this->m_outChannels];
+    float* var   = new float[this->m_outChannels];
+
+    this->checkLwdaErrors( lwdaMemcpy( in, this->m_input->m_outData, px * sizeof( T ), lwdaMemcpyDeviceToHost ) );
+
+    this->checkLwdaErrors( lwdaMemcpy( alpha, this->m_alpha, sizeof( float ) * this->m_outChannels, lwdaMemcpyDeviceToHost ) );
+    this->checkLwdaErrors( lwdaMemcpy( beta, this->m_beta, sizeof( float ) * this->m_outChannels, lwdaMemcpyDeviceToHost ) );
+    this->checkLwdaErrors( lwdaMemcpy( mean, this->m_mean, sizeof( float ) * this->m_outChannels, lwdaMemcpyDeviceToHost ) );
+    this->checkLwdaErrors( lwdaMemcpy( var, this->m_var, sizeof( float ) * this->m_outChannels, lwdaMemcpyDeviceToHost ) );
+
+    for( int c = 0; c < this->m_outChannels; ++c )
+    {
+        for( int i = 0; i < this->m_outWidth * this->m_outHeight; ++i )
+        {
+            int fi = this->m_tensor_format == LWDNN_TENSOR_NCHW ? c * this->m_outWidth * this->m_outHeight + i :
+                                                                  i * this->m_outChannels + c;
+            from_float( out[fi], to_float( alpha[c] ) * ( to_float( in[fi] ) - to_float( mean[c] ) )
+                                         / std::sqrt( m_eps + to_float( var[c] ) )
+                                     + to_float( beta[c] ) );
+        }
+    }
+
+    lwdaMemcpy( this->m_outData, out, px * sizeof( T ), lwdaMemcpyHostToDevice );
+
+    delete[] in;
+    delete[] out;
+
+    delete[] alpha;
+    delete[] beta;
+    delete[] mean;
+    delete[] var;
+#endif
+
+
+    if( this->m_status == lwdaSuccess )
+    {
+        dim3 dimBlock( LWDA_BLOCK * 4, LWDA_BLOCK / 4, 1 );
+        dim3 blockGrid =
+            dim3( RoundUp( this->m_outWidth, dimBlock.x ), RoundUp( this->m_outHeight, dimBlock.y ), this->m_outChannels );
+        k_ReLu<<<blockGrid, dimBlock, 0, this->m_stream>>>( static_cast<T*>( this->m_outData ), this->m_outWidth,
+                                                            this->m_outHeight, this->m_outChannels );
+    }
+
+    lwdaEventRecord( this->m_stop_event );
+    lwdaEventSynchronize( this->m_stop_event );
+    this->m_evaltime = 0.f;
+    lwdaEventElapsedTime( &this->m_evaltime, this->m_start_event, this->m_stop_event );
+}
+
+
+template <typename OUT, typename IN>
+static __global__ void k_scale( OUT* out, const IN* in, float scale, int sz )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( x < sz )
+        out[x] = scale * float( in[x] );
+}
+
+
+template <typename T>
+Avg_pooling_layer<T>::Avg_pooling_layer( const char* name, lwdnnHandle_t lwdnn, const Layer_base* input, int outWidth, int outHeight, bool alloc, ILogger* logger )
+    : Layer<T>( name, lwdnn )
+    , m_desc( nullptr )
+    , m_input_buf( nullptr )
+    , m_input_buf_sums( nullptr )
+{
+    this->set_logger( logger );
+
+
+    this->m_input         = input;
+    this->m_tensor_format = input->m_tensor_format;
+    this->m_outWidth      = outWidth;
+    this->m_outHeight     = outHeight;
+    this->m_outChannels   = this->m_input->m_outChannels;
+
+    const int dims[] = {1, int( this->m_outChannels ), int( this->m_outHeight ), int( this->m_outWidth )};
+    this->checkLWDNN( lwdnnSetTensorNdDescriptorEx( this->m_outTensorDesc, this->m_tensor_format, this->LWDNN_DTYPE, 4, dims ) );
+
+#ifdef HAS_LWDNN_POOL
+    this->checkLWDNN( lwdnnCreatePoolingDescriptor( &m_desc ) );
+    const int win[] = {int( this->m_input->m_outHeight / this->m_outHeight ), int( this->m_input->m_outWidth / this->m_outWidth )};
+    const int pad[] = {0, 0};
+    const int str[] = {1, 1};
+
+    this->checkLWDNN( lwdnnSetPoolingNdDescriptor( m_desc, LWDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING,
+                                                   LWDNN_NOT_PROPAGATE_NAN, 2, win, pad, str ) );
+#endif
+}
+
+template <typename T>
+Avg_pooling_layer<T>::~Avg_pooling_layer()
+{
+    if( m_desc != nullptr )
+    {
+        this->checkLWDNN( lwdnnDestroyPoolingDescriptor( m_desc ) );
+        m_desc = nullptr;
+    }
+
+    if( m_input_buf != nullptr )
+    {
+        this->checkLwdaErrors( lwdaFree( m_input_buf ) );
+        m_input_buf = nullptr;
+    }
+
+    if( m_input_buf_sums != nullptr )
+    {
+        this->checkLwdaErrors( lwdaFree( m_input_buf_sums ) );
+        m_input_buf_sums = nullptr;
+    }
+}
+
+template <typename T>
+void Avg_pooling_layer<T>::fwd_eval( void* workspace, size_t workspaceSize )
+{
+    this->reset_error();
+
+    lwdaEventRecord( this->m_start_event );
+
+//#define DEBUG_POOL
+#ifndef DEBUG_POOL
+#ifdef HAS_LWDNN_POOL
+    float alpha = 1.0f;
+    float beta  = 0.0f;
+    this->checkLWDNN( lwdnnPoolingForward( this->m_lwdnn, this->m_desc, &alpha, this->m_input->m_outTensorDesc,
+                                           this->m_input->m_outData, &beta, this->m_outTensorDesc, this->m_outData ) );
+#else  // custom LWCA core
+    //  only global pool is implemented
+    MI_ASSERT( this->m_outHeight == 1 );
+    MI_ASSERT( this->m_outWidth == 1 );
+
+    auto means = std::vector<T>( this->m_outChannels );
+
+    // Re-order the inout buffer
+    bool in_nchw = this->m_tensor_format == LWDNN_TENSOR_NCHW;
+    // implemented with buffer concetrion or directly for floats
+    MI_ASSERT( !in_nchw || sizeof( T ) == 4 );
+
+    if( !in_nchw )
+    {
+        // lazy allocation
+
+        if( this->m_input_buf == nullptr )
+            this->checkLwdaErrors( lwdaMalloc( &this->m_input_buf, sizeof( float ) * this->m_input->m_outHeight
+                                                                       * this->m_input->m_outWidth * this->m_outChannels ) );
+        nhwc2nchw( this->m_input_buf, static_cast<T*>( this->m_input->m_outData ), 1, this->m_outChannels,
+                   this->m_input->m_outHeight, this->m_input->m_outWidth, this->m_stream );
+    }
+
+
+    // in NCHW form
+    thrust::device_ptr<float> ptr( in_nchw ? static_cast<float*>( this->m_input->m_outData ) : this->m_input_buf );
+
+    // lazy allocation
+    if( !this->m_input_buf_sums )
+        this->checkLwdaErrors( lwdaMalloc( &this->m_input_buf_sums, sizeof( float ) * this->m_outChannels ) );
+    thrust::device_ptr<float> sums( this->m_input_buf_sums );
+
+
+    using namespace thrust::placeholders;
+
+    int res = this->m_input->m_outHeight * this->m_input->m_outWidth;
+
+    thrust::reduce_by_key( thrust::lwca::par.on( this->m_stream ),
+                           thrust::make_transform_iterator( thrust::counting_iterator<int>( 0 ), _1 / res ),
+                           thrust::make_transform_iterator( thrust::counting_iterator<int>( this->m_outChannels * res ), _1 / res ),
+                           ptr, thrust::discard_iterator<int>(), sums );
+
+    // there are usually not too many channels, likely to be just 1 block
+    dim3 dimBlock( LWDA_BLOCK * 4 );
+    dim3 blockGrid = dim3( RoundUp( this->m_outChannels, dimBlock.x ) );
+
+    k_scale<<<blockGrid, dimBlock, 0, this->m_stream>>>( static_cast<T*>( this->m_outData ), this->m_input_buf_sums,
+                                                         1.0f / res, this->m_outChannels );
+
+
+#endif
+#else  // DEBUG POOL
+    T* in  = new T[this->m_input->m_outWidth * this->m_input->m_outHeight * this->m_outChannels];
+    T* out = new T[this->m_outChannels];
+    lwdaMemcpy( in, this->m_input->m_outData,
+                this->m_input->m_outWidth * this->m_input->m_outHeight * this->m_outChannels * sizeof( T ), lwdaMemcpyDeviceToHost );
+
+    for( int c = 0; c < this->m_outChannels; ++c )
+    {
+        double sum = 0.0;
+        for( int i = 0; i < this->m_input->m_outWidth * this->m_input->m_outHeight; ++i )
+        {
+            sum += to_float( in[i + this->m_input->m_outWidth * this->m_input->m_outHeight * c] );
+        }
+        from_float( out[c], sum / ( this->m_input->m_outWidth * this->m_input->m_outHeight ) );
+    }
+
+    lwdaMemcpy( this->m_outData, out, this->m_outChannels * sizeof( T ), lwdaMemcpyHostToDevice );
+
+    delete[] in;
+    delete[] out;
+#endif
+
+    lwdaEventRecord( this->m_stop_event );
+    lwdaEventSynchronize( this->m_stop_event );
+    this->m_evaltime = 0.f;
+    lwdaEventElapsedTime( &this->m_evaltime, this->m_start_event, this->m_stop_event );
+}
+
+
+template <typename T>
+Activation_layer<T>::Activation_layer( const char*           name,
+                                       lwdnnHandle_t         lwdnn,
+                                       const Layer<T>*       input,
+                                       lwdnnActivationMode_t activation,
+                                       bool                  alloc,
+                                       LW::SSIM::ILogger*    logger )
+    : Layer<T>( name, lwdnn )
+    , m_activation_mode( activation )
+    , m_desc( nullptr )
+{
+    this->set_logger( logger );
+
+    this->m_input         = input;
+    this->m_tensor_format = input->m_tensor_format;
+    this->m_outWidth      = input->m_outWidth;
+    this->m_outHeight     = input->m_outHeight;
+    this->m_outChannels   = this->m_input->m_outChannels;
+
+#ifdef HAS_LWDNN_ACTIVATION
+    this->checkLWDNN( lwdnnCreateActivationDescriptor( &m_desc ) );
+    this->checkLWDNN( lwdnnSetActivationDescriptor( m_desc, activation, LWDNN_NOT_PROPAGATE_NAN, 1.0 ) );
+#else
+    // only sigmoid is implemented
+    MI_ASSERT( activation == LWDNN_ACTIVATION_SIGMOID || activation == LWDNN_ACTIVATION_RELU );
+#endif
+
+    const int dims[] = {1, int( this->m_outChannels ), int( this->m_outHeight ), int( this->m_outWidth )};
+    this->checkLWDNN( lwdnnSetTensorNdDescriptorEx( this->m_outTensorDesc, this->m_tensor_format, this->LWDNN_DTYPE, 4, dims ) );
+}
+
+template <typename T>
+static __global__ void k_sigmoid( T* out, const T* in, int width, int height, int channels )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z * blockDim.z + threadIdx.z;
+
+    if( x < width && y < height && c < channels )
+    {
+        float val                               = in[c * height * width + y * width + x];
+        val                                     = 1.0f / ( 1.0f + expf( -val ) );
+        out[c * height * width + y * width + x] = val;
+    }
+}
+
+
+template <typename T>
+void Activation_layer<T>::fwd_eval( void* workspace, size_t workspaceSize )
+{
+    this->reset_error();
+
+    lwdaEventRecord( this->m_start_event );
+
+#ifdef HAS_LWDNN_ACTIVATION
+    float alpha = 1.0f;
+    float beta  = 0.0f;
+    this->checkLWDNN( lwdnnActivationForward( this->m_lwdnn, m_desc, &alpha, this->m_input->m_outTensorDesc,
+                                              this->m_input->m_outData, &beta, this->m_outTensorDesc, this->m_outData ) );
+#else
+    dim3 dimBlock( LWDA_BLOCK * 4, LWDA_BLOCK / 4, 1 );
+    dim3 blockGrid = dim3( RoundUp( this->m_outWidth, dimBlock.x ), RoundUp( this->m_outHeight, dimBlock.y ), this->m_outChannels );
+    if( m_activation_mode == LWDNN_ACTIVATION_SIGMOID )
+        k_sigmoid<<<blockGrid, dimBlock, 0, this->m_stream>>>( static_cast<T*>( this->m_outData ),
+                                                               static_cast<const T*>( this->m_input->m_outData ),
+                                                               this->m_outWidth, this->m_outHeight, this->m_outChannels );
+    else
+        k_ReLu2<<<blockGrid, dimBlock, 0, this->m_stream>>>( static_cast<T*>( this->m_outData ),
+                                                             static_cast<const T*>( this->m_input->m_outData ),
+                                                             this->m_outWidth, this->m_outHeight, this->m_outChannels );
+#endif
+
+    lwdaEventRecord( this->m_stop_event );
+    lwdaEventSynchronize( this->m_stop_event );
+    this->m_evaltime = 0.f;
+    lwdaEventElapsedTime( &this->m_evaltime, this->m_start_event, this->m_stop_event );
+}
+
+
+template <typename T>
+Activation_layer<T>::~Activation_layer()
+{
+    if( m_desc != nullptr )
+    {
+        this->checkLWDNN( lwdnnDestroyActivationDescriptor( m_desc ) );
+        m_desc = nullptr;
+    }
+}
+
+
+static __inline__ __device__ int addrNHWC( int channels, int height, int width, int n, int c, int y, int x )
+{
+    return n * height * width * channels + y * width * channels + x * channels + c;
+}
+
+#if 0  // not lwrrently used
+static __inline__ __device__ int addrNCHW(
+    int channels, 
+    int height, 
+    int width, 
+    int n, 
+    int c, 
+    int y, 
+    int x)
+{
+    return n*channels*height*width + c*height*width + y*width + x;
+}
+#endif
+
+template <typename T>
+static __global__ void k_Scale2xConcat_NHWC( const T* input, const T* skip, T* out, int width, int height, int channels, int pad, int channelsSkip, int padSkip )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z * blockDim.z + threadIdx.z;
+
+    int hWidth  = width / 2;
+    int hHeight = height / 2;
+
+    int lrx = min( x / 2, max( hWidth, 1 ) - 1 );
+    int lry = min( y / 2, max( hHeight, 1 ) - 1 );
+
+    int totalChannels = channels + channelsSkip;
+
+    if( x < width && y < height )
+    {
+        // Scale up input layer (low res image coming from decoder part) by replicating
+        for( int cblock = 0; cblock + c < channels; cblock += blockDim.z )
+            out[addrNHWC( totalChannels, height, width, 0, cblock + c, y, x )] =
+                input[addrNHWC( channels + pad, hHeight, hWidth, 0, cblock + c, lry, lrx )];
+
+        // Concatenate skip values (high res image)
+        for( int cblock = 0; cblock + c < channelsSkip; cblock += blockDim.z )
+            out[addrNHWC( totalChannels, height, width, 0, cblock + c + channels, y, x )] =
+                skip[addrNHWC( channelsSkip + padSkip, height, width, 0, cblock + c, y, x )];
+    }
+}
+
+template <typename T>
+static __global__ void k_Scale2xConcat_NCHW( const T* decode, const T* skip, T* output, int width, int height, int channelsDecode, int channelsSkip )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int lrx = min( x / 2, ( width / 2 ) - 1 );
+    int lry = min( y / 2, ( height / 2 ) - 1 );
+
+    if( x < width && y < height )
+    {
+        // Scale up decoder layer (low res image) by replicating
+        for( int i                                     = 0; i < channelsDecode; ++i )
+            output[i * height * width + y * width + x] = decode[i * ( height / 2 ) * ( width / 2 ) + lry * ( width / 2 ) + lrx];
+
+        // Concatenate skip values (high res image)
+        for( int i                                                          = 0; i < channelsSkip; ++i )
+            output[( i + channelsDecode ) * height * width + y * width + x] = skip[i * height * width + y * width + x];
+    }
+}
+
+
+template <typename T>
+inline Upscale_concat_layer<T>::Upscale_concat_layer( const char*       name,
+                                                      lwdnnHandle_t     lwdnn,
+                                                      const Layer_base* input,
+                                                      const Layer_base* skip,
+                                                      bool              alloc,
+                                                      ILogger*          logger )
+    : Layer<T>( name, lwdnn )
+{
+    this->set_logger( logger );
+
+    m_input               = input;
+    this->m_tensor_format = input->m_tensor_format;
+    m_skip                = skip;
+
+    if( !( m_skip->m_outWidth / 2 == m_input->m_outWidth && m_skip->m_outHeight / 2 == m_input->m_outHeight ) )
+        this->log_error( "wrong skip layer dimensions" );
+
+    this->m_outWidth    = m_skip->m_outWidth;
+    this->m_outHeight   = m_skip->m_outHeight;
+    this->m_outChannels = m_input->m_outChannels - m_input->m_outPad + m_skip->m_outChannels - m_skip->m_outPad;
+
+    // this->log_info("%s+%s->%s: %d x %d,  %d + %d", m_input->name(), m_skip->name(), name,
+    //                m_skip->m_outWidth, m_skip->m_outHeight,
+    //                m_input->m_outChannels - m_input->m_outPad,
+    //                m_skip->m_outChannels - m_skip->m_outPad);
+
+    const int tdim_nchw[] = {1, (int)this->m_outChannels, (int)this->m_outHeight, (int)this->m_outWidth};
+    this->checkLWDNN( lwdnnSetTensorNdDescriptorEx( this->m_outTensorDesc, this->m_tensor_format, this->LWDNN_DTYPE, 4, tdim_nchw ) );
+}
+
+template <typename T>
+Upscale_concat_layer<T>::~Upscale_concat_layer()
+{
+}
+
+template <typename T>
+void Upscale_concat_layer<T>::fwd_eval( void* workspace, size_t workspaceSize )
+{
+    this->reset_error();
+
+    lwdaEventRecord( this->m_start_event );
+
+    if( this->m_tensor_format == LWDNN_TENSOR_NHWC )
+    {
+        dim3 dimBlock( 2, 2, 8 );
+        dim3 blockGrid = dim3( RoundUp( this->m_outWidth, dimBlock.x ), RoundUp( this->m_outHeight, dimBlock.y ), 1 );
+        k_Scale2xConcat_NHWC<<<blockGrid, dimBlock, 0, this->m_stream>>>(
+            static_cast<T*>( m_input->m_outData ), static_cast<T*>( m_skip->m_outData ), static_cast<T*>( this->m_outData ),
+            this->m_outWidth, this->m_outHeight, m_input->m_outChannels - m_input->m_outPad, m_input->m_outPad,
+            m_skip->m_outChannels - m_skip->m_outPad, m_skip->m_outPad );
+    }
+    else
+    {
+        dim3 dimBlock( LWDA_BLOCK, LWDA_BLOCK );
+        dim3 blockGrid = dim3( RoundUp( this->m_outWidth, dimBlock.x ), RoundUp( this->m_outHeight, dimBlock.y ), 1 );
+        k_Scale2xConcat_NCHW<<<blockGrid, dimBlock, 0, this->m_stream>>>(
+            static_cast<T*>( m_input->m_outData ), static_cast<T*>( m_skip->m_outData ),
+            static_cast<T*>( this->m_outData ), this->m_outWidth, this->m_outHeight,
+            m_input->m_outChannels - m_input->m_outPad, m_skip->m_outChannels - m_skip->m_outPad );
+    }
+
+    lwdaEventRecord( this->m_stop_event );
+    lwdaEventSynchronize( this->m_stop_event );
+    this->m_evaltime = 0.f;
+    lwdaEventElapsedTime( &this->m_evaltime, this->m_start_event, this->m_stop_event );
+}
+
+
+template <typename T>
+Colwert_layer<T>::Colwert_layer( const char* name, lwdnnHandle_t lwdnn, const Layer_base* input, bool to_nhwc, bool alloc, LW::SSIM::ILogger* logger )
+    : Layer<T>( name, lwdnn )
+    , m_to_nhwc( to_nhwc )
+{
+    this->set_logger( logger );
+
+    this->m_input         = input;
+    this->m_tensor_format = to_nhwc ? LWDNN_TENSOR_NHWC : LWDNN_TENSOR_NCHW;
+    this->m_outWidth      = input->m_outWidth;
+    this->m_outHeight     = input->m_outHeight;
+    this->m_width         = input->m_width;
+    this->m_height        = input->m_height;
+    this->m_outChannels   = input->m_outChannels;
+    this->m_outPad        = input->m_outPad;
+
+    const int dims[] = {1, int( this->m_outChannels ), int( this->m_outHeight ), int( this->m_outWidth )};
+    this->checkLWDNN( lwdnnSetTensorNdDescriptorEx( this->m_outTensorDesc, this->m_tensor_format, this->LWDNN_DTYPE, 4, dims ) );
+}
+
+template <typename T>
+void Colwert_layer<T>::fwd_eval( void* workspace, size_t workspaceSize )
+{
+    this->reset_error();
+
+    lwdaEventRecord( this->m_start_event );
+
+#ifdef HAS_LWDNN_TRANSFORM
+    float alpha = 1.0f;
+    float beta  = 0.0f;
+    this->checkLWDNN( lwdnnTransformTensor( this->m_lwdnn, &alpha, this->m_input->m_outTensorDesc,
+                                            this->m_input->m_outData, &beta, this->m_outTensorDesc, this->m_outData ) );
+#else
+    // do not allow layer wihtout NCHW<->NHWC colwersion
+    if( this->m_tensor_format == LWDNN_TENSOR_NHWC )
+    {
+        MI_ASSERT( this->m_input->m_tensor_format == LWDNN_TENSOR_NCHW );
+        if( this->m_input->is_half() )
+            nchw2nhwc( static_cast<T*>( this->m_outData ), static_cast<half*>( this->m_input->m_outData ), 1,
+                       this->m_outChannels, this->m_outHeight, this->m_outWidth, this->m_stream );
+        else
+            nchw2nhwc( static_cast<T*>( this->m_outData ), static_cast<float*>( this->m_input->m_outData ), 1,
+                       this->m_outChannels, this->m_outHeight, this->m_outWidth, this->m_stream );
+    }
+    else
+    {
+        MI_ASSERT( this->m_tensor_format == LWDNN_TENSOR_NCHW );
+        MI_ASSERT( this->m_input->m_tensor_format == LWDNN_TENSOR_NHWC );
+        if( this->m_input->is_half() )
+            nhwc2nchw( static_cast<T*>( this->m_outData ), static_cast<half*>( this->m_input->m_outData ), 1,
+                       this->m_outChannels, this->m_outHeight, this->m_outWidth, this->m_stream );
+        else
+            nhwc2nchw( static_cast<T*>( this->m_outData ), static_cast<float*>( this->m_input->m_outData ), 1,
+                       this->m_outChannels, this->m_outHeight, this->m_outWidth, this->m_stream );
+    }
+#endif
+
+    lwdaEventRecord( this->m_stop_event );
+    lwdaEventSynchronize( this->m_stop_event );
+    this->m_evaltime = 0.f;
+    lwdaEventElapsedTime( &this->m_evaltime, this->m_start_event, this->m_stop_event );
+}
+
+
+template <typename T>
+Colwert_layer<T>::~Colwert_layer()
+{
+}
+
+
+// float instantiation
+template <>
+void* Layer<float>::s_device_buffer = nullptr;
+
+template <>
+size_t Layer<float>::s_device_buffer_size = 0;
+
+template class Layer<float>;
+template class Batchnorm_layer<float>;
+template class Colwolution_layer<float>;
+template class Classifier_layer<float>;
+template class Avg_pooling_layer<float>;
+template class Activation_layer<float>;
+template class Fc_layer<float>;
+template class Upscale_concat_layer<float>;
+template class Colwert_layer<float>;
+
+
+// half isntantiation
+template <>
+void* Layer<__half>::s_device_buffer = nullptr;
+
+template <>
+size_t Layer<__half>::s_device_buffer_size = 0;
+
+template class Layer<__half>;
+template class Batchnorm_layer<__half>;
+template class Colwolution_layer<__half>;
+template class Classifier_layer<__half>;
+template class Avg_pooling_layer<__half>;
+template class Activation_layer<__half>;
+template class Fc_layer<__half>;
+template class Upscale_concat_layer<__half>;
+template class Colwert_layer<__half>;
+
+
+}  // namespace SSIM
+}  // namespace LW

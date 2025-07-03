@@ -1,0 +1,54 @@
+package fmlib;
+
+/*****************************************************************************
+ As we update this file, we need to update encoding/decoding of the modified
+ structures in infra/protobuf/fmLibProtobuf.cpp
+*****************************************************************************/
+
+/* Represents type of the command. Update this enum for each command to be 
+   exchanged between client and host engine. These IDs must not be changed
+   or current clients will not be able to communicate with newer host engines and
+   vice versa. */
+enum CmdType 
+{
+    /* FM Lib APIs */
+    FM_GET_SUPPORTED_PARTITIONS                    = 1;
+    FM_ACTIVATE_PARTITION                          = 2;
+    FM_DEACTIVATE_PARTITION                        = 3;
+    FM_SET_ACTIVATED_PARTITION_LIST                = 4;    
+    FM_GET_LWLINK_FAILED_DEVICES                   = 5;
+    FM_GET_UNSUPPORTED_PARTITIONS                  = 6;
+    FM_ACTIVATE_PARTITION_WITH_VFS                 = 7;
+    /* Allocate these IDs in groups of 10. */
+};
+
+/* Message to encode/decode one of the public data structures */
+message CmdArg
+{
+    optional bytes blob                = 1; /* Value of a binary blob of data containing a predefined structure */
+}
+
+/* This is not being used as of now */
+enum CmdOperationMode
+{
+    OPERATION_SINGLE_ENTITY     =   1;
+    OPERATION_GROUP_ENTITIES    =   2;
+    OPERATION_SYSTEM            =   3;
+}
+
+/* Represents command which is encoded/decoded */
+message Command
+{
+    required CmdType cmdType   = 1;  /* Type of Command (One of enum CmdType) */
+    optional uint32 version    = 2;  /* Version field to represent version of all the args present in case of group command */
+    optional int32 status      = 3;  /* Status of the single/group command */
+    optional string errString  = 4;  /* Error string for the command. Made optional as set only in case of errors */
+    optional CmdArg arg        = 5;  /* Zero or more arguments to be passed with the command. */
+    optional int64 timestamp   = 6;  /* Timestamp of the sender */
+}
+
+/* Used for request-response type scenarios */
+message Msg
+{
+    optional Command cmd = 1;           /* One command */
+}

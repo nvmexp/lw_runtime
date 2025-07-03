@@ -1,0 +1,152 @@
+##############################################################################
+# Copyright (c) 2021, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+##############################################################################
+
+##############################################################################
+# test_lwscibuf_kpi makefile
+##############################################################################
+
+##############################################################################
+# Identify this module to lwCommon.lwmk so it can decide the build type
+##############################################################################
+LW_MODULE_BUILD_TYPE_ALIASES = test_lwscibuf_kpi
+LW_MODULE_LOGGING_NAME = "test_lwscibuf_kpi"
+
+include $(LW_SOURCE)/drivers/lwsci/lwsci.lwmk
+
+CFLAGS += -DBACKEND_RESMAN=$(LW_BACKEND_RESMAN)
+
+
+##############################################################################
+# Path shorthands
+##############################################################################
+LWSCI_PATH              := $(LW_SOURCE)/drivers/lwsci
+LWSCIBUF_PATH          := $(LWSCI_PATH)/lwscibuf
+LWSCI_TESTS_PATH        := $(LWSCI_PATH)/tests
+LWSCIBUF_TESTS_PATH  := $(LWSCI_TESTS_PATH)/lwscibuf/kpi
+
+##############################################################################
+# build the appropriate LwSciBuf stub libraries
+##############################################################################
+include $(LWSCIBUF_PATH)/lwscibuf-dso-stub.lwmk
+STUB_DSO_DEPENDS += $(LWSCIBUF_DSO_STUB)
+STUB_LDFLAGS += -llwscibuf-stub
+
+##############################################################################
+# define SOURCES
+##############################################################################
+LWSCIBUF_TEST_SOURCES := main.cpp
+
+SOURCES += $(addprefix $(LWSCIBUF_TESTS_PATH)/,$(LWSCIBUF_TEST_SOURCES))
+
+##############################################################################
+# define LW_INCLUDES
+##############################################################################
+
+LW_INCLUDES += $(LWSCI_PATH)/inc/public
+LW_INCLUDES += $(LWSCI_PATH)/inc/internal
+LW_INCLUDES += $(LWSCI_TESTS_PATH)/common/kpi
+
+
+#include cheetah headers
+ifeq ($(LW_TEGRA_MIRROR_INCLUDES), 1)
+#get lwrm headers from sdk/inc and RMAPI_TEGRA_MIRROR if we are building
+#perforce tree.
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+else
+ifeq ($(LW_TEGRA_DIRECT_INCLUDES), 1)
+#get lwrm headers directly from core/include
+  LW_INCLUDES += $(TEGRA_TOP)/core/include
+  LW_INCLUDES += $(TEGRA_TOP)/core-private/include
+endif
+endif
+
+#include x86 headers
+ifeq ($(LW_BACKEND_RESMAN), 1)
+  include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+  LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+  LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+endif
+
+
+# OS specific variants
+ifneq ($(LW_TARGET_OS), QNX)
+LW_INCLUDES += $(LWSCI_TESTS_PATH)/common/kpi/linux
+else
+LW_INCLUDES += $(LWSCI_TESTS_PATH)/common/kpi/qnx
+endif
+
+LW_INCLUDES += $(OUTPUTDIR)
+
+
+##############################################################################
+# define LW_DEFINES
+##############################################################################
+# For lwmake builds, lwcfg feature flags are available to LWSCI.
+ifdef LWCFG_INITIALIZED
+  LW_DEFINES += LWCFG_ENABLED
+endif
+
+ifeq ($(LW_TEGRA_MIRROR_INCLUDES), 1)
+  LW_DEFINES += LW_SCI_DESKTOP_COMPATIBLE_HEADERS
+endif
+
+# Embedded defines this on the command line for their builds.
+LW_BUILD_EMBEDDED ?= 0
+
+ifeq ($(LW_BUILD_EMBEDDED),1)
+    LW_DEFINES += LW_BUILD_EMBEDDED=1
+endif
+
+LW_NEEDS_UNSTRIPPED = 1
+LW_SUPPORTS_SEPARATE_DEBUG_INFO = 1
+
+##############################################################################
+# library flags
+##############################################################################
+LDFLAGS += -lm
+
+ifneq ($(LW_TARGET_OS), QNX)
+  LDFLAGS += -lrt
+  LDFLAGS += -lstdc++
+else
+  LDFLAGS += -lc++
+endif
+LDFLAGS += -g
+LDFLAGS += -L $(OUTPUTDIR) $(STUB_LDFLAGS)
+LDFLAGS += $(BIN_LDFLAGS)
+
+ifdef RMAPI_TEGRA_MIRROR_LWMK
+  # Include header from rmapi_tegra mirror
+  CFLAGS += -DRMAPI_TEGRA_MIRROR
+endif
+
+##############################################################################
+# link the binary
+##############################################################################
+TESTAPP := $(OUTPUTDIR)/test_lwscibuf_kpi
+
+TESTAPP_LD_TARGET = $(TESTAPP).unstripped
+TESTAPP_DEBUG_INFO = $(TESTAPP).debug
+$(eval $(call LW_DEBUG_INFO_CMD, \
+  $(TESTAPP_LD_TARGET), \
+  $(TESTAPP), \
+  $(TESTAPP_DEBUG_INFO)))
+
+build: $(TESTAPP)
+
+$(TESTAPP_LD_TARGET): $(OBJECTS) $(STUB_DSO_DEPENDS)
+	$(call quiet_cmd,LINK) $(OBJECTS) -o $(TESTAPP_LD_TARGET) $(LDFLAGS)
+
+##############################################################################
+# include definitions of tools and build rules
+##############################################################################
+
+include $(LW_COMMON)/build/lwCommonRules.lwmk

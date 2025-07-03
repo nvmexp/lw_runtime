@@ -1,0 +1,37 @@
+##############################################################################
+# define LOCAL_SOURCES
+##############################################################################
+
+LW_CXX_EXCEPTIONS := 0
+LW_CXX_RTTI := 0
+
+###############################################################################
+# Google Protobuf
+###############################################################################
+FM_PROTO_DIR := $(LW_SOURCE)/apps/fabricmanager/infra/protobuf
+
+#PROTOC = $(LW_TOOLS)/unix/hosts/Linux-x86/unix-build/bin/protoc_2.6.0
+PROTOC_INCLUDES += -I$(OUTPUTDIR)
+PROTOC_INCLUDES += -I$(FM_PROTO_DIR)
+
+FM_INTERNAL_PROTOC_SOURCES := $(FM_PROTO_DIR)/fmInternalLib.proto
+ifdef FM_PROTOC_OPTIONS
+	PROTOC_OPTIONS += --lwpb_out=$(OUTPUTDIR)
+	PROTOC_SOURCES += $(FM_INTERNAL_PROTOC_SOURCES)
+endif
+
+# Create source, header, and object macros based on list of proto files
+FM_INTERNAL_PB_CFILES := $(call BUILD_PROTOC_C_LIST, $(FM_INTERNAL_PROTOC_SOURCES))
+FM_INTERNAL_PB_HFILES := $(call BUILD_PROTOC_H_LIST, $(FM_INTERNAL_PROTOC_SOURCES))
+
+FORCE_PB_HFILE_GENERATION_LWMK := $(OUTPUTDIR)/force_pb_hfile_generation.lwmk
+
+# declare ALL_PB_HFILES as a prerequisite of FORCE_PB_HFILE_GENERATION
+$(FORCE_PB_HFILE_GENERATION_LWMK): $(FM_INTERNAL_PB_HFILES)
+	$(TOUCH) $@
+
+# Force this lwmk fragment to be included; this should trigger
+# ALL_PB_HFILES and ALL_PB_CFILES generation.
+-include $(FORCE_PB_HFILE_GENERATION_LWMK)
+
+

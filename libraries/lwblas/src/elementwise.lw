@@ -1,0 +1,1099 @@
+#include <cstdio>
+#include <cfloat>
+#include <cmath>
+#include <cassert>
+
+#include <algorithm>
+#include <vector>
+#include <unordered_map>
+
+#include <lwda_runtime.h>
+
+#include <lwtensor/internal/computeEngine.h>
+#include <lwtensor/internal/export.h>
+#include <lwtensor/internal/elementwisePrototype.h>
+#include <lwtensor/internal/typesEx.h> // only for Candidate
+#include <lwtensor/internal/util.h>
+#include <lwtensor/internal/types.h>
+#include <lwtensor/internal/context.h>
+#include <lwtensor/internal/defines.h>
+
+namespace LWTENSOR_NAMESPACE
+{
+    const ComputeEngineBase<ElementwiseParameters>* getElementwiseEngine();
+
+    std::string colwertTypeToCommandline(lwdaDataType_t typeA)
+    {
+        switch ( typeA )
+        {
+            case LWDA_R_8U:
+                return std::string("k");
+            case LWDA_R_8I:
+                return std::string("j");
+            case LWDA_R_32U:
+                return std::string("u");
+            case LWDA_R_32I:
+                return std::string("i");
+            case LWDA_R_16F:
+                return std::string("h");
+            case LWDA_R_32F:
+                return std::string("s");
+            case LWDA_R_64F:
+                return std::string("d");
+            case LWDA_C_32F:
+                return std::string("c");
+            case LWDA_C_64F:
+                return std::string("z");
+            default:
+                throw InternalError("Datatype is not yet supported.\n");
+        }
+    }
+
+    std::string reproduceElementwiseCommand(
+        const int useA, const int useB, const int useC,
+        const TensorDescriptor *descA, const int* modeA,
+        const TensorDescriptor *descB, const int* modeB,
+        const TensorDescriptor *descC, const int* modeC,
+        lwtensorOperator_t opAB,
+        lwtensorOperator_t opABC,
+        lwdaDataType_t typeCompute)
+    {
+
+        /* Using an unordered map to store the extents. */
+        std::unordered_map<mode_type, extent_type> extents;
+        /* The output descriptor. */
+        std::string descr = "\n";
+
+        descr += "useA" + std::to_string(useA) + " useB" + std::to_string(useB) + " useC" + std::to_string(useC) + "\n";
+
+        if (descC && modeC)
+        {
+            auto numModes = descC->getNumModes();
+            descr += std::string(" -Pc") + colwertTypeToCommandline(descC->getDataType());
+            descr += std::string(" -modeC");
+            std::string stride = " -strideC";
+            for (uint32_t i = 0; i < numModes; i ++)
+            {
+                auto mode = modeC[i];
+                auto search = extents.find(mode);
+                if( search != extents.end() && search->second != descC->getExtent(i) )
+                {
+                    throw IlwalidArgument("Extents do not match.\n");
+                }
+                extents[mode] = descC->getExtent(i);
+                stride += std::to_string(descC->getStride(i)) + std::string(",");
+                descr += std::to_string(mode);
+                if (i != numModes - 1)
+                {
+                    descr += std::string(",");
+                }
+            }
+            descr += stride;
+            descr += std::string(" -gamma") + std::to_string(0.7);
+            descr += std::string(" -opC") + std::to_string((int32_t)descC->getOp());
+            if (descC->isVectorized())
+            {
+                descr += std::string(" -vectorModeC")   + std::to_string( descC->getVectorModeIndex());
+                descr += std::string(" -vectorWidthC")  + std::to_string( descC->getVectorWidth());
+                descr += std::string(" -vectorOffsetC") + std::to_string( descC->getVectorOffset() );
+                descr += std::string(" -paddingC")      + std::to_string( descC->getZeroPadding() );
+            }
+        }
+
+        if (descA && modeA)
+        {
+            descr += std::string(" -Pa") + colwertTypeToCommandline(descA->getDataType());
+            auto numModes = descA->getNumModes();
+            descr += std::string(" -modeA");
+            std::array<std::pair<stride_type, mode_type>, TensorDescriptor::LWTENSOR_MAX_MODES> sort;
+            for ( uint32_t i = 0; i < numModes; i ++ )
+            {
+                auto mode = modeA[i];
+                auto search = extents.find(mode);
+                if (search != extents.end() && search->second != descA->getExtent(i))
+                {
+                    throw IlwalidArgument("Extents do not match.\n");
+                }
+                extents[mode] = descA->getExtent(i);
+                sort[i] = std::pair<stride_type, mode_type>(descA->getStride(i), mode);
+            }
+            // sort w.r.t. stride
+            std::sort(sort.begin(), sort.begin() + numModes, [](
+                        const std::pair<stride_type, mode_type>&a,
+                        const std::pair<stride_type, mode_type>&b) { return a.first < b.first; });
+
+            std::string stride = " -strideA";
+            for ( uint32_t i = 0; i < numModes; i ++ )
+            {
+                stride += std::to_string(sort[i].first) + std::string(",");
+                descr += std::to_string( sort[i].second);
+                if ( i != numModes - 1 ) 
+                {
+                    descr += std::string( "," );
+                }
+            }
+
+            descr += stride;
+            descr += std::string(" -alpha") + std::to_string(1.3);
+            descr += std::string(" -opA") + std::to_string((int32_t)descA->getOp());
+            if (descA->isVectorized())
+            {
+                descr += std::string(" -vectorModeA") + std::to_string(descA->getVectorModeIndex());
+                descr += std::string(" -vectorWidthA") + std::to_string(descA->getVectorWidth());
+                descr += std::string(" -vectorOffsetA") + std::to_string(descA->getVectorOffset() );
+                descr += std::string(" -paddingA") + std::to_string(descA->getZeroPadding() );
+            }
+        }
+
+        if (descB && modeB)
+        {
+            descr += std::string(" -Pb") + colwertTypeToCommandline(descB->getDataType());
+            auto numModes = descB->getNumModes();
+            descr += std::string( " -modeB" );
+            std::string stride = " -strideB";
+            for ( uint32_t i = 0; i < numModes; i ++ )
+            {
+                auto mode = modeB[i];
+                auto search = extents.find(mode);
+                if( search != extents.end() && search->second != descB->getExtent(i) )
+                    throw IlwalidArgument("Extents do not match.\n");
+                extents[mode] = descB->getExtent(i);
+                stride += std::to_string(descB->getStride(i)) + std::string(",");
+                //descr += std::string( 1, mode );
+                descr += std::to_string( mode );
+                if ( i != numModes - 1 ) descr += std::string( "," );
+            }
+            descr += stride;
+            descr += std::string(" -beta") + std::to_string(1.7);
+            descr += std::string(" -opB") + std::to_string((int32_t)descB->getOp());
+            if( descA->isVectorized() )
+            {
+                descr += std::string(" -vectorModeB") + std::to_string(descB->getVectorModeIndex());
+                descr += std::string(" -vectorWidthB") + std::to_string(descB->getVectorWidth());
+                descr += std::string(" -vectorOffsetB") + std::to_string(descB->getVectorOffset() );
+                descr += std::string(" -paddingB") + std::to_string(descB->getZeroPadding() );
+            }
+        }
+
+        descr += std::string(" -extent");
+        for (auto i : extents)
+        {
+            descr += std::to_string( i.first )  + std::string( "=" );
+            descr += std::to_string( i.second ) + std::string( "," );
+        }
+        descr += std::string(" -opAB") + std::to_string((int32_t)opAB);
+        descr += std::string(" -opABC") + std::to_string((int32_t)opABC);
+        descr += std::string(" -Pcomp") + colwertTypeToCommandline(typeCompute);
+        descr += std::string(" -Relementwise \n");
+
+        return descr;
+    }
+
+    void getModeOrder(
+            const ModeList &modeA,
+            const ModeList &modeB,
+            const ModeList &modeC,
+            const bool useB,
+            const ExtentMap &extent,
+            ModeList &mode_order)
+    {
+        assert(modeA.size() > 0 && !useB || modeB.size() > 0 && modeC.size() > 0);
+
+        const auto firstModeA =          modeA.front();
+        const auto firstModeB = (useB ?  modeB.front() : LWTENSOR_ILWALID_MODE);
+        const auto firstModeC =          modeC.front();
+
+        /* First push the leading mode of C. */
+        mode_order.emplace_back(firstModeC);
+
+        /* If the leading mode of A is different from C, then push the leading mode of A. */
+        if (firstModeC != firstModeA)
+        {
+            mode_order.emplace_back(firstModeA);
+        }
+
+        /* If B's leading mode is different, push the leading mode of B. */
+        if (useB && (firstModeB != firstModeC) && (firstModeB != firstModeA) )
+        {
+            mode_order.emplace_back(firstModeB);
+        }
+
+        mode_type bestChoice = LWTENSOR_ILWALID_MODE;
+        if (firstModeC == firstModeA)
+        {
+            // optimization for stride-1 kernel: in this case we've some freedome to
+            // select the next mode s.t. the largest blocking is applicable (e.g.,
+            // C[a,b,c] = A[a,c,b] with b=16 and c = 64, in that case c should be the next
+            // mode -- not b!
+            extent_type maxExtent = 0;
+            for ( auto it = modeC.cbegin(); it != modeC.cend(); it ++ )
+            {
+                if ((*it != firstModeC) &&
+                    (*it != firstModeA) &&
+                    (*it != firstModeB) && extent.at(*it) > maxExtent)
+                {
+                    bestChoice = *it;
+                    maxExtent = extent.at(*it);
+                }
+            }
+            if (bestChoice != LWTENSOR_ILWALID_MODE)
+            {
+                mode_order.emplace_back(bestChoice);
+            }
+        }
+
+        /* Push the rest of the modes. */
+        for ( auto it = modeC.cbegin(); it != modeC.cend(); it ++ )
+        {
+            if ((*it != firstModeC) &&
+                (*it != firstModeA) &&
+                (*it != firstModeB) &&
+                (*it != bestChoice))
+            {
+                mode_order.emplace_back( *it );
+            }
+        }
+    }
+
+    lwtensorStatus_t pwValidateInput(
+            const Context *ctx,
+            const void * const alpha, const TensorDescriptor* const descA, const mode_type* const modeA,
+            const void * const beta,  const TensorDescriptor* const descB, const mode_type* const modeB,
+            const void * const gamma, const TensorDescriptor* const descC, const mode_type* const modeC,
+                                      const TensorDescriptor* const descD,
+            const lwtensorOperator_t opA,
+            const lwtensorOperator_t opB,
+            const lwtensorOperator_t opC,
+            const lwtensorOperator_t opAB,
+            const lwtensorOperator_t opABC,
+            const lwdaDataType_t typeCompute, const bool useA, const bool useB, const bool useC)
+    {
+        if( alpha == nullptr )
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_ILWALID_VALUE);
+        }
+        if( (beta != nullptr) ^ useB )
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_ILWALID_VALUE);
+        }
+        if( (gamma != nullptr) ^ useC )
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_ILWALID_VALUE);
+        }
+        if( (descD != descC) )
+        {
+            return ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_NOT_SUPPORTED,
+                    "Current limitation: descD and descC must be pointers to the same memory location." );
+        }
+
+        /* Check if operators are valid? */
+        if ( (useA && ( opA == lwtensorOperator_t::LWTENSOR_OP_UNKNOWN )) ||
+             (useB && ( opB == lwtensorOperator_t::LWTENSOR_OP_UNKNOWN )) ||
+             (useC && ( opC == lwtensorOperator_t::LWTENSOR_OP_UNKNOWN )) ||
+             (useA && useB && ( opAB == lwtensorOperator_t::LWTENSOR_OP_UNKNOWN )) ||
+             ((useA||useB) && useC && ( opABC == lwtensorOperator_t::LWTENSOR_OP_UNKNOWN )))
+        {
+            RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                    "Operator invalid."));
+        }
+
+            if ( !isValidUnaryOperator( opA, typeCompute ) )
+            {
+                if ( useA )
+                {
+                    RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                        "Operator opA invalid." ));
+                }
+            }
+            if ( !isValidUnaryOperator( opB, typeCompute ) )
+            {
+                if ( useB )
+                {
+                    RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                        "Operator opB invalid." ));
+                }
+            }
+            if ( !isValidUnaryOperator( opC, typeCompute ) )
+            {
+                if ( useC )
+                {
+                    RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                        "Operator opC invalid." ));
+                }
+            }
+            if ( !isValidBinaryOperator( opAB, typeCompute) )
+            {
+                RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                        "Operator opAB invalid." ));
+            }
+            if ( !isValidBinaryOperator( opABC, typeCompute) )
+            {
+                RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                        "Operator opABC invalid." ));
+            }
+
+        if( useA && (descA->getNumModes() > 0U) && (modeA == nullptr) )
+        {
+            RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                    "modeA may not be null."));
+        }
+
+        if( useB && (descB->getNumModes() > 0U) && (modeB == nullptr) )
+        {
+            RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                    "modeB may not be null."));
+        }
+
+        if( useC && (descC->getNumModes() > 0U) && (modeC == nullptr) )
+        {
+            RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                    "modeC may not be null."));
+        }
+
+        if ( descC == nullptr )
+        {
+            RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                    "Descriptor for C may not be null."));
+        }
+
+        if ( !useA )
+        {
+            RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                    "alpha, *alpha, and A must not be zero." ));
+        }
+        if ( (useA && hasDuplicates( modeA, descA->getNumModes() )) ||
+             (useB && hasDuplicates( modeB, descB->getNumModes() )) ||
+             (useC && hasDuplicates( modeC, descC->getNumModes() )) )
+        {
+            RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                    "Each mode may only appear up to once per tensor." ));
+        }
+        for ( uint32_t i = 0U; useA && (i < descA->getNumModes()); ++ i )
+        {
+            if ( (modeA[i] >= LWTENSOR_FIRST_INTERNAL_MODE) || (modeA[i] < 0) || (descA->getExtent(i) < 0) )
+            {
+                RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                        "A mode-value is invalid or an extent is negative; make sure that each mode m is 0 <= m < 128."));
+            }
+            if ( find( modeA[i], modeC, descC->getNumModes()) == -1 )
+            {
+                RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                        "Each mode of A must also appear in the output tensor D." ));
+            }
+        }
+        for ( uint32_t i = 0U; useC && (i < descC->getNumModes()); ++ i )
+        {
+            if ( (modeC[i] >= LWTENSOR_FIRST_INTERNAL_MODE) || (modeC[i] < 0) || (descC->getExtent(i) < 0) )
+            {
+                RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                        "A mode-value is invalid or an extent is negative; make sure that each mode m is 0 <= m < 128." ));
+            }
+        }
+        for ( uint32_t i = 0U; useB && i < (descB->getNumModes()); ++ i )
+        {
+            if ( (modeB[i] >= LWTENSOR_FIRST_INTERNAL_MODE) || (modeB[i] < 0)  || (descB->getExtent(i) < 0) )
+            {
+                RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                        "A mode-value is invalid or an extent is negative; make sure that each mode m is 0 <= m < 128."));
+            }
+            if ( find( modeB[i], modeC, descC->getNumModes() ) == -1 )
+            {
+                RETURN_STATUS(ctx->logError( lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE,
+                        "Each mode of B must also appear in the output tensor D."));
+            }
+        }
+
+        /* Return with no error. */
+        return lwtensorStatus_t::LWTENSOR_STATUS_SUCCESS;
+    }
+
+
+    lwtensorStatus_t lwtensorElementwiseInternal_L1(
+            const Context *ctx,
+            const void * const alpha, const lwdaDataType_t typeA, const StrideMap &strideA, const ModeList &modeA, const uint32_t alignmentRequirementA,
+            const void * const beta,  const lwdaDataType_t typeB, const StrideMap &strideB, const ModeList &modeB, const uint32_t alignmentRequirementB,
+            const void * const gamma, const lwdaDataType_t typeC, const StrideMap &strideC, const ModeList &modeC, const uint32_t alignmentRequirementC, const uint32_t alignmentRequirementD,
+            const ExtentMap &extent,
+            const lwtensorOperator_t opA,
+            const lwtensorOperator_t opB,
+            const lwtensorOperator_t opC,
+            const lwtensorOperator_t opAB,
+            const lwtensorOperator_t opABC,
+            const lwdaDataType_t typeCompute,
+            ElementwisePlan * plan)
+    {
+        HANDLE_ERROR(validateStride(strideA, modeA));
+        HANDLE_ERROR(validateStride(strideB, modeB));
+        HANDLE_ERROR(validateStride(strideC, modeC));
+
+        const bool useA = alpha != nullptr;
+        const bool useB = beta  != nullptr;
+        const bool useC = gamma != nullptr;
+
+        if (!useA)
+        {
+            RETURN_STATUS(ctx->logError(lwtensorStatus_t::LWTENSOR_STATUS_NOT_SUPPORTED, 
+                    "The elementwise operation much be either permutation, binary, or trinary."));
+        }
+        //if (useB && !useC)
+        //{
+        //    return handleError(lwtensorStatus_t::LWTENSOR_STATUS_NOT_SUPPORTED, 
+        //            "The elementwise operation much be either permutation, binary, or trinary.");
+        //}
+
+#ifdef DEBUG
+        if (!useA)
+        {
+            return handleError( lwtensorStatus_t::LWTENSOR_STATUS_INTERNAL_ERROR, "A is not used!.");
+        }
+        if ( A == nullptr || modeA.size() != strideA.size() || modeA.size() <= 0 )
+        {
+            return handleError( lwtensorStatus_t::LWTENSOR_STATUS_INTERNAL_ERROR, "A is invalid!." );
+        }
+        if ( useB && ( modeB.size() != strideB.size() || modeB.size() <= 0 ) )
+        {
+            return handleError( lwtensorStatus_t::LWTENSOR_STATUS_INTERNAL_ERROR, "B is invalid." );
+        }
+        if ( useC && C == nullptr || modeC.size() != strideC.size() || modeC.size() <= 0 || (D == nullptr) )
+        {
+            return handleError( lwtensorStatus_t::LWTENSOR_STATUS_INTERNAL_ERROR, "D or C invalid!." );
+        }
+#endif
+
+        /*
+         * Encodes the order in which the modes will be traversed within the kernel.
+         * Notice: the first modes are blocked.
+         */
+        ModeList mode_order;
+        /* The first mode will be C's vectorized mode or its leading mode. */
+        getModeOrder(modeA, modeB, modeC, useB, extent, mode_order);
+
+        ElementwiseParameters params;
+
+        HANDLE_ERROR(params.init(ctx, mode_order, extent,
+                useA, typeA, modeA, opA,
+                useB, typeB, modeB, opB,
+                useC, typeC, modeC, opC, opAB, opABC, typeCompute,
+                alignmentRequirementA, alignmentRequirementB, alignmentRequirementC, alignmentRequirementD,
+                strideA, strideB, strideC));
+
+        int kernelRank = -1; // default (i.e., use heur)
+#ifdef LWTENSOR_EXPOSE_INTERNAL
+        if (getelw("LWTENSOR_FORCE_EW_ALGO") != nullptr)
+        {
+            kernelRank = atoi(getelw("LWTENSOR_FORCE_EW_ALGO"));
+        }
+#endif
+
+        int32_t candidateIdx;
+        int32_t containerIdx;
+        auto elementwiseEngine = getElementwiseEngine();
+        HANDLE_ERROR(elementwiseEngine->getCandidate(ctx,
+                    params,
+                    /*workspaceSize*/0,
+                    kernelRank,
+                    candidateIdx, containerIdx));
+
+#ifdef LWTENSOR_EXPOSE_INTERNAL
+        if (getelw("LWTENSOR_FORCE_EW_ALGO") != nullptr)
+        {
+            const Candidate<ElementwiseParameters> *candidate;
+            elementwiseEngine->getCandidatePtr(candidateIdx, containerIdx, candidate);
+            char info[255];
+            static char setelw_str[1024];
+            candidate->info(info, 255);
+            sprintf(setelw_str, "LWTENSOR_EW_PLANINFO=%s;modes:%d;extent:", info, params.nmodeC_);
+            for (int i = 0; i < params.nmodeC_; i++)
+            {
+                char extent_buf[128];
+                sprintf(extent_buf, "%d,", params.extent_[i]);
+                strcat(setelw_str, extent_buf);
+            }
+            strcat(setelw_str, ";strideC:");
+            for (int i = 0; i < params.nmodeC_; i++)
+            {
+                char extent_buf[128];
+                sprintf(extent_buf, "%ld,", params.strideC_[i]);
+                strcat(setelw_str, extent_buf);
+            }
+            strcat(setelw_str, ";strideA:");
+            for (int i = 0; i < params.nmodeC_; i++)
+            {
+                char extent_buf[128];
+                sprintf(extent_buf, "%ld,", params.strideA_[i]);
+                strcat(setelw_str, extent_buf);
+            }
+            strcat(setelw_str, ";");
+            putelw(setelw_str);
+        }
+#endif
+
+#ifdef DEBUG
+        printf("mode order: \n");
+        for(auto m : mode_order)
+            printf("%c ", m);
+        printf("\n");
+        printf("\nC: ");
+        for(auto s : modeC)
+            printf("(%c,%d,%d) ",s,extent.at(s), strideC.at(s));
+        printf("\n");
+        printf("\nA: ");
+        for(auto s : modeA)
+            printf("(%c,%d,%d) ",s,extent.at(s),strideA.at(s));
+        printf("\n");
+        printf("\nB: ");
+        for(auto s : modeB)
+            printf("(%c,%d,%d) ",s,extent.at(s),strideB.at(s));
+        printf("\n");
+#endif
+
+        plan->swapAB_ = false;
+        plan->swapAC_ = false;
+        plan->params_ = params;
+        plan->candidateIdx_ = candidateIdx;
+        plan->containerIdx_ = containerIdx;
+        return lwtensorStatus_t::LWTENSOR_STATUS_SUCCESS;
+    }
+
+    lwtensorStatus_t lwtensorElementwiseInternal_L0(
+            const Context *ctx,
+            const void * alpha, const TensorDescriptor * descA, const mode_type* modeA, const uint32_t alignmentRequirementA,
+            const void * beta,  const TensorDescriptor * descB, const mode_type* modeB, const uint32_t alignmentRequirementB,
+            const void * gamma, const TensorDescriptor * descC, const mode_type* modeC, const uint32_t alignmentRequirementC,
+                                const TensorDescriptor * const descD, const mode_type* modeD, const uint32_t alignmentRequirementD,
+            lwtensorOperator_t opA,
+            lwtensorOperator_t opB,
+            lwtensorOperator_t opC,
+            lwtensorOperator_t opAB,
+            const lwtensorOperator_t opABC,
+            const lwdaDataType_t typeCompute, ElementwisePlan * plan)
+    {
+        if (modeC != modeD)
+        {
+            RETURN_STATUS(ctx->logError(LWTENSOR_STATUS_NOT_SUPPORTED, "The pointer to the modes of C and D must be identical."))
+        }
+        bool useA = (descA != nullptr) && (alpha != nullptr);
+        bool useB = (descB != nullptr) && (beta  != nullptr);
+        bool useC = (descC != nullptr) && (gamma != nullptr);
+
+        if (! isValidLwdaDataType(typeCompute))
+        {
+            RETURN_STATUS(ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Not a valid lwdaDataType_t"));
+        }
+
+        LWTENSOR_LOG_API(ctx, 1, reproduceElementwiseCommand(
+                    useA, useB, useC,
+                    descA, modeA,
+                    descB, modeB,
+                    descC, modeC, opAB, opABC, typeCompute));
+
+        if (!useA)
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_NOT_SUPPORTED;
+        }
+        if (!useB)
+        {
+            descB = nullptr;
+            modeB = nullptr;
+            beta = nullptr;
+        }
+        if (!useC)
+        {
+            gamma = nullptr;
+        }
+
+        ModeRenamer renamer;
+        ModeList renameModeA = renamer.rename(modeA, descA->getNumModes());
+        modeA = renameModeA.data();
+        ModeList renameModeB;
+        if (useB)
+        {
+            renameModeB = renamer.rename(modeB, descB->getNumModes());
+            modeB = renameModeB.data();
+        }
+        ModeList renameModeC = renamer.rename(modeC, descC->getNumModes());
+        modeC = renameModeC.data();
+
+        if (! renamer.valid())
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Too many distinct modes were passed");
+        }
+
+        HANDLE_ERROR(pwValidateInput(
+                    ctx,
+                    alpha, descA, modeA,
+                    beta,  descB, modeB,
+                    gamma, descC, modeC,
+                           descD,
+                    opA, opB, opC, opAB, opABC,
+                    typeCompute, useA, useB, useC));
+
+        /*
+         * Sort strides and modes in ascending order w.r.t. strides
+         */
+        ExtentMap extent;
+
+        /* Initialize A, B, and C */
+        ModeList sortedModeA;
+        ModeList sortedModeB;
+        ModeList sortedModeC;
+        StrideMap strideA;
+        StrideMap strideB;
+        StrideMap strideC;
+        HANDLE_ERROR( initStrideExtentModesSorted( descA, modeA, strideA, sortedModeA, extent ) );
+        HANDLE_ERROR( initStrideExtentModesSorted( descB, modeB, strideB, sortedModeB, extent ) );
+        HANDLE_ERROR( initStrideExtentModesSorted( descC, modeC, strideC, sortedModeC, extent ) );
+
+        /*
+         * Delete all extent-1 modes
+         */
+        for (auto it = sortedModeC.begin(); it != sortedModeC.end();)
+        {
+            auto mode = *it;
+            if (extent.at(mode) == 1)
+            {
+                it = sortedModeC.erase(it);
+                strideC.erase(mode);
+
+                auto itA = std::find(sortedModeA.begin(), sortedModeA.end(), mode);
+                if (itA != sortedModeA.end())
+                {
+                    sortedModeA.erase(itA);
+                    strideA.erase(mode);
+                }
+                auto itB = std::find(sortedModeB.begin(), sortedModeB.end(), mode);
+                if (itB != sortedModeB.end())
+                {
+                    sortedModeB.erase(itB);
+                    strideB.erase(mode);
+                }
+                extent.erase(mode);
+            }
+            else
+            {
+                it++;
+            }
+        }
+
+        /*
+         * Creacte maping between modes and strides for A, B, and C.
+         */
+        HANDLE_ERROR( fuseModes(
+                    sortedModeA, strideA,
+                    sortedModeB, strideB,
+                    sortedModeC, strideC,
+                    extent));
+
+        /* This is unrelevent to vectorization. */
+        if ( useA && sortedModeA.empty() )
+        {
+            assert( extent.find( RESERVED_M_MODE_PW ) == extent.end() );
+            assert( strideA.find( RESERVED_M_MODE_PW ) == strideA.end() );
+            assert( strideC.find( RESERVED_M_MODE_PW ) == strideC.end() );
+            extent[ RESERVED_M_MODE_PW ] = 1;
+            // if(strideA.find(sortedModeA.back()) != strideA.end() )
+            // {
+            //     strideA[ RESERVED_M_MODE_PW ] = strideA[ sortedModeA.back() ];
+            // }
+            // else
+            {
+                strideA[ RESERVED_M_MODE_PW ] = 0;
+            }
+            if(!sortedModeC.empty() && strideC.find(sortedModeC.back()) != strideC.end() )
+            {
+                strideC[ RESERVED_M_MODE_PW ] = strideC[ sortedModeC.back() ];
+            }
+            else
+            {
+                strideC[ RESERVED_M_MODE_PW ] = 0;
+            }
+            sortedModeA.push_back( RESERVED_M_MODE_PW );
+            sortedModeC.push_back( RESERVED_M_MODE_PW );
+        }
+
+        /* This is unrelevent to vectorization. */
+        if ( useB && sortedModeB.empty() )
+        {
+            assert( extent.find( RESERVED_N_MODE_PW ) == extent.end() );
+            assert( strideB.find( RESERVED_N_MODE_PW ) == strideB.end() );
+            assert( strideC.find( RESERVED_N_MODE_PW ) == strideC.end() );
+            extent[ RESERVED_N_MODE_PW ] = 1;
+            //if(strideB.find(sortedModeB.back()) != strideB.end() )
+            //{
+            //    strideB[ RESERVED_N_MODE_PW ] = strideB[ sortedModeB.back() ];
+            //}
+            //else
+            {
+                strideB[ RESERVED_N_MODE_PW ] = 0;
+            }
+            if(!sortedModeC.empty() && strideC.find(sortedModeC.back()) != strideC.end() )
+            {
+                strideC[ RESERVED_N_MODE_PW ] = strideC[ sortedModeC.back() ];
+            }
+            else
+            {
+                strideC[ RESERVED_N_MODE_PW ] = 0;
+            }
+            sortedModeB.push_back( RESERVED_N_MODE_PW );
+            sortedModeC.push_back( RESERVED_N_MODE_PW );
+        }
+
+        /******** NOTE **************************************
+         * At this point we require that the modes, strides, and extents have been sorted
+         * w.r.t. ascending strides
+         ***************************************************/
+
+        const auto typeC(descC->getDataType());
+        const auto typeA(useA ? descA->getDataType() : typeC);
+        const auto typeB(useB ? descB->getDataType() : typeA);
+        /* The entry point to the decision tree generated by python. */
+        return lwtensorElementwiseInternal_L1(
+                ctx,
+                alpha, typeA, strideA, sortedModeA, alignmentRequirementA,
+                beta,  typeB, strideB, sortedModeB, alignmentRequirementB,
+                gamma, typeC, strideC, sortedModeC, alignmentRequirementC, alignmentRequirementD,
+                extent,
+                opA, opB, opC, opAB, opABC,
+                typeCompute, plan);
+    }
+
+
+    lwtensorStatus_t elementwiseTrinaryCreate(
+            const Context *ctx,
+            const void * alpha,const TensorDescriptor & descA, const int32_t * modeA, const uint32_t alignmentRequirementA,
+            const void * beta, const TensorDescriptor & descB, const int32_t * modeB, const uint32_t alignmentRequirementB,
+            const void * gamma,const TensorDescriptor & descC, const int32_t * modeC, const uint32_t alignmentRequirementC,
+                               const TensorDescriptor & descD, const int32_t * modeD, const uint32_t alignmentRequirementD,
+            const lwtensorOperator_t opAB,
+            const lwtensorOperator_t opABC,
+            const lwdaDataType_t typeCompute, ElementwisePlan & plan)
+    {
+        try
+        {
+            if (((descA.getNumModes() > 0U) && (modeA == nullptr)) ||
+                ((descB.getNumModes() > 0U) && (modeB == nullptr)) ||
+                ((descC.getNumModes() > 0U) && (modeC == nullptr)))
+            {
+                RETURN_STATUS(ctx->logError(lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE, "some mode for trinary elementwise is NULL."));
+            }
+            const lwtensorOperator_t opA = descA.getOp();
+            const lwtensorOperator_t opB = descB.getOp();
+            const lwtensorOperator_t opC = descC.getOp();
+            const auto status = lwtensorElementwiseInternal_L0(
+                    ctx,
+                    alpha, &descA, modeA, alignmentRequirementA,
+                    beta,  &descB, modeB, alignmentRequirementB,
+                    gamma, &descC, modeC, alignmentRequirementC,
+                           &descD, modeD, alignmentRequirementD,
+                    opA, opB, opC, opAB, opABC, typeCompute, &plan);
+            return status;
+        }
+        catch ( const std::exception& e )
+        {
+            return LWTENSOR_NAMESPACE::handleException(e);
+        }
+    }
+
+    lwtensorStatus_t elementwiseBinaryCreate(
+            const Context *ctx,
+            const void * alpha, const TensorDescriptor & descA, const int32_t * modeA, const uint32_t alignmentRequirementA,
+            const void * gamma, const TensorDescriptor & descC, const int32_t * modeC, const uint32_t alignmentRequirementC,
+            const TensorDescriptor & descD, const int32_t * modeD, const uint32_t alignmentRequirementD,
+            const lwtensorOperator_t opAC, const lwdaDataType_t typeCompute,
+            ElementwisePlan & plan)
+    {
+        try
+        {
+            if (((descA.getNumModes() > 0U) && (modeA == nullptr)) ||
+                ((descC.getNumModes() > 0U) && (modeC == nullptr)))
+            {
+                return LWTENSOR_NAMESPACE::handleError(lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE, "some mode for binary elementwise is NULL.");
+            }
+            const lwtensorOperator_t opA = descA.getOp();
+            const lwtensorOperator_t opC = descC.getOp();
+            constexpr lwtensorOperator_t opAdd = lwtensorOperator_t::LWTENSOR_OP_ADD;
+            constexpr lwtensorOperator_t opId = lwtensorOperator_t::LWTENSOR_OP_IDENTITY;
+            return LWTENSOR_NAMESPACE::lwtensorElementwiseInternal_L0(
+                    ctx,
+                    alpha, &descA, modeA, alignmentRequirementA,
+                    nullptr, nullptr, nullptr, 0,
+                    gamma, &descC, modeC, alignmentRequirementC,
+                           &descD, modeD, alignmentRequirementD,
+                    opA, opId, opC, opAdd, opAC, typeCompute, &plan);
+        }
+        catch ( const std::exception& e )
+        {
+            return LWTENSOR_NAMESPACE::handleException(e);
+        }
+    }
+
+    lwtensorStatus_t permutationCreate(
+            const Context *ctx,
+            const void* alpha, const TensorDescriptor & descA, const int32_t * modeA, const uint32_t alignmentRequirementA,
+                               const TensorDescriptor & descD, const int32_t * modeD, const uint32_t alignmentRequirementD,
+            const lwdaDataType_t typeCompute,
+            ElementwisePlan & plan)
+    {
+        try
+        {
+            if (((descA.getNumModes() > 0U) && (modeA == nullptr)) ||
+                ((descD.getNumModes() > 0U) && (modeD == nullptr)))
+            {
+                RETURN_STATUS(ctx->logError(lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE, "some permutation mode is NULL."));
+            }
+            /* Must provide opAB and opABC. */
+            constexpr lwtensorOperator_t opAdd = lwtensorOperator_t::LWTENSOR_OP_ADD;
+            const lwtensorOperator_t opA = descA.getOp();
+            constexpr lwtensorOperator_t opId = lwtensorOperator_t::LWTENSOR_OP_IDENTITY;
+            return LWTENSOR_NAMESPACE::lwtensorElementwiseInternal_L0(
+                ctx,
+                alpha, &descA, modeA, alignmentRequirementA,
+                nullptr, nullptr, nullptr, 0,
+                nullptr, &descD, modeD, alignmentRequirementD,
+                       &descD, modeD, alignmentRequirementD,
+                opA, opId, opId, opAdd, opAdd, typeCompute, &plan);
+        }
+        catch (const std::exception& e)
+        {
+            return LWTENSOR_NAMESPACE::handleException(e);
+        }
+    }
+
+    lwtensorStatus_t elementwiseTrinaryExelwte(
+            const Context *ctx,
+            const void * alpha, const void * A,
+            const void *  beta, const void * B,
+            const void * gamma, const void * C, void * const D,
+            const ElementwisePlan & plan, const lwdaStream_t stream)
+    {
+        LWTENSOR_LOG_API(ctx, 3, plan.toString());
+        const auto & params = plan.params_;
+        /* This case happens when A is not used but B is used. */
+        if (plan.swapAB_)
+        {
+            std::swap(alpha, beta);
+            std::swap(A, B);
+        }
+        /* This case happens when only C is used. */
+        if (plan.swapAC_)
+        {
+            alpha = gamma;
+            gamma = nullptr;
+            A = C;
+            C = nullptr;
+        }
+        if (!plan.params_.useA_)
+        {
+            A = nullptr;
+            alpha = nullptr;
+        }
+        if (!plan.params_.useB_)
+        {
+            B = nullptr;
+            beta = nullptr;
+        }
+        if (!plan.params_.useC_)
+        {
+            C = nullptr;
+            gamma = nullptr;
+        }
+
+        auto elementwiseEngine = getElementwiseEngine();
+        return (*elementwiseEngine)(ctx,
+                    params,
+                    alpha, A, beta, B, gamma, C, D,
+                    /*workspace*/ nullptr, /*workspaceSize*/0, stream,
+                    plan.candidateIdx_,
+                    plan.containerIdx_);
+    }
+
+    lwtensorStatus_t elementwiseBinaryExelwte(
+            const Context *ctx,
+            const void * const alpha, const void * const A,
+            const void * const gamma, const void * const C,
+                                            void * const D,
+            const ElementwisePlan & plan, const lwdaStream_t stream)
+    {
+        return elementwiseTrinaryExelwte(ctx, alpha, A, nullptr, nullptr, gamma, C, D, plan, stream);
+    }
+
+    lwtensorStatus_t permutationExelwte(
+            const Context *ctx,
+            const void * const alpha, const void * const A,
+                                            void * const D,
+            const ElementwisePlan & plan, const lwdaStream_t stream)
+    {
+        return elementwiseTrinaryExelwte(ctx, alpha, A, nullptr, nullptr, nullptr, nullptr, D, plan, stream);
+    }
+
+} /* end namespace LWTENSOR_NAMESPACE */
+
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t lwtensorElementwiseBinary(const lwtensorHandle_t* handle,
+        const void * alpha, const void * A, const lwtensorTensorDescriptor_t* descA, const int32_t * modeA,
+        const void * gamma, const void * C, const lwtensorTensorDescriptor_t* descC, const int32_t * modeC,
+                                  void * D, const lwtensorTensorDescriptor_t* descD, const int32_t * modeD,
+        const lwtensorOperator_t opAC, const lwdaDataType_t typeScalar, const lwdaStream_t stream)
+{
+    //using namespace LWTENSOR_NAMESPACE;
+    using LWTENSOR_NAMESPACE::TensorDescriptor;
+    using LWTENSOR_NAMESPACE::Context;
+    try
+    {
+        const TensorDescriptor * descA_ = reinterpret_cast<const TensorDescriptor *>(descA);
+        const TensorDescriptor * descC_ = reinterpret_cast<const TensorDescriptor *>(descC);
+        const TensorDescriptor * descD_ = reinterpret_cast<const TensorDescriptor *>(descD);
+        const Context *ctx = reinterpret_cast<const Context *>(handle);
+
+        if (ctx == nullptr || !ctx->isInitialized())
+        {
+            return LWTENSOR_NAMESPACE::handleError(LWTENSOR_STATUS_NOT_INITIALIZED, "Handle must be initialized.");
+        }
+        if ((alpha == nullptr) || (A == nullptr) || (descA_ == nullptr) || ! descA_->isInitialized() || ((descA_->getNumModes() > 0U) && (modeA == nullptr)))
+        {
+            RETURN_STATUS(ctx->logError(lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE, "Some argument related to A is invalid."));
+        }
+        if ((gamma == nullptr) || (C == nullptr) || (descC_ == nullptr) || !  descC_->isInitialized() || ((descC_->getNumModes() > 0U) && (modeC == nullptr)))
+        {
+            RETURN_STATUS(ctx->logError(lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE, "Some argument related to C is invalid."));
+        }
+        if (D == nullptr)
+        {
+            RETURN_STATUS(ctx->logError(lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE, "D must not be nullptr."));
+        }
+
+        const uint32_t alignmentRequirementA = LWTENSOR_NAMESPACE::getMaximalAlignmentPtr(A);
+        const uint32_t alignmentRequirementC = LWTENSOR_NAMESPACE::getMaximalAlignmentPtr(C);
+        const uint32_t alignmentRequirementD = LWTENSOR_NAMESPACE::getMaximalAlignmentPtr(D);
+
+        LWTENSOR_NAMESPACE::ElementwisePlan plan;
+        auto status = elementwiseBinaryCreate(
+                ctx,
+                alpha, *descA_, modeA, alignmentRequirementA,
+                gamma, *descC_, modeC, alignmentRequirementC,
+                *descD_, modeD, alignmentRequirementD,
+                opAC, typeScalar, plan);
+        if (status != lwtensorStatus_t::LWTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        return LWTENSOR_NAMESPACE::elementwiseBinaryExelwte(ctx, alpha, A, gamma, C, D, plan, stream);
+    }
+    catch ( const std::exception& e )
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t lwtensorElementwiseTrinary(const lwtensorHandle_t* handle,
+        const void * alpha, const void * A, const lwtensorTensorDescriptor_t* descA, const int32_t * modeA,
+        const void * beta,  const void * B, const lwtensorTensorDescriptor_t* descB, const int32_t * modeB,
+        const void * gamma, const void * C, const lwtensorTensorDescriptor_t* descC, const int32_t * modeC,
+                                  void * D, const lwtensorTensorDescriptor_t* descD, const int32_t * modeD,
+        lwtensorOperator_t opAB, lwtensorOperator_t opABC, const lwdaDataType_t typeScalar, const lwdaStream_t stream)
+{
+    using LWTENSOR_NAMESPACE::Context;
+    using LWTENSOR_NAMESPACE::TensorDescriptor;
+    try
+    {
+        const Context *ctx = reinterpret_cast<const Context *>(handle);
+        const TensorDescriptor *descA_ = reinterpret_cast<const TensorDescriptor *>(descA);
+        const TensorDescriptor *descB_ = reinterpret_cast<const TensorDescriptor *>(descB);
+        const TensorDescriptor *descC_ = reinterpret_cast<const TensorDescriptor *>(descC);
+        const TensorDescriptor *descD_ = reinterpret_cast<const TensorDescriptor *>(descD);
+
+        if (ctx == nullptr || !ctx->isInitialized())
+        {
+            RETURN_STATUS(LWTENSOR_NAMESPACE::handleError(LWTENSOR_STATUS_NOT_INITIALIZED,
+                        "Handle must be initialized."));
+        }
+        if ((alpha == nullptr) || (A == nullptr) || (descA_ == nullptr) || !  descA_->isInitialized() || ((descA_->getNumModes() > 0U) && (modeA == nullptr)))
+        {
+            RETURN_STATUS(ctx->logError(lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE, "Some argument related to A is invalid."));
+        }
+        if ((beta  == nullptr) || (B == nullptr) || (descB_ == nullptr) || !  descB_->isInitialized() || ((descB_->getNumModes() > 0U) && (modeB == nullptr)))
+        {
+            RETURN_STATUS(ctx->logError(lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE, "Some argument related to B is invalid."));
+        }
+        if ((gamma == nullptr) || (C == nullptr) || (descC_ == nullptr) || ! descC_->isInitialized() || ((descC_->getNumModes() > 0U) && (modeC == nullptr)))
+        {
+            RETURN_STATUS(ctx->logError(lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE, "Some argument related to C is invalid."));
+        }
+        if (D == nullptr)
+        {
+            RETURN_STATUS(ctx->logError(lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE, "D must not be nullptr."));
+        }
+
+        const uint32_t alignmentRequirementA = LWTENSOR_NAMESPACE::getMaximalAlignmentPtr(A);
+        const uint32_t alignmentRequirementB = LWTENSOR_NAMESPACE::getMaximalAlignmentPtr(B);
+        const uint32_t alignmentRequirementC = LWTENSOR_NAMESPACE::getMaximalAlignmentPtr(C);
+        const uint32_t alignmentRequirementD = LWTENSOR_NAMESPACE::getMaximalAlignmentPtr(D);
+
+        LWTENSOR_NAMESPACE::ElementwisePlan plan;
+        auto status = LWTENSOR_NAMESPACE::elementwiseTrinaryCreate(
+                ctx,
+                alpha, *descA_, modeA, alignmentRequirementA,
+                beta,  *descB_, modeB, alignmentRequirementB,
+                gamma, *descC_, modeC, alignmentRequirementC,
+                *descD_, modeD, alignmentRequirementD,
+                opAB, opABC, typeScalar, plan);
+        if (status != lwtensorStatus_t::LWTENSOR_STATUS_SUCCESS)
+        {
+            RETURN_STATUS(status);
+        }
+        return LWTENSOR_NAMESPACE::elementwiseTrinaryExelwte(
+            ctx,
+            alpha, A, beta, B, gamma, C, D, plan, stream);
+    }
+    catch (const std::exception& e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t lwtensorPermutation(const lwtensorHandle_t* handle, const void * alpha,
+        const void * A, const lwtensorTensorDescriptor_t* descA, const int * modeA,
+              void * B, const lwtensorTensorDescriptor_t* descB, const int * modeB,
+        const lwdaDataType_t typeScalar, const lwdaStream_t stream )
+{
+    using LWTENSOR_NAMESPACE::TensorDescriptor;
+    using LWTENSOR_NAMESPACE::Context;
+    try
+    {
+        const Context* const ctx = reinterpret_cast<const Context *>(handle);
+        auto intDescA = reinterpret_cast<const TensorDescriptor*>(descA);
+        auto intDescB = reinterpret_cast<const TensorDescriptor*>(descB);
+        if (ctx == nullptr || !ctx->isInitialized())
+        {
+            return LWTENSOR_NAMESPACE::handleError(LWTENSOR_STATUS_NOT_INITIALIZED, "Handle must be initialized.");
+        }
+        if ((alpha == nullptr) || (A == nullptr) || (intDescA == nullptr) ||
+              ! intDescA->isInitialized() || ((intDescA->getNumModes() > 0) && (modeA == nullptr)) ||
+            (B == nullptr)   || (intDescB == nullptr) || !intDescB->isInitialized() || ((intDescB->getNumModes() > 0) && (modeB == nullptr)))
+        {
+            return ctx->logError(lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE, "some argument is NULL.");
+        }
+
+        const uint32_t alignmentRequirementA = LWTENSOR_NAMESPACE::getMaximalAlignmentPtr(A);
+        const uint32_t alignmentRequirementB = LWTENSOR_NAMESPACE::getMaximalAlignmentPtr(B);
+
+        LWTENSOR_NAMESPACE::ElementwisePlan plan;
+        auto status = LWTENSOR_NAMESPACE::permutationCreate(
+                ctx,
+                alpha, *intDescA, modeA, alignmentRequirementA,
+                *intDescB, modeB, alignmentRequirementB,
+                typeScalar, plan);
+        if (status != lwtensorStatus_t::LWTENSOR_STATUS_SUCCESS)
+        {
+            RETURN_STATUS(status);
+        }
+        return LWTENSOR_NAMESPACE::permutationExelwte(ctx, alpha, A, B, plan, stream);
+    }
+    catch (const std::exception& e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}

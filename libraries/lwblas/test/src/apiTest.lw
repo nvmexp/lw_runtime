@@ -1,0 +1,61 @@
+#include <cstdlib>
+#include <stdio.h>
+#include <string.h>
+#include <ostream>
+#include <limits>
+#include <cstdint>
+#include "gtest/gtest.h"
+#include "apiTest.h"
+#include "apiMaster.h"
+#include "apiDevice.h"
+#include "publicApiMaster.h"
+
+void setSelectedDevice(int &deviceId)
+{
+    // pick the desired GPU (in case we've multiple choices)
+    if (getelw("LWTENSOR_COMPUTE_ARCH") != nullptr)
+    {
+        int requested_sm = atoi(getelw("LWTENSOR_COMPUTE_ARCH")); // e.g., 70
+        int numDevices;
+        lwdaGetDeviceCount(&numDevices);
+        bool found = false;
+        for(int i=0; i < numDevices; ++i)
+        {
+            lwdaSetDevice(i);
+            lwdaDeviceProp prop;
+            lwdaGetDeviceProperties(&prop, i);
+            if (prop.major == requested_sm / 10 &&
+                prop.minor == requested_sm % 10)
+            {
+                deviceId = i;
+                found = true;
+            }
+        }
+        if (! found)
+        {
+            printf("Error: Not suitable GPU was found (SM %d was requested)\n", requested_sm);
+            exit(-1);
+        }
+    }
+    lwdaSetDevice(deviceId);
+}
+
+int main(int argc, char **argv) {
+    int deviceId = 0;
+    setSelectedDevice(deviceId);
+
+    lwdaDeviceProp prop;
+    lwdaGetDeviceProperties(&prop, deviceId);
+    printf("id:%d\n", deviceId);
+    printf("GPU-name:%s\n", prop.name);
+    printf("GPU-clock:%d\n", prop.clockRate);
+    printf("GPU-memoryClock:%d\n", prop.memoryClockRate);
+    printf("GPU-nSM:%d\n", prop.multiProcessorCount);
+    printf("GPU-major:%d\n", prop.major);
+    printf("GPU-minor:%d\n", prop.minor);
+
+    unsigned int seed = 1337U;
+    srand(seed);
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}

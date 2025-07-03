@@ -1,0 +1,39 @@
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 texcoord: TexCoord;
+};
+
+Texture2D txDiffuse : register( t0 );
+SamplerState samLinear : register( s0 );
+
+float4 main( VSOut frag ): SV_Target
+{
+    float4 clr = float4(0.1, 0.2, 0.6, 1.0);
+	int txDiffuseSizeX, txDiffuseSizeY;
+	txDiffuse.GetDimensions(txDiffuseSizeX, txDiffuseSizeY);
+	const float2 onePixelSize = float2(1.0 / txDiffuseSizeX, 1.0 / txDiffuseSizeY);
+	const float2 whiteGridWidth = 2.0*onePixelSize;
+	const float2 ilwGridWidth = 1.0*onePixelSize;
+	const float2 distTo1stBar = frag.texcoord - float2(1.0 / 3.0, 1.0 / 3.0);
+	const float2 distTo2ndBar = frag.texcoord - float2(2.0 / 3.0, 2.0 / 3.0);
+
+	float3 gridColorRGB;
+	if ((distTo1stBar.x > -ilwGridWidth.x && distTo1stBar.x < ilwGridWidth.x) ||
+		(distTo2ndBar.x > -ilwGridWidth.x && distTo2ndBar.x < ilwGridWidth.x) ||
+		(distTo1stBar.y > -ilwGridWidth.y && distTo1stBar.y < ilwGridWidth.y) ||
+		(distTo2ndBar.y > -ilwGridWidth.y && distTo2ndBar.y < ilwGridWidth.y))
+	{
+		gridColorRGB = float3(0.05, 0.05, 0.05);
+	} else
+	if ((distTo1stBar.x > -whiteGridWidth.x && distTo1stBar.x < whiteGridWidth.x) ||
+		(distTo2ndBar.x > -whiteGridWidth.x && distTo2ndBar.x < whiteGridWidth.x) ||
+		(distTo1stBar.y > -whiteGridWidth.y && distTo1stBar.y < whiteGridWidth.y) ||
+		(distTo2ndBar.y > -whiteGridWidth.y && distTo2ndBar.y < whiteGridWidth.y))
+	{
+		gridColorRGB = float3(0.95, 0.95, 0.95);
+	}
+	else discard; 
+	clr.rgb = gridColorRGB;
+    return clr;
+}

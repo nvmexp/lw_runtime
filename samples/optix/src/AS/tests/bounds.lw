@@ -1,0 +1,36 @@
+/*
+ * Copyright (c) 2017, LWPU CORPORATION. All rights reserved.
+ */
+
+#include <o6/optix.h>
+#include <optixu/optixu_aabb_namespace.h>
+#include <optixu/optixu_math_namespace.h>
+#include <optixu/optixu_matrix_namespace.h>
+
+using namespace optix;
+
+RT_PROGRAM void ilwalid_bounds( int primIdx, float result[6] )
+{
+    optix::Aabb* aabb = (optix::Aabb*)result;
+    aabb->ilwalidate();
+}
+
+RT_PROGRAM void inf_bounds( int primIdx, float result[6] )
+{
+    optix::Aabb* aabb = (optix::Aabb*)result;
+    float        inf  = INFINITY;
+    aabb->set( make_float3( -inf ), make_float3( inf ) );
+}
+
+RT_PROGRAM void nan_bounds( int primIdx, float result[6] )
+{
+    optix::Aabb* aabb = (optix::Aabb*)result;
+    aabb->set( make_float3( NAN ), make_float3( NAN ) );
+}
+
+RT_PROGRAM void degenerate_bounds( int primIdx, float result[6] )
+{
+    optix::Aabb* aabb = (optix::Aabb*)result;
+    // Use 1 instead of zero here to avoid the insertion of llvm.memset during canonicalization
+    aabb->set( make_float3( 1.f ), make_float3( 1.f ) );
+}

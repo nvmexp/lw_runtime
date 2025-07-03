@@ -1,0 +1,153 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+# handle files that must be patched ("configured")
+CMAKE_CONFIGURED_FILES_OUT := $(addprefix $(OUTPUTDIR)/optix-include/,$(notdir $(filter %.rc %.h,$(CMAKE_CONFIGURED_FILES:%.in=%))))
+ifeq ($(LW_VERBOSE),1)
+  $(info The following files will be "configured" $(CMAKE_CONFIGURED_FILES_OUT))
+endif
+
+# generic rule to depend all generated headers in $OUTPUTDIR/optix-include on their input files
+$(OUTPUTDIR)/generated-configure-files.lwmk: $(filter-out %_dep.lwmk,$(MAKEFILE_LIST))
+	$(UNESCAPE) $(foreach h,$(filter %.rc.in %.h.in,$(CMAKE_CONFIGURED_FILES)),"$(OUTPUTDIR)/optix-include/$(notdir $(h:%.in=%)): $h\n\n")>$@.tmp
+	$(CMAKE) -E copy_if_different $@.tmp $@
+-include $(OUTPUTDIR)/generated-configure-files.lwmk
+
+# This script is ilwoked twice to process template files:
+# 1) The 'list-vars' argument tells the script to print out a list of variables referenced in the template.
+# 2) The 'configure' argument tells the script to configure the template using the supplied name=value pairs,
+#    where we got the list of names for which we supply values from the output of the 'list-vars' invocation.
+#
+LW_OPTIX_CONFIG_FILE = $(PYTHON) $(LW_OPTIX)/make/cmake-configure-file.py
+
+# Generic rule for creating a configured file from a template,
+# mirroring input paths under $(LW_SOURCE)/apps/optix into output paths under $(OUTPUTDIR)
+$(OUTPUTDIR)/%: $(LW_OPTIX)/%.in
+	$(MKDIR) $(@D)
+	$(ECHO) Configuring $(subst $(OUTPUTDIR)/,,$(@))
+	$(LW_OPTIX_CONFIG_FILE) configure $(foreach v,$(sort $(shell $(LW_OPTIX_CONFIG_FILE) list-vars $(<))),$(v)="$($(v))") $(<) >$(@).tmp
+	$(CMAKE) -E copy_if_different $(@).tmp $(@)
+
+# Rule for configuring files mentioned in $(CMAKE_CONFIGURED_FILES_OUT)
+$(CMAKE_CONFIGURED_FILES_OUT): %:
+	$(MKDIR) $(@D)
+	$(ECHO) Configuring $(subst $(OUTPUTDIR)/,,$(@))
+	$(LW_OPTIX_CONFIG_FILE) configure $(foreach v,$(sort $(shell $(LW_OPTIX_CONFIG_FILE) list-vars $(<))),$(v)="$($(v))") $(<) >$(@).tmp
+	$(CMAKE) -E copy_if_different $(@).tmp $(@)
+
+# Regenerate configured files whenever the makefiles change
+$(CMAKE_CONFIGURED_FILES_OUT): $(filter-out %_dep.lwmk,$(MAKEFILE_LIST))
+
+ifeq ($(LW_OPTIX_LINK_SEQUENTIALLY),1)
+  ifeq ($(LW_OPTIX_TESTS),1)
+    $(shell $(PYTHON) $(LW_OPTIX)/make/sequentialLink.py $(OUTPUTDIR)/linkTests.lwmk $(sort $(optix_test_exelwtables)))
+    include $(OUTPUTDIR)/linkTests.lwmk
+    OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/linkTests.lwmk
+  endif
+  ifeq ($(LW_OPTIX_TOOLS),1)
+    $(shell $(PYTHON) $(LW_OPTIX)/make/sequentialLink.py $(OUTPUTDIR)/linkTools.lwmk $(sort $(optix_tool_exelwtables)))
+    include $(OUTPUTDIR)/linkTools.lwmk
+    OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/linkTools.lwmk
+  endif
+endif
+
+# Pack VRL Tests if needed
+ifeq ($(LW_OPTIX_VRL_PACKAGE),1)
+    # Extra-Target to pack VRL test package.Under Linux it just triggers the compile.
+    # Under Windows the test-binaries and runtime ptx are copied to the Install-Directory
+
+    # We were asked not to use LW_INSTALL_DIR on Non-Windows
+    ifeq ($(LW_HOST_OS_FAMILY),Windows)
+      vrl_package_basepath = $(LW_INSTALL_DIR)/
+    else
+      vrl_package_basepath =
+    endif
+
+    # Binaries that are needed for the VRL test and are refd by DVS (go into the final outputdir)
+    # Make the paths to the files that go into the VRL Package
+    # Must be separated from vrl_package_basepath, since these depend on a different high-level target
+    # Output is flattened
+    vrl_package_files = $(addprefix $(vrl_package_basepath),$(notdir $(vrltest_binaries) $(vrltest_runtime_ptx)))
+    ifneq ($(LW_VERBOSE),0)
+      $(info These files go into the VRL Package: $(vrl_package_files))
+    endif
+
+    # depend the files on the trigger-target vrl-test-package
+    .PHONY: vrl-test-package
+    vrl-test-package: $(vrl_package_files)
+
+    ifeq ($(LW_HOST_OS_FAMILY),Windows)
+      # Pattern rule to install test binaries
+      $(LW_INSTALL_DIR)/test_%$(EXESUFFIX): $(OUTPUTDIR)/test_%$(EXESUFFIX)
+		$(standard_install)
+
+      # Pattern rule to install test binary runtime PTX
+      $(LW_INSTALL_DIR)/%.lw.ptx: $(SRC_TESTS_PTX_DIR)/%.lw.ptx
+		$(standard_install)
+    endif
+endif
+
+# Generate bitcode from LLVM IR source via llvm-as
+$(OUTPUTDIR)/%.bc: $(LW_SOURCE)/%.ll | lwvm-build
+ifeq ($(LW_VERBOSE),0)
+	$(ECHO) llvm-as $(@F)
+endif
+	$(MKDIR) $(@D)
+	$(LLVM_AS) -o $(@) $(^)
+
+# Generate bitcode from generated LLVM IR source via llvm-as
+$(OUTPUTDIR)/%.bc: $(OUTPUTDIR)/%.ll | lwvm-build
+ifeq ($(LW_VERBOSE),0)
+	$(ECHO) llvm-as $(@F)
+endif
+	$(MKDIR) $(@D)
+	$(LLVM_AS) -o $(@) $(^)
+
+# Generate Bitcode file from C++ source via Clang
+$(OUTPUTDIR)/%.bc: $(LW_SOURCE)/%.cpp $(CLANG)
+ifeq ($(LW_VERBOSE),0)
+	$(ECHO) clang $(<F)
+endif
+	$(MKDIR) $(dir $(@))
+	$(CLANG) -MP -MF $(call DEPFILE_FROM_OBJECT,$(@)) -MT $(@) -MD $(CLANG_ARGS) -o $(@) $(<)
+
+echo_%:
+	echo $($(subst echo_,,$@))
+
+# Generate an optimized bitcode file from another bitcode file
+#
+%_opt.bc: %.bc $(LLVM_OPT) | lwvm-build
+ifeq ($(LW_VERBOSE),0)
+	$(ECHO) opt $(@F)
+endif
+	$(MKDIR) $(dir $(@))
+	$(LLVM_OPT) $(LLVM_OPT_ARGS) -o $@ $(filter %.bc,$(^))
+
+# Disassemble a bitcode file into LLVM IR
+#
+%-dis.ll: %.bc $(LLVM_DIS) | lwvm-build
+ifeq ($(LW_VERBOSE),0)
+	$(ECHO) llvm-dis $(@F)
+endif
+	$(LLVM_DIS) -o $@ $(filter %.bc,$(^))

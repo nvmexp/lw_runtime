@@ -1,0 +1,232 @@
+
+//
+//  Copyright (c) 2019 LWPU Corporation.  All rights reserved.
+//
+//  LWPU Corporation and its licensors retain all intellectual property and proprietary
+//  rights in and to this software, related documentation and any modifications thereto.
+//  Any use, reproduction, disclosure or distribution of this software and related
+//  documentation without an express license agreement from LWPU Corporation is strictly
+//  prohibited.
+//
+//  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+//  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+//  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+//  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+//  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+//  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+//  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+//  SUCH DAMAGES
+//
+
+#ifdef OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+#define OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE_HAS_PARAMS
+#endif  // OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+
+#include "test_DeviceAPI_rayProperties.h"
+
+extern "C" {
+__constant__ Params params;
+}
+
+#include <optix.h>
+
+extern "C" __global__ void __exception__nil() {}
+
+__device__ void traceRay( float3 origin, float3 direction )
+{
+    float               tmin           = params.tMin;
+    float               tmax           = params.tMax;
+    float               rayTime        = 0.0f;
+    OptixVisibilityMask visibilityMask = params.visibilityMask;
+    OptixRayFlags       rayFlags       = params.rayFlags;
+    unsigned int        SBToffset      = 0;
+    unsigned int        SBTstride      = 1;
+    unsigned int        missSBTIndex   = 0;
+
+    unsigned int* payloads = (unsigned int*)params.payloads;
+    optixTrace( params.handle, origin, direction, tmin, tmax, rayTime, visibilityMask, rayFlags, SBToffset, SBTstride, missSBTIndex,
+                payloads[0], payloads[1], payloads[2], payloads[3], payloads[4], payloads[5], payloads[6], payloads[7] );
+}
+
+extern "C" __global__ void __raygen__()
+{
+    float3 origin    = make_float3( 0.5f, 0.0f, 0.5f );
+    float3 direction = make_float3( 0.0f, 0.5f, 1.0f );
+    traceRay( origin, direction );
+}
+
+extern "C" __global__ void __raygen__ilwertedDirection()
+{
+    float3 origin    = make_float3( 0.5f, 0.0f, 1.0f );
+    float3 direction = make_float3( 0.0f, 0.5f, -1.0f );
+    traceRay( origin, direction );
+}
+
+__device__ void setPayloadValue( unsigned int entry, unsigned int value )
+{
+    switch( entry )
+    {
+        case 0:
+            optixSetPayload_0( value );
+            break;
+        case 1:
+            optixSetPayload_1( value );
+            break;
+        case 2:
+            optixSetPayload_2( value );
+            break;
+        case 3:
+            optixSetPayload_3( value );
+            break;
+        case 4:
+            optixSetPayload_4( value );
+            break;
+        case 5:
+            optixSetPayload_5( value );
+            break;
+        case 6:
+            optixSetPayload_6( value );
+            break;
+        case 7:
+            optixSetPayload_7( value );
+            break;
+    }
+}
+
+// Helper to avoid casting madness.
+template <typename T, typename V>
+__device__ void setPayloadValue( T entry, V value )
+{
+    setPayloadValue( static_cast<unsigned int>( entry ), static_cast<unsigned int>( value ) );
+}
+
+extern "C" __global__ void __intersection__originAndDirectionRetrieval()
+{
+    // TODO order of these two calls is reversed due to Bug 2779573 "Device API call optixGetWorldRayDirection() with side effects"
+    float3 oDir  = optixGetObjectRayDirection();
+    float3 wDir  = optixGetWorldRayDirection();
+    float3 wOrig = optixGetWorldRayOrigin();
+    float3 oOrig = optixGetObjectRayOrigin();
+    setPayloadValue( PAYLOAD_IS_DIRECTION, wDir.x == oDir.x && wDir.y == oDir.y && wDir.z == oDir.z );
+    setPayloadValue( PAYLOAD_IS_ORIGIN, wOrig.x == oOrig.x && wOrig.y == oOrig.y && wOrig.z == oOrig.z );
+
+    if( wDir.z > 0.0f )
+    {
+        // write object ray origin/direction into attributes such that ch() can retrieve it
+        optixReportIntersection( 1.0f, 0, float_as_int( oDir.x ), float_as_int( oDir.y ), float_as_int( oDir.z ),
+                                 float_as_int( oOrig.x ), float_as_int( oOrig.y ), float_as_int( oOrig.z ) );
+    }
+    else
+    {
+        // write the object ray origin/direction into payload such that miss() can retrieve it
+        optixSetPayload_2( float_as_int( oDir.x ) );
+        optixSetPayload_3( float_as_int( oDir.y ) );
+        optixSetPayload_4( float_as_int( oDir.z ) );
+        optixSetPayload_5( float_as_int( oOrig.x ) );
+        optixSetPayload_6( float_as_int( oOrig.y ) );
+        optixSetPayload_7( float_as_int( oOrig.z ) );
+    }
+}
+
+extern "C" __global__ void __closesthit__originAndDirectionRetrieval()
+{
+    float3 wDir  = optixGetWorldRayDirection();
+    float3 wOrig = optixGetWorldRayOrigin();
+    // retrieve both object ray origin and direction from the attributes and compare those with the world ones
+    float3 oDir  = make_float3( int_as_float( optixGetAttribute_0() ), int_as_float( optixGetAttribute_1() ),
+                               int_as_float( optixGetAttribute_2() ) );
+    float3 oOrig = make_float3( int_as_float( optixGetAttribute_3() ), int_as_float( optixGetAttribute_4() ),
+                                int_as_float( optixGetAttribute_5() ) );
+
+    setPayloadValue( PAYLOAD_CH_DIRECTION, wDir.x == oDir.x && wDir.y == oDir.y && wDir.z == oDir.z );
+    setPayloadValue( PAYLOAD_CH_ORIGIN, wOrig.x == oOrig.x && wOrig.y == oOrig.y && wOrig.z == oOrig.z );
+}
+
+extern "C" __global__ void __anyhit__originAndDirectionRetrieval()
+{
+    float3 wDir  = optixGetWorldRayDirection();
+    float3 oDir  = optixGetObjectRayDirection();
+    float3 wOrig = optixGetWorldRayOrigin();
+    float3 oOrig = optixGetObjectRayOrigin();
+
+    setPayloadValue( PAYLOAD_AH_DIRECTION, wDir.x == oDir.x && wDir.y == oDir.y && wDir.z == oDir.z );
+    setPayloadValue( PAYLOAD_AH_ORIGIN, wOrig.x == oOrig.x && wOrig.y == oOrig.y && wOrig.z == oOrig.z );
+}
+
+extern "C" __global__ void __miss__originAndDirectionRetrieval()
+{
+    float3 wOrig = optixGetWorldRayOrigin();
+    float3 wDir  = optixGetWorldRayDirection();
+
+    float3 oDir  = make_float3( int_as_float( optixGetPayload_2() ), int_as_float( optixGetPayload_3() ),
+                               int_as_float( optixGetPayload_4() ) );
+    float3 oOrig = make_float3( int_as_float( optixGetPayload_5() ), int_as_float( optixGetPayload_6() ),
+                                int_as_float( optixGetPayload_7() ) );
+
+    setPayloadValue( PAYLOAD_MS_DIRECTION, wDir.x == oDir.x && wDir.y == oDir.y && wDir.z == oDir.z );
+    setPayloadValue( PAYLOAD_MS_ORIGIN, wOrig.x == oOrig.x && wOrig.y == oOrig.y && wOrig.z == oOrig.z );
+}
+
+
+extern "C" __global__ void __intersection__flagsAndMaskRetrieval()
+{
+    setPayloadValue( PAYLOAD_IS_PROGRAM_FLAGS, optixGetRayFlags() );
+    setPayloadValue( PAYLOAD_IS_PROGRAM_MASK, optixGetRayVisibilityMask() );
+
+    if( optixGetWorldRayDirection().z > 0.0f )
+    {
+        optixReportIntersection( 1.0f, 0 );
+    }
+}
+
+extern "C" __global__ void __anyhit__flagsAndMaskRetrieval()
+{
+    setPayloadValue( PAYLOAD_AH_PROGRAM_FLAGS, optixGetRayFlags() );
+    setPayloadValue( PAYLOAD_AH_PROGRAM_MASK, optixGetRayVisibilityMask() );
+}
+
+extern "C" __global__ void __closesthit__flagsAndMaskRetrieval()
+{
+    setPayloadValue( PAYLOAD_CH_PROGRAM_FLAGS, optixGetRayFlags() );
+    setPayloadValue( PAYLOAD_CH_PROGRAM_MASK, optixGetRayVisibilityMask() );
+}
+
+extern "C" __global__ void __miss__flagsAndMaskRetrieval()
+{
+    setPayloadValue( PAYLOAD_MS_PROGRAM_FLAGS, optixGetRayFlags() );
+    setPayloadValue( PAYLOAD_MS_PROGRAM_MASK, optixGetRayVisibilityMask() );
+}
+
+
+// The tests regarding correctness of the returned values for optixGetRayTmin(), optixGetRayTmax()
+// are done here inside the programs already. Only the "boolean" result gets written into the
+// corresponding payload.
+
+extern "C" __global__ void __intersection__rayExtentRetrieval()
+{
+    setPayloadValue( PAYLOAD_IS_RAY_EXTENT_TMIN, optixGetRayTmin() == params.tMin ? 1 : 0 );
+    setPayloadValue( PAYLOAD_IS_RAY_EXTENT_TMAX, optixGetRayTmax() == params.tMax ? 1 : 0 );
+    if( optixGetWorldRayDirection().z > 0.0f )
+    {
+        optixReportIntersection( 1.0f, 0 );
+    }
+}
+
+extern "C" __global__ void __anyhit__rayExtentRetrieval()
+{
+    setPayloadValue( PAYLOAD_AH_RAY_EXTENT_TMIN, optixGetRayTmin() == params.tMin ? 1 : 0 );
+    setPayloadValue( PAYLOAD_AH_RAY_EXTENT_TMAX, optixGetRayTmax() == 1.f );
+}
+
+extern "C" __global__ void __closesthit__rayExtentRetrieval()
+{
+    setPayloadValue( PAYLOAD_CH_RAY_EXTENT_TMIN, optixGetRayTmin() == params.tMin ? 1 : 0 );
+    setPayloadValue( PAYLOAD_CH_RAY_EXTENT_TMAX, optixGetRayTmax() == 1.f );
+}
+
+extern "C" __global__ void __miss__rayExtentRetrieval()
+{
+    setPayloadValue( PAYLOAD_MS_RAY_EXTENT_TMIN, optixGetRayTmin() == params.tMin ? 1 : 0 );
+    setPayloadValue( PAYLOAD_MS_RAY_EXTENT_TMAX, optixGetRayTmax() == params.tMax ? 1 : 0 );
+}

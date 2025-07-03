@@ -1,0 +1,159 @@
+/*
+ * Copyright 2018 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "lwca/include/lwda_fp16.h"
+#include "lwca/include/lwda_runtime.h"
+#include "lwca/include/lwrand_kernel.h"
+// lwda_util.h is intentionally not included to simplify compiling this file.
+
+namespace lwidia_libs_test {
+namespace {
+const int kGridDim = 16;
+const int kBlockDim = 128;
+
+template <typename DstT, typename SrcT>
+struct ValueColwerter {
+  __device__ DstT operator()(const SrcT& value) const {
+    return static_cast<DstT>(scale * value);
+  }
+  double scale;
+};
+
+template <typename SrcT>
+struct ValueColwerter<__half, SrcT> {
+  __device__ __half operator()(const SrcT& value) const {
+    return __float2half(static_cast<float>(scale * value));
+  }
+  double scale;
+};
+
+template <typename DstT>
+struct ValueColwerter<DstT, __half> {
+  __device__ DstT operator()(const __half& value) const {
+    return static_cast<DstT>(scale * __half2float(value));
+  }
+  double scale;
+};
+
+template <typename DstT, typename SrcT>
+__global__ void ColwertDeviceDataKernel(double scale, DstT* dst,
+                                        const SrcT* src, int num_elements) {
+  size_t thread_idx = threadIdx.x + blockIdx.x * blockDim.x;
+  ValueColwerter<DstT, SrcT> colwert = {scale};
+  for (size_t i = thread_idx; i < num_elements; i += gridDim.x * blockDim.x) {
+    dst[i] = colwert(src[i]);
+  }
+}
+
+template <typename DstT, typename SrcT>
+void ColwertDeviceDataImpl(double scale, DstT* dst, const SrcT* src,
+                           size_t num_elements) {
+  ColwertDeviceDataKernel<<<kGridDim, kBlockDim>>>(scale, dst, src,
+                                                   num_elements);
+}
+
+__global__ void InitializeLwrandStateKernel(lwrandState* states, size_t seed) {
+  size_t thread_idx = threadIdx.x + blockIdx.x * blockDim.x;
+  lwrand_init(seed, thread_idx, /*offset=*/0, states + thread_idx);
+}
+
+__device__ void GenerateUniform(__half* dst, float scale, float bias,
+                                lwrandState* state) {
+  *dst = __float2half(lwrand_uniform(state) * scale + bias);
+}
+__device__ void GenerateUniform(float* dst, float scale, float bias,
+                                lwrandState* state) {
+  *dst = lwrand_uniform(state) * scale + bias;
+}
+__device__ void GenerateUniform(double* dst, double scale, double bias,
+                                lwrandState* state) {
+  *dst = lwrand_uniform_double(state) * scale + bias;
+}
+
+template <typename T>
+__global__ void InitializeDeviceDataKernel(T* ptr, size_t num_elements,
+                                           double scale, double bias,
+                                           lwrandState* states) {
+  size_t thread_idx = threadIdx.x + blockIdx.x * blockDim.x;
+  lwrandState state = states[thread_idx];
+  for (size_t i = thread_idx; i < num_elements; i += gridDim.x * blockDim.x) {
+    GenerateUniform(ptr + i, scale, bias, &state);
+  }
+  states[thread_idx] = state;
+}
+
+template <typename T>
+void InitializeDeviceDataImpl(T* ptr, size_t num_elements, double lower,
+                              double upper, void* state) {
+  InitializeDeviceDataKernel<<<kGridDim, kBlockDim>>>(
+      ptr, num_elements, upper - lower, lower,
+      static_cast<lwrandState*>(state));
+}
+
+}  // namespace
+
+void ColwertDeviceData(double scale, double* dst, const float* src,
+                       size_t num_elements) {
+  ColwertDeviceDataImpl(scale, dst, src, num_elements);
+}
+void ColwertDeviceData(double scale, float* dst, const double* src,
+                       size_t num_elements) {
+  ColwertDeviceDataImpl(scale, dst, src, num_elements);
+}
+void ColwertDeviceData(double scale, __half* dst, const float* src,
+                       size_t num_elements) {
+  ColwertDeviceDataImpl(scale, dst, src, num_elements);
+}
+void ColwertDeviceData(double scale, float* dst, const __half* src,
+                       size_t num_elements) {
+  ColwertDeviceDataImpl(scale, dst, src, num_elements);
+}
+void ColwertDeviceData(double scale, __half* dst, const double* src,
+                       size_t num_elements) {
+  ColwertDeviceDataImpl(scale, dst, src, num_elements);
+}
+void ColwertDeviceData(double scale, double* dst, const __half* src,
+                       size_t num_elements) {
+  ColwertDeviceDataImpl(scale, dst, src, num_elements);
+}
+
+namespace detail {
+size_t GetLwrandStateSize() {
+  return kBlockDim * kGridDim * sizeof(lwrandState);
+}
+
+void InitializeLwrandState(void* state, size_t seed) {
+  InitializeLwrandStateKernel<<<kGridDim, kBlockDim>>>(
+      static_cast<lwrandState*>(state), seed);
+}
+
+void InitializeDeviceData(float* ptr, size_t num_elements, double lower,
+                          double upper, void* state) {
+  InitializeDeviceDataImpl(ptr, num_elements, lower, upper, state);
+}
+
+void InitializeDeviceData(double* ptr, size_t num_elements, double lower,
+                          double upper, void* state) {
+  InitializeDeviceDataImpl(ptr, num_elements, lower, upper, state);
+}
+
+void InitializeDeviceData(__half* ptr, size_t num_elements, double lower,
+                          double upper, void* state) {
+  InitializeDeviceDataImpl(ptr, num_elements, lower, upper, state);
+}
+}  // namespace detail
+
+}  // namespace lwidia_libs_test

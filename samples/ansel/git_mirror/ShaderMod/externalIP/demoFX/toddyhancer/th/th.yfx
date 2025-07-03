@@ -1,0 +1,133 @@
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 texcoord: TexCoord;
+};
+
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+}
+
+// Special texture for the last pass, that has the original buffer that game sent
+// for quick&dirty effect enabling/disabling
+Texture2D originalColor;
+
+Texture2D inputColor;
+
+
+Texture2D SamplerBloom1;
+Texture2D SamplerBloom2;
+Texture2D SamplerBloom3;
+Texture2D SamplerBloom4;
+Texture2D SamplerBloom5;
+
+Texture2D ceBlurSamplerPing;
+
+
+SamplerState colorLinearSampler;
+SamplerState colorLinearSamplerWrap;
+
+#define BUFFER_WIDTH	(float)(screenSize.x)
+#define BUFFER_HEIGHT	(float)(screenSize.y)
+#define BUFFER_RCP_WIDTH	1/BUFFER_WIDTH
+#define BUFFER_RCP_HEIGHT	1/BUFFER_HEIGHT
+
+#define px BUFFER_RCP_WIDTH
+#define py BUFFER_RCP_HEIGHT
+
+#define PixelSize  	float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT)
+
+cbuffer ControlBuf
+{
+	bool g_chkEnable;
+	bool g_chkBloom;
+	bool g_chkLumaSharpen;
+	float g_sldLumaSharpen;
+	float g_sldLumaSharpenRad;
+	bool g_chkVibrance;
+	bool g_chkVignette;
+	bool g_chkTonemap;
+	bool g_chkClarity;
+	bool g_chkChromAb;
+	bool g_chkChromAbBlur;
+};
+
+#include "settings.fxh"
+
+#include "bloom.fxh"
+#include "vibrance.fxh"
+#include "vignette.fxh"
+#include "hpdTonemapping.fxh"
+#include "lumasharpen.fxh"
+#include "fxaa.fxh"
+#include "clarity.fxh"
+#include "chromaticAbberation.fxh"
+
+
+float4 PS_LightingCombine(VSOut IN) : SV_Target 
+{
+	float4 color = inputColor.Sample(colorLinearSampler, IN.texcoord.xy);
+
+	float3 colorbloom=0;
+
+	if (g_chkBloom)
+	{////////////////////////////////////////////////////
+		
+	colorbloom.xyz += SamplerBloom3.Sample(colorLinearSampler, IN.texcoord.xy).xyz*1.0;
+	colorbloom.xyz += SamplerBloom5.Sample(colorLinearSampler, IN.texcoord.xy).xyz*9.0;
+	colorbloom.xyz *= 0.1;
+
+	colorbloom.xyz = saturate(colorbloom.xyz);
+	float colorbloomgray = dot(colorbloom.xyz, 0.333);
+	colorbloom.xyz = lerp(colorbloomgray, colorbloom.xyz, fBloomSaturation);
+	colorbloom.xyz *= fBloomTint;
+	float colorgray = dot(color.xyz, 0.333);
+
+	if (iBloomMixmode == 1) color.xyz = color.xyz + colorbloom.xyz;
+	if (iBloomMixmode == 2) color.xyz = 1-(1-color.xyz)*(1-colorbloom.xyz);
+	if (iBloomMixmode == 3) color.xyz = max(0.0f,max(color.xyz,lerp(color.xyz,(1.0f - (1.0f - saturate(colorbloom.xyz)) *(1.0f - saturate(colorbloom.xyz * 1.0))),1.0)));
+	if (iBloomMixmode == 4) color.xyz = max(color.xyz, colorbloom.xyz);
+
+	}////////////////////////////////////////////////////
+
+	return color;
+
+}
+
+float4 PS_Tonemapping(VSOut IN) : SV_Target 
+{
+	float4 color = inputColor.Sample(colorLinearSampler, IN.texcoord.xy);
+	float4 colorOut = color;
+	
+	if (g_chkVibrance)
+	{////////////////////////////////////////////////////
+		colorOut = VibrancePass(colorOut);
+	}////////////////////////////////////////////////////
+
+	if (g_chkVignette)
+	{////////////////////////////////////////////////////
+		colorOut = VignettePass(colorOut, IN.texcoord.xy);
+	}////////////////////////////////////////////////////
+	
+	if (g_chkTonemap)
+	{////////////////////////////////////////////////////
+		colorOut.rgb = HaarmPeterDuikerFilmicToneMapping(colorOut.rgb);
+	}////////////////////////////////////////////////////
+	
+	return colorOut;
+}
+
+float4 PS_LumaSharpen(VSOut IN) : SV_Target 
+{
+	float4 color = inputColor.Sample(colorLinearSampler, IN.texcoord.xy);
+	float4 colorOut = color;
+	
+	if (g_chkLumaSharpen)
+	{////////////////////////////////////////////////////
+		colorOut.rgb = LumaSharpenPass(IN.texcoord.xy, inputColor, colorLinearSampler);
+	}////////////////////////////////////////////////////
+	
+	return colorOut;
+}

@@ -1,0 +1,575 @@
+//
+//  Copyright (c) 2020 LWPU Corporation.  All rights reserved.
+//
+//  LWPU Corporation and its licensors retain all intellectual property and proprietary
+//  rights in and to this software, related documentation and any modifications thereto.
+//  Any use, reproduction, disclosure or distribution of this software and related
+//  documentation without an express license agreement from LWPU Corporation is strictly
+//  prohibited.
+//
+//  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+//  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+//  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+//  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+//  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+//  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+//  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+//  SUCH DAMAGES
+//
+
+#ifdef OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+#define OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE_HAS_PARAMS
+#endif  // OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+
+#include "test_DeviceAPI_query.h"
+
+extern "C" {
+__constant__ Params params;
+}
+
+#include <optix.h>
+
+__device__ void traceRay()
+{
+    float3       origin;
+    unsigned int missSBTIndex;
+
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_MISS )
+    {
+        origin = make_float3( 0.0f, 0.0f, 10.0f );
+        // equal to EXPECTED_SBT_GAS_INDEX to access correct sbt record in this case,
+        // as we keep miss sbt data aligned with hit sbt data
+        missSBTIndex = 4;
+    }
+    else
+    {
+        origin       = make_float3( 0.0f, 0.0f, 0.0f );
+        missSBTIndex = 0;
+    }
+
+    float3              direction      = make_float3( 0.0f, 0.0f, 1.0f );
+    float               tmin           = 0.1f;
+    float               tmax           = 100.f;
+    float               rayTime        = 0.0f;
+    OptixVisibilityMask visibilityMask = 255;
+    OptixRayFlags       rayFlags       = OPTIX_RAY_FLAG_NONE;
+    unsigned int        SBToffset      = 0;
+    unsigned int        SBTstride      = 1;
+
+    // this one payload is lwrrently for testing setting it to optixUndefinedValue() only
+    unsigned int payload{};
+    optixTrace( params.handle, origin, direction, tmin, tmax, rayTime, visibilityMask, rayFlags, SBToffset, SBTstride,
+                missSBTIndex, payload );
+}
+
+__forceinline__ __device__ void callSimpleQueries()
+{
+    Results& results = *params.testResultsOut;
+
+    results.launchDimensionsOut = optixGetLaunchDimensions();
+    results.launchIndexOut      = optixGetLaunchIndex();
+    results.primIndexOut        = -1;
+}
+
+__forceinline__ __device__ void callGetPrimitiveIndex()
+{
+    Results& results     = *params.testResultsOut;
+    results.primIndexOut = optixGetPrimitiveIndex();
+}
+
+__forceinline__ __device__ void callUndefinedValue()
+{
+    Results& results = *params.testResultsOut;
+    // poor men's attempt to test optixUndefinedValue() - using payload_0 once and then setting it to undefinedValue
+    optixSetPayload_0( optixGetPayload_0() );
+    optixSetPayload_0( optixUndefinedValue() );
+    results.setUndefinedValueSuccessfully = true;
+}
+
+__forceinline__ __device__ void callGetInstanceIdFromHandle( OptixTraversableHandle handle )
+{
+    Results& results = *params.testResultsOut;
+
+    results.instanceIdOut        = optixGetInstanceIdFromHandle( handle );
+    results.ilwalidInstanceIdOut = optixGetInstanceIdFromHandle( static_cast<OptixTraversableHandle>( 1 ) );
+}
+
+__forceinline__ __device__ void callGetInstanceChildFromHandle( OptixTraversableHandle handle )
+{
+    Results& results = *params.testResultsOut;
+
+    results.instanceChildHandleOut = optixGetInstanceChildFromHandle( handle );
+    // with current AS that tests "Returns 0 if the traversable handle does not reference an OptixInstance"
+    // as it returns a handle to the geometry
+    results.instanceChild2HandleOut = optixGetInstanceChildFromHandle( results.instanceChildHandleOut );
+}
+
+__forceinline__ __device__ void callGetInstanceIdAndIndex()
+{
+    Results& results = *params.testResultsOut;
+
+    results.instanceIdOut    = optixGetInstanceId();
+    results.instanceIndexOut = optixGetInstanceIndex();
+}
+
+__forceinline__ __device__ void callGetSBTData()
+{
+    Results& results = *params.testResultsOut;
+
+    results.sbtData = *(unsigned int*)optixGetSbtDataPointer();
+}
+
+__forceinline__ __device__ void callGetSbtGASIndex()
+{
+    Results& results = *params.testResultsOut;
+
+    results.sbtGASIndex = static_cast<int>( optixGetSbtGASIndex() );
+}
+
+__forceinline__ __device__ void callGetInstanceTraversableFromIAS()
+{
+    Results& results = *params.testResultsOut;
+    for( unsigned int i = 0; i < params.instanceTraversablesCount; ++i )
+    {
+        OptixTraversableHandle instance      = optixGetInstanceTraversableFromIAS( params.handle, i );
+        results.instanceTraversableIdsOut[i] = optixGetInstanceIdFromHandle( instance );
+    }
+}
+
+// Compare the given float arrays for length count
+__device__ bool compareFloats( const float* p0, const float* p1, unsigned int count )
+{
+    for( unsigned int i = 0; i < count; ++i )
+    {
+        if( p0[i] != p1[i] )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Compare the optixGetXXXTransformFromHandle() retrieved transform data against the passed in one.
+// Check that the other optixGetXXXTransformFromHandle() flavours return 0 indeed when applied to wrong type.
+__device__ bool compareTransformFromHandleData( OptixTraversableHandle handle, float* transformData, int transformDataCount )
+{
+    switch( optixGetTransformTypeFromHandle( handle ) )
+    {
+        case OPTIX_TRANSFORM_TYPE_NONE: {
+            return false;
+        }
+        case OPTIX_TRANSFORM_TYPE_STATIC_TRANSFORM: {
+            if( optixGetMatrixMotionTransformFromHandle( handle ) )
+                return false;
+            if( optixGetSRTMotionTransformFromHandle( handle ) )
+                return false;
+            if( optixGetInstanceTransformFromHandle( handle ) )
+                return false;
+            if( optixGetInstanceIlwerseTransformFromHandle( handle ) )
+                return false;
+            const OptixStaticTransform* t = optixGetStaticTransformFromHandle( handle );
+            return compareFloats( transformData, &t->transform[0], transformDataCount );
+        }
+        case OPTIX_TRANSFORM_TYPE_MATRIX_MOTION_TRANSFORM: {
+            if( optixGetStaticTransformFromHandle( handle ) )
+                return false;
+            if( optixGetSRTMotionTransformFromHandle( handle ) )
+                return false;
+            if( optixGetInstanceTransformFromHandle( handle ) )
+                return false;
+            if( optixGetInstanceIlwerseTransformFromHandle( handle ) )
+                return false;
+            const OptixMatrixMotionTransform* traversable = optixGetMatrixMotionTransformFromHandle( handle );
+            return compareFloats( transformData, &( traversable->transform[0] )[0], transformDataCount );
+        }
+        case OPTIX_TRANSFORM_TYPE_SRT_MOTION_TRANSFORM: {
+            if( optixGetStaticTransformFromHandle( handle ) )
+                return false;
+            if( optixGetMatrixMotionTransformFromHandle( handle ) )
+                return false;
+            if( optixGetInstanceTransformFromHandle( handle ) )
+                return false;
+            if( optixGetInstanceIlwerseTransformFromHandle( handle ) )
+                return false;
+            const OptixSRTMotionTransform* traversable = optixGetSRTMotionTransformFromHandle( handle );
+            return compareFloats( transformData, &( traversable->srtData[0].sx ), transformDataCount );
+        }
+        case OPTIX_TRANSFORM_TYPE_INSTANCE: {
+            if( optixGetStaticTransformFromHandle( handle ) )
+                return false;
+            if( optixGetMatrixMotionTransformFromHandle( handle ) )
+                return false;
+            if( optixGetSRTMotionTransformFromHandle( handle ) )
+                return false;
+            const float4* transform = optixGetInstanceTransformFromHandle( handle );
+            bool          res       = compareFloats( transformData, &transform[0].x, transformDataCount / 2 );
+            transform               = optixGetInstanceIlwerseTransformFromHandle( handle );
+            return res || compareFloats( transformData + transformDataCount / 2, &transform[0].x, transformDataCount / 2 );
+        }
+        default:
+            return false;
+    }
+}
+
+// Return the handle of the "transform instance", which is the instance right above the GAS and hence the last one in the list
+__device__ OptixTraversableHandle retrieveLastInstanceHandle()
+{
+    OptixTraversableHandle notFoundHandle = 0;
+    for( unsigned int i = 0; i < optixGetTransformListSize(); ++i )
+    {
+        OptixTraversableHandle handle = optixGetTransformListHandle( i );
+        switch( optixGetTransformTypeFromHandle( handle ) )
+        {
+            case OPTIX_TRANSFORM_TYPE_INSTANCE: {
+                if( i == ( optixGetTransformListSize() - 1 ) )
+                    return handle;
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return notFoundHandle;
+}
+
+// For the given handle, compare its transform data against the params.transformData
+__device__ void compareTransformData( OptixTraversableHandle handle )
+{
+    Results& results = *params.testResultsOut;
+
+    if( handle )
+        results.transformationsEqual = compareTransformFromHandleData( handle, params.transformData, params.transformDataCount );
+    else
+        results.transformationsEqual = false;
+}
+
+// For params.transformHandle, compare its transform data against the params.transformData. If the handle is not
+// given (ie, when the "transform node" is a build input of one instance), traverse transform list and locate it.
+__device__ void compareTransformDataEx()
+{
+    Results& results = *params.testResultsOut;
+
+    OptixTraversableHandle handle = params.transformHandle;
+    // only instance handles require special retrieval - all other transforms are passed via params.transformHandle
+    // We can't retrieve the instance's handle inside miss programs though.
+    if( !handle )
+        handle = retrieveLastInstanceHandle();
+    if( handle )
+        compareTransformData( handle );
+    else
+        results.transformationsEqual = false;
+}
+
+// Return whether the retrieval of the instance's handle is required outside of the program itself.
+// Background: IS, CH, AH can iterate and find the last instance's - which is what we care about in these tests here -
+// itself, which some programs require the shooting of additional rays to retrieve it.
+__device__ bool requiresInstanceHandleRetrieval( OptixTraversableHandle transformHandle )
+{
+    return !transformHandle
+           && ( ( params.optixProgramType == OPTIX_PROGRAM_TYPE_RAYGEN ) || ( params.optixProgramType == OPTIX_PROGRAM_TYPE_MISS )
+                || ( params.optixProgramType == OPTIX_PROGRAM_TYPE_EXCEPTION ) );
+}
+
+__device__ void traceRay_transformHandle( OptixTraversableHandle transformHandle )
+{
+    float3 origin = make_float3( 0.0f, 0.0f, 2.0f );
+
+    float3              direction      = make_float3( 0.0f, 0.0f, -1.0f );
+    float               tmin           = 0.1f;
+    float               tmax           = 100.f;
+    float               rayTime        = 0.5f;
+    OptixVisibilityMask visibilityMask = 255;
+    OptixRayFlags       rayFlags       = OPTIX_RAY_FLAG_ENFORCE_ANYHIT;
+    unsigned int        SBToffset      = 0;
+    unsigned int        SBTstride      = 1;
+    unsigned int        missSBTIndex   = 0;
+
+    // special handling for certain programs when no transformHandle was given, ie when instance transform is set
+    if( !requiresInstanceHandleRetrieval( transformHandle ) )
+    {
+        if( params.optixProgramType == OPTIX_PROGRAM_TYPE_MISS )
+            origin = make_float3( 0.0f, 0.0f, -10.0f );
+        optixTrace( params.handle, origin, direction, tmin, tmax, rayTime, visibilityMask, rayFlags, SBToffset, SBTstride, missSBTIndex );
+    }
+    else
+    {
+        // retrieve transformHandle from CH
+        unsigned int payloads[2]{};
+        optixTrace( params.handle, origin, direction, tmin, tmax, rayTime, visibilityMask, rayFlags, SBToffset,
+                    SBTstride, missSBTIndex, payloads[0], payloads[1] );
+
+        if( params.optixProgramType == OPTIX_PROGRAM_TYPE_RAYGEN )
+        {
+            OptixTraversableHandle handle = ( (OptixTraversableHandle)payloads[0] ) << 32 | payloads[1];
+            if( params.testGetInstanceIdFromHandle )
+                callGetInstanceIdFromHandle( handle );
+            else if( params.testGetInstanceChildFromHandle )
+                callGetInstanceChildFromHandle( handle );
+            else if( params.testTransformData )
+                compareTransformData( handle );
+        }
+        else if( params.optixProgramType == OPTIX_PROGRAM_TYPE_MISS )
+        {
+            // fire miss trace and use already found handle passed-in through payloads
+            origin = make_float3( 0.0f, 0.0f, -10.0f );
+            optixTrace( params.handle, origin, direction, tmin, tmax, rayTime, visibilityMask, rayFlags, SBToffset,
+                        SBTstride, missSBTIndex, payloads[0], payloads[1] );
+        }
+        else  //if( params.optixProgramType == OPTIX_PROGRAM_TYPE_EXCEPTION )
+        {
+            // throw exception and use already found handle through payload/exception details
+            optixThrowException( 0, payloads[0], payloads[1] );
+        }
+    }
+}
+
+extern "C" __global__ void __raygen__()
+{
+    if( params.testQuery )
+    {
+        // default-initializing this member as not every program will set it
+        params.testResultsOut->setUndefinedValueSuccessfully = false;
+
+        if( params.optixProgramType == OPTIX_PROGRAM_TYPE_RAYGEN )
+            callSimpleQueries();
+        if( params.optixProgramType == OPTIX_PROGRAM_TYPE_EXCEPTION )
+            optixThrowException( 0 );
+        else
+            traceRay();
+    }
+    else if( params.testGetInstanceIdFromHandle || params.testGetInstanceChildFromHandle )
+    {
+        // locate inner instance's traversable handle
+        traceRay_transformHandle( 0 );
+    }
+    else if( params.testTransformData )
+    {
+        OptixTraversableHandle transformHandle = params.transformHandle;
+        if( params.optixProgramType == OPTIX_PROGRAM_TYPE_RAYGEN && transformHandle )
+        {
+            compareTransformData( transformHandle );
+        }
+        if( transformHandle && params.optixProgramType == OPTIX_PROGRAM_TYPE_EXCEPTION )
+            optixThrowException( 0 );
+        else
+            traceRay_transformHandle( transformHandle );
+    }
+    else if( params.testSBTData && params.optixProgramType == OPTIX_PROGRAM_TYPE_RAYGEN )
+    {
+        callGetSBTData();
+    }
+    else if( params.optixProgramType == OPTIX_PROGRAM_TYPE_EXCEPTION )
+        optixThrowException( 0 );
+    else if( params.testGetInstanceTraversableFromIAS )
+    {
+        if( params.optixProgramType == OPTIX_PROGRAM_TYPE_RAYGEN )
+            callGetInstanceTraversableFromIAS();
+        if( params.optixProgramType == OPTIX_PROGRAM_TYPE_EXCEPTION )
+            optixThrowException( 0 );
+        else
+            // imitate traversal for testGetInstanceIdFromHandle || testGetInstanceChildFromHandle
+            traceRay_transformHandle( 0 );
+    }
+    else
+        traceRay();
+}
+
+extern "C" __global__ void __intersection__()
+{
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_INTERSECTION )
+    {
+        if( params.testQuery )
+        {
+            callSimpleQueries();
+            callGetPrimitiveIndex();
+            callUndefinedValue();
+        }
+        else if( params.testGetInstanceIdFromHandle )
+        {
+            callGetInstanceIdFromHandle( retrieveLastInstanceHandle() );
+        }
+        else if( params.testGetInstanceChildFromHandle )
+        {
+            callGetInstanceChildFromHandle( retrieveLastInstanceHandle() );
+        }
+        else if( params.testTransformData )
+        {
+            compareTransformDataEx();
+        }
+        else if( params.testQueryInst )
+        {
+            callGetInstanceIdAndIndex();
+        }
+        else if( params.testSBTData )
+        {
+            callGetSBTData();
+            callGetSbtGASIndex();
+        }
+        else if( params.testGetInstanceTraversableFromIAS )
+        {
+            callGetInstanceTraversableFromIAS();
+        }
+    }
+
+    optixReportIntersection( 1.0f, 0 );
+}
+
+extern "C" __global__ void __anyhit__()
+{
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_ANY_HIT )
+    {
+        if( params.testQuery )
+        {
+            callUndefinedValue();
+            callSimpleQueries();
+            callGetPrimitiveIndex();
+        }
+        else if( params.testGetInstanceIdFromHandle )
+        {
+            callGetInstanceIdFromHandle( retrieveLastInstanceHandle() );
+        }
+        else if( params.testGetInstanceChildFromHandle )
+        {
+            callGetInstanceChildFromHandle( retrieveLastInstanceHandle() );
+        }
+        else if( params.testTransformData )
+        {
+            compareTransformDataEx();
+        }
+        else if( params.testQueryInst )
+        {
+            callGetInstanceIdAndIndex();
+        }
+        else if( params.testSBTData )
+        {
+            callGetSBTData();
+            callGetSbtGASIndex();
+        }
+        else if( params.testGetInstanceTraversableFromIAS )
+        {
+            callGetInstanceTraversableFromIAS();
+        }
+    }
+}
+
+extern "C" __global__ void __closesthit__()
+{
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_CLOSEST_HIT )
+    {
+        if( params.testQuery )
+        {
+            callSimpleQueries();
+            callGetPrimitiveIndex();
+            callUndefinedValue();
+        }
+        else if( params.testGetInstanceIdFromHandle )
+        {
+            callGetInstanceIdFromHandle( retrieveLastInstanceHandle() );
+        }
+        else if( params.testGetInstanceChildFromHandle )
+        {
+            callGetInstanceChildFromHandle( retrieveLastInstanceHandle() );
+        }
+        else if( params.testTransformData )
+        {
+            compareTransformDataEx();
+        }
+        else if( params.testQueryInst )
+        {
+            callGetInstanceIdAndIndex();
+        }
+        else if( params.testSBTData )
+        {
+            callGetSBTData();
+            callGetSbtGASIndex();
+        }
+        else if( params.testGetInstanceTraversableFromIAS )
+        {
+            callGetInstanceTraversableFromIAS();
+        }
+    }
+    else if( params.testTransformData || params.testGetInstanceIdFromHandle || params.testGetInstanceChildFromHandle )
+    {
+        if( requiresInstanceHandleRetrieval( params.transformHandle ) )
+        {
+            OptixTraversableHandle transformHandle = retrieveLastInstanceHandle();
+            unsigned int           hPart           = (unsigned int)( transformHandle >> 32 );
+            unsigned int           lPart           = (unsigned int)( transformHandle );
+            optixSetPayload_0( hPart );
+            optixSetPayload_1( lPart );
+        }
+    }
+}
+
+extern "C" __global__ void __miss__()
+{
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_MISS )
+    {
+        if( params.testQuery )
+        {
+            callSimpleQueries();
+            callUndefinedValue();
+        }
+        else if( params.testGetInstanceIdFromHandle || params.testGetInstanceChildFromHandle || params.testTransformData )
+        {
+            OptixTraversableHandle handle = params.transformHandle;
+            if( !handle )
+            {
+                unsigned int p0 = optixGetPayload_0();
+                unsigned int p1 = optixGetPayload_1();
+                handle          = ( (OptixTraversableHandle)p0 ) << 32 | p1;
+            }
+            if( params.testGetInstanceIdFromHandle )
+                callGetInstanceIdFromHandle( handle );
+            else if( params.testGetInstanceChildFromHandle )
+                callGetInstanceChildFromHandle( handle );
+            else
+                compareTransformData( handle );
+        }
+        else if( params.testSBTData )
+        {
+            callGetSBTData();
+        }
+        else if( params.testGetInstanceTraversableFromIAS )
+        {
+            callGetInstanceTraversableFromIAS();
+        }
+    }
+}
+
+extern "C" __global__ void __exception__()
+{
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_EXCEPTION )
+    {
+        if( params.testQuery )
+        {
+            callSimpleQueries();
+            callGetPrimitiveIndex();
+        }
+        else if( params.testTransformData || params.testGetInstanceIdFromHandle || params.testGetInstanceChildFromHandle )
+        {
+            OptixTraversableHandle handle = params.transformHandle;
+            if( !handle )
+            {
+                unsigned int hValue = optixGetExceptionDetail_0();
+                unsigned int lValue = optixGetExceptionDetail_1();
+                handle = ( (OptixTraversableHandle)optixGetExceptionDetail_0() ) << 32 | optixGetExceptionDetail_1();
+            }
+            if( params.testGetInstanceIdFromHandle )
+                callGetInstanceIdFromHandle( handle );
+            else if( params.testGetInstanceChildFromHandle )
+                callGetInstanceChildFromHandle( handle );
+            else
+                compareTransformData( handle );
+        }
+        else if( params.testSBTData )
+        {
+            callGetSBTData();
+        }
+        else if( params.testGetInstanceTraversableFromIAS )
+        {
+            callGetInstanceTraversableFromIAS();
+        }
+    }
+}

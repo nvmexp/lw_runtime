@@ -1,0 +1,232 @@
+
+//
+//  Copyright (c) 2020 LWPU Corporation.  All rights reserved.
+//
+//  LWPU Corporation and its licensors retain all intellectual property and proprietary
+//  rights in and to this software, related documentation and any modifications thereto.
+//  Any use, reproduction, disclosure or distribution of this software and related
+//  documentation without an express license agreement from LWPU Corporation is strictly
+//  prohibited.
+//
+//  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+//  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+//  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+//  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+//  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+//  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+//  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+//  SUCH DAMAGES
+//
+
+#ifdef OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+#define OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE_HAS_PARAMS
+#endif                                        // OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+
+#include "test_DeviceAPI_triangleHit.h"
+
+extern "C" {
+__constant__ Params params;
+}
+
+#include <optix.h>
+
+static __forceinline__ __device__ float3 operator-( float3 a, float3 b )
+{
+    return make_float3( a.x - b.x, a.y - b.y, a.z - b.z );
+}
+
+static __forceinline__ __device__ float3 operator+( float3 a, float3 b )
+{
+    return make_float3( a.x + b.x, a.y + b.y, a.z + b.z );
+}
+
+static __forceinline__ __device__ float3 operator*( float b, float3 a )
+{
+    return make_float3( a.x * b, a.y * b, a.z * b );
+}
+
+static __forceinline__ __device__ float3 computeHitPoint( unsigned int sbtIdx )
+{
+    OptixTraversableHandle gas     = optixGetGASTraversableHandle();
+    unsigned int           primIdx = optixGetPrimitiveIndex();
+    float                  time    = optixGetRayTime();
+    float3                 data[3];
+    optixGetTriangleVertexData( gas, primIdx, sbtIdx, time, data );
+
+    const float2 hit = optixGetTriangleBarycentrics();
+    const float3 e0  = data[1] - data[0];
+    const float3 e1  = data[2] - data[0];
+    const float3 op  = data[0] + hit.x * e0 + hit.y * e1;
+
+    return optixTransformPointFromObjectToWorldSpace( op );
+}
+
+static __forceinline__ __device__ void computeHitPoint()
+{
+    // the GAS local SBT index of this primitive is in our case (of one triangle) always 0
+    unsigned int sbtIdx = 0;
+    *params.d_hitPoint  = computeHitPoint( sbtIdx );
+}
+
+static __forceinline__ __device__ void testTriangleFrontOrBackFaceHit()
+{
+    *params.d_optixPrimitiveTypeResultOutPointer = optixGetPrimitiveType();
+
+    switch( params.expectedTriangleHitType )
+    {
+        case EXPECTED_TRIANGLE_HIT_TYPE_HIT:
+            if( optixIsTriangleHit() )
+                *params.d_triangleHitResultOutPointer = TRIANGLE_HIT_ID_HIT;
+            break;
+
+        case EXPECTED_TRIANGLE_HIT_TYPE_FRONT_FACE_HIT:
+            if( optixIsTriangleFrontFaceHit() )
+                *params.d_triangleHitResultOutPointer = TRIANGLE_HIT_ID_FRONT;
+            break;
+
+        case EXPECTED_TRIANGLE_HIT_TYPE_BACK_FACE_HIT:
+            if( optixIsTriangleBackFaceHit() )
+                *params.d_triangleHitResultOutPointer = TRIANGLE_HIT_ID_BACK;
+            break;
+        default:
+            break;
+    }
+    computeHitPoint();
+}
+
+static __forceinline__ __device__ void testFrontOrBackFaceHitFromArgument()
+{
+
+    const unsigned int optixHitKind = optixGetHitKind();
+
+    *params.d_optixPrimitiveTypeResultOutPointer = optixGetPrimitiveType();
+
+    switch( params.expectedTriangleHitType )
+    {
+        case EXPECTED_TRIANGLE_HIT_TYPE_HIT:
+            if( optixIsFrontFaceHit( optixHitKind ) )
+                *params.d_triangleHitResultOutPointer = TRIANGLE_HIT_ID_HIT;
+            break;
+
+        case EXPECTED_TRIANGLE_HIT_TYPE_FRONT_FACE_HIT:
+            if( optixIsFrontFaceHit( optixHitKind ) )
+                *params.d_triangleHitResultOutPointer = TRIANGLE_HIT_ID_FRONT;
+            break;
+
+        case EXPECTED_TRIANGLE_HIT_TYPE_BACK_FACE_HIT:
+            if( optixIsBackFaceHit( optixHitKind ) )
+                *params.d_triangleHitResultOutPointer = TRIANGLE_HIT_ID_BACK;
+            break;
+        default:
+            break;
+    }
+    computeHitPoint();
+}
+
+static __forceinline__ __device__ void testFrontOrBackFaceHit()
+{
+    *params.d_optixPrimitiveTypeResultOutPointer = optixGetPrimitiveType();
+    switch( params.expectedTriangleHitType )
+    {
+        case EXPECTED_TRIANGLE_HIT_TYPE_HIT:
+            if( optixIsFrontFaceHit() )
+                *params.d_triangleHitResultOutPointer = TRIANGLE_HIT_ID_HIT;
+            break;
+
+        case EXPECTED_TRIANGLE_HIT_TYPE_FRONT_FACE_HIT:
+            if( optixIsFrontFaceHit() )
+                *params.d_triangleHitResultOutPointer = TRIANGLE_HIT_ID_FRONT;
+            break;
+
+        case EXPECTED_TRIANGLE_HIT_TYPE_BACK_FACE_HIT:
+            if( optixIsBackFaceHit() )
+                *params.d_triangleHitResultOutPointer = TRIANGLE_HIT_ID_BACK;
+            break;
+        default:
+            break;
+    }
+    computeHitPoint();
+}
+
+__device__ void traceRay()
+{
+    // Swap origin and direction for testing front/back hits.
+    float3 origin, direction;
+    switch( params.expectedTriangleHitType )
+    {
+        case EXPECTED_TRIANGLE_HIT_TYPE_HIT:
+        case EXPECTED_TRIANGLE_HIT_TYPE_FRONT_FACE_HIT:
+            origin    = make_float3( 0.0f, 0.0f, 1.0f );
+            direction = make_float3( 0.0f, 0.0f, -1.0f );
+            break;
+        case EXPECTED_TRIANGLE_HIT_TYPE_BACK_FACE_HIT:
+            origin    = make_float3( 0.0f, 0.0f, -1.0f );
+            direction = make_float3( 0.0f, 0.0f, 1.0f );
+            break;
+        default:
+            break;
+    }
+
+    float               tmin           = 0.0f;
+    float               tmax           = 1e16f;
+    float               rayTime        = 0.0f;
+    OptixVisibilityMask visibilityMask = 255;
+    OptixRayFlags       rayFlags       = OPTIX_RAY_FLAG_NONE;
+    unsigned int        SBToffset      = 0;
+    unsigned int        SBTstride      = 0;
+    unsigned int        missSBTIndex   = 0;
+
+    optixTrace( params.handle, origin, direction, tmin, tmax, rayTime, visibilityMask, rayFlags, SBToffset, SBTstride, missSBTIndex );
+}
+
+extern "C" __global__ void __raygen__()
+{
+    traceRay();
+}
+
+extern "C" __global__ void __exception__() {}
+
+extern "C" __global__ void __intersection__() {}
+
+extern "C" __global__ void __anyhit__()
+{
+    if( params.optixProgramType == PROGRAM_TYPE_ANY_HIT )
+    {
+        switch( params.useHitTypeArgument )
+        {
+            case USE_HIT_TYPE_TRIANGLE_IMPLICIT:
+                testTriangleFrontOrBackFaceHit();
+                break;
+            case USE_HIT_TYPE_ARGUMENT:
+                testFrontOrBackFaceHitFromArgument();
+                break;
+            case USE_HIT_TYPE_IMPLICIT:
+                testFrontOrBackFaceHit();
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+extern "C" __global__ void __closesthit__()
+{
+    if( params.optixProgramType == PROGRAM_TYPE_CLOSEST_HIT )
+    {
+        switch( params.useHitTypeArgument )
+        {
+            case USE_HIT_TYPE_TRIANGLE_IMPLICIT:
+                testTriangleFrontOrBackFaceHit();
+                break;
+            case USE_HIT_TYPE_ARGUMENT:
+                testFrontOrBackFaceHitFromArgument();
+                break;
+            case USE_HIT_TYPE_IMPLICIT:
+                testFrontOrBackFaceHit();
+                break;
+            default:
+                break;
+        }
+    }
+}

@@ -1,0 +1,65 @@
+#
+# LWIDIA_COPYRIGHT_BEGIN
+#
+# Copyright 2020-2021 by LWPU Corporation.  All rights reserved.  All
+# information contained herein is proprietary and confidential to LWPU
+# Corporation.  Any use, reproduction, or disclosure without the written
+# permission of LWPU Corporation is prohibited.
+#
+# LWIDIA_COPYRIGHT_END
+#
+
+LW_MODS_MODULE := multinode_transport lib
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+INCLUDE_LIBEVENT ?= true
+
+LW_INCLUDES += $(LW_DIAG_SOURCE)/mods
+LW_INCLUDES += $(LW_SDK_SOURCE)
+LW_INCLUDES += $(LW_TOOLS)/mods/boost2
+LW_INCLUDES += $(LW_DIAG_SOURCE)/utils
+LW_INCLUDES += inc
+LW_INCLUDES += priv/inc
+
+LW_INCLUDES += $(LW_SOURCE)/apps/fabricmanager/libs/libevent-2.0.22-stable/include
+SOURCES += libevent/client_libevent.cpp
+SOURCES += libevent/server_libevent.cpp
+SOURCES += libevent/connection_libevent.cpp
+
+ifeq "$(INCLUDE_LIBEVENT)" "true"
+    LIBEVENT_DIR := $(LW_SOURCE)/apps/fabricmanager/libs/libevent-2.0.22-stable
+
+    SOURCES += $(LIBEVENT_DIR)/src/buffer.c
+    SOURCES += $(LIBEVENT_DIR)/src/bufferevent.c
+    SOURCES += $(LIBEVENT_DIR)/src/bufferevent_filter.c
+    SOURCES += $(LIBEVENT_DIR)/src/bufferevent_pair.c
+    SOURCES += $(LIBEVENT_DIR)/src/bufferevent_ratelim.c
+    SOURCES += $(LIBEVENT_DIR)/src/bufferevent_sock.c
+    SOURCES += $(LIBEVENT_DIR)/src/event.c
+    SOURCES += $(LIBEVENT_DIR)/src/evmap.c
+    SOURCES += $(LIBEVENT_DIR)/src/evthread.c
+    SOURCES += $(LIBEVENT_DIR)/src/evthread_pthread.c
+    SOURCES += $(LIBEVENT_DIR)/src/evutil.c
+    SOURCES += $(LIBEVENT_DIR)/src/evutil_rand.c
+    SOURCES += $(LIBEVENT_DIR)/src/listener.c
+    SOURCES += $(LIBEVENT_DIR)/src/log.c
+    SOURCES += $(LIBEVENT_DIR)/src/strlcpy.c
+    SOURCES += $(LIBEVENT_DIR)/src/select.c
+    SOURCES += $(LIBEVENT_DIR)/src/signal.c
+    SOURCES += $(LIBEVENT_DIR)/src/poll.c
+endif
+
+CFLAGS += -Wno-implicit-fallthrough
+CFLAGS += -fPIC
+CFLAGS += -Wno-cast-qual
+ifneq ($(filter Android Linux QNX,$(LW_TARGET_OS)),)
+    CFLAGS += -Wno-missing-field-initializers
+    CFLAGS += -Wno-stringop-truncation
+    CFLAGS += -Wno-unused-result
+endif
+
+LW_WARNINGS_AS_ERRORS := 1
+LW_AGGRESSIVE_WARNINGS := 1
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

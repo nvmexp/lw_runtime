@@ -1,0 +1,69 @@
+##############################################################################
+# define LOCAL_SOURCES
+##############################################################################
+
+LW_CXX_EXCEPTIONS := 0
+LW_CXX_RTTI := 0
+LW_BUILD_PIC := 1
+
+LWRRENT_DIR := $(LWVS_DIR)/plugin_src/BusGrind
+LOCAL_SOURCES :=
+LOCAL_SOURCES += BusGrind.cpp
+LOCAL_SOURCES += BusGrindMain.cpp
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+##############################################################################
+## define LOCAL_CFLAGS
+###############################################################################
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(LWVS_PLUGIN_INCLUDES)
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+LOCAL_CFLAGS += -fopenmp -Wno-sign-compare
+
+LWVS_BUSGRIND_LIBRARY_NAME = libPcie.so
+
+##############################################################################
+## define LOCAL_LDFLAGS
+###############################################################################
+
+LOCAL9_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL9_LDFLAGS += -L $(LOCAL_LWDA9_DIR)/lib/$(LW_TARGET_ARCH) -l$(LWDART) -lgomp -lstdc++ -lc -llwlibos
+LOCAL9_LDFLAGS += -L$(OUTPUTDIR)/lwda9 -lpluginCommon
+
+LOCAL10_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL10_LDFLAGS += -L $(LOCAL_LWDA10_DIR)/lib/$(LW_TARGET_ARCH) -l$(LWDART) -lgomp -lstdc++ -lc -llwlibos
+LOCAL10_LDFLAGS += -L$(OUTPUTDIR)/lwda10 -lpluginCommon
+
+busgrind9_TARGET  := $(OUTPUTDIR)/lwda9/$(LWVS_BUSGRIND_LIBRARY_NAME)
+busgrind9_SONAME  := $(LWVS_BUSGRIND_LIBRARY_NAME)
+busgrind9_OBJECTS := $(LOCAL_OBJECTS)
+busgrind9_CFLAGS  := $(LOCAL_CFLAGS) $(addprefix -I,$(LOCAL_LWDA9_DIR)/include)
+busgrind9_LDFLAGS := $(LOCAL9_LDFLAGS)
+busgrind9_DEPENDS ?= $(common9_TARGET)
+
+busgrind10_TARGET  := $(OUTPUTDIR)/lwda10/$(LWVS_BUSGRIND_LIBRARY_NAME)
+busgrind10_SONAME  := $(LWVS_BUSGRIND_LIBRARY_NAME)
+busgrind10_OBJECTS := $(LOCAL_OBJECTS)
+busgrind10_CFLAGS  := $(LOCAL_CFLAGS) $(addprefix -I,$(LOCAL_LWDA10_DIR)/include)
+busgrind10_LDFLAGS := $(LOCAL10_LDFLAGS)
+busgrind10_DEPENDS ?= $(common10_TARGET)
+
+# C++11 produces a ctor/dtor for basic_string that RedHat and CentOS do not
+# like; use the default C++ dialect.
+CXX_STD =
+
+build: $(busgrind10_TARGET) $(busgrind9_TARGET)
+$(eval $(call MAKE_SHARED_LIBRARY,busgrind10))
+$(eval $(call MAKE_SHARED_LIBRARY,busgrind9))
+build: $(busgrind10_TARGET).guardwords $(busgrind9_TARGET).guardwords
+
+#################################################################################
+## End of nested lwmk
+##################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

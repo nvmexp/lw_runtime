@@ -1,0 +1,92 @@
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 texcoord: TexCoord;
+};
+
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+}
+
+cbuffer controlBuf
+{
+	float g_sldIntensity;
+}
+
+Texture2D txDiffuse;
+
+SamplerState samLinear;
+SamplerState samLinearWrap;
+
+float4 AnselSketch(float4 colorInput, float2 texCoords, Texture2D texColor, SamplerState sampState)
+{
+	const int ks = 3;
+	// Sobel Horizontal
+	float filterKernelH[ks * ks] =
+			{
+				 -1,  0,  1,
+				 -2,  0,  2,
+				 -1,  0,  1
+			};
+	// Sobel Vertical
+	float filterKernelV[ks * ks] =
+			{
+				 -1, -2, -1,
+				  0,  0,  0,
+				  1,  2,  1
+			};
+
+	float4 clrH = { 0.0f, 0.0f, 0.0f, 0.0f };
+	float4 clrV = { 0.0f, 0.0f, 0.0f, 0.0f };
+	float4 clrOriginal;
+
+	[unroll]
+	for (int i = 0; i < ks; ++i)
+	{
+		[unroll]
+		for (int j = 0; j < ks; ++j)  
+		{
+			float4 clr = texColor.Sample(sampState, texCoords, int2(i - ks/2, j - ks/2));
+			
+			if (i == ks/2 && j == ks/2)
+				clrOriginal = clr;
+			
+			clrH += filterKernelH[i+j*ks] * clr;
+			clrV += filterKernelV[i+j*ks] * clr;
+		}
+	}
+
+	// BW result
+//	const float4 lumFilter = { 0.2126, 0.7152, 0.0722, 0.0 };
+//	return float4( (1.0 - length(float2( dot(clrH, lumFilter), dot(clrV, lumFilter) ))).xxx, 1.0 ); 
+
+#define ILWERT
+
+	float3 sobelLengths =
+#ifndef ILWERT
+		{
+			length( float2(clrH.r, clrV.r) ),
+			length( float2(clrH.g, clrV.g) ),
+			length( float2(clrH.b, clrV.b) )
+		};
+#else
+		{
+			1.0 - length( float2(clrH.r, clrV.r) ),
+			1.0 - length( float2(clrH.g, clrV.g) ),
+			1.0 - length( float2(clrH.b, clrV.b) )
+		};
+#endif
+	return float4( lerp(colorInput.rgb, sobelLengths, 0.45), colorInput.a ); 
+}
+
+float4 PS_Sketch( VSOut frag ): SV_Target
+{
+	float2 uv = frag.texcoord;
+	float4 color = txDiffuse.Sample(samLinear, frag.texcoord);
+	
+	float4 sketchColor = AnselSketch(color, frag.texcoord, txDiffuse, samLinear);
+	
+	return lerp(color, sketchColor, g_sldIntensity);
+}

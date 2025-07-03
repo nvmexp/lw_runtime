@@ -1,0 +1,64 @@
+##############################################################################
+# define LOCAL_SOURCES
+# This is not all of libevent, but just what is needed.  This makefile should
+# only be called for Unix builds.  No support for windows.
+##############################################################################
+
+LWRRENT_DIR := $(LW_SOURCE)/apps/dcgm/libs/libevent-2.0.22-stable
+LOCAL_SOURCES :=
+LOCAL_SOURCES += src/buffer.c
+LOCAL_SOURCES += src/bufferevent.c
+LOCAL_SOURCES += src/bufferevent_filter.c
+LOCAL_SOURCES += src/bufferevent_pair.c
+LOCAL_SOURCES += src/bufferevent_ratelim.c
+LOCAL_SOURCES += src/bufferevent_sock.c
+LOCAL_SOURCES += src/event.c
+LOCAL_SOURCES += src/evmap.c
+LOCAL_SOURCES += src/evthread.c
+LOCAL_SOURCES += src/evthread_pthread.c
+LOCAL_SOURCES += src/evutil.c
+LOCAL_SOURCES += src/evutil_rand.c
+LOCAL_SOURCES += src/listener.c
+LOCAL_SOURCES += src/log.c
+LOCAL_SOURCES += src/strlcpy.c
+LOCAL_SOURCES += src/select.c
+LOCAL_SOURCES += src/signal.c
+LOCAL_SOURCES += src/poll.c
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES)) 
+
+LOCAL_INCLUDES += $(LWRRENT_DIR)/include
+ifeq ($(LW_TARGET_ARCH), amd64)
+    LOCAL_INCLUDES += $(LWRRENT_DIR)/include/targets/$(LW_TARGET_OS)-x86_64/
+endif
+
+LOCAL_CFLAGS := $(addprefix -I,$(LOCAL_INCLUDES))
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_CFLAGS += -fPIC 
+endif
+
+LOCAL_LDFLAGS :=
+
+##############################################################################
+# build
+##############################################################################
+
+LIBEVENT_LIB := libevent$(STATIC_LIBSUFFIX)
+
+libevent_TARGET  := $(OUTPUTDIR)/$(LIBEVENT_LIB)
+libevent_OBJECTS := $(LOCAL_OBJECTS)
+libevent_CFLAGS  := $(LOCAL_CFLAGS)
+libevent_LDFLAGS := $(LOCAL_LDFLAGS)
+libevent_DEPENDS ?=
+
+build: $(libevent_TARGET)
+$(eval $(call MAKE_STATIC_LIBRARY,libevent))
+
+clean:
+
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

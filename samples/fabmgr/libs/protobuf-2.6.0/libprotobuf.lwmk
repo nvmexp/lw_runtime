@@ -1,0 +1,84 @@
+##############################################################################
+# define LOCAL_SOURCES
+##############################################################################
+
+LWRRENT_DIR := $(LW_SOURCE)/apps/fabricmanager/libs/protobuf-2.6.0
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += src/google/protobuf/stubs/atomicops_internals_x86_gcc.cc
+LOCAL_SOURCES += src/google/protobuf/stubs/atomicops_internals_x86_msvc.cc
+LOCAL_SOURCES += src/google/protobuf/stubs/common.cc
+LOCAL_SOURCES += src/google/protobuf/stubs/once.cc
+LOCAL_SOURCES += src/google/protobuf/stubs/stringprintf.cc
+LOCAL_SOURCES += src/google/protobuf/extension_set.cc
+LOCAL_SOURCES += src/google/protobuf/generated_message_util.cc
+LOCAL_SOURCES += src/google/protobuf/message_lite.cc
+LOCAL_SOURCES += src/google/protobuf/repeated_field.cc
+LOCAL_SOURCES += src/google/protobuf/wire_format_lite.cc
+LOCAL_SOURCES += src/google/protobuf/io/coded_stream.cc
+LOCAL_SOURCES += src/google/protobuf/io/zero_copy_stream.cc
+LOCAL_SOURCES += src/google/protobuf/io/zero_copy_stream_impl_lite.cc
+LOCAL_SOURCES += src/google/protobuf/stubs/strutil.cc
+LOCAL_SOURCES += src/google/protobuf/stubs/substitute.cc
+LOCAL_SOURCES += src/google/protobuf/stubs/structurally_valid.cc
+LOCAL_SOURCES += src/google/protobuf/descriptor.cc
+LOCAL_SOURCES += src/google/protobuf/descriptor.pb.cc
+LOCAL_SOURCES += src/google/protobuf/descriptor_database.cc
+LOCAL_SOURCES += src/google/protobuf/dynamic_message.cc
+LOCAL_SOURCES += src/google/protobuf/extension_set_heavy.cc
+LOCAL_SOURCES += src/google/protobuf/generated_message_reflection.cc
+LOCAL_SOURCES += src/google/protobuf/message.cc
+LOCAL_SOURCES += src/google/protobuf/reflection_ops.cc
+LOCAL_SOURCES += src/google/protobuf/service.cc
+LOCAL_SOURCES += src/google/protobuf/text_format.cc
+LOCAL_SOURCES += src/google/protobuf/unknown_field_set.cc
+LOCAL_SOURCES += src/google/protobuf/wire_format.cc
+LOCAL_SOURCES += src/google/protobuf/io/gzip_stream.cc
+LOCAL_SOURCES += src/google/protobuf/io/printer.cc
+LOCAL_SOURCES += src/google/protobuf/io/strtod.cc
+LOCAL_SOURCES += src/google/protobuf/io/tokenizer.cc
+LOCAL_SOURCES += src/google/protobuf/io/zero_copy_stream_impl.cc
+LOCAL_SOURCES += src/google/protobuf/compiler/importer.cc
+LOCAL_SOURCES += src/google/protobuf/compiler/parser.cc
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES)) 
+
+LOCAL_INCLUDES += $(LWRRENT_DIR)/src/
+LOCAL_INCLUDES += $(LWRRENT_DIR)/include/
+
+LOCAL_CFLAGS := $(addprefix -I,$(LOCAL_INCLUDES))
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+# ARM compilation reports indentation warning for GPB generated codes, ignore the same.
+	LOCAL_CFLAGS += -fPIC -Wno-sign-compare -Wno-return-type -Wno-uninitialized -Wno-misleading-indentation
+else
+	LOCAL_CFLAGS += /D_SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS
+endif
+
+LOCAL_LDFLAGS :=
+
+##############################################################################
+# build
+##############################################################################
+
+LIBPROTOBUF_LIB := libprotobuf$(STATIC_LIBSUFFIX)
+
+libprotobuf_TARGET  := $(OUTPUTDIR)/$(LIBPROTOBUF_LIB)
+libprotobuf_OBJECTS := $(LOCAL_OBJECTS)
+libprotobuf_CFLAGS  := $(LOCAL_CFLAGS)
+libprotobuf_LDFLAGS := $(LOCAL_LDFLAGS)
+libprotobuf_DEPENDS ?=
+
+ifeq ($(LW_MODS),)
+  build: $(libprotobuf_TARGET)
+  $(eval $(call MAKE_STATIC_LIBRARY,libprotobuf))
+else
+  $(eval $(call MAKE_MODS_FM_LIBRARY,libprotobuf))
+endif
+
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

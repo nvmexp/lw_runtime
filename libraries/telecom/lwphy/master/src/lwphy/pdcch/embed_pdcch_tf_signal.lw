@@ -1,0 +1,158 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include "lwphy.h"
+#include "lwphy_internal.h"
+#include "descrambling.hpp"
+#include "descrambling.lwh"
+#include "crc.hpp"
+#include "GOLD_2_COALESCED_P_LUT.h"
+#include "GOLD_1_SEQ_LUT.h"
+
+#include "tensor_desc.hpp"
+#include <cooperative_groups.h>
+
+namespace pdcch
+{
+using namespace lwphy_i;
+using namespace descrambling;
+
+namespace cg = cooperative_groups;
+//cg::thread_block                                                           block = cg::this_thread_block();
+
+// TODO: gold32 is also used in ch_est and pdsch
+// Compute 32 bits of the Gold sequence starting from bit n//32
+__device__ inline uint32_t gold32(uint32_t seed2, uint32_t n)
+{
+    uint32_t prod2;
+
+    //    uint32_t state1 = 0x40000000;         // reverse of 0x1
+    uint32_t state2 = __brev(seed2) >> 1; // reverse 31 bits
+
+    state2 = polyMulHigh31(state2, POLY_2);
+
+    prod2 = mulModPoly31_Coalesced(state2,
+                                   &GOLD_2_COALESCED_P_LUT[(n) / WORD_SIZE],
+                                   GOLD_2_COALESCED_P_LUT_OFFSET,
+                                   POLY_2);
+
+    uint32_t fstate2 = galois31LFSRWord(prod2, POLY_2_GMASK, 31);
+
+    uint32_t output2 = fibonacciLFSR2_1bit(fstate2);
+
+    //    return output1 ^ output2;
+    return GOLD_1_SEQ_LUT[n / WORD_SIZE] ^ output2;
+}
+
+template <typename TComplex, typename Block>
+__device__ void generate_dmrs(TComplex*    dmrs_seqs, // 3 * n_rb
+                              uint32_t*    gold_seqs, // 6 * n_rb / 32
+                              PdcchParams& params,
+                              Block&       block)
+{
+    uint32_t dmrs_id              = params.dmrs_id;
+    uint32_t n_rb                 = params.n_rb;
+    uint32_t gold_start_bit       = params.start_rb * 6;
+    uint32_t gold_start_remainder = (gold_start_bit & 0x1F);
+    // gold_start_bit -= (32 - gold_start_remainder);
+    uint32_t n_gold_seqs      = n_rb * 6;
+    uint32_t n_gold_seqs_in_B = n_gold_seqs / 32 + ((n_gold_seqs & 0x1F) != 0) + (gold_start_remainder != 0);
+    uint32_t n_dmrs_seqs      = n_rb * 3;
+
+    float dmrs_base = 1 / sqrtf(2.f) * params.beta_dmrs;
+
+    for(uint32_t i = 0; i < params.n_sym; i++)
+    {
+        uint32_t t      = params.start_sym + i;
+        uint32_t c_init = (1 << 17) * (OFDM_SYMBOLS_PER_SLOT * params.slot_number + t + 1) * (2 * dmrs_id + 1) + (2 * dmrs_id);
+        c_init &= ~(1 << 31);
+
+        // Step 1.1. compute gold sequence (in shared memory)
+        if(threadIdx.x < n_gold_seqs_in_B)
+        {
+            gold_seqs[threadIdx.x + n_gold_seqs_in_B * i] = gold32(c_init, gold_start_bit + threadIdx.x * 32);
+        }
+        block.sync();
+
+        uint32_t lo = 0;
+        uint32_t hi = 0;
+        if(gold_start_remainder && (threadIdx.x < n_gold_seqs_in_B - 1))
+        {
+            lo = gold_seqs[threadIdx.x + n_gold_seqs_in_B * i];
+            hi = gold_seqs[threadIdx.x + 1 + n_gold_seqs_in_B * i];
+        }
+        block.sync();
+        if(gold_start_remainder && (threadIdx.x < n_gold_seqs_in_B - 1))
+        {
+            gold_seqs[threadIdx.x + n_gold_seqs_in_B * i] = __funnelshift_r(lo, hi, gold_start_remainder);
+        }
+        block.sync();
+
+        // Step 1.2. qpsk modulate and scale power (in registers)
+        if(threadIdx.x < n_dmrs_seqs)
+        {
+            const int      gold_seqs_idx             = threadIdx.x >> 4; // 16 threads use the same 32-bit data
+            const int      gold_seqs_offset          = (threadIdx.x & 0xF) << 1;
+            const uint32_t vals                      = (gold_seqs[gold_seqs_idx] >> gold_seqs_offset) & 0x3; // 2 bits
+            const float    r                         = (vals == 1 || vals == 3) ? -dmrs_base : dmrs_base;
+            const float    j                         = (vals == 2 || vals == 3) ? -dmrs_base : dmrs_base;
+            dmrs_seqs[threadIdx.x + n_dmrs_seqs * i] = make_complex<TComplex>::create(r, j);
+        }
+    }
+}
+
+template <typename TComplex>
+__global__ void embed_pdcch_tf_signal(TComplex*   tf_signal,
+                                      PdcchParams params)
+{
+    // TODO: change SMEM size dynamically
+    extern __shared__ TComplex s_dmrs_seqs[]; // (n_rb * 3) * 2
+    extern __shared__ uint32_t s_gold_seqs[]; // ceil(n_rb * 6 / 32) * 2 + 2
+
+    cg::thread_block block = cg::this_thread_block();
+
+    generate_dmrs(s_dmrs_seqs, s_gold_seqs, params, block);
+
+    int pdcch_start_freq = params.start_rb * 12;
+    int total_n_rb       = params.n_rb * 12;
+    int n_qam_per_sym    = params.n_rb * 9;
+
+    for(uint32_t i = 0; i < params.n_sym; i++)
+    {
+        int tid_base = threadIdx.x;
+        for(int tid = tid_base; tid < total_n_rb; tid += blockDim.x)
+        {
+            int      g_w_idx = tid + pdcch_start_freq + (i + params.start_sym) * params.n_f;
+            TComplex val     = ((tid & 0x3) == 1) ?
+                               s_dmrs_seqs[((tid - 1) >> 2) + i * params.n_f] :
+                               params.qam_payload[((tid == 0) ? 0 : (tid - ((tid - 1) / 4 + 1))) + i * n_qam_per_sym];
+            if((tid & 0x3) != 1)
+            {
+                val.x *= params.beta_qam;
+                val.y *= params.beta_qam;
+            }
+            tf_signal[g_w_idx] = val;
+        }
+    }
+}
+
+} // namespace pdcch
+
+void lwphyPdcchTfSignal(lwphyTensorDescriptor_t tf_signal_desc,
+                        void*                   tf_signal_addr,
+                        PdcchParams&            params,
+                        lwdaStream_t            stream)
+{
+    // TODO: for much larger n_sym and/or n_rb, multiple CTAs may be necessary
+    int    n_blocks   = 1;
+    int    block_size = 128;
+    size_t smem_size  = (sizeof(__half2) * (params.n_rb * 3) * 2) + (sizeof(uint32_t) * (((params.n_rb * 6 + 31) / 32) * 2 + 2));
+    pdcch::embed_pdcch_tf_signal<__half2><<<n_blocks, block_size, smem_size, stream>>>((__half2*)tf_signal_addr, params);
+}

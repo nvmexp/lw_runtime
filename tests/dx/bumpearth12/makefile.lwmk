@@ -1,0 +1,152 @@
+##############################################################################
+#
+# This is a sample skeleton makefile that demonstrates how to use
+# lwmake from within the //sw/apps tree.
+#
+# Contact: jjuliano@lwpu.com
+# (Please ask jjuliano to code review changes to this file.)
+#
+# UNIX contact: aplattner@lwpu.com and CC linux-devel@exchange.lwpu.com
+#
+##############################################################################
+
+LWMK_SOURCE = $(LW_SOURCE)/drivers/common/build
+
+# Override LW_INSTALL_DIR before lwCommon.lwmk
+ifeq ($(LW_TARGET_ARCH),amd64)
+  LW_ALT_INSTALL_DIR ?= x64\$(LW_BUILD_TYPE)
+else
+  LW_ALT_INSTALL_DIR ?= Win32\$(LW_BUILD_TYPE)
+endif
+
+# Include lwcommon before including anything else
+include $(LWMK_SOURCE)/lwCommon.lwmk
+
+ifeq (,$(findstring $(LW_BUILD_TYPE),"debug develop release"))
+  $(error Only release, develop, and debug builds are supported)
+endif
+
+ifeq (,$(findstring $(LW_TARGET_ARCH),"x86 amd64 ARMv7"))
+  $(error Only x86, amd64, and ARMv7 architectures are supported)
+endif
+
+##############################################################################
+
+# This generates and includes LWCFG_* makefile vars and C #defines in
+# g_lwconfig.h. Include it before proceeding with anything else.
+include $(LWMK_SOURCE)/lwconfig.lwmk
+
+# Normally I put the "ifdef LWCFG_INITIALIZED" stuff into a separate
+# makefile. But since this one is so simple it is left inline in a
+# single makefile. To indent or not to indent, that is the question.
+ifdef LWCFG_INITIALIZED
+
+##############################################################################
+
+# On Linux, LW_EXTERNAL_DRIVER_SOURCE is set by unix-build when the
+# --external-driver option is specified.
+#
+# For Windows, set LW_EXTERNAL_DRIVER_SOURCE on the lwmake command
+# line like this:
+#
+#     lwmake LW_EXTERNAL_DRIVER_SOURCE=c:/sw/dev/gpu_drv/bugfix_main
+#
+# or uncomment the following line and lwstomize for your own disk
+# layout (this example is for the layout on jjuliano's disk):
+#
+LW_EXTERNAL_DRIVER_SOURCE = $(LW_SOURCE)
+#
+# Or add that line to your private.lwmk.
+
+LW_EXTERNAL_DRIVER_SOURCE ?=
+ifeq (,$(LW_EXTERNAL_DRIVER_SOURCE))
+  $(error Must specify a value for LW_EXTERNAL_DRIVER_SOURCE. See comment in makefile)
+endif
+
+##############################################################################
+
+# Define these before including makefile-windows.lwmk, because they
+# are consumed by it.
+
+TARGET_EXE = bumpearth12$(EXESUFFIX)
+TARGET_PDB = bumpearth12.pdb
+
+# Always generate the PDB.  A little bit overkill, but want the PDB in the install directory to stay up to date.
+LW_GEN_PDB = 1
+
+# SOURCES must be specified after including lwCommon.lwmk.
+SOURCES += main.cpp
+
+##############################################################################
+
+LW_INCLUDES += $(OUTPUTDIR)
+LW_INCLUDES += ..\sdk\d3d12_v39\inc
+LW_INCLUDES += ..\common
+
+# It is uncommon to use LW_EXTERNAL_DRIVER_SOURCE. It is used here to
+# demonstrate its use.
+# LW_INCLUDES += $(LW_EXTERNAL_DRIVER_SOURCE)/sdk/lwpu/inc
+
+##############################################################################
+
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+  include makefile-windows.lwmk
+endif
+
+##############################################################################
+
+# enable more aggressive warnings
+LW_AGGRESSIVE_WARNINGS = 1
+
+# make string literals have type const char* rather than just char*
+LW_WRITE_STRINGS_WARNINGS = 1
+
+# treat warnings as errors
+LW_WARNINGS_AS_ERRORS = 1
+
+##############################################################################
+
+main.cpp : shaders_default.h shaders_0.h shaders_1.h shaders_2.h 
+
+shaders_default.h : shaders_default.sh compileshaders.cmd
+	compileshaders.cmd
+
+shaders_0.h : shaders_0.sh compileshaders.cmd
+	compileshaders.cmd
+
+shaders_1.h : shaders_1.sh compileshaders.cmd
+	compileshaders.cmd
+
+shaders_2.h : shaders_2.sh compileshaders.cmd
+	compileshaders.cmd
+
+# All OBJECTS depend on the top-level makefiles. Colweniently
+# automatically remakes everything after the makefile changes.
+$(call BUILD_OBJECT_LIST,$(OBJECTS)) $(OUTPUTDIR)/$(TARGET_EXE): makefile.lwmk makefile-windows.lwmk
+
+ifeq ($(LW_TARGET_OS_FAMILY),Unix)
+  $(OUTPUTDIR)/$(TARGET_EXE): $(OBJECTS)
+	$(call quiet_cmd,CXX) -o $@ $(OBJECTS) $(LDFLAGS) $(BIN_LDFLAGS)
+	$(STRIP_CMD) $@
+else
+  $(OUTPUTDIR)/$(TARGET_EXE): $(OBJECTS)
+	@$(ECHO) Building $@...
+	$(LINK) $(strip $(LFLAGS)) $(OBJECTS) $(libraries)
+endif
+
+build: $(OUTPUTDIR)/$(TARGET_EXE)
+
+ifeq ($(LW_DO_INSTALL),1)
+  build: $(LW_INSTALL_DIR)/$(TARGET_EXE) $(LW_INSTALL_DIR)/$(TARGET_PDB)
+
+  $(LW_INSTALL_DIR)/$(TARGET_EXE): $(OUTPUTDIR)/$(TARGET_EXE)
+	$(standard_install)
+
+  $(LW_INSTALL_DIR)/$(TARGET_PDB): $(OUTPUTDIR)/$(TARGET_PDB)
+	$(standard_install)
+endif
+
+endif # LWCFG_INITIALIZED
+
+# Always include this last.
+include $(LWMK_SOURCE)/lwCommonRules.lwmk

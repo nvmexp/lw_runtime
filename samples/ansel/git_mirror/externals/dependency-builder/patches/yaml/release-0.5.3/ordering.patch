@@ -1,0 +1,56 @@
+diff --git a/include/yaml-cpp/node/detail/node_data.h b/include/yaml-cpp/node/detail/node_data.h
+index 6030867..faabcc0 100644
+--- a/include/yaml-cpp/node/detail/node_data.h
++++ b/include/yaml-cpp/node/detail/node_data.h
+@@ -23,12 +23,15 @@
+ 
+ namespace YAML {
+ namespace detail {
++
+ class node;
+-}  // namespace detail
+-}  // namespace YAML
+ 
+-namespace YAML {
+-namespace detail {
++struct node_data_comparator
++{
++	bool operator()(const node* a, const node* b) const;
++};
++
++
+ class YAML_CPP_API node_data : private boost::noncopyable {
+  public:
+   node_data();
+@@ -114,7 +117,7 @@ class YAML_CPP_API node_data : private boost::noncopyable {
+   mutable std::size_t m_seqSize;
+ 
+   // map
+-  typedef std::map<node*, node*> node_map;
++  typedef std::map<node*, node*, node_data_comparator> node_map;
+   node_map m_map;
+ 
+   typedef std::pair<node*, node*> kv_pair;
+diff --git a/src/node_data.cpp b/src/node_data.cpp
+index a1ca900..c82e722 100644
+--- a/src/node_data.cpp
++++ b/src/node_data.cpp
+@@ -13,6 +13,18 @@
+ namespace YAML {
+ namespace detail {
+ 
++bool node_data_comparator::operator()(const node* a, const node* b) const
++{
++	if (a && b)
++	{
++		const auto m1 = a->mark();
++		const auto m2 = b->mark();
++		return m1.pos < m2.pos;
++	}
++	else
++		return a < b;
++}
++
+ std::string node_data::empty_scalar;
+ 
+ node_data::node_data()

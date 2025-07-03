@@ -1,0 +1,41 @@
+!!LWvp5.0
+# cgc version 3.0.0001, build date Sep 30 2009
+# command line args: 
+#vendor LWPU Corporation
+#version 3.0.0.1
+#profile gp5vp
+#program main
+#semantic gl_ModelViewProjectionMatrixTranspose : state.matrix.mvp
+#semantic tex
+#var float4 gl_FrontColor : $vout.COLOR0 : COL0 : -1 : 1
+#var float4 gl_Position : $vout.POSITION : HPOS : -1 : 1
+#var float4x4 gl_ModelViewProjectionMatrixTranspose : state.matrix.mvp : c[0], 4 : -1 : 1
+#var float4 gl_Vertex : $vin.POSITION : ATTR0 : -1 : 1
+#var sampler1DARRAY tex :  : texunit 0 : -1 : 1
+PARAM c[4] = { state.matrix.mvp.row[0..3] };
+ATTRIB vertex_attrib[] = { vertex.attrib[0..0] };
+TEMP R0;
+TEMP RC, HC;
+MOV.S R0.x, {1, 0, 0, 0};
+TXF.F R0, -{1, 1, 0, 0}.xxzw, texture[0], ARRAY1D, offset(R0);
+SEQ.F R0.y, R0, {1, 0, 0, 0}.x;
+SEQ.F R0.x, R0, {1, 0, 0, 0};
+TRUNC.U R0.y, R0;
+TRUNC.U R0.x, R0;
+AND.U R0.x, R0, R0.y;
+SEQ.F R0.y, R0.z, {1, 0, 0, 0}.x;
+SEQ.F R0.z, R0.w, {1, 0, 0, 0}.x;
+TRUNC.U R0.y, R0;
+TRUNC.U R0.z, R0;
+AND.U R0.x, R0, R0.y;
+AND.U.CC HC.x, R0, R0.z;
+IF    NE.x;
+MOV.F result.color, {0, 1, 0, 0}.xyxx;
+ELSE;
+MOV.F result.color, {1, 0, 0, 0}.xyyy;
+ENDIF;
+DP4.F result.position.w, vertex.attrib[0], c[3];
+DP4.F result.position.z, vertex.attrib[0], c[2];
+DP4.F result.position.y, vertex.attrib[0], c[1];
+DP4.F result.position.x, vertex.attrib[0], c[0];
+END

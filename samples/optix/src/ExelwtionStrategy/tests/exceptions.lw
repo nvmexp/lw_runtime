@@ -1,0 +1,1099 @@
+#include <optix_device.h>
+#include <optix_world.h>
+
+using namespace optix;
+
+const unsigned int LARGE_INDEX = 10000;
+
+const int TRACE_RG_START = 1;
+const int TRACE_RG_END   = 2;
+const int TRACE_EX_START = 3;
+const int TRACE_EX_END   = 4;
+
+// input[0] and input[1] are used as non-constant invalid user exception code
+rtBuffer<int> input;
+
+// output[0] is used to trace program exelwtion
+// output[1] is used as dummy variable
+rtBuffer<int> output;
+
+// exception code and details are stored by the EX program in these buffers
+rtBuffer<int>       code;
+rtBuffer<int>       details32;
+rtBuffer<long long> details64;
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void ex()
+{
+    output[0] = TRACE_EX_START;
+
+    code[0] = rtGetExceptionCode();
+
+    details32[0] = rti_internal_register::reg_exception_detail0;
+    details32[1] = rti_internal_register::reg_exception_detail1;
+    details32[2] = rti_internal_register::reg_exception_detail2;
+    details32[3] = rti_internal_register::reg_exception_detail3;
+    details32[4] = rti_internal_register::reg_exception_detail4;
+    details32[5] = rti_internal_register::reg_exception_detail5;
+    details32[6] = rti_internal_register::reg_exception_detail6;
+    details32[7] = rti_internal_register::reg_exception_detail7;
+    details32[8] = rti_internal_register::reg_exception_detail8;
+
+    details64[0] = rti_internal_register::reg_exception_64_detail0;
+    details64[1] = rti_internal_register::reg_exception_64_detail1;
+    details64[2] = rti_internal_register::reg_exception_64_detail2;
+    details64[3] = rti_internal_register::reg_exception_64_detail3;
+    details64[4] = rti_internal_register::reg_exception_64_detail4;
+    details64[5] = rti_internal_register::reg_exception_64_detail5;
+    details64[6] = rti_internal_register::reg_exception_64_detail6;
+
+    rtPrintExceptionDetails();
+
+    output[0] = TRACE_EX_END;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg()
+{
+    output[0] = TRACE_RG_START;
+    output[0] = TRACE_RG_END;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void ms()
+{
+}
+
+RT_PROGRAM void bounds( int primIdx, float result[6] )
+{
+    result[0] = result[1] = result[2] = 0.0f;
+    result[3] = result[4] = result[5] = 1.0f;
+}
+
+RT_PROGRAM void ch()
+{
+}
+
+RT_PROGRAM void ah()
+{
+}
+
+RT_PROGRAM void is()
+{
+}
+
+RT_PROGRAM void is_always_hit()
+{
+    if( rtPotentialIntersection( 100.0f ) )
+        rtReportIntersection( 0 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+struct Payload
+{
+    int depth;
+};
+
+struct Attributes
+{
+    int data[50];
+};
+
+rtDeclareVariable( rtObject, top_object, , );
+rtDeclareVariable( Payload, payload, rtPayload, );
+rtDeclareVariable( Attributes, attributes, attribute my_attribute, );
+
+static __device__ optix::Ray createRay()
+{
+    return optix::make_Ray( make_float3( 0, 0, 0 ), /* origin */
+                            make_float3( 1, 0, 0 ), /* direction */
+                            0,                      /* ray type */
+                            0.001f,                 /* scene_epsilon */
+                            RT_DEFAULT_MAX );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg_userexception_RG_constant_minimal()
+{
+    output[0] = TRACE_RG_START;
+
+    rtThrow( RT_EXCEPTION_USER );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_userexception_RG_constant_maximal()
+{
+    output[0] = TRACE_RG_START;
+
+    rtThrow( RT_EXCEPTION_USER_MAX );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_userexception_RG_constant_too_low()
+{
+    output[0] = TRACE_RG_START;
+
+    rtThrow( RT_EXCEPTION_USER - 1 );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_userexception_RG_constant_too_high()
+{
+    output[0] = TRACE_RG_START;
+
+    rtThrow( RT_EXCEPTION_USER_MAX + 1 );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_userexception_RG_nonconstant_minimal()
+{
+    output[0] = TRACE_RG_START;
+
+    rtThrow( input[0] );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_userexception_RG_nonconstant_maximal()
+{
+    output[0] = TRACE_RG_START;
+
+    rtThrow( input[1] );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_userexception_RG_nonconstant_too_low()
+{
+    output[0] = TRACE_RG_START;
+
+    rtThrow( input[0] - 1 );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_userexception_RG_nonconstant_too_high()
+{
+    output[0] = TRACE_RG_START;
+
+    rtThrow( input[1] + 1 );
+
+    output[0] = TRACE_RG_END;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg_userexception_IS()
+{
+    output[0] = TRACE_RG_START;
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void is_userexception_IS()
+{
+    rtThrow( RT_EXCEPTION_USER + 1 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg_userexception_AH()
+{
+    output[0] = TRACE_RG_START;
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void ah_userexception_AH()
+{
+    rtThrow( RT_EXCEPTION_USER + 2 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg_userexception_CH()
+{
+    output[0] = TRACE_RG_START;
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void ch_userexception_CH()
+{
+    rtThrow( RT_EXCEPTION_USER + 3 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg_userexception_MS()
+{
+    output[0] = TRACE_RG_START;
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void is_userexception_MS()
+{
+    // Never hit.
+}
+
+RT_PROGRAM void ms_userexception_MS()
+{
+    rtThrow( RT_EXCEPTION_USER + 4 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg_userexception_EX()
+{
+    output[0] = TRACE_RG_START;
+
+    rtThrow( RT_EXCEPTION_USER + 5 );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void exception_userexception_EX()
+{
+    output[0] = TRACE_EX_START;
+
+    // This will be replaced by a return.
+    rtThrow( RT_EXCEPTION_USER + 6 );
+
+    output[0] = TRACE_EX_END;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+rtDeclareVariable( rtCallableProgramId<void()>, var_bindless_userexception_bindlessCP, , );
+
+RT_PROGRAM void rg_userexception_bindlessCP()
+{
+    output[0] = TRACE_RG_START;
+
+    var_bindless_userexception_bindlessCP();
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_CALLABLE_PROGRAM void bindless_userexception_bindlessCP()
+{
+    rtThrow( RT_EXCEPTION_USER + 7 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+typedef rtCallableProgramX<void()> type_bound_userexception_boundCP;
+
+rtDeclareVariable( type_bound_userexception_boundCP, var_bound_userexception_boundCP, , );
+
+RT_PROGRAM void rg_userexception_boundCP()
+{
+    output[0] = TRACE_RG_START;
+
+    var_bound_userexception_boundCP();
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_CALLABLE_PROGRAM void bound_userexception_boundCP()
+{
+    rtThrow( RT_EXCEPTION_USER + 8 );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+#define INIT_STACKSPACE( N )                                                                                           \
+    float tmp[( N )];                                                                                                  \
+    for( int i = 0; i < ( N ); ++i )                                                                                   \
+        tmp[i] = i;
+
+#define USE_STACKSPACE( N, ACC )                                                                                       \
+    for( int i = 0; i < ( N ); ++i )                                                                                   \
+        ( ACC ) += tmp[i];
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg_stackoverflow_RG_immediate_rtx()
+{
+    output[0] = TRACE_RG_START;
+    INIT_STACKSPACE( 1100 );  // 4*1100 > 4096
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    USE_STACKSPACE( 1100, output[1] );
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_stackoverflow_RG_attributes_rtx()
+{
+    output[0] = TRACE_RG_START;
+    INIT_STACKSPACE( 1000 );  // 4 * (1000 + 2*50) > 4096
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    USE_STACKSPACE( 1000, output[1] );
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void is_stackoverflow_RG_attributes_rtx()
+{
+    // Always hit.
+    if( rtPotentialIntersection( 100.0f ) )
+    {
+        attributes.data[0] = 42;
+        rtReportIntersection( 0 );
+    }
+}
+
+RT_PROGRAM void ch_stackoverflow_RG_attributes_rtx()
+{
+    output[1] = attributes.data[0];
+}
+
+RT_PROGRAM void rg_stackoverflow_RG_huge_rtx()
+{
+    // This test is for huge stack allocations that can *not* reliably be detected with the stack
+    // check bits, such that an additional comparison with RTC_MAX_STACK_SIZE is needed. In this
+    // test no attribute are used, so the stack allocation is already known at module compile time.
+    //
+    // The argument of INIT_STACKSPACE should be chosen such that 2*RTC_MAX_STACK_SIZE stack space
+    // (or a bit more) is needed (such that the stack check bits who consider allocations modulo
+    // 2*RTC_MAX_STACK_SIZE will *not* trigger).
+
+    output[0] = TRACE_RG_START;
+    INIT_STACKSPACE( 32768 );
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    USE_STACKSPACE( 32768, output[1] );
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_stackoverflow_RG_huge_and_attributes_rtx()
+{
+    // This test is for huge stack allocations that can *not* reliably be detected with the stack
+    // check bits, such that an additional comparison with RTC_MAX_STACK_SIZE is needed. In this
+    // test attributes are used, so the stack allocation is only known at pipeline creation time.
+    //
+    // The argument of INIT_STACKSPACE should be chosen such that without attribute a bit less than
+    // RTC_MAX_STACK_SIZE stack space is needed, but more than RTC_MAX_STACK_SIZE stack space with
+    // attributes.
+    //
+    // This test is supposed to hit the check in Pipeline::checkContinuationStackUsage().
+    // Implementation details inside rtcore might make it hit earlier checks, though.
+    //
+    //    4 = sizeof(float) = sizeof(int)
+    //    2 = number of attribute frames added in the rtcore check
+    // 50-2 = number of attributes in memory
+    //   32 = some other continuation stack space (16 for exception frame)
+    //
+    // 4*16300 + 32              <= 65536
+    // 4*16300 + 32 + 2*4*(50-2) >  65536
+
+    output[0] = TRACE_RG_START;
+    INIT_STACKSPACE( 16300 );
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    USE_STACKSPACE( 16300, output[1] );
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void is_stackoverflow_RG_huge_and_attributes_rtx()
+{
+    // Always hit.
+    if( rtPotentialIntersection( 100.0f ) )
+    {
+        attributes.data[0] = 42;
+        rtReportIntersection( 0 );
+    }
+}
+
+RT_PROGRAM void ch_stackoverflow_RG_huge_and_attributes_rtx()
+{
+    output[1] = attributes.data[0];
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg_stackoverflow_MS_rtx()
+{
+    output[0] = TRACE_RG_START;
+    INIT_STACKSPACE( 600 );
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    USE_STACKSPACE( 600, output[1] );
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void ms_stackoverflow_MS_immediate_rtx()
+{
+    INIT_STACKSPACE( 600 );
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    USE_STACKSPACE( 600, output[1] );
+}
+
+RT_PROGRAM void ms_stackoverflow_MS_relwrsive_rtx()
+{
+    INIT_STACKSPACE( 50 );
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    USE_STACKSPACE( 50, output[1] );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg_stackoverflow_CH_rtx()
+{
+    output[0] = TRACE_RG_START;
+    INIT_STACKSPACE( 600 );
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    USE_STACKSPACE( 600, output[1] );
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void ch_stackoverflow_CH_immediate_rtx()
+{
+    INIT_STACKSPACE( 600 );
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    USE_STACKSPACE( 600, output[1] );
+}
+
+RT_PROGRAM void ch_stackoverflow_CH_relwrsive_rtx()
+{
+    INIT_STACKSPACE( 50 );
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    USE_STACKSPACE( 50, output[1] );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg_stackoverflow_RG_mk()
+{
+    output[0] = TRACE_RG_START;
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void ms_stackoverflow_RG_mk()
+{
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg_tracedepthexceeded_RG_rtx()
+{
+    output[0] = TRACE_RG_START;
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_tracedepthexceeded_CH_rtx()
+{
+    output[0] = TRACE_RG_START;
+
+    Payload prd;
+    prd.depth = 1;
+    rtTrace( top_object, createRay(), prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void ch_tracedepthexceeded_CH_4_rtx()
+{
+    if( payload.depth == 4 )
+        return;
+
+    Payload prd;
+    prd.depth = payload.depth + 1;
+    rtTrace( top_object, createRay(), prd );
+}
+
+RT_PROGRAM void ch_tracedepthexceeded_CH_32_rtx()
+{
+    if( payload.depth == 32 )
+        return;
+
+    Payload prd;
+    prd.depth = payload.depth + 1;
+    rtTrace( top_object, createRay(), prd );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+rtBuffer<rtBufferId<int, 1>, 1> idBuffer;
+
+RT_PROGRAM void rg_ilwalidbufferid()
+{
+    output[0] = TRACE_RG_START;
+
+    rtBufferId<int, 1>& validBuffer = idBuffer[0];  // Valid id.
+    output[1] = validBuffer[0];
+
+    rtBufferId<int, 1>& ilwalidBuffer = idBuffer[1];  // Invalid id.
+    output[1] = ilwalidBuffer[0];
+
+    output[0] = TRACE_RG_END;
+}
+
+rtBuffer<int> texIdBuffer;
+
+RT_PROGRAM void rg_ilwalidtextureid()
+{
+    output[0] = TRACE_RG_START;
+
+    int validTexture = texIdBuffer[0];
+    output[1]        = rtTex1D<int>( validTexture, 0 );  // Valid id.
+
+    int ilwalidTexture = texIdBuffer[1];
+    output[1]          = rtTex1D<int>( ilwalidTexture, 0 );  // Invalid id.
+
+    output[0] = TRACE_RG_END;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+rtBuffer<int, 1> input1d;
+rtBuffer<int, 2> input2d;
+rtBuffer<int, 3> input3d;
+rtBuffer<int, 1> output1d;
+rtBuffer<int, 2> output2d;
+rtBuffer<int, 3> output3d;
+
+RT_PROGRAM void rg_bufferindexoutofbounds_getBufferElement_1d()
+{
+    output[0] = TRACE_RG_START;
+
+    const uint index = {LARGE_INDEX};
+    output[1]        = input1d[index];
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_bufferindexoutofbounds_getBufferElement_2d()
+{
+    output[0] = TRACE_RG_START;
+
+    const uint2 index = {0, LARGE_INDEX};
+    output[1]         = input2d[index];
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_bufferindexoutofbounds_getBufferElement_3d()
+{
+    output[0] = TRACE_RG_START;
+
+    const uint3 index = {0, 0, LARGE_INDEX};
+    output[1]         = input3d[index];
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_bufferindexoutofbounds_setBufferElement_1d()
+{
+    output[0] = TRACE_RG_START;
+
+    const uint index = {LARGE_INDEX};
+    output1d[index]  = 100;
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_bufferindexoutofbounds_setBufferElement_2d()
+{
+    output[0] = TRACE_RG_START;
+
+    const uint2 index = {0, LARGE_INDEX};
+    output2d[index]   = 100;
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_bufferindexoutofbounds_setBufferElement_3d()
+{
+    output[0] = TRACE_RG_START;
+
+    const uint3 index = {0, 0, LARGE_INDEX};
+    output3d[index]   = 100;
+
+    output[0] = TRACE_RG_END;
+}
+
+// For better test coverage variables for input buffers are declared as buffer IDs while variables
+// for output buffers are declared as int.
+
+typedef rtBufferId<int, 1> BufferId1d;
+typedef rtBufferId<int, 2> BufferId2d;
+typedef rtBufferId<int, 3> BufferId3d;
+
+rtDeclareVariable( BufferId1d, inputId1d, , );
+rtDeclareVariable( BufferId2d, inputId2d, , );
+rtDeclareVariable( BufferId3d, inputId3d, , );
+
+rtDeclareVariable( int, outputId1d, , );
+rtDeclareVariable( int, outputId2d, , );
+rtDeclareVariable( int, outputId3d, , );
+
+RT_PROGRAM void rg_bufferindexoutofbounds_getBufferElementFromId_1d()
+{
+    output[0] = TRACE_RG_START;
+
+    const uint index = {LARGE_INDEX};
+    output[1]        = inputId1d[index];
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_bufferindexoutofbounds_getBufferElementFromId_2d()
+{
+    output[0] = TRACE_RG_START;
+
+    const uint2 index = {0, LARGE_INDEX};
+    output[1]         = inputId2d[index];
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_bufferindexoutofbounds_getBufferElementFromId_3d()
+{
+    output[0] = TRACE_RG_START;
+
+    const uint3 index = {0, 0, LARGE_INDEX};
+    output[1]         = inputId3d[index];
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_bufferindexoutofbounds_setBufferElementFromId_1d()
+{
+    output[0] = TRACE_RG_START;
+
+    const uint index = {LARGE_INDEX};
+    rtBufferId<int, 1> buffer( outputId1d );
+    buffer[index] = 100;
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_bufferindexoutofbounds_setBufferElementFromId_2d()
+{
+    output[0] = TRACE_RG_START;
+
+    const uint2 index = {0, LARGE_INDEX};
+    rtBufferId<int, 2> buffer( outputId2d );
+    buffer[index] = 100;
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_bufferindexoutofbounds_setBufferElementFromId_3d()
+{
+    output[0] = TRACE_RG_START;
+
+    const uint3 index = {0, 0, LARGE_INDEX};
+    rtBufferId<int, 3> buffer( outputId3d );
+    buffer[index] = 100;
+
+    output[0] = TRACE_RG_END;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+#include <math_constants.h>
+
+RT_PROGRAM void rg_ilwalidray()
+{
+    output[0] = TRACE_RG_START;
+
+    optix::Ray ray = optix::make_Ray( make_float3( LWDART_NAN_F, 0, 0 ), /* origin */
+                                      make_float3( 1, 0, 0 ),            /* direction */
+                                      0,                                 /* ray type */
+                                      0.001f,                            /* scene_epsilon */
+                                      RT_DEFAULT_MAX );
+    Payload prd;
+    rtTrace( top_object, ray, prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_ilwalidray2()
+{
+    output[0] = TRACE_RG_START;
+
+    optix::Ray ray = optix::make_Ray( make_float3( 0, 0.f / 0.f, 0 ), /* origin */
+                                      make_float3( 1, 0, 0 ),         /* direction */
+                                      0,                              /* ray type */
+                                      0.001f,                         /* scene_epsilon */
+                                      RT_DEFAULT_MAX );
+    Payload prd;
+    rtTrace( top_object, ray, prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_ilwalidray3()
+{
+    output[0] = TRACE_RG_START;
+
+    optix::Ray ray = optix::make_Ray( make_float3( 0, 0, 0 ),            /* origin */
+                                      make_float3( 1, LWDART_INF_F, 0 ), /* direction */
+                                      0,                                 /* ray type */
+                                      0.001f,                            /* scene_epsilon */
+                                      RT_DEFAULT_MAX );
+    Payload prd;
+    rtTrace( top_object, ray, prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_ilwalidray4()
+{
+    output[0] = TRACE_RG_START;
+
+    optix::Ray ray = optix::make_Ray( make_float3( 0, 0, 0 ), /* origin */
+                                      make_float3( 1, 0, 0 ), /* direction */
+                                      0,                      /* ray type */
+                                      0.001f,                 /* scene_epsilon */
+                                      LWDART_NAN_F );
+    Payload prd;
+    rtTrace( top_object, ray, prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void rg_indexoutofbounds()
+{
+    output[0] = TRACE_RG_START;
+
+    Payload prd;
+    rtTrace( top_object, createRay(), prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void is_indexoutofbounds()
+{
+    // Always hit.
+    if( rtPotentialIntersection( 100.0f ) )
+    {
+        output[1] = 42;                       // Useless code, just to carry debug info around
+        rtReportIntersection( LARGE_INDEX );  // Invalid material index.
+    }
+}
+
+RT_PROGRAM void ms_indexoutofbounds()
+{
+}
+RT_PROGRAM void bounds_indexoutofbounds( int primIdx, float result[6] )
+{
+    result[0] = result[1] = result[2] = 0.0f;
+    result[3] = result[4] = result[5] = 1.0f;
+}
+RT_PROGRAM void ch_indexoutofbounds()
+{
+}
+RT_PROGRAM void ah_indexoutofbounds()
+{
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+rtDeclareVariable( rtCallableProgramId<void()>, var_bindless_ilwalidprogramid, , );
+
+RT_PROGRAM void rg_ilwalidprogramid()
+{
+    output[0] = TRACE_RG_START;
+    var_bindless_ilwalidprogramid();
+    output[0] = TRACE_RG_END;
+}
+
+RT_CALLABLE_PROGRAM void bindless_ilwalidprogramid()
+{
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// The knob "rtx.maxPayloadRegCount" defaults to 7, i.e., payloads up to 7
+// registers are promoted to registers. Propagation of the payload size needs
+// one additional register. Therefore, with the enabled exception, a payload of
+// -  <= 6 registers should still be promoted to registers,
+// -  == 7 registers will no longer be promoted to registers, and
+// -  >= 8 registers should still remain in memory.
+
+struct Payload6
+{
+    int inbounds[6];
+};
+
+struct LargePayload6
+{
+    int inbounds[6];
+    int outofbounds;
+};
+
+struct Payload7
+{
+    int inbounds[7];
+};
+
+struct LargePayload7
+{
+    int inbounds[7];
+    int outofbounds;
+};
+
+struct Payload8
+{
+    int inbounds[8];
+};
+
+struct LargePayload8
+{
+    int inbounds[8];
+    int outofbounds;
+};
+
+struct VeryLargePayload
+{
+    int inbounds[100];
+};
+
+rtDeclareVariable( Payload6, payload6, rtPayload, );
+rtDeclareVariable( Payload7, payload7, rtPayload, );
+rtDeclareVariable( Payload8, payload8, rtPayload, );
+rtDeclareVariable( LargePayload6, largePayload6, rtPayload, );
+rtDeclareVariable( LargePayload7, largePayload7, rtPayload, );
+rtDeclareVariable( LargePayload8, largePayload8, rtPayload, );
+rtDeclareVariable( VeryLargePayload, verylargePayload, rtPayload, );
+
+RT_PROGRAM void rg_payloadaccessoutofbounds6()
+{
+    output[0] = TRACE_RG_START;
+
+    Payload6 prd;
+    prd.inbounds[0] = 1;
+    rtTrace( top_object, createRay(), prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_payloadaccessoutofbounds7()
+{
+    output[0] = TRACE_RG_START;
+
+    Payload7 prd;
+    prd.inbounds[0] = 1;
+    rtTrace( top_object, createRay(), prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void rg_payloadaccessoutofbounds8()
+{
+    output[0] = TRACE_RG_START;
+
+    Payload8 prd;
+    prd.inbounds[0] = 1;
+    rtTrace( top_object, createRay(), prd );
+
+    output[0] = TRACE_RG_END;
+}
+
+RT_PROGRAM void ch_payloadaccessoutofbounds6_getPayloadValue()
+{
+    output[1] = largePayload6.outofbounds;
+}
+
+RT_PROGRAM void ch_payloadaccessoutofbounds6_setPayloadValue()
+{
+    largePayload6.outofbounds = 42;
+}
+
+RT_PROGRAM void ch_payloadaccessoutofbounds6_getPayloadValue_globalTrace()
+{
+    if( payload6.inbounds[0] == 1 )
+    {
+        payload6.inbounds[0] = 2;
+        rtTrace( top_object, createRay(), payload6 );
+    }
+    else
+    {
+        output[1] = largePayload6.outofbounds;
+    }
+}
+
+RT_PROGRAM void ch_payloadaccessoutofbounds6_setPayloadValue_globalTrace()
+{
+    if( payload6.inbounds[0] == 1 )
+    {
+        payload6.inbounds[0] = 2;
+        rtTrace( top_object, createRay(), payload6 );
+    }
+    else
+    {
+        largePayload6.outofbounds = 42;
+    }
+}
+
+RT_PROGRAM void ch_payloadaccessoutofbounds7_getPayloadValue()
+{
+    output[1] = largePayload7.outofbounds;
+}
+
+RT_PROGRAM void ch_payloadaccessoutofbounds7_setPayloadValue()
+{
+    largePayload7.outofbounds = 42;
+}
+
+RT_PROGRAM void ch_payloadaccessoutofbounds7_getPayloadValue_globalTrace()
+{
+    if( payload7.inbounds[0] == 1 )
+    {
+        payload7.inbounds[0] = 2;
+        rtTrace( top_object, createRay(), payload7 );
+    }
+    else
+    {
+        output[1] = largePayload7.outofbounds;
+    }
+}
+
+RT_PROGRAM void ch_payloadaccessoutofbounds7_setPayloadValue_globalTrace()
+{
+    if( payload7.inbounds[0] == 1 )
+    {
+        payload7.inbounds[0] = 2;
+        rtTrace( top_object, createRay(), payload7 );
+    }
+    else
+    {
+        largePayload7.outofbounds = 42;
+    }
+}
+
+RT_PROGRAM void ch_payloadaccessoutofbounds8_getPayloadValue()
+{
+    output[1] = largePayload8.outofbounds;
+
+    // Use a very large payload here to verify that the check above considers
+    // the actual payload size and not the maximum payload size. (Do not do
+    // that in the other tests with smaller payloads since it also disables
+    // payload promotion to registers).
+
+    VeryLargePayload prd;
+    rtTrace( top_object, createRay(), prd );
+}
+
+RT_PROGRAM void ch_payloadaccessoutofbounds8_setPayloadValue()
+{
+    largePayload8.outofbounds = 42;
+
+    // Use a very large payload here to verify that the check above considers
+    // the actual payload size and not the maximum payload size. (Do not do
+    // that in the other tests with smaller payloads since it also disables
+    // payload promotion to registers).
+
+    VeryLargePayload prd;
+    rtTrace( top_object, createRay(), prd );
+}
+
+RT_PROGRAM void ch_payloadaccessoutofbounds8_getPayloadValue_globalTrace()
+{
+    if( payload8.inbounds[0] == 1 )
+    {
+        payload8.inbounds[0] = 2;
+        rtTrace( top_object, createRay(), payload8 );
+    }
+    else
+    {
+        output[1] = largePayload8.outofbounds;
+    }
+}
+
+RT_PROGRAM void ch_payloadaccessoutofbounds8_setPayloadValue_globalTrace()
+{
+    if( payload8.inbounds[0] == 1 )
+    {
+        payload8.inbounds[0] = 2;
+        rtTrace( top_object, createRay(), payload8 );
+    }
+    else
+    {
+        largePayload8.outofbounds = 42;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void ex_calls_bindlessCP()
+{
+    output[0] = TRACE_EX_START;
+
+    var_bindless_userexception_bindlessCP();
+
+    output[0] = TRACE_EX_END;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+RT_PROGRAM void ex_calls_boundCP()
+{
+    output[0] = TRACE_EX_START;
+
+    var_bound_userexception_boundCP();
+
+    output[0] = TRACE_EX_END;
+}

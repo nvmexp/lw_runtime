@@ -1,0 +1,63 @@
+ps_3_0
+
+def c0, 0.50000000, 0.75000000, 1.00000000, 0.25000000
+
+dcl_2d s0
+dcl_2d s1
+dcl_2d s15
+dcl_texcoord0 v1.rg
+
+texld r0, v1, s1
+mov r3.xy, v1.xy
+add r3.w, r0.x, c0.z
+texldp r4, r3, s0.x
+texldp r5, r3, s15.x
+mov r3, r0.x
+texldd r6, v1, s0.x, r3, r3
+texldd r7, v1, s15.x, r3, r3
+mov r3.xy, v1.xy
+mov r3.w, r0.x
+texldb r8, r3, s0.x
+texldb r9, r3, s15.x
+mov r3.xy, v1.xy
+mov r3.w, r0.x
+texldl r10, r3, s0.x
+texldl r11, r3, s15.x
+texld r12, v1, s0.x
+texld r13, v1, s15.x
+if_lt v1.x, c0.x
+  if_lt v1.y, c0.x
+    mul r4, r4, c0.x
+    mul r5, r5, c0.x
+    add r0, r4, r5
+  else
+    mul r8, r8, c0.x
+    mul r9, r9, c0.x
+    add r0, r8, r9
+  endif
+else
+  if_lt v1.y, c0.x
+    mul r6, r6, c0.x
+    mul r7, r7, c0.x
+    add r0, r6, r7
+  else
+    mul r10, r10, c0.x
+    mul r11, r11, c0.x
+    add r0, r10, r11
+  endif
+endif
+if_gt v1.x, c0.w
+  if_gt v1.y, c0.w
+    if_lt v1.x, c0.y
+      if_lt v1.y, c0.y
+        mul r12, r12, c0.x
+        mul r13, r13, c0.x
+        add r5, r12, r13
+        mul r0, r0, c0.x
+        mul r5, r5, c0.x
+        add r0, r0, r5
+      endif
+    endif
+  endif
+endif
+mov oC0, r0

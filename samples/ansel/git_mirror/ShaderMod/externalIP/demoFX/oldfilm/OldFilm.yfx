@@ -1,0 +1,90 @@
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 txcoord: TexCoord;
+};
+
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+	float4 tileUV;
+}
+
+cbuffer controlBuf
+{
+	float g_sldGamma;
+	float g_sldExposure;
+	float g_sldContrast;
+	float g_sldVign;
+	float g_sldFilterStrength;
+	float g_sldScratchesStrength;
+}
+
+Texture2D texColor;
+Texture2D texScratches;
+
+SamplerState samLinear;
+SamplerState samLinearWrap;
+
+float4 PSMain( VSOut IN ): SV_Target
+{
+	float GlobalExposure = g_sldExposure;
+	float GlobalGamma = lerp(0.4, 0.01, g_sldGamma);
+	float GlobalContrast = g_sldContrast;
+	float TintIntensity = -2.0 * g_sldFilterStrength;
+	float BlackLevel = 0.16;
+	float VignetteStrength = g_sldVign * 8.0;
+
+	float4 color = texColor.Sample(samLinear, IN.txcoord.xy);
+
+	color.rgb *= 0.33;
+	color.rgb = lerp(color.rgb,dot(color.rgb,float3(0.299,0.587,0.114)), g_sldFilterStrength);
+	color.rgb = pow(color.rgb,lerp(3.0,1.0,color.rgb)) * 4.5;
+
+	color.rgb *= GlobalExposure * 1.1;
+
+	color.rgb = pow(color.rgb,GlobalGamma * 0.9);
+	color.rgb = lerp(color.rgb,color.rgb*color.rgb*(3-2*color.rgb), GlobalContrast);
+
+	color.rgb *= lerp(1.0,float3(0,0.42,1.28),0.1 * TintIntensity * saturate(1-dot(color.rgb,0.333)));
+
+
+	float2 vigncoord = IN.txcoord.xy-0.5;
+	float vignamount = dot(vigncoord,vigncoord);
+	color.rgb *= lerp(1.0,0.0,saturate((1-dot(color.rgb,0.333))*vignamount*VignetteStrength));
+
+	float frames24 = floor(elapsedTime / 83.3);
+
+	float2 flipRand, shiftRand;
+	float channelRand;
+	//magic numbers for randomization, makes sure the (tileable) textures are shifted and
+	//flipped randomly (both x and y axis) and the channel is randomly selected, to minimize
+	//repeating patterns without using tons of external textures
+	flipRand.x = sin(frames24 * 233.22) > 0;
+	flipRand.y = sin(frames24 * 122.1 + 0.22) < 0;
+	shiftRand.x = sin(frames24 * 17.1 - 0.25);
+	shiftRand.y = sin(frames24 * 23.1 + 4.25);
+	channelRand = floor(frac(frames24 * 1.618) * 19.0) % 3;
+
+	float2 lookupCoord;
+	lookupCoord = lerp(IN.txcoord.xy, -IN.txcoord.xy, flipRand.xy);
+	lookupCoord += shiftRand.xy;
+
+	float3 scratchesSource = texScratches.Sample(samLinearWrap, lookupCoord.xy).rgb;
+	float scratchesTex = scratchesSource.x;
+	if(channelRand == 1) scratchesTex = scratchesSource.y;
+	if(channelRand == 2) scratchesTex = scratchesSource.z;
+	scratchesTex = lerp(scratchesTex, 1.0, saturate(1-vignamount*0.8));
+	scratchesTex = lerp(1.0, scratchesTex, g_sldScratchesStrength * 3.0);
+
+	color.rgb *= saturate(scratchesTex);
+
+	color.rgb = lerp(saturate(color.rgb),1.0,BlackLevel);
+
+	//if(IN.txcoord.x > 0.9) color.rgb = frac(elapsedTime * 0.001);
+
+
+	return color;
+}

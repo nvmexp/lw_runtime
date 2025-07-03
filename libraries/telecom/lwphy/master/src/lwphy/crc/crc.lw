@@ -1,0 +1,792 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include <lwda_runtime.h>
+#include <stdio.h>
+#include <vector>
+#include "G_CRC_16_COALESCED_P_LUT.h"
+#include "G_CRC_24_A_COALESCED_P_LUT.h"
+#include "G_CRC_24_B_COALESCED_P_LUT.h"
+#include "crc.lwh"
+#include "crc.hpp"
+#include "lwphy.h"
+#include "lwphy_internal.h"
+
+#define _WITH_LARGE_RADIX_TABLE_ 0
+
+using namespace lwphy_i;
+namespace crc
+{
+// 5G spec 24-bit polynomial a (Transport Block) and b (Code Block)
+__constant__ uint32_t POLY_A[1]  = {G_CRC_24_A};
+__constant__ uint32_t POLY_B[1]  = {G_CRC_24_B};
+__constant__ uint32_t POLY_16[1] = {G_CRC_16};
+
+// KERNEL copmputing CRC of Code Blocks and assembling the Transport Block
+__global__ void crlwplinkPuschCodeBlocksKernel(uint32_t*          outputCBCRCs,
+                                               uint8_t*           outputTBs,
+                                               const uint32_t*    inputCodeBlocks,
+                                               const PerTbParams* tbPrmsArray,
+                                               bool               reverseBytes)
+{
+    // exit if blockIdx.x is less than number of code blocks for current transport block
+    uint32_t codeBlockIdx = blockIdx.x + tbPrmsArray[blockIdx.y].firstCodeBlockIndex;
+    if(blockIdx.x >= tbPrmsArray[blockIdx.y].num_CBs)
+        return;
+
+    // Shared memory for CRC xor-based reduction of partial results
+    extern __shared__ uint32_t rems[];
+
+    uint32_t crcPolyBitSize        = (tbPrmsArray[blockIdx.y].K - tbPrmsArray[blockIdx.y].F) > (MAX_SMALL_A_BITS + SMALL_L_BITS) ? LARGE_L_BITS : SMALL_L_BITS;
+    uint32_t codeBlockDataByteSize = (tbPrmsArray[blockIdx.y].K - tbPrmsArray[blockIdx.y].F - crcPolyBitSize + 8 - 1) / 8;
+    int      tid                   = threadIdx.x;
+    uint32_t size                  = (tbPrmsArray[blockIdx.y].K - tbPrmsArray[blockIdx.y].F + 32 - 1) / 32; // pad to 32-bit boundary
+
+    // base addresses for transport block and code block for block y
+    uint32_t tbBase         = 0;
+    uint32_t cbBase         = 0;
+    uint32_t nCodeBlocksSum = 0;
+    for(int i = 1; i <= blockIdx.y; i++)
+    {
+        uint32_t prevCrcPolyBitSize        = (tbPrmsArray[i - 1].K - tbPrmsArray[i - 1].F) > (MAX_SMALL_A_BITS + SMALL_L_BITS) ? LARGE_L_BITS : SMALL_L_BITS;
+        uint32_t prevCodeBlockDataByteSize = (tbPrmsArray[i - 1].K - tbPrmsArray[i - 1].F - prevCrcPolyBitSize + 8 - 1) / 8;
+
+        tbBase += tbPrmsArray[i - 1].num_CBs * prevCodeBlockDataByteSize;
+        tbBase += (sizeof(uint32_t) - tbBase % sizeof(uint32_t)) % sizeof(uint32_t);
+        cbBase += tbPrmsArray[i - 1].num_CBs * MAX_WORDS_PER_CODE_BLOCK;
+        nCodeBlocksSum += tbPrmsArray[i - 1].num_CBs;
+    }
+
+    // 1) Compute CRCs of code blocks; assume size of code block data + crc +
+    // right zero padding (in bytes) bytes is divisible by 4. Also Assemble
+    // Transport Block
+    uint32_t ilwal = 0;
+    uint32_t crc   = 0;
+
+    uint8_t* tb = (uint8_t*)outputTBs;
+    tb += tbBase;
+
+    while(tid < size)
+    {
+        // CRC "map"
+
+        ilwal = inputCodeBlocks[cbBase + codeBlockIdx * MAX_WORDS_PER_CODE_BLOCK + tid];
+        if(reverseBytes)
+        {
+            ilwal = __brev(ilwal);
+            ilwal = swap<32>(ilwal);
+        }
+
+        // If transport block is small (single code block) compute CRC using TB polynomial and skip TB CRC computation in next kernel
+        if(tbPrmsArray[blockIdx.y].num_CBs <= 1)
+        {
+            // for TBs of size less than 3824 bits use 16-bit CRC
+            if(codeBlockDataByteSize + 2 <= MAX_SMALL_A_BYTES)
+            {
+                crc ^= mulModCRCPoly32_1Coalesced<uint16_t, 16>(ilwal,
+                                                                &G_CRC_16_COALESCED_P_LUT[(tid)],
+                                                                G_CRC_16_COALESCED_P_LUT_OFFSET,
+                                                                *POLY_16);
+            }
+            else
+                crc ^= mulModCRCPoly32_1Coalesced<uint32_t, 24>(ilwal,
+                                                                &G_CRC_24_A_COALESCED_P_LUT[(tid)],
+                                                                G_CRC_24_A_COALESCED_P_LUT_OFFSET,
+                                                                *POLY_A);
+        }
+        else
+            crc ^= mulModCRCPoly32_1Coalesced<uint32_t, 24>(ilwal,
+                                                            &G_CRC_24_B_COALESCED_P_LUT[(tid)],
+                                                            G_CRC_24_B_COALESCED_P_LUT_OFFSET,
+                                                            *POLY_B);
+
+        // Transport Block assembly
+        if((tid * 4) < codeBlockDataByteSize)
+            tb[codeBlockIdx * codeBlockDataByteSize + 4 * tid] = (uint8_t)ilwal & 0xFF;
+        if((tid * 4 + 1) < codeBlockDataByteSize)
+            tb[codeBlockIdx * codeBlockDataByteSize + 4 * tid + 1] = (uint8_t)(ilwal >> 8) & 0xFF;
+        if((tid * 4 + 2) < codeBlockDataByteSize)
+            tb[codeBlockIdx * codeBlockDataByteSize + 4 * tid + 2] = (uint8_t)(ilwal >> 16) & 0xFF;
+        if((tid * 4 + 3) < codeBlockDataByteSize)
+            tb[codeBlockIdx * codeBlockDataByteSize + 4 * tid + 3] = (uint8_t)(ilwal >> 24) & 0xFF;
+
+        tid += blockDim.x;
+    }
+
+    crc = xorReductionWarpShared<uint32_t>(crc, rems);
+    // zero pad TB up to bytesize divsible by 4
+    if(threadIdx.x == 0)
+    {
+        *(outputCBCRCs + nCodeBlocksSum + codeBlockIdx) = crc;
+        if(blockIdx.x == 0)
+        {
+            int rem4 = (codeBlockDataByteSize * tbPrmsArray[blockIdx.y].num_CBs) % 4;
+            if(rem4)
+            {
+                for(int i = 0; i < 4 - rem4; i++)
+                {
+                    tb[codeBlockDataByteSize * tbPrmsArray[blockIdx.y].num_CBs + i] = 0;
+                }
+            }
+        }
+    }
+}
+
+// KERNEL computing CRC of transport block; two levels (block and grid) of
+__global__ void crlwplinkPuschTransportBlockKernel(uint32_t*          outputTBCRCs,
+                                                   const uint32_t*    inputTBs,
+                                                   const PerTbParams* tbPrmsArray)
+{
+    uint32_t crcPolyBitSize        = (tbPrmsArray[blockIdx.y].K - tbPrmsArray[blockIdx.y].F) > (MAX_SMALL_A_BITS + SMALL_L_BITS) ? LARGE_L_BITS : SMALL_L_BITS;
+    uint32_t codeBlockDataByteSize = (tbPrmsArray[blockIdx.y].K - tbPrmsArray[blockIdx.y].F - crcPolyBitSize + 8 - 1) / 8;
+
+    uint32_t tbSize = tbPrmsArray[blockIdx.y].num_CBs * codeBlockDataByteSize;
+    tbSize += (sizeof(uint32_t) - tbSize % sizeof(uint32_t)) % sizeof(uint32_t);
+    tbSize /= sizeof(uint32_t);
+
+    // Do nothing in the single code block per transport block case
+    if(tbSize <= MAX_WORDS_PER_CODE_BLOCK)
+        return;
+
+    const uint32_t    crcPolyDegree = 24;
+    extern __shared__ uint32_t rems[];
+    int                        tid = blockDim.x * blockIdx.x + threadIdx.x;
+
+    uint32_t tbBase = 0;
+
+    for(int i = 1; i <= blockIdx.y; i++)
+    {
+        uint32_t prevCrcPolyBitSize        = (tbPrmsArray[i - 1].K - tbPrmsArray[i - 1].F) > (MAX_SMALL_A_BITS + SMALL_L_BITS) ? LARGE_L_BITS : SMALL_L_BITS;
+        uint32_t prevCodeBlockDataByteSize = (tbPrmsArray[i - 1].K - tbPrmsArray[i - 1].F - prevCrcPolyBitSize + 8 - 1) / 8;
+
+        tbBase += tbPrmsArray[i - 1].num_CBs * prevCodeBlockDataByteSize;
+        tbBase += (sizeof(uint32_t) - tbBase % sizeof(uint32_t)) % sizeof(uint32_t);
+    }
+    // Word size
+    tbBase /= sizeof(uint32_t);
+
+    int crc = 0;
+
+    if(tid < tbSize)
+    {
+        crc = mulModCRCPoly32_1Coalesced<uint32_t, crcPolyDegree>(inputTBs[tbBase + tid],
+                                                                  &G_CRC_24_A_COALESCED_P_LUT[tid],
+                                                                  G_CRC_24_A_COALESCED_P_LUT_OFFSET,
+                                                                  *POLY_A);
+    }
+
+    crc = xorReductionWarpShared<uint32_t>(crc, rems);
+
+    // reduction
+    if(threadIdx.x == 0)
+    {
+        atomicXor(&outputTBCRCs[blockIdx.y], crc);
+    }
+}
+
+lwphyStatus_t launch(
+    uint32_t*          d_cbCRCs,
+    uint32_t*          d_tbCRCs,
+    uint8_t*           d_transportBlocks,
+    const uint32_t*    d_inputCodeBlocks,
+    const PerTbParams* d_tbPrmsArray,
+    uint32_t           nTBs,
+    uint32_t           maxNCBsPerTB,
+    uint32_t           maxTBByteSize,
+    bool               reverseBytes,
+    bool               timeIt,
+    uint32_t           NRUNS,
+    bool               codeBlocksOnly,
+    lwdaStream_t       strm)
+{
+    lwphyStatus_t status = LWPHY_STATUS_SUCCESS;
+    if(nTBs > MAX_N_TBS_SUPPORTED)
+    {
+        fprintf(stderr,
+                "ERROR: Maximum number of Transport Blocks supported is "
+                "%u\n",
+                MAX_N_TBS_SUPPORTED);
+        status = LWPHY_STATUS_NOT_SUPPORTED;
+        return status;
+    }
+
+    if(maxNCBsPerTB > MAX_N_CBS_PER_TB_SUPPORTED)
+    {
+        fprintf(stderr,
+                "ERROR: Maximum number of Code Blocks per Transport Block supported is "
+                "%u\n",
+                MAX_N_CBS_PER_TB_SUPPORTED);
+        status = LWPHY_STATUS_NOT_SUPPORTED;
+        return status;
+    }
+
+    if(maxTBByteSize > MAX_BYTES_PER_TRANSPORT_BLOCK)
+    {
+        fprintf(stderr,
+                "ERROR: Transport Block size = %u. Maximum Transport Block size in bytes supported is "
+                "%u\n",
+                maxTBByteSize,
+                MAX_BYTES_PER_TRANSPORT_BLOCK);
+        status = LWPHY_STATUS_NOT_SUPPORTED;
+        return status;
+    }
+
+    const uint32_t crcPolyDegree = 24;
+    const uint32_t blockSize     = GLOBAL_BLOCK_SIZE;
+    uint32_t       gridSizeCBX   = maxNCBsPerTB;
+    uint32_t       gridSizeCBY   = nTBs;
+    uint32_t       tbSize        = (maxTBByteSize + sizeof(uint32_t) + 1) / sizeof(uint32_t);
+    dim3           gCBSize(gridSizeCBX, gridSizeCBY);
+
+    LWDA_CHECK(lwdaMemsetAsync(d_tbCRCs, 0, sizeof(uint32_t) * nTBs, strm));
+
+    crlwplinkPuschCodeBlocksKernel<<<gCBSize, blockSize, sizeof(uint32_t) * WARP_SIZE, strm>>>(d_cbCRCs,
+                                                                                               d_transportBlocks,
+                                                                                               d_inputCodeBlocks,
+                                                                                               d_tbPrmsArray,
+                                                                                               reverseBytes);
+
+    uint32_t gridSizeTBX = (tbSize + blockSize - 1) / blockSize;
+    uint32_t gridSizeTBY = nTBs;
+    dim3     gTBSize(gridSizeTBX, gridSizeTBY);
+
+    if(!codeBlocksOnly)
+    {
+        crlwplinkPuschTransportBlockKernel<<<gTBSize, blockSize, sizeof(uint32_t) * WARP_SIZE, strm>>>(d_tbCRCs,
+                                                                                                       (uint32_t*)d_transportBlocks,
+                                                                                                       d_tbPrmsArray);
+    }
+
+    if(timeIt)
+    {
+        lwdaEvent_t start, stop;
+        lwdaEventCreate(&start);
+        lwdaEventCreate(&stop);
+
+        float time1 = 0.0;
+        float time2 = 0.0;
+        lwdaEventRecord(start);
+
+        for(int i = 0; i < NRUNS; i++)
+        {
+            crlwplinkPuschCodeBlocksKernel<<<gCBSize, blockSize, sizeof(uint32_t) * WARP_SIZE, strm>>>(d_cbCRCs,
+                                                                                                       d_transportBlocks,
+                                                                                                       d_inputCodeBlocks,
+                                                                                                       d_tbPrmsArray,
+                                                                                                       reverseBytes);
+        }
+        lwdaEventRecord(stop);
+        lwdaEventSynchronize(stop);
+        lwdaEventElapsedTime(&time1, start, stop);
+
+        if(!codeBlocksOnly)
+        {
+            lwdaEventRecord(start);
+            for(int i = 0; i < NRUNS; i++)
+            {
+                crlwplinkPuschTransportBlockKernel<<<gTBSize, blockSize, sizeof(uint32_t) * WARP_SIZE, strm>>>(d_tbCRCs,
+                                                                                                               (uint32_t*)d_transportBlocks,
+                                                                                                               d_tbPrmsArray);
+            }
+            lwdaEventRecord(stop);
+            lwdaEventSynchronize(stop);
+            lwdaEventElapsedTime(&time2, start, stop);
+        }
+        lwdaEventDestroy(start);
+        lwdaEventDestroy(stop);
+
+        time1 /= NRUNS;
+        time2 /= NRUNS;
+
+        printf("CB KERNEL GRID_SIZE_X: %d\n", gridSizeCBX);
+        if(!codeBlocksOnly)
+            printf("TB KERNEL GRID_SIZE_X: %d\n", gridSizeTBX);
+
+        printf("Kernel 1: Code blocks CRC and TB assembly(%d-bit crc):\n %.2f us\n",
+               crcPolyDegree,
+               time1 * 1000);
+
+        if(!codeBlocksOnly)
+            printf("Kernel 2: TB CRC(%d-bit crc):\n %.2f us\n",
+                   crcPolyDegree,
+                   time2 * 1000);
+    }
+    return status;
+}
+
+// KERNEL copmputing CRC of Code Blocks and assembling the Transport Block
+__global__ void crcDownlinkPdschCodeBlocksKernel(uint32_t*          outputCBCRCs,
+                                                 uint32_t*          outputTBCRCs,
+                                                 uint8_t*           outputTBs,
+                                                 const PerTbParams* tbPrmsArray,
+                                                 bool               reverseBytes)
+{
+    // exit if blockIdx.x is less than number of code blocks for current transport block
+    uint32_t codeBlockIdx = blockIdx.x + tbPrmsArray[blockIdx.y].firstCodeBlockIndex;
+    if(blockIdx.x >= tbPrmsArray[blockIdx.y].num_CBs)
+        return;
+
+    // Shared memory for CRC xor-based reduction of partial results
+    extern __shared__ uint32_t rems[];
+
+    uint32_t crcPolyBitSize        = (tbPrmsArray[blockIdx.y].K - tbPrmsArray[blockIdx.y].F) > (MAX_SMALL_A_BITS + SMALL_L_BITS) ? LARGE_L_BITS : SMALL_L_BITS;
+    uint32_t codeBlockDataByteSize = (tbPrmsArray[blockIdx.y].K - tbPrmsArray[blockIdx.y].F - crcPolyBitSize + 8 - 1) >> 3;
+    int      tid                   = threadIdx.x;
+    uint32_t size                  = tbPrmsArray[blockIdx.y].K - tbPrmsArray[blockIdx.y].F; // pad to 32-bit boundary
+    uint32_t cbShiftBits           = (32 - (size % 32)) % 32;
+    uint32_t totalSize             = (tbPrmsArray[blockIdx.y].K + 32 - 1) / 32; // padded size including filler bits
+    size = (size + cbShiftBits) >> 5;
+
+    // base addresses for transport block and code block for block y
+    uint32_t tbBase         = 0;
+    uint32_t cbBase         = 0;
+    uint32_t nCodeBlocksSum = 0;
+    for(int i = 1; i <= blockIdx.y; i++)
+    {
+        uint32_t prevCBKPadBits              = (32 - (tbPrmsArray[blockIdx.y].K % 32)) % 32;
+        uint32_t prevCodeBlockPaddedByteSize = (tbPrmsArray[i - 1].K + prevCBKPadBits) / 8;
+
+        // tbBase and cbBase is used to assemble final codeblocks
+        // so the filler bits must be included
+        // also needs to be padded to 32-bit boundary
+        tbBase += tbPrmsArray[i - 1].num_CBs * prevCodeBlockPaddedByteSize;
+        nCodeBlocksSum += tbPrmsArray[i - 1].num_CBs;
+    }
+    cbBase += codeBlockIdx * totalSize;
+
+    // 1) Compute CRCs of code blocks; assume size of code block data + crc +
+    // right zero padding (in bytes) bytes is divisible by 4. Also Assemble
+    // Transport Block
+    uint32_t in = 0;
+    uint32_t ilwal = 0;
+    uint64_t inPad = 0;
+    uint32_t crc   = 0;
+
+    uint8_t* tb = (uint8_t*)outputTBs;
+    tb += tbBase;
+    uint32_t* inputCodeBlocks = reinterpret_cast<uint32_t*>(tb);
+
+    while(tid < size)
+    {
+        // CRC "map"
+
+        // ilwal = inputCodeBlocks[tbBase + cbBase + tid];
+        // CRC "map"
+        if (tid == 0)
+        {
+            in = *(inputCodeBlocks + cbBase + tid);
+            ilwal = (in << cbShiftBits) & 0xffffffff;
+        }
+        else
+        {
+
+            in = *(inputCodeBlocks + cbBase + tid);
+            inPad = (uint64_t)in << sizeof(uint32_t) * 8;
+            inPad ^= *(inputCodeBlocks + cbBase + tid - 1);
+            ilwal = (inPad >> (32 - cbShiftBits)) & 0xffffffff;
+        }
+
+        if(reverseBytes)
+        {
+            ilwal = __brev(ilwal);
+            ilwal = swap<32>(ilwal);
+        }
+
+        // If transport block is small (single code block) compute CRC using TB polynomial and skip TB CRC computation in next kernel
+        if(tbPrmsArray[blockIdx.y].num_CBs <= 1)
+        {
+            // for TBs of size less than 3824 bits use 16-bit CRC
+            if(codeBlockDataByteSize + 2 <= MAX_SMALL_A_BYTES)
+            {
+                int offset = (G_CRC_16_COALESCED_P_LUT_SIZE / 
+                         ( 32 / BITS_PROCESSED_PER_LUT_ENTRY)) - size + tid;
+                crc ^= mulModCRCPoly32_1Coalesced<uint16_t, 16>(ilwal,
+                                                                &G_CRC_16_COALESCED_P_LUT[(offset)],
+                                                                G_CRC_16_COALESCED_P_LUT_OFFSET,
+                                                                *POLY_16);
+            }
+            else
+            {
+                int offset = (G_CRC_24_A_COALESCED_P_LUT_SIZE / 
+                         ( 32 / BITS_PROCESSED_PER_LUT_ENTRY)) - size + tid;
+                crc ^= mulModCRCPoly32_1Coalesced<uint32_t, 24>(ilwal,
+                                                                &G_CRC_24_A_COALESCED_P_LUT[(offset)],
+                                                                G_CRC_24_A_COALESCED_P_LUT_OFFSET,
+                                                                *POLY_A);
+            }
+        }
+        else
+        {
+            int offset = (G_CRC_24_B_COALESCED_P_LUT_SIZE / 
+                         ( 32 / BITS_PROCESSED_PER_LUT_ENTRY)) - size + tid;
+            crc ^= mulModCRCPoly32_1Coalesced<uint32_t, 24>(ilwal,
+                                                            &G_CRC_24_B_COALESCED_P_LUT[(offset)],
+                                                            G_CRC_24_B_COALESCED_P_LUT_OFFSET,
+                                                            *POLY_B);
+        }
+
+        tid += blockDim.x;
+    }
+
+    crc = xorReductionWarpShared<uint32_t>(crc, rems);
+
+    // zero pad TB up to bytesize divsible by 4
+    if(threadIdx.x == 0)
+    {
+
+        if (reverseBytes) { // FIXME might not be related to reverseBytes
+            crc = __brev(crc) >> 8; // assumes CRC is 24 bits
+        }
+
+        // Separate per-CB CRCs are only useful for debugging. Disable if outputCBCRCs is nullptr.
+        if (outputCBCRCs != nullptr) {
+            *(outputCBCRCs + nCodeBlocksSum + codeBlockIdx) = crc;
+        }
+        tb[cbBase * 4 + codeBlockDataByteSize] = (uint8_t)crc & 0xff;
+        tb[cbBase * 4 + codeBlockDataByteSize + 1] = (uint8_t)(crc >> 8) & 0xff;
+        tb[cbBase * 4 + codeBlockDataByteSize + 2] = (uint8_t)(crc >> 16) & 0xff;
+    }
+}
+
+// KERNEL computing CRC of transport block; two levels (block and grid) of
+__global__ void crcDownlinkPdschTransportBlockKernel(uint32_t*          outputTBCRCs,
+                                                     const uint32_t*    inputTBs,
+                                                     uint32_t*          outputCBs,
+                                                     const PerTbParams* tbPrmsArray,
+                                                     bool reverseBytes)
+{
+    uint32_t crcPolyBitSize        = (tbPrmsArray[blockIdx.y].K - tbPrmsArray[blockIdx.y].F) > (MAX_SMALL_A_BITS + SMALL_L_BITS) ? LARGE_L_BITS : SMALL_L_BITS;
+    uint32_t codeBlockDataByteSize = (tbPrmsArray[blockIdx.y].K - tbPrmsArray[blockIdx.y].F - crcPolyBitSize + 8 - 1) / 8;
+
+    uint32_t tbSize = tbPrmsArray[blockIdx.y].num_CBs * codeBlockDataByteSize;
+
+    uint32_t tbShiftBytes = (sizeof(uint32_t) - tbSize % sizeof(uint32_t)) % sizeof(uint32_t);
+    tbSize += tbShiftBytes;
+    tbSize /= sizeof(uint32_t);
+
+    // Do nothing in the single code block per transport block case
+    if(tbSize <= MAX_WORDS_PER_CODE_BLOCK)
+        return;
+
+    const uint32_t    crcPolyDegree = 24;
+    extern __shared__ uint32_t rems[];
+    int                        tid = blockDim.x * blockIdx.x + threadIdx.x;
+
+    uint32_t tbBase = 0;
+    uint32_t tbOutBase = 0;
+
+    for(int i = 1; i <= blockIdx.y; i++)
+    {
+        uint32_t prevCrcPolyBitSize        = (tbPrmsArray[i - 1].K - tbPrmsArray[i - 1].F) > (MAX_SMALL_A_BITS + SMALL_L_BITS) ? LARGE_L_BITS : SMALL_L_BITS;
+        uint32_t prevCodeBlockDataByteSize = (tbPrmsArray[i - 1].K - tbPrmsArray[i - 1].F - prevCrcPolyBitSize + 8 - 1) / 8;
+        uint32_t prevCodeBlockByteSize     = ((tbPrmsArray[i - 1].K + 32 - 1) / 32) * 4;
+
+        tbOutBase += tbPrmsArray[i - 1].num_CBs * prevCodeBlockByteSize;
+        tbBase += tbPrmsArray[i - 1].num_CBs * prevCodeBlockDataByteSize;
+        tbBase += (sizeof(uint32_t) - tbBase % sizeof(uint32_t)) % sizeof(uint32_t);
+    }
+
+    // Word size
+    tbBase /= sizeof(uint32_t);
+
+    int crc = 0;
+    uint32_t in = 0;
+    uint32_t ilwal = 0;
+    uint64_t inPad = 0;
+    if(tid < tbSize)
+    {
+        if (tid == 0)
+        {
+            in = *(inputTBs + tbBase + tid);
+            ilwal = (in << (tbShiftBytes*8)) & 0xffffffff;
+        }
+        else
+        {
+
+            in = *(inputTBs + tbBase + tid);
+            inPad = (uint64_t)in << sizeof(uint32_t) * 8;
+            inPad ^= *(inputTBs + tbBase + tid - 1);
+            ilwal = (inPad >> (32 - (tbShiftBytes*8))) & 0xffffffff;
+        }
+
+        if (reverseBytes) { // reverseBytes reverses bit order and reorders bytes (endianness change)
+            ilwal = __brev(ilwal);
+            ilwal = swap<32>(ilwal);
+        }
+
+
+        int offset = (G_CRC_24_A_COALESCED_P_LUT_SIZE / ( 32 / BITS_PROCESSED_PER_LUT_ENTRY)) - tbSize + tid;
+        crc = mulModCRCPoly32_1Coalesced<uint32_t, crcPolyDegree>(ilwal,
+                                                                  &G_CRC_24_A_COALESCED_P_LUT[offset],
+                                                                  G_CRC_24_A_COALESCED_P_LUT_OFFSET,
+                                                                  *POLY_A);
+    }
+
+    crc = xorReductionWarpShared<uint32_t>(crc, rems);
+
+    // reduction
+    if(threadIdx.x == 0)
+    {
+        if (reverseBytes) { //FIXME might not be related to reverseBytes
+            crc = __brev(crc) >> 8;
+        }
+
+        //Per-TB CRC needs to be atomically updated for every TB (blockIdx.y).
+        //Separate TB-CRCs are useful only for debugging. Disabled if outputTBCRCs is null.
+        if (outputTBCRCs != nullptr) {
+            atomicXor(&outputTBCRCs[blockIdx.y], crc);
+        }
+
+        // Insert TB CRC into codeblocks
+        // CRC lwrrently maintains the per-TB CRC in the outputTBCRCs buffer, but
+        // needs to also update it in the cb buffer, as the last per-CB CRC will be computed
+        // on top of the CRC.
+        uint32_t tbCRCOffset = ((tbPrmsArray[blockIdx.y].K + 32 - 1) / 32) *
+                                (tbPrmsArray[blockIdx.y].num_CBs - 1);
+        tbCRCOffset *= 4;
+        uint8_t* cb = (uint8_t*)outputCBs + tbOutBase;
+        uint8_t * per_tb_crc_addr = &cb[tbCRCOffset + codeBlockDataByteSize - 3];
+        int remainder = ((unsigned long long) per_tb_crc_addr) % 4;
+        uint32_t prepare_crc;
+
+        // This code assumes the per-TB CRC is 24 bits. Also, little-endian.
+        if (remainder == 2) {
+            prepare_crc = ((crc & 0x0FFFFU) << 16);
+            atomicXor((uint32_t *)(&cb[tbCRCOffset + codeBlockDataByteSize - 5]), prepare_crc);
+
+            prepare_crc = ((crc >> 16) & 0x0FFU);
+            atomicXor((uint32_t *)(&cb[tbCRCOffset + codeBlockDataByteSize - 1]), prepare_crc);
+
+        } else if (remainder == 0) {
+            prepare_crc = (crc & 0x0FFFFFFU);
+            atomicXor((uint32_t *)(per_tb_crc_addr), prepare_crc);
+
+        } else if (remainder == 1) {
+            uint32_t prepare_crc = ((crc & 0x0FFFFFFU) << 8);
+            atomicXor((uint32_t *)(&cb[tbCRCOffset + codeBlockDataByteSize - 4]), prepare_crc);
+
+        } else if (remainder == 3) {
+            uint32_t prepare_crc = ((crc & 0x0FFU) << 24);
+            atomicXor((uint32_t *)(&cb[tbCRCOffset + codeBlockDataByteSize - 6]), prepare_crc);
+
+            prepare_crc = ((crc >> 8) & 0x0FFFFU);
+            atomicXor((uint32_t *)(&cb[tbCRCOffset + codeBlockDataByteSize - 2]), prepare_crc);
+        }
+        
+    }
+}
+
+lwphyStatus_t launchEncode(
+    uint32_t*          d_cbCRCs,
+    uint32_t*          d_tbCRCs,
+    const uint32_t*    d_inputTransportBlocks,
+    uint8_t*           d_codeBlocks,
+    const PerTbParams* d_tbPrmsArray,
+    uint32_t           nTBs,
+    uint32_t           maxNCBsPerTB,
+    uint32_t           maxTBByteSize,
+    bool               reverseBytes,
+    // timeIt and NRUNS parameters are not used lwrrently
+    // As the time measurements of the kernels is not ready yet
+    bool               timeIt,
+    uint32_t           NRUNS,
+    bool               codeBlocksOnly,
+    lwdaStream_t       strm)
+{
+    lwphyStatus_t status = LWPHY_STATUS_SUCCESS;
+    if(nTBs > MAX_N_TBS_SUPPORTED)
+    {
+        fprintf(stderr,
+                "ERROR: Maximum number of Transport Blocks supported is "
+                "%u\n",
+                MAX_N_TBS_SUPPORTED);
+        status = LWPHY_STATUS_NOT_SUPPORTED;
+        return status;
+    }
+
+    if(maxNCBsPerTB > MAX_N_CBS_PER_TB_SUPPORTED)
+    {
+        fprintf(stderr,
+                "ERROR: Maximum number of Code Blocks per Transport Block supported is "
+                "%u\n",
+                MAX_N_CBS_PER_TB_SUPPORTED);
+        status = LWPHY_STATUS_NOT_SUPPORTED;
+        return status;
+    }
+
+    if(maxTBByteSize > MAX_BYTES_PER_TRANSPORT_BLOCK)
+    {
+        fprintf(stderr,
+                "ERROR: Transport Block size = %u. Maximum Transport Block size in bytes supported is "
+                "%u\n",
+                maxTBByteSize,
+                MAX_BYTES_PER_TRANSPORT_BLOCK);
+        status = LWPHY_STATUS_NOT_SUPPORTED;
+        return status;
+    }
+
+    const uint32_t crcPolyDegree = 24;
+    const uint32_t blockSize     = GLOBAL_BLOCK_SIZE;
+    uint32_t       gridSizeCBX   = maxNCBsPerTB;
+    uint32_t       gridSizeCBY   = nTBs;
+    uint32_t       tbSize        = (maxTBByteSize + sizeof(uint32_t) + 1) / sizeof(uint32_t);
+    dim3           gCBSize(gridSizeCBX, gridSizeCBY);
+
+    if (d_tbCRCs != nullptr) {
+        LWDA_CHECK(lwdaMemsetAsync(d_tbCRCs, 0, sizeof(uint32_t) * nTBs, strm));
+    }
+
+    uint32_t gridSizeTBX = (tbSize + blockSize - 1) / blockSize;
+    uint32_t gridSizeTBY = nTBs;
+    dim3     gTBSize(gridSizeTBX, gridSizeTBY);
+
+    // if(timeIt)
+    // {
+    //     lwdaEvent_t start, stop;
+    //     lwdaEventCreate(&start);
+    //     lwdaEventCreate(&stop);
+
+    //     float time1 = 0.0;
+    //     float time2 = 0.0;
+    //     lwdaEventRecord(start);
+
+    //     for(int i = 0; i < NRUNS; i++)
+    //     {
+    //         crcDownlinkPdschTransportBlockKernel<<<gTBSize, blockSize, sizeof(uint32_t) * WARP_SIZE, strm>>>(d_tbCRCs,
+    //                                                                                                    (uint32_t*)d_inputTransportBlocks,
+    //                                                                                                    (uint32_t*)d_codeBlocks,
+    //                                                                                                    d_tbPrmsArray);
+    //     }
+    //     lwdaEventRecord(stop);
+    //     lwdaEventSynchronize(stop);
+    //     lwdaEventElapsedTime(&time1, start, stop);
+
+    //     if(!codeBlocksOnly)
+    //     {
+    //         lwdaEventRecord(start);
+    //         for(int i = 0; i < NRUNS; i++)
+    //         {
+    //             crcDownlinkPdschCodeBlocksKernel<<<gCBSize, blockSize, sizeof(uint32_t) * WARP_SIZE, strm>>>(d_cbCRCs,
+    //                                                                                            d_tbCRCs,
+    //                                                                                            d_codeBlocks,
+    //                                                                                            d_tbPrmsArray,
+    //                                                                                            reverseBytes);
+    //         }
+    //         lwdaEventRecord(stop);
+    //         lwdaEventSynchronize(stop);
+    //         lwdaEventElapsedTime(&time2, start, stop);
+    //     }
+    //     lwdaEventDestroy(start);
+    //     lwdaEventDestroy(stop);
+
+    //     time1 /= NRUNS;
+    //     time2 /= NRUNS;
+
+    //     printf("CB KERNEL GRID_SIZE_X: %d\n", gridSizeCBX);
+    //     if(!codeBlocksOnly)
+    //         printf("TB KERNEL GRID_SIZE_X: %d\n", gridSizeTBX);
+
+    //     printf("Kernel 1: Code blocks CRC and TB assembly(%d-bit crc):\n %.2f us\n",
+    //            crcPolyDegree,
+    //            time1 * 1000);
+
+    //     if(!codeBlocksOnly)
+    //         printf("Kernel 2: TB CRC(%d-bit crc):\n %.2f us\n",
+    //                crcPolyDegree,
+    //                time2 * 1000);
+
+    //     return status;
+    // }
+
+    if(!codeBlocksOnly)
+    {
+        crcDownlinkPdschTransportBlockKernel<<<gTBSize, blockSize, sizeof(uint32_t) * WARP_SIZE, strm>>>(d_tbCRCs,
+                                                                                                       (uint32_t*)d_inputTransportBlocks,
+                                                                                                       (uint32_t*)d_codeBlocks,
+                                                                                                       d_tbPrmsArray,
+                                                                                                       reverseBytes);
+    }
+
+    crcDownlinkPdschCodeBlocksKernel<<<gCBSize, blockSize, sizeof(uint32_t) * WARP_SIZE, strm>>>(d_cbCRCs,
+                                                                                               d_tbCRCs,
+                                                                                               d_codeBlocks,
+                                                                                               d_tbPrmsArray,
+                                                                                               reverseBytes);
+    return status;
+}
+
+} // namespace crc
+
+lwphyStatus_t lwphyCRCDecode(
+    /* DEVICE MEMORY*/
+    uint32_t*          d_outputCBCRCs,
+    uint32_t*          d_outputTBCRCs,
+    uint8_t*           d_outputTransportBlocks,
+    const uint32_t*    d_inputCodeBlocks,
+    const PerTbParams* d_tbPrmsArray,
+    /* END DEVICE MEMORY*/
+    uint32_t     nTBs,
+    uint32_t     maxNCBsPerTB,  // Maximum number of code blocks per transport block for current launch
+    uint32_t     maxTBByteSize, // Maximum size in bytes of transport block for current launch
+    int          reverseBytes,
+    int          timeIt,
+    uint32_t     NRUNS,
+    uint32_t     codeBlocksOnly, // Only compute CRC of code blocks. Skip transport block CRC computation
+    lwdaStream_t strm)
+{
+    lwphyStatus_t status = crc::launch(
+        d_outputCBCRCs,
+        d_outputTBCRCs,
+        d_outputTransportBlocks,
+        d_inputCodeBlocks,
+        d_tbPrmsArray,
+        nTBs,
+        maxNCBsPerTB,
+        maxTBByteSize,
+        reverseBytes,
+        timeIt,
+        NRUNS,
+        codeBlocksOnly,
+        strm);
+    return status;
+}
+lwphyStatus_t lwphyCRCEncode(
+    /* DEVICE MEMORY*/
+    uint32_t*          d_outputCBCRCs,
+    uint32_t*          d_outputTBCRCs,
+    uint8_t*           d_outputCodeBlocks,
+    const uint32_t*    d_inputTransportBlocks,
+    const PerTbParams* d_tbPrmsArray,
+    /* END DEVICE MEMORY*/
+    uint32_t     nTBs,
+    uint32_t     maxNCBsPerTB,  // Maximum number of code blocks per transport block for current launch
+    uint32_t     maxTBByteSize, // Maximum size in bytes of transport block for current launch
+    int          reverseBytes,
+    int          timeIt,
+    uint32_t     NRUNS,
+    uint32_t     codeBlocksOnly, // Only compute CRC of code blocks. Skip transport block CRC computation
+    lwdaStream_t strm)
+{
+    lwphyStatus_t status = crc::launchEncode(
+        d_outputCBCRCs,
+        d_outputTBCRCs,
+        d_inputTransportBlocks,
+        d_outputCodeBlocks,
+        d_tbPrmsArray,
+        nTBs,
+        maxNCBsPerTB,
+        maxTBByteSize,
+        reverseBytes,
+        timeIt,
+        NRUNS,
+        codeBlocksOnly,
+        strm);
+    return status;
+}

@@ -1,0 +1,39 @@
+##############################################################################
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+
+##############################################################################
+# string to prepend in unix builds when exelwting rules in this gmake instance
+##############################################################################
+
+LW_MODULE_LOGGING_NAME = "apps/lwwatch"
+
+##############################################################################
+# common lwwatch unix makefile definitions
+##############################################################################
+
+LWWATCHCFG_PROFILE = unix-mmap
+
+include $(LW_SOURCE)/apps/lwwatch/os/unix/common/unix.lwmk
+
+##############################################################################
+# unix/mmap-specific LDFLAGS
+##############################################################################
+
+ifeq ($(SUPPORTS_PKG_CONFIG),1)
+  CLAGS += $(call PKG_CONFIG_CFLAGS,libpci)
+  LDFLAGS += -Bstatic $(call PKG_CONFIG_LDFLAGS,--static libpci) -Bdynamic
+else
+  _pci_dir = $(LW_TOOLS)/unix/targets/$(LW_TARGET_TOOLS_DIR)/pciutils-2.2.1
+
+  LDFLAGS += $(_pci_dir)/lib/libpci.a
+
+  LW_INCLUDES += $(_pci_dir)/include/
+endif
+
+##############################################################################
+# include definitions of build rules
+##############################################################################
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

@@ -1,0 +1,77 @@
+!!LWfp5.0
+OPTION LW_internal;
+OPTION LW_gpu_program_fp64;
+OPTION LW_bindless_texture;
+# cgc version 3.4.0001, build date Apr 13 2017
+# command line args: 
+#vendor LWPU Corporation
+#version 3.4.0.1 COP Build Date Apr 13 2017
+#profile gp5fp
+#program main
+#semantic isam
+#semantic sam
+#semantic shsam
+#semantic usam
+#semantic block : BUFFER[0]
+#var float4 Color : $vout.COL00 : COL0[0] : -1 : 1
+#var ulong isam :  : c[0] : -1 : 1
+#var ulong sam :  : c[1] : -1 : 1
+#var ulong shsam :  : c[2] : -1 : 1
+#var ulong usam :  : c[3] : -1 : 1
+#var int granularity : BUFFER[0] : buffer[0][0] : -1 : 1
+#var float2 ddx : BUFFER[0] : buffer[0][8] : -1 : 1
+#var float2 ddy : BUFFER[0] : buffer[0][16] : -1 : 1
+PARAM c[4] = { program.local[0..3] };
+CBUFFER buf0[] = { program.buffer[0] };
+TEMP R0, R1, R2, R3, R4, R5;
+LONG TEMP D0;
+TEMP RC;
+SHORT TEMP HC;
+OUTPUT result_color0 = result.color;
+LDC.S32 R0.x, buf0[0];
+LDC.F32X2 R4.xy, buf0[8];
+MOV.F R3.z, R0.x;
+MOV.F R3.xy, {0.5, 0, 0, 0}.x;
+LDC.F32X2 R5.xy, buf0[16];
+PK64.U D0.x, c[1];
+TXD.FOOTPRINT.FOOTPRINTPRED.U R0, R3.xyzz, R4, R5, handle(D0.x), 2D;
+MOV.U.CC HC.x, 0;
+MOV.U.CC HC.x (SINGLELOD), 0xffffffff;
+PK64.U D0.x, c[0];
+TXD.FOOTPRINT.FOOTPRINTPRED.U.COARSELEVEL R1, R3.xyzz, R4, R5, handle(D0.x), 2D;
+MOV.U R3.w, 0;
+MOV.U R3.w (SINGLELOD), 0xffffffff;
+PK64.U D0.x, c[3];
+TXD.FOOTPRINT.FOOTPRINTPRED.U.COARSELEVEL R2, R3.xyzz, R4, R5, handle(D0.x), 2D;
+MOV.U R5.z, 0;
+MOV.U R5.z (SINGLELOD), 0xffffffff;
+I2F.U R1, R1;
+I2F.U R0, R0;
+ADD.F32 R0, R0, R1;
+I2F.U R2, R2;
+PK64.U D0.x, c[2];
+TXD.FOOTPRINT.FOOTPRINTPRED.U.COARSELEVEL R1, R3.xyzz, R4, R5, handle(D0.x), 2D;
+I2F.U R4, R1;
+ADD.F32 R0, R0, R2;
+ADD.F32 R2, R0, R4;
+MOV.F R0, R2;
+MOV.F result_color0, R2;
+MOV.U R1.x, 0;
+MOV.U R1.x (SINGLELOD), 0xffffffff;
+IF    NE.x;
+ADD.F32 result_color0.w, R0, {1, 0, 0, 0}.x;
+ENDIF;
+MOV.U.CC RC.x, R3.w;
+IF    NE.x;
+ADD.F32 result_color0.z, R0, {1, 0, 0, 0}.x;
+ENDIF;
+MOV.U.CC RC.x, R5.z;
+IF    NE.x;
+ADD.F32 result_color0.y, R0, {1, 0, 0, 0}.x;
+ENDIF;
+MOV.U.CC RC.x, R1;
+IF    NE.x;
+ADD.F32 result_color0.x, R0, {1, 0, 0, 0};
+ENDIF;
+END
+# 41 instructions, 6 R-regs, 1 D-regs

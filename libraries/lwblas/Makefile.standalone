@@ -1,0 +1,110 @@
+INCLUDE_PATH=-I./include/
+INCLUDE_PATH+=-I./external/lwtlass/include/
+INCLUDE_PATH+=-I${LWDA_ROOT}/include/
+
+CXX=g++
+LWDA_CXX=${LWDA_ROOT}/bin/lwcc
+
+CXX_FLAGS=-std=c++11 -O3 -fPIC -Wall -Wunused -Wno-strict-aliasing -DTENSOR_CONTRACTIONS
+
+
+INTERNAL_FLAGS=-DTENSOR_CONTRACTIONS -DLWTLASS_ENABLE_TENSOR_CORE_MMA=1 -DJETFIRE_ENABLED=1 -DLWTLASS_ENABLE_EXTENDED_PTX=1 -DLWTLASS_LWDA_RP2RP_ENABLED=1 -DLWTLASS_ENABLE_INTERNAL_LWVM=1 -DLWTLASS_LWDA_SECTOR_PROMOTION_ENABLED=1 -DLWTLASS_ENABLE_COMPILER_KNOBS=1 -DLWTLASS_ENABLE_LWOPT=1 -DLWDA_PTX_KNOB_SCHED_MEM_NO_ALIAS_ENABLED=1 -DLWDA_PTX_KNOB_DISABLE_IMPLICIT_MEM_DESC_ENABLED=1 -DLWDA_PTX_KNOB_SCHED_READ_SB_BASE_LATENCY=1
+#INTERNAL_FLAGS=-DLWTLASS_ENABLE_TENSOR_CORE_MMA=1 -DJETFIRE_ENABLED=1 #-DLWTLASS_CONTRACTION_KERNEL_RENAME
+ARCH_80=-gencode arch=compute_80,code=sm_80
+#ARCH_70=-gencode arch=compute_70,code=sm_70
+#ARCH_75=-gencode arch=compute_75,code=sm_75
+#ARCH_61=-gencode arch=compute_60,code=sm_60
+GPU_ARCHS=${ARCH_70}
+GPU_ARCHS+=${ARCH_61}
+#GPU_ARCHS+=${ARCH_75}
+#LWCC_FLAGS=-std=c++11 -O3 -m64 ${GPU_ARCHS} -Xcompiler="-O3 ${CXX_FLAGS}" -rdc=true -DNDEBUG -Xptxas="-v"
+LWCC_FLAGS=-std=c++11 -O3 -m64 -Xcompiler="-O3 ${CXX_FLAGS}" -rdc=true -DNDEBUG -Xptxas="-v" -Xfatbin -compress-all ${INTERNAL_FLAGS} #-fmad=false
+
+
+
+#LWCC_FLAGS=-std=c++11 -O0 -g -m64 ${GPU_ARCHS} -Xcompiler="-O0 -g ${CXX_FLAGS}" -rdc=true # -DNDEBUG -Xptxas="-v" 
+
+#LWCC_FLAGS+=-DDISABLE_TC_hhhh
+#LWCC_FLAGS+=-DDISABLE_TC_ssss
+#LWCC_FLAGS+=-DDISABLE_TC_sssd
+#LWCC_FLAGS+=-DDISABLE_TC_ddds
+#LWCC_FLAGS+=-DDISABLE_TC_dddd
+#LWCC_FLAGS+=-DDISABLE_TC_cccc
+#LWCC_FLAGS+=-DDISABLE_TC_zzzz
+
+#OUTPUT_INTERNAL= > $@.reg 2>&1
+
+SRC=$(wildcard ./src/*.cpp)
+OBJ=$(SRC:.cpp=.o)
+
+SRC_80_LW=$(wildcard ./src/*sm80*.lw)
+OBJ_80_LW=$(SRC_80_LW:.lw=.o)
+SRC_70_LW=$(wildcard ./src/*sm70*.lw)
+OBJ_70_LW=$(SRC_70_LW:.lw=.o)
+SRC_75_LW=$(wildcard ./src/*sm75*.lw)
+OBJ_75_LW=$(SRC_75_LW:.lw=.o)
+SRC_61_LW=$(wildcard ./src/*sm61*.lw)
+OBJ_61_LW=$(SRC_61_LW:.lw=.o)
+
+SRC_LW=$(filter-out $(SRC_61_LW) $(SRC_75_LW) $(SRC_70_LW) $(SRC_80_LW),$(wildcard ./src/*.lw))
+OBJ_LW=$(SRC_LW:.lw=.o)
+
+all:
+	@echo 70XX ${SRC_70_LW}
+	@echo 61XX ${SRC_61_LW}
+	@echo 00XX ${SRC_LW}
+#	${MAKE} clean
+	${MAKE} lib/liblwtensor.so
+	${MAKE} -C samples
+	${MAKE} -C test
+
+#release: GPU_ARCHS+=-gencode arch=compute_61,code=sm_61
+#release: GPU_ARCHS+=-gencode arch=compute_75,code=sm_75
+release: LWCC_LINKER_FLAGS=-Xlinker -Bsymbolic  -Xlinker --default-symver -Xlinker --version-script=cmake/liblwtensor.map
+release: CXX_FLAGS+=-DNDEBUG
+release: lib/liblwtensor.so
+	${MAKE} lib/liblwtensor.so
+	strip lib/liblwtensor.so
+
+run:
+	${MAKE} -C test test
+
+test:
+	${MAKE} -C test
+.PHONY: test
+
+
+
+lib/liblwtensor.so: ${OBJ}  ${OBJ_61_LW} ${OBJ_80_LW} ${OBJ_70_LW} ${OBJ_75_LW} ${OBJ_LW}
+	mkdir -p lib
+	${LWDA_CXX} -shared ${OBJ_LW} ${OBJ} ${LWCC_FLAGS} -llwblasLt -o lib/liblwtensor.so ${LWCC_LINKER_FLAGS}
+
+${OBJ_LW}: %.o: %.lw
+	${LWDA_CXX} ${LWCC_FLAGS} ${GPU_ARCHS} ${INCLUDE_PATH} -c  $< -o $@ ${OUTPUT_INTERNAL}
+
+${OBJ_75_LW}: %.o: %.lw
+	${LWDA_CXX} ${LWCC_FLAGS} ${ARCH_75} ${INCLUDE_PATH} -c  $< -o $@ ${OUTPUT_INTERNAL}
+
+${OBJ_61_LW}: %.o: %.lw
+	${LWDA_CXX} ${LWCC_FLAGS} ${ARCH_61} ${INCLUDE_PATH} -c  $< -o $@ ${OUTPUT_INTERNAL}
+
+${OBJ_80_LW}: %.o: %.lw
+	${LWDA_CXX} ${LWCC_FLAGS} ${ARCH_80} ${INCLUDE_PATH} -c  $< -o $@ ${OUTPUT_INTERNAL}
+
+${OBJ_70_LW}: %.o: %.lw
+	${LWDA_CXX} ${LWCC_FLAGS} ${ARCH_70} ${INCLUDE_PATH} -c  $< -o $@ ${OUTPUT_INTERNAL}
+	#${LWDA_CXX} ${LWCC_FLAGS} ${INCLUDE_PATH} -c  $< -o $@.lwbin --lwbin
+	#lwdisasm_internal  $@.lwbin > $@.asm
+	#lwasm_internal ./src/tensorContraction.o.asm -arch=SM70 -typ elf64 -novliw -o ./src/tensorContraction.lwbin
+	#${LWDA_CXX} ${LWCC_FLAGS} ${INCLUDE_PATH} --use-lwbin code=sm_70,lwbin=src/tensorContraction.lwbin -c ./src/tensorContraction.lw -o $@.o 
+
+
+
+${OBJ}: %.o: %.cpp
+	${CXX} ${CXX_FLAGS} -pedantic-errors ${INCLUDE_PATH} ${INTERNAL_FLAGS} -c $< -o $@
+
+
+
+clean:
+	rm -f ./lib/*.so ./src/*.o ./src/*.reg ./examples/*.o ./examples/*.exe
+	${MAKE} -C test clean

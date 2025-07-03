@@ -1,0 +1,93 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+CMAKE_CONFIGURED_FILES += $(LW_OPTIX)/src/tests/srcTestsConfig.h.in
+
+# TODO: Shouldn't the dependency checker find this?
+$(LW_OPTIX)/src/tests/srcTests.h: $(SRC_TESTS_BINARY_DIR)/srcTestConfig.h
+
+# Workaround the fact that the .in file has a different base file name from the generated file;
+# srcTestsConfig.h.in vs. srcTestConfig.h
+# TODO: Reconcile the filename differences and eliminate this workaround
+$(SRC_TESTS_BINARY_DIR)/srcTestConfig.h: $(OUTPUTDIR)/optix-include/srcTestsConfig.h
+	$(MKDIR) $(@D)
+	$(COPY) $(OUTPUTDIR)/optix-include/srcTestsConfig.h $(SRC_TESTS_BINARY_DIR)/srcTestConfig.h
+
+# srcTests is the static library that all source unit tests link against
+srcTests_SOURCES = $(addprefix $(LW_OPTIX)/src/tests/, \
+  srcTests.cpp \
+  glm.cpp \
+  Image.cpp \
+  LLVMPassFixture.cpp \
+  ObjLoader.cpp \
+)
+$(call create_static_library,srcTests)
+
+# srcTests sources depend on configured headers
+$(srcTests_SOURCES): $(SRC_TESTS_BINARY_DIR)/srcTestConfig.h $(OUTPUTDIR)/optix-include/sse_support.h
+
+srcTests_CFLAGS ?=
+ifeq ($(LW_HOST_OS_FAMILY),Windows) 
+  srcTests_CFLAGS += /wd4996
+endif
+# Flatten srcTests_CFLAGS
+srcTests_CFLAGS := $(srcTests_CFLAGS)
+
+$(srcTests_OBJECTS): CFLAGS += \
+  $(OPTIX_CFLAGS) \
+  $(srcTests_CFLAGS)
+
+$(srcTests_OBJECTS): LW_DEFINES += RTAPI=
+
+# srcTests objects depend on additional include directories
+# apps/optix/src            tests/Image.h
+$(srcTests_OBJECTS): LW_INCLUDES += \
+  $(OPTIX_LWDA_INCLUDES) \
+  $(SRC_TESTS_INCLUDE_DIRS) \
+  $(LW_OPTIX)/src
+
+# Source paths of all test data files that need to be copied.
+TEST_DATA_SOURCE_FILES := $(wildcard $(addprefix $(LW_OPTIX)/src/tests/data/,*.* ptxInputs/*.*))
+
+# Runtime paths of all test data files.
+TEST_DATA_RUNTIME_FILES := $(subst $(LW_OPTIX)/src/tests/data,$(SRC_TESTS_DATA_DIR),$(TEST_DATA_SOURCE_FILES))
+
+# These directories need to exist under the runtime data directory
+LW_DIRS_TO_CREATE += $(SRC_TESTS_DATA_DIR) $(SRC_TESTS_DATA_DIR)/ptxInputs
+
+# test-data target copies all data files into the runtime test data directory
+.PHONY: test-data
+test-data: test-global-data
+
+# Global test data files
+.PHONY: test-global-data
+test-global-data: $(TEST_DATA_RUNTIME_FILES)
+
+# Make sure target directories exist before copying data files.
+$(TEST_DATA_RUNTIME_FILES): | $(SRC_TESTS_DATA_DIR) $(SRC_TESTS_DATA_DIR)/ptxInputs
+
+# Rule to copy test files to the data directory
+$(SRC_TESTS_DATA_DIR)/%: $(LW_OPTIX)/src/tests/data/%
+	$(ECHO) Copying $(subst $(LW_OPTIX)/,,$<)
+	$(COPY) $< $@

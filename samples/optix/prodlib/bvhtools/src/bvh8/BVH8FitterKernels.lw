@@ -1,0 +1,406 @@
+// Copyright LWPU Corporation 2016
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "BVH8FitterKernels.hpp"
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(BVH8FITTER_NODES_WARPS_PER_BLOCK * 32, BVH8FITTER_NODES_BLOCKS_PER_SM)
+void BVH8FitterNodes(BVH8FitterNodesParams p)
+{
+    INIT_SHUFFLE_EMULATION(BVH8FITTER_NODES_WARPS_PER_BLOCK)
+
+    // Collaborate on each node by a group of BVH8FITTER_NODES_GROUP_SIZE conselwtive threads.
+
+    int             groupSize   = BVH8FITTER_NODES_GROUP_SIZE;
+    int             lane        = threadIdx.x;
+    int             groupBase   = (groupSize == 32) ? 0     : lane & ~(groupSize - 1);
+    int             laneRel     = (groupSize == 32) ? lane  : lane &  (groupSize - 1);
+    unsigned int    groupMask   = (groupSize == 32) ? ~0u   : ((unsigned int)(1ull << groupSize) - 1u) << groupBase;
+
+    // Process nodes in bottom-up order.
+
+    int nodeIdx = -1;
+    BVH8Node* nodePtr = NULL;
+    BVH8NodeAux* auxPtr = NULL;
+
+    for (;;)
+    {
+        // Find a node that is ready to be processed.
+
+        do
+        {
+            // No current node => grab a new one.
+            // Out of work => terminate.
+
+            if (nodeIdx == -1)
+            {
+                if (lane == groupBase)
+                    nodeIdx = atomicAdd(p.workCounter, 1);
+                nodeIdx = shfl(nodeIdx, groupBase);
+
+                if (nodeIdx >= *p.inNumNodes)
+                    return;
+
+                nodeIdx = *p.inNumNodes - nodeIdx - 1;
+            }
+
+            // Initialize node pointers.
+
+            nodePtr = &p.ioNodes[nodeIdx];
+            auxPtr = &p.ioNodeAux[nodeIdx];
+
+            // Node has unprocessed children => decrement counter and come back later.
+
+            int counter = 0;
+            if (lane == groupBase)
+                counter = atomicAdd(&auxPtr->numChildNodes, -1);
+            counter = shfl(counter, groupBase);
+
+            if (counter != 0)
+                nodeIdx = -1;
+        }
+        while (nodeIdx == -1);
+
+        // Fetch node header.
+
+        BVH8NodeHeader header = {};
+        int parentNodeIdx = 0;
+
+        if (lane == groupBase)
+        {
+            header = loadCachedAlign16(&nodePtr->header);
+            parentNodeIdx = loadUncachedAlign4(&auxPtr->parentNodeIdx);
+        }
+
+        header = shfl(header, groupBase);
+        parentNodeIdx = shfl(parentNodeIdx, groupBase);
+
+        // Fetch one child by each lane.
+
+        BVH8Meta childMeta;
+        if (laneRel < 8)
+            childMeta = loadCachedAlign1(&nodePtr->header.meta[laneRel]);
+        else
+            childMeta.setEmpty();
+
+        // Inner node => fetch AABB.
+
+        AABB childAABB = AABB(+FLT_MAX, -FLT_MAX);
+        int childNodeIdx = header.firstChildIdx + __popc(__ballot(childMeta.isInner()) & groupMask & getLaneMaskLt());
+        if (childMeta.isInner())
+        {
+            BVH8NodeHeader ch;
+            *(int4*)&ch = loadUncachedAlign16((int4*)&p.ioNodes[childNodeIdx].header); // pos[], scale[], innerMask
+            childAABB.lo = make_float3(ch.pos[0], ch.pos[1], ch.pos[2]);
+            //childAABB.hi = loadUncachedAlign16(&p.ioNodeAux[childNodeIdx]).aabbHi;
+            BVH8NodeAux tmp = loadUncachedAlign16(&p.ioNodeAux[childNodeIdx]); // FIXME: We have to do this to compile on Linux
+            childAABB.hi = tmp.aabbHi;
+        }
+
+        // Leaf node => process each primitive.
+
+        if (childMeta.isLeaf())
+        {
+            int remapOfs        = childMeta.getLeafRemapOfs();
+            int numLeafPrims    = childMeta.getLeafNumPrims();
+            int remapBase       = header.firstRemapIdx + remapOfs;
+
+            // Union AABBs and get primitive indices.
+            // Peephole optimization => also populate the output triangle buffer.
+
+            int primitiveIdx[BVH8FITTER_NODES_MAX_LEAF_SIZE];
+#pragma unroll
+            for (int i = 0; i < BVH8FITTER_NODES_MAX_LEAF_SIZE; i++)
+            {
+                primitiveIdx[i] = -1;
+                if (i >= numLeafPrims)
+                    continue;
+                primitiveIdx[i] = loadCachedAlign4(&p.ioRemap[remapBase + i]);
+
+                if (!p.outTriangles) // general case
+                {
+                    PrimitiveAABB primAABB = p.inModel.loadPrimitiveAABB(primitiveIdx[i]);
+                    childAABB = AABB(childAABB, primAABB);
+                    if (p.translateIndices)
+                        primitiveIdx[i] = primAABB.primitiveIdx;
+                }
+                else // peephole optimization
+                {
+                    float3 v0, v1, v2;
+                    p.inModel.loadVertexPositions(v0, v1, v2, primitiveIdx[i]);
+                    childAABB = AABB(childAABB, AABB(v0, v1, v2));
+
+                    BVH8Triangle tri = {};
+                    tri.userTriangleID = primitiveIdx[i];
+                    tri.v0x = v0.x, tri.v0y = v0.y, tri.v0z = v0.z;
+                    tri.v1x = v1.x, tri.v1y = v1.y, tri.v1z = v1.z;
+                    tri.v2x = v2.x, tri.v2y = v2.y, tri.v2z = v2.z;
+
+                    // Overwrite everything but the primBits field.
+                    // (On GP102, this solution performs better than first
+                    // reading the primBits from the previous triangle
+                    // and then writing the entire new triangle back.)
+                    char *triPtr = (char *) &tri;
+                    char *outPtr = (char *) &p.outTriangles[remapBase + i];
+                    storeCachedAlign16((float4 *) &outPtr[0 ], *(float4 *) &triPtr[0 ]);
+                    storeCachedAlign16((float4 *) &outPtr[16], *(float4 *) &triPtr[16]);
+                    storeCachedAlign8( (float2 *) &outPtr[32], *(float2 *) &triPtr[32]);
+                    storeCachedAlign4( (float  *) &outPtr[40], *(float  *) &triPtr[40]);
+                }
+            }
+
+            // Remove duplicates if requested.
+
+            int numUniquePrims = numLeafPrims;
+            if (p.removeDuplicates)
+            {
+                numUniquePrims = 1;
+#pragma unroll
+                for (int i = 1; i < BVH8FITTER_NODES_MAX_LEAF_SIZE; i++)
+                {
+#pragma unroll
+                    for (int j = 0; j < i; j++)
+                        if (primitiveIdx[i] == primitiveIdx[j])
+                            primitiveIdx[i] = -1;
+
+                    if (primitiveIdx[i] != -1)
+                        numUniquePrims++;
+                }
+            }
+
+            // Store updated primitive indices.
+
+            if (p.translateIndices || p.removeDuplicates)
+            {
+                int remapIdx = remapBase;
+#pragma unroll
+                for (int i = 0; i < BVH8FITTER_NODES_MAX_LEAF_SIZE; i++)
+                {
+                    if (primitiveIdx[i] != -1)
+                    {
+                        storeCachedAlign4(&p.ioRemap[remapIdx], primitiveIdx[i]);
+                        remapIdx++;
+                    }
+                }
+                childMeta.setLeaf(remapOfs, numUniquePrims);
+            }
+        }
+
+        // Compute node AABB as the union of all child AABBs.
+
+        AABB nodeAABB = childAABB;
+#pragma unroll
+        for (int i = 1; i < 8; i *= 2)
+            nodeAABB = AABB(nodeAABB, shfl_xor(nodeAABB, i));
+
+        // Optimize child slot assignment if requested.
+
+        int childSlot = laneRel; // which child slot should this lane deposit its data into?
+        if (p.numReorderRounds && childSlot < 8)
+        {
+            // Callwlate child centroid relative to the parent.
+
+            float cx = 0.0f, cy = 0.0f, cz = 0.0f;
+            if (childMeta.isInner())
+            {
+                cx = childAABB.lo.x + childAABB.hi.x - nodeAABB.lo.x - nodeAABB.hi.x;
+                cy = childAABB.lo.y + childAABB.hi.y - nodeAABB.lo.y - nodeAABB.hi.y;
+                cz = childAABB.lo.z + childAABB.hi.z - nodeAABB.lo.z - nodeAABB.hi.z;
+            }
+
+            // Callwlate assignment score as a dot product with the
+            // diagonal vector corresponding to the given child slot.
+
+            childSlot <<= 29;
+            float score = slct(cx, -cx, childSlot << 2) + slct(cy, -cy, childSlot << 1) + slct(cz, -cz, childSlot);
+
+            // Optimize child slots for the given number of rounds using a greedy algorithm that
+            // exchanges slots between a pair of lanes whenever this increases the overall score.
+
+            for (int round = 0; round < p.numReorderRounds; round++)
+            {
+#pragma unroll
+                for (int mask = 1; mask < 8; mask++)
+                {
+                    int newSlot = __shfl_xor_nosync(childSlot, mask);
+                    float newScore = slct(cx, -cx, newSlot << 2) + slct(cy, -cy, newSlot << 1) + slct(cz, -cz, newSlot);
+                    float diff = score - newScore;
+                    if (-diff > __shfl_xor_nosync(diff, mask))
+                        childSlot = newSlot, score = newScore;
+                }
+            }
+            childSlot = (unsigned int)childSlot >> 29;
+        }
+
+        // Determine node scale, rounding up to next power of two.
+        // (zero/small => 1, FLT_MAX/Inf/NaN => 248)
+
+        int magic = 0x0000FFFF - (7 << 23); // yields quantized AABB range 0..255; change to "0x007FFFFF - (7 << 23)" for 0..128
+        int xscl = min(max((__float_as_int(__fsub_ru(nodeAABB.hi.x, nodeAABB.lo.x)) + magic) >> 23, 1), 248);
+        int yscl = min(max((__float_as_int(__fsub_ru(nodeAABB.hi.y, nodeAABB.lo.y)) + magic) >> 23, 1), 248);
+        int zscl = min(max((__float_as_int(__fsub_ru(nodeAABB.hi.z, nodeAABB.lo.z)) + magic) >> 23, 1), 248);
+
+        // Callwlate updated childMeta and innerMask.
+
+        unsigned int innerMask = 0u;
+        if (childMeta.isInner())
+        {
+            childMeta.setInner(childSlot);
+            innerMask = 1u << childSlot;
+        }
+
+#pragma unroll
+        for (int i = 1; i < 8; i *= 2)
+            innerMask |= shfl_xor(innerMask, i);
+
+        // Output node header and aux data.
+
+        if (lane == groupBase)
+        {
+            // Write min corner, scale, and innerMask in header.
+
+            header.pos[0] = nodeAABB.lo.x;
+            header.pos[1] = nodeAABB.lo.y;
+            header.pos[2] = nodeAABB.lo.z;
+            header.scale[0] = (unsigned char)xscl;
+            header.scale[1] = (unsigned char)yscl;
+            header.scale[2] = (unsigned char)zscl;
+            header.innerMask = (unsigned char)innerMask;
+            storeUncachedAlign16((int4*)&nodePtr->header, *(int4*)&header); // pos[], scale[], innerMask
+
+            // Write max corner in aux data.
+
+            BVH8NodeAux aux;
+            aux.numChildNodes = __popc(innerMask); // reset numChildNodes for subsequent refits
+            if (parentNodeIdx == -1)
+                aux.parentNodeIdx = -1;
+            else
+                aux.aabbHi = nodeAABB.hi;
+            storeUncachedAlign16(auxPtr, aux);
+        }
+
+        // Update child meta.
+
+        if (childSlot < 8)
+            storeUncachedAlign1(&nodePtr->header.meta[childSlot], childMeta);
+
+        // Fill in quantized child AABB data.
+
+        if (!childMeta.isEmpty())
+        {
+            float xmul = __int_as_float((254 - xscl) << 23); //  1.0f / exp2(scl)
+            float ymul = __int_as_float((254 - yscl) << 23);
+            float zmul = __int_as_float((254 - zscl) << 23);
+            storeUncachedAlign1(&nodePtr->lox[childSlot], (unsigned char)min(max((int)floorf(__fmul_rd(__fsub_rd(childAABB.lo.x, nodeAABB.lo.x), xmul)), 0x00), 0xFF));
+            storeUncachedAlign1(&nodePtr->loy[childSlot], (unsigned char)min(max((int)floorf(__fmul_rd(__fsub_rd(childAABB.lo.y, nodeAABB.lo.y), ymul)), 0x00), 0xFF));
+            storeUncachedAlign1(&nodePtr->loz[childSlot], (unsigned char)min(max((int)floorf(__fmul_rd(__fsub_rd(childAABB.lo.z, nodeAABB.lo.z), zmul)), 0x00), 0xFF));
+            storeUncachedAlign1(&nodePtr->hix[childSlot], (unsigned char)min(max((int)ceilf (__fmul_ru(__fsub_ru(childAABB.hi.x, nodeAABB.lo.x), xmul)), 0x00), 0xFF));
+            storeUncachedAlign1(&nodePtr->hiy[childSlot], (unsigned char)min(max((int)ceilf (__fmul_ru(__fsub_ru(childAABB.hi.y, nodeAABB.lo.y), ymul)), 0x00), 0xFF));
+            storeUncachedAlign1(&nodePtr->hiz[childSlot], (unsigned char)min(max((int)ceilf (__fmul_ru(__fsub_ru(childAABB.hi.z, nodeAABB.lo.z), zmul)), 0x00), 0xFF));
+        }
+
+        // Permute child nodes in memory to match the new slot assignment,
+        // and reset parentNodeIdx for subsequent refits.
+
+        int oldIdx = childNodeIdx;
+        int newIdx = header.firstChildIdx + __popc(innerMask & ~(-1 << childSlot));
+        if (childMeta.isInner())
+        {
+            if (oldIdx != newIdx)
+            {
+                BVH8Node childNode = loadUncachedAlign16(&p.ioNodes[oldIdx]);
+                storeUncachedAlign16(&p.ioNodes[newIdx], childNode);
+                if (p.supportRefit)
+                {
+                    int numGrandchildren = __popc(childNode.header.innerMask);
+                    int2 childAux = make_int2(numGrandchildren, nodeIdx);
+                    storeUncachedAlign8((int2*)&p.ioNodeAux[newIdx], childAux); // numChildNodes, parentNodeIdx
+
+                    for (int i = 0; i < numGrandchildren; i++)
+                    {
+                        int grandchild = childNode.header.firstChildIdx + i;
+                        storeUncachedAlign4(&p.ioNodeAux[grandchild].parentNodeIdx, newIdx);
+                    }
+                }
+            }
+            else if (p.supportRefit)
+            {
+                storeUncachedAlign4(&p.ioNodeAux[newIdx].parentNodeIdx, nodeIdx);
+            }
+        }
+
+        // Advance to parent node.
+
+        nodeIdx = parentNodeIdx;
+    }
+}
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(BVH8FITTER_TRIANGLES_WARPS_PER_BLOCK * 32, BVH8FITTER_TRIANGLES_BLOCKS_PER_SM)
+void BVH8FitterTriangles(BVH8FitterTrianglesParams p)
+{
+    // Pick a remap entry.
+
+    int remapIdx = threadIdx.x + 32 * (threadIdx.y + BVH8FITTER_TRIANGLES_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+    if (remapIdx >= p.maxPrims)
+        return;
+
+    // Colwert triangle.
+
+    BVH8Triangle tri = {};
+    tri.userTriangleID = loadCachedAlign4(&p.inRemap[remapIdx]);
+
+    if (tri.userTriangleID >= 0 && tri.userTriangleID < p.inModel.numPrimitives)
+    {
+        float3 v0, v1, v2;
+        p.inModel.loadVertexPositions(v0, v1, v2, tri.userTriangleID);
+        tri.v0x = v0.x, tri.v0y = v0.y, tri.v0z = v0.z;
+        tri.v1x = v1.x, tri.v1y = v1.y, tri.v1z = v1.z;
+        tri.v2x = v2.x, tri.v2y = v2.y, tri.v2z = v2.z;
+    }
+
+    // Store result.
+
+    // Overwrite everything but the primBits field.
+    // (On GP102, this solution performs better than first
+    // reading the primBits from the previous triangle
+    // and then writing the entire new triangle back.)
+    char *triPtr = (char *) &tri;
+    char *outPtr = (char *) &p.outTriangles[remapIdx];
+    storeCachedAlign16((float4 *) &outPtr[0 ], *(float4 *) &triPtr[0 ]);
+    storeCachedAlign16((float4 *) &outPtr[16], *(float4 *) &triPtr[16]);
+    storeCachedAlign8( (float2 *) &outPtr[32], *(float2 *) &triPtr[32]);
+    storeCachedAlign4( (float  *) &outPtr[40], *(float  *) &triPtr[40]);
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchBVH8FitterNodes(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const BVH8FitterNodesParams& p)
+{
+    if (lwdaFuncSetCacheConfig(BVH8FitterNodes, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    BVH8FitterNodes<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchBVH8FitterTriangles(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const BVH8FitterTrianglesParams& p)
+{
+    if (lwdaFuncSetCacheConfig(BVH8FitterTriangles, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    BVH8FitterTriangles<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

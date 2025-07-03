@@ -1,0 +1,16 @@
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=16 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=32 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=64 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=88 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=120 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=160 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=208 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=272 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=360 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=472 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=616 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=808 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=1056 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=1384 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=1808 -fastVerify  -beta0
+./lwtensorTest -Rcontraction -modeAm,k -modeBn,k -modeCm,n -extentm=12288,n=12288,k=2368 -fastVerify  -beta0

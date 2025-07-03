@@ -1,0 +1,62 @@
+!!FP1.0
+# Doom3 main shader from EriK's e-mail:
+
+# /**********************************************************************
+# * Doom3                                                erikl: Oct. 2003
+# *
+# *   texture 0 is the lwbe map
+# *   texture 1 is the per-surface bump map
+# *   texture 2 is the light falloff texture
+# *   texture 3 is the light projection texture
+# *   texture 4 is the per-surface diffuse map
+# *   texture 5 is the per-surface spelwlar map
+# *   texture 6 is the spelwlar lookup table
+# * 
+# *   elw[0] is the diffuse modifier
+# *   elw[1] is the spelwlar modifier
+# **********************************************************************/
+
+# R10 = spelwlar
+# R11 = light
+# R12 = localNormal
+# R13 = color
+# R14 = RA
+# R15 = RB
+# R16 = RC
+
+DECLARE program$elw$0;
+DECLARE program$elw$1;
+
+DP3    R10, f[TEX6],f[TEX6];
+RSQ    R10, R10.x;
+MUL    R10, R10.x, f[TEX6];
+
+DP3    R11, f[TEX0],f[TEX0];
+RSQ    R11, R11.x;
+MUL    R11, R11.x, f[TEX0];
+
+TEX    R12, f[TEX1], TEX1, 2D;
+DP3    R11, R11, R12;
+DP3    R10, R10, R12;
+
+TXP    R13, f[TEX3], TEX3, 2D;
+MUL    R11, R11, R13;
+
+TXP    R15, f[TEX2], TEX2, 2D;
+MUL    R11, R11, R15;
+
+TEX    R16, f[TEX4], TEX4, 2D;
+MUL    R13, R16, program$elw$0;
+
+TEX    R1, R10, TEX6, 2D;
+MUL    R1, R1, program$elw$1;
+
+TEX    R2, f[TEX5], TEX5, 2D;
+ADD    R2, R2, R2;
+
+MAD    R13, R1, R2, R13;
+MUL    R13, R11, R13;
+MUL    o[COLR], R13, f[COL0];
+
+END
+

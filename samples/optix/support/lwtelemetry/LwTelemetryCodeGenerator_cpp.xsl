@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:output method="xml" encoding="UTF-8" omit-xml-declaration="yes"/>
+  <xsl:param name="GeneratedHeaderName" select="'LwTelemetryEvents.h'" />
+
+  <xsl:template match="/eventDefinition">
+//
+// Copyright (c) 2017, LWPU CORPORATION.  All rights reserved.
+//
+// LWPU CORPORATION and its licensors retain all intellectual property
+// and proprietary rights in and to this software, related documentation
+// and any modifications thereto.  Any use, reproduction, disclosure or
+// distribution of this software and related documentation without an express
+// license agreement from LWPU CORPORATION is strictly prohibited.
+//
+
+#include "<xsl:value-of select="$GeneratedHeaderName"/>"
+#include <xsl:text disable-output-escaping="yes">&lt;</xsl:text>rapidjson/document.h<xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+#include <xsl:text disable-output-escaping="yes">&lt;</xsl:text>rapidjson/stringbuffer.h<xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+#include <xsl:text disable-output-escaping="yes">&lt;</xsl:text>rapidjson/writer.h<xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+#include <xsl:text disable-output-escaping="yes">&lt;</xsl:text>memory<xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+#pragma warning(push, 0)
+#include <xsl:text disable-output-escaping="yes">&lt;</xsl:text>shlobj.h<xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+#pragma warning(pop)
+#include <xsl:text disable-output-escaping="yes">&lt;</xsl:text>unordered_set<xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+#include <xsl:text disable-output-escaping="yes">&lt;</xsl:text>unordered_map<xsl:text disable-output-escaping="yes">&gt;</xsl:text>
+
+namespace LwTelemetry
+{
+  namespace <xsl:value-of select="@clientName"/>
+  {
+    static std::wstring GetShellDirectory(int csidl)
+    {
+      wchar_t buf[MAX_PATH + 1] = { 0 };
+
+      HRESULT hr = SHGetFolderPathW(
+        NULL,
+        csidl,
+        NULL,
+        SHGFP_TYPE_LWRRENT,
+        buf);
+
+      if (FAILED(hr))
+      {
+        throw std::runtime_error("GetShellDirectory failed");
+      }
+
+      return buf;
+    }
+
+    std::wstring dllPath()
+    {
+      std::wstring bitness;
+#if _WIN64
+      bitness = L"64";
+#else
+      bitness = L"32";
+#endif
+
+      std::wstring res = GetShellDirectory(CSIDL_PROGRAM_FILES);
+      res += L"\\LWPU Corporation\\LwTelemetry\\LwTelemetryAPI";
+      res += bitness;
+      res += L".dll";
+      return res;
+    }
+
+    const std::string gs_clientId = "<xsl:value-of select="@clientID"/>";
+    const std::string gs_eventSchemaVer = "<xsl:value-of select="@thisFileVersion"/>";
+    <xsl:apply-templates select="types"/>
+    static auto gs_freeDll = [](HMODULE h) { if (h) { FreeLibrary(h); }};
+    static std::unique_ptr<xsl:text disable-output-escaping="yes">&lt;</xsl:text>std::remove_pointer<xsl:text disable-output-escaping="yes">&lt;</xsl:text>HMODULE<xsl:text disable-output-escaping="yes">&gt;</xsl:text>::type, decltype(gs_freeDll)<xsl:text disable-output-escaping="yes">&gt;</xsl:text> gs_dll(nullptr, gs_freeDll);
+    static HRESULT(*pSend)(const char*);
+    static HRESULT(*pInit)();
+    static HRESULT(*pDeInit)();
+
+    HRESULT Init()
+    {
+      if (!gs_dll || !pInit)
+      {
+        gs_dll.reset(LoadLibraryW(dllPath().c_str()));
+        if (!gs_dll)
+        {
+          return E_FAIL;
+        }
+
+        pInit = reinterpret_cast<xsl:text disable-output-escaping="yes">&lt;</xsl:text>decltype(pInit)<xsl:text disable-output-escaping="yes">&gt;</xsl:text>(GetProcAddress(gs_dll.get(), "Init"));
+        if (!pInit)
+        {
+          //probably old API version without Init
+          return S_OK;
+        }
+      }
+
+      return pInit();
+    }
+    
+    HRESULT DeInit()
+    {
+      if (!gs_dll || !pDeInit)
+      {
+        gs_dll.reset(LoadLibraryW(dllPath().c_str()));
+        if (!gs_dll)
+        {
+          return S_OK;
+        }
+
+        pDeInit = reinterpret_cast<xsl:text disable-output-escaping="yes">&lt;</xsl:text>decltype(pDeInit)<xsl:text disable-output-escaping="yes">&gt;</xsl:text>(GetProcAddress(gs_dll.get(), "DeInit"));
+        if (!pDeInit)
+        {
+          // DeInit is optional and not supported before 1.2.0.0
+          return S_OK;
+        }
+      }
+
+      return pDeInit();
+    }
+    
+    // Throwing version of rapidjson::CrtAllocator
+    class ThrowingCrtAllocator
+    {
+    public:
+      static const bool kNeedFree = true;
+      void* Malloc(size_t size)
+      {
+        auto ptr = m_allocator.Malloc(size);
+        if(!ptr)
+        {
+          throw std::bad_alloc();
+        }
+        return ptr;
+      }
+
+      void* Realloc(void* originalPtr, size_t originalSize, size_t newSize)
+      {
+        auto ptr = m_allocator.Realloc(originalPtr, originalSize, newSize);
+        if(!ptr)
+        {
+          throw std::bad_alloc();
+        }
+        return ptr;
+      }
+
+      static void Free(void *ptr)
+      {
+        m_allocator.Free(ptr);
+      }
+
+    private:
+      // CrtAllocator is stateless and thread-safe
+      static rapidjson::CrtAllocator m_allocator;
+    };
+
+    rapidjson::CrtAllocator ThrowingCrtAllocator::m_allocator;
+
+    using RapidjsonDolwment = rapidjson::GenericDolwment<xsl:text disable-output-escaping="yes">&lt;</xsl:text>
+      rapidjson::UTF8<xsl:text disable-output-escaping="yes">&lt;</xsl:text><xsl:text disable-output-escaping="yes">&gt;</xsl:text>,
+      rapidjson::MemoryPoolAllocator<xsl:text disable-output-escaping="yes">&lt;</xsl:text>ThrowingCrtAllocator<xsl:text disable-output-escaping="yes">&gt;</xsl:text>,
+      ThrowingCrtAllocator<xsl:text disable-output-escaping="yes">&gt;</xsl:text>;
+
+    using Rapidjsolwalue = rapidjson::GenericValue<xsl:text disable-output-escaping="yes">&lt;</xsl:text>rapidjson::UTF8<xsl:text disable-output-escaping="yes">&lt;</xsl:text><xsl:text disable-output-escaping="yes">&gt;</xsl:text>, rapidjson::MemoryPoolAllocator<xsl:text disable-output-escaping="yes">&lt;</xsl:text>ThrowingCrtAllocator<xsl:text disable-output-escaping="yes">&gt;</xsl:text><xsl:text disable-output-escaping="yes">&gt;</xsl:text>;
+
+    <xsl:apply-templates select="events"/>
+  }
+}
+</xsl:template>
+
+<xsl:template match="types">
+  <xsl:apply-templates select="type" mode="Bound"/>
+  <xsl:apply-templates select="type" mode="EnumColwersion"/>
+</xsl:template>
+
+<xsl:template match="type" mode="Bound">
+  <xsl:if test="@name='Click_TarconID' or @name='Presentation_TarconID'">
+#pragma warning(push)
+#pragma warning(disable:4592) // symbol will be dynamically initialized (implementation limitation)
+    const std::unordered_set<xsl:text disable-output-escaping="yes">&lt;</xsl:text>std::string<xsl:text disable-output-escaping="yes">&gt;</xsl:text> valid_<xsl:value-of select="@name"/>_values =
+    {
+    <xsl:for-each select="enum">  "<xsl:value-of select="@name"/>"<xsl:if test="position()!=last()">,
+    </xsl:if>
+    </xsl:for-each>
+    };
+#pragma warning(pop)
+  </xsl:if>
+</xsl:template>
+
+<xsl:template match="type" mode="EnumColwersion">
+  <xsl:if test="enum and @name!='Click_TarconID' and @name!='Presentation_TarconID'">
+    const std::string<xsl:text disable-output-escaping="yes">&amp; </xsl:text> <xsl:value-of select="@name"/>ToString(<xsl:value-of select="@name"/> value)
+    {
+      static std::unordered_map<xsl:text disable-output-escaping="yes">&lt;</xsl:text><xsl:value-of select="@name"/>, std::string<xsl:text disable-output-escaping="yes">&gt;</xsl:text> map =
+      {
+        <xsl:for-each select="enum">{ <xsl:value-of select="../@name"/>::<xsl:value-of select="@name"/>, "<xsl:value-of select="@name"/>" }<xsl:if test="position()!=last()">,
+        </xsl:if>
+        </xsl:for-each>
+      };
+
+      return map[value];
+    }
+  </xsl:if>
+</xsl:template>
+
+<xsl:template match="events">
+  <xsl:apply-templates select="event"/>
+</xsl:template>
+
+<xsl:template match="event">
+    HRESULT Send_<xsl:value-of select="@name"/>_Event(
+      <xsl:for-each select="parameters/key"><xsl:value-of select="@type"/><xsl:text> </xsl:text><xsl:value-of select="@name"/>,
+      </xsl:for-each>const std::string<xsl:text disable-output-escaping="yes">&amp;</xsl:text> clientVer,
+      const std::string<xsl:text disable-output-escaping="yes">&amp;</xsl:text> userId
+    )
+    {
+      try
+      {<xsl:apply-templates select="parameters" mode="InputCheck"/>
+        if (!gs_dll || !pSend)
+        {
+          gs_dll.reset(LoadLibraryW(dllPath().c_str()));
+          if (!gs_dll)
+          {
+            throw std::runtime_error("Failed to load LwTelemetry API DLL");
+          }
+
+          pSend = reinterpret_cast<xsl:text disable-output-escaping="yes">&lt;</xsl:text>decltype(pSend)<xsl:text disable-output-escaping="yes">&gt;</xsl:text>(GetProcAddress(gs_dll.get(), "LwTelemetrySendEvent"));
+          if (!pSend)
+          {
+            throw std::runtime_error("Could not find method LwTelemetrySendEvent in LwTelemetry API DLL");
+          }
+        }
+
+        RapidjsonDolwment d;
+        d.SetObject();
+        auto<xsl:text disable-output-escaping="yes">&amp;</xsl:text> a = d.GetAllocator();
+
+        d.AddMember("clientId", gs_clientId, a);
+        d.AddMember("clientVer", clientVer, a);
+        d.AddMember("userId", userId, a);
+        d.AddMember("eventSchemaVer", gs_eventSchemaVer, a);
+        d.AddMember("event", Rapidjsolwalue(rapidjson::kObjectType), a);
+        d["event"].AddMember("name", "<xsl:value-of select="@name"/>", a);
+        d["event"].AddMember("parameters", Rapidjsolwalue(rapidjson::kObjectType), a);
+        <xsl:for-each select="parameters/key">
+        d["event"]["parameters"].AddMember("<xsl:value-of select="@name"/>", <xsl:choose>
+            <xsl:when test="/eventDefinition/types/type[@name=current()/@type]/enum and @type!='Click_TarconID' and @type!='Presentation_TarconID'">
+                <xsl:value-of select="@type"/>ToString(<xsl:value-of select="@name"/>), a);
+            </xsl:when>
+            <xsl:when test="/eventDefinition/types/type[@name=current()/@type]/@nativeType='string16'">
+              <xsl:value-of select="@name"/>.substr(0, 16), a);
+            </xsl:when>
+            <xsl:when test="/eventDefinition/types/type[@name=current()/@type]/@nativeType='string32'">
+              <xsl:value-of select="@name"/>.substr(0, 32), a);
+            </xsl:when>
+            <xsl:when test="/eventDefinition/types/type[@name=current()/@type]/@nativeType='string64'">
+              <xsl:value-of select="@name"/>.substr(0, 64), a);
+            </xsl:when>
+            <xsl:when test="/eventDefinition/types/type[@name=current()/@type]/@nativeType='string128'">
+              <xsl:value-of select="@name"/>.substr(0, 128), a);
+            </xsl:when>
+            <xsl:otherwise>
+              <xsl:value-of select="@name"/>, a);
+            </xsl:otherwise>
+        </xsl:choose>
+        </xsl:for-each>
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<xsl:text disable-output-escaping="yes">&lt;</xsl:text>rapidjson::StringBuffer<xsl:text disable-output-escaping="yes">&gt;</xsl:text> writer(buffer);
+        d.Accept(writer);
+
+        return pSend(buffer.GetString());
+      }
+      catch(const std::bad_alloc<xsl:text disable-output-escaping="yes">&amp;</xsl:text>)
+      {
+        return E_OUTOFMEMORY;
+      }
+      catch(const std::ilwalid_argument<xsl:text disable-output-escaping="yes">&amp;</xsl:text>)
+      {
+        return E_ILWALIDARG;
+      }
+      catch(const std::exception<xsl:text disable-output-escaping="yes">&amp;</xsl:text>)
+      {
+        return E_FAIL;
+      }
+    }
+</xsl:template>
+
+<xsl:template match="parameters" mode="InputCheck">
+  <xsl:for-each select="key">
+    <xsl:if test="@type='Click_TarconID' or @type='Presentation_TarconID'">
+      if (valid_<xsl:value-of select="@type"/>_values.find(id) == valid_<xsl:value-of select="@type"/>_values.end())
+      {
+        return E_ILWALIDARG;
+      }
+    </xsl:if>
+  </xsl:for-each>
+</xsl:template>
+</xsl:stylesheet>

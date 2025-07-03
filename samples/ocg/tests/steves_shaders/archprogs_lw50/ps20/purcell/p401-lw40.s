@@ -1,0 +1,31 @@
+ps_2_0
+def c6, 0.333333, 0.000000, 0.000000, 0.000000
+dcl_pp t0.rg
+dcl t3.rgb
+dcl t6.rgb
+dcl v0.rgb
+dcl_2d s0
+dcl_lwbe s1
+dp3 r0.r, t6, t6
+rcp r0.a, r0.r
+mov r0.rgb, t6
+dp3 r1.r, r0, t3
+mul r0.a, r0.a, r1.r
+add r0.a, r0.a, r0.a
+mad r0.rgb, r0.a, r0, -t3
+texld_pp r1, r0, s1
+texld_pp r0, t0, s0
+mul_pp r2.rgb, v0, c1
+mul_pp r3.rgb, r1, c0
+mul_pp r1.rgb, r0, r2
+mad_pp r2.rgb, r3, r3, -r3
+mul_pp r1.rgb, r1, c4
+mad_pp r3.rgb, c2, r2, r3
+add_pp r2.rgb, r1, r1
+dp3_pp r4.r, r3, c6.r
+mad_pp r0.rgb, c5, r0, -r2
+lrp_pp r1.rgb, c3, r3, r4.r
+mad_pp r0.rgb, r0.a, r0, r2
+add_pp r0.rgb, r1, r0
+mov_pp r0.a, c1.a
+mov_pp oC0, r0

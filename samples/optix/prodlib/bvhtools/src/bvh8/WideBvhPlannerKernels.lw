@@ -1,0 +1,703 @@
+// Copyright LWPU Corporation 2015
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "WideBvhPlannerKernels.hpp"
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+// Which lanes might be holding a child node of a given lane in chooseWideNodeShape()?
+
+static __device__ unsigned int s_childMasks[] =
+{
+    0x00000002u, 0x0000000Lw, 0x00000050u, 0x000000A0u, 0x00001100u, 0x00002200u, 0x00004400u, 0x00008800u,
+    0x01010000u, 0x02020000u, 0x04040000u, 0x08080000u, 0x10100000u, 0x20200000u, 0x40400000u, 0x80800000u,
+    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
+    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u,
+};
+
+static INLINE unsigned int getChildMask(int lane)
+{
+/*
+    unsigned int mask = 0;
+    if (lane < (1 << (PLANNER_EXEC_MAX_DEPTH - 1)))
+    {
+        int bit = 1 << findLeadingOne(lane);
+        mask = 1u << (lane + bit);
+        mask += mask << bit;
+    }
+    return mask;
+/**/
+    return s_childMasks[lane];
+}
+
+//------------------------------------------------------------------------
+
+static INLINE void chooseWideNodeShape(/*in/out*/ PlannerBinaryNode& root, /*out*/ int& totalWideNodes, PlannerExecParams p)
+{
+    INIT_SHUFFLE_EMULATION(PLANNER_EXEC_WARPS_PER_BLOCK)
+
+    // Use each lane to hold one potential binary node to be subsumed by the wide node.
+    // Lane 1 holds the root, lanes 2 & 3 hold the children of the root.
+
+    int nodeIdx = -1;
+    PlannerBinaryNode node = root;
+
+    int trail = threadIdx.x;
+    int internalNodeTag = -1; // not known yet, filled in during the first iteration
+
+    if (trail > 1) do
+    {
+        // Descend nodes according to the bit-trail.
+
+        nodeIdx = node.childPairIdx + (trail & 1);
+        node = loadUncachedAlign16(&p.ioBinaryNodes[nodeIdx]);
+        trail >>= 1;
+
+        // First iteration => determine internalNodeTag.
+
+        if (internalNodeTag == -1)
+        {
+            internalNodeTag = node.afterPlan.subtreePrims & INT_MAX;
+            if (internalNodeTag <= p.maxBranchingFactor)
+                internalNodeTag = 0; // extend all the way
+            node.afterPlan.ownerSubtreePrims = INT_MAX; // force the loop to continue, overwrites primitiveCost
+        }
+    }
+    while (trail > 1 && node.childPairIdx >= 0 && node.afterPlan.ownerSubtreePrims >= internalNodeTag);
+
+    // Could the binary node be a valid internal node of this wide node?
+
+    bool validTrail = (threadIdx.x >= 1 && threadIdx.x < (1 << PLANNER_EXEC_MAX_DEPTH));
+    bool validOwner = (threadIdx.x < 4 || node.afterPlan.ownerSubtreePrims >= internalNodeTag);
+    bool notLeaf    = (node.childPairIdx >= 0);
+    bool active     = (validTrail && validOwner && notLeaf);
+
+    // How much would it change the total wide node count and subtree cost if we got rid of this internal node?
+
+    int deltaWideNodes = 0;
+    float deltaCost = 0.0f;
+
+    if (active)
+    {
+        PlannerBinaryNode c0 = loadUncachedAlign16(&p.ioBinaryNodes[node.childPairIdx + 0]);
+        PlannerBinaryNode c1 = loadUncachedAlign16(&p.ioBinaryNodes[node.childPairIdx + 1]);
+
+        if (nodeIdx != -1)
+        {
+            deltaWideNodes = loadUncachedAlign4(&p.tempA[node.childPairIdx >> 1].subtreeWideNodes);
+            deltaCost = node.afterPlan.subtreeCost;
+        }
+
+        if (c0.childPairIdx >= 0) deltaWideNodes -= loadUncachedAlign4(&p.tempA[c0.childPairIdx >> 1].subtreeWideNodes);
+        if (c1.childPairIdx >= 0) deltaWideNodes -= loadUncachedAlign4(&p.tempA[c1.childPairIdx >> 1].subtreeWideNodes);
+        deltaCost -= c0.afterPlan.subtreeCost;
+        deltaCost -= c1.afterPlan.subtreeCost;
+    }
+
+    // Remove internal nodes until the branching factor is low enough.
+
+    int removalsLeft = __popc(__ballot(active)) - (p.maxBranchingFactor - 1);
+    unsigned int childMask = getChildMask(threadIdx.x);
+
+    if (removalsLeft > 0) do
+    {
+        // Can remove if neither child is an internal node.
+
+        bool canRemove = ((__ballot(active) & childMask) == 0 && active);
+
+        // Choose the internal node that yields the lowest increase in SAH cost.
+        // Note: Reinterpreting the floats as unsigned integers ensures that
+        // the comparison stays robust even if the input contains NaNs/Infs.
+
+        unsigned int deltaCostU32 = __float_as_int(fmaxf(deltaCost, 0.0f));
+        unsigned int bestDeltaCostU32 = (canRemove) ? deltaCostU32 : ~0u;
+        for (int i = 0; i < PLANNER_EXEC_MAX_DEPTH; i++)
+            bestDeltaCostU32 = min(bestDeltaCostU32, shfl_xor(bestDeltaCostU32, 1 << i));
+
+        // Remove one internal node with the chosen contribution.
+
+        int removeLane = findLeadingOne(__ballot(canRemove && deltaCostU32 == bestDeltaCostU32));
+        active = (active && threadIdx.x != removeLane);
+    }
+    while (--removalsLeft > 0);
+
+    // Callwlate final wide node count and SAH cost.
+
+    totalWideNodes = (active) ? -deltaWideNodes : 0;
+    root.afterPlan.subtreeCost = (active) ? -deltaCost : 0.0f; // overwrites halfArea
+
+    for (int i = 0; i < PLANNER_EXEC_MAX_DEPTH; i++)
+    {
+        totalWideNodes += shfl_xor(totalWideNodes, 1 << i);
+        root.afterPlan.subtreeCost += shfl_xor(root.afterPlan.subtreeCost, 1 << i);
+    }
+    totalWideNodes++; // the current wide node itself
+
+    // Tag the final internal nodes.
+
+    if (threadIdx.x == 2 || threadIdx.x == 3 || (active && threadIdx.x != 1))
+    {
+        int ownerSubtreePrims = root.afterPlan.subtreePrims & INT_MAX;
+        if (!active)
+            ownerSubtreePrims = 0; // immediate child => not owned by anyone yet
+        storeUncachedAlign4(&p.ioBinaryNodes[nodeIdx].afterPlan.ownerSubtreePrims, ownerSubtreePrims); // overwrites primitiveCost
+    }
+}
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(PLANNER_EXEC_WARPS_PER_BLOCK * 32, PLANNER_EXEC_BLOCKS_PER_SM)
+void PlannerExec(PlannerExecParams p)
+{
+    INIT_SHUFFLE_EMULATION(PLANNER_EXEC_WARPS_PER_BLOCK)
+
+    int nodeIdx;                            // Index of the node lwrrently being processed, or one of the following:
+    const int BVH_ROOT          = INT_MAX;  // Root node of the BVH (not explicitly stored).
+    const int LOOKING_FOR_WORK  = -1;       // Finished, wants to grab a new node to process.
+    const int OUT_OF_WORK       = -2;       // Finished, wants to terminate.
+
+    // Callwlate normalized model AABB area.
+
+    AABB modelAABB = p.inApexPointMap->getAABB();
+    float sizeMaxRcp = modelAABB.getSizeMaxRcp();
+    float modelHalfArea = modelAABB.getHalfArea() * (sizeMaxRcp * sizeMaxRcp);
+
+    // Parallel bottom-up traversal of binary nodes using persistent warps.
+
+    nodeIdx = (threadIdx.x < PLANNER_EXEC_SIMD_MAX_LANES) ? LOOKING_FOR_WORK : OUT_OF_WORK;
+    do
+    {
+        // Enough lanes are inactive => fetch more work.
+
+        bool skipIfNotLeaf = false;
+        if (__popc(__ballot(nodeIdx >= 0)) < PLANNER_EXEC_SIMD_MIN_LANES && nodeIdx == LOOKING_FOR_WORK)
+        {
+            // Pick a node in the binary tree.
+
+            unsigned int workMask = __ballot(true);
+            int workSum = __popc(workMask & getLaneMaskGt());
+
+            if (workSum == 0)
+                nodeIdx = atomicAdd(p.workCounter, __popc(workMask));
+            nodeIdx = shfl(nodeIdx, findLeadingOne(workMask)) + workSum;
+
+            // Out of bounds => no more work.
+            // 2 primitives or less => nodes 0 and 1 are always valid leaves.
+            // Otherwise => skip the node if it's not a valid leaf.
+
+            int numPrims = p.inPrimRange->span();
+            int numNodes = (numPrims <= 2) ? 2 : numPrims * 2;
+            skipIfNotLeaf = (numPrims > 2);
+            if (nodeIdx >= numNodes)
+                nodeIdx = OUT_OF_WORK;
+        }
+
+        // Fetch node.
+
+        PlannerBinaryNode node  = {};
+        if (nodeIdx >= 0 && nodeIdx != BVH_ROOT)
+        {
+            node = loadCachedAlign16(&p.ioBinaryNodes[nodeIdx]);
+            if (skipIfNotLeaf)
+                if (node.childPairIdx >= 0 || node.childPairIdx == INT_MIN)
+                    nodeIdx = LOOKING_FOR_WORK;
+        }
+
+        // Callwlate aggregates.
+
+        int parentIdx = (node.beforePlan.parentIdx != -1) ? node.beforePlan.parentIdx : BVH_ROOT;
+        float halfArea = (nodeIdx != BVH_ROOT) ? node.beforePlan.halfArea : modelHalfArea;
+
+        if (node.childPairIdx < 0)
+        {
+            node.afterPlan.subtreePrims = 1; // overwrites parentIdx
+            node.beforePlan.primitiveCost = halfArea * p.sahPrimCost;
+        }
+        else if (nodeIdx >= 0)
+        {
+            node.afterPlan.subtreePrims = 0; // overwrites parentIdx
+            node.beforePlan.primitiveCost = 0.0f;
+            int squeezeTag = 0;
+
+            for (int c = 0; c < 2; c++)
+            {
+                PlannerBinaryNode child = loadUncachedAlign16(&p.ioBinaryNodes[node.childPairIdx + c]);
+                node.afterPlan.subtreePrims += child.afterPlan.subtreePrims & INT_MAX;
+                node.beforePlan.primitiveCost += child.beforePlan.primitiveCost;
+                int childTag = (child.childPairIdx < 0) ? 1 : loadUncachedAlign4(&p.tempA[child.childPairIdx >> 1].squeezeTag);
+                squeezeTag += (childTag == -1) ? p.maxLeafSize : childTag;
+            }
+
+            // Squeezed wide node has become large enough => mark as complete.
+
+            if (squeezeTag * 2 >= p.maxBranchingFactor * p.maxLeafSize + 2)
+                squeezeTag = -1;
+            storeUncachedAlign4(&p.tempA[node.childPairIdx >> 1].squeezeTag, squeezeTag);
+        }
+
+        // Large subtree => process collaboratively by the entire warp.
+
+        int totalWideNodes = 0;
+        int isLarge = (node.afterPlan.subtreePrims > p.maxBranchingFactor);
+        unsigned int largeMask = __ballot(nodeIdx >= 0 && isLarge);
+
+        if (largeMask != 0) do
+        {
+            int srcLane = findLeadingOne(largeMask);
+            largeMask ^= 1u << srcLane;
+
+            PlannerBinaryNode tmpNode = shfl(node, srcLane);
+            int tmpTotalWideNodes;
+            chooseWideNodeShape(tmpNode, tmpTotalWideNodes, p);
+
+            if (threadIdx.x == srcLane)
+            {
+                node = tmpNode;
+                totalWideNodes = tmpTotalWideNodes;
+            }
+        }
+        while (largeMask != 0);
+
+        // Small subtree => must become a single wide node whose children contain one primitive each.
+
+        if (nodeIdx >= 0 && !isLarge)
+        {
+            node.afterPlan.subtreeCost = node.beforePlan.primitiveCost; // overwrites halfArea
+            totalWideNodes = 1;
+            if (node.childPairIdx >= 0)
+                for (int c = 0; c < 2; c++)
+                    storeUncachedAlign4(&p.ioBinaryNodes[node.childPairIdx + c].afterPlan.ownerSubtreePrims, 0); // not owned by anyone yet, overwrites primitiveCost
+        }
+
+        // Finalize the node.
+
+        if (nodeIdx >= 0)
+        {
+            // Callwlate SAH cost assuming that we create a wide node.
+
+            node.afterPlan.subtreeCost += halfArea * p.sahNodeCost;
+
+            // Node is large enough => decide whether to create one root at the node itself, or multiple roots at its ancestors.
+
+            if (nodeIdx == BVH_ROOT || (p.outSubtreeRoots && halfArea >= modelHalfArea * p.minAreaPerRoot && node.childPairIdx >= 0))
+            {
+                // One root?
+
+                float subtreeCost = node.afterPlan.subtreeCost + halfArea * p.sahRootCost;
+                int subtreeRoots = 1;
+                int totalWideNodesRoots = totalWideNodes;
+
+                // Multiple roots?
+
+                if (p.outSubtreeRoots)
+                {
+                    int2 n = loadUncachedAlign8((const int2*)&p.outSubtreeRoots[node.childPairIdx]);
+                    if (n.x && n.y)
+                    {
+                        int childPairA = loadUncachedAlign4(&p.ioBinaryNodes[node.childPairIdx + 0].childPairIdx);
+                        int childPairB = loadUncachedAlign4(&p.ioBinaryNodes[node.childPairIdx + 1].childPairIdx);
+                        PlannerTempB t0 = loadUncachedAlign8(&p.tempB[childPairA >> 1]);
+                        PlannerTempB t1 = loadUncachedAlign8(&p.tempB[childPairB >> 1]);
+
+                        float costSplit = t0.subtreeCostRoots + t1.subtreeCostRoots + halfArea * p.sahTopLevelCost;
+                        if (costSplit < subtreeCost)
+                        {
+                            subtreeCost = costSplit;
+                            subtreeRoots = n.x + n.y;
+                            totalWideNodesRoots = t0.subtreeWideNodesRoots + t1.subtreeWideNodesRoots;
+                        }
+                    }
+                }
+
+                // Store results.
+
+                if (nodeIdx == BVH_ROOT)
+                {
+                    *p.outNumWideNodes = totalWideNodesRoots;
+                    if (p.outNumRoots)
+                        *p.outNumRoots = subtreeRoots;
+                }
+                else
+                {
+                    PlannerTempB t;
+                    t.subtreeCostRoots = subtreeCost;
+                    t.subtreeWideNodesRoots = totalWideNodesRoots;
+                    storeUncachedAlign8(&p.tempB[node.childPairIdx >> 1], t);
+                    if (p.outSubtreeRoots)
+                        storeUncachedAlign4(&p.outSubtreeRoots[nodeIdx], subtreeRoots);
+                }
+            }
+
+            // Decide whether to collapse the subtree into a leaf node, and store results.
+
+            if (nodeIdx != BVH_ROOT)
+            {
+                float leafCost = halfArea * (float)node.afterPlan.subtreePrims * p.sahPrimCost;
+                if (node.childPairIdx < 0 || (node.afterPlan.subtreePrims <= p.maxLeafSize && leafCost <= node.afterPlan.subtreeCost))
+                {
+                    node.afterPlan.subtreePrims |= 1 << 31;
+                    node.afterPlan.subtreeCost = leafCost;
+                    totalWideNodes = 0;
+                }
+
+                storeUncachedAlign16(&p.ioBinaryNodes[nodeIdx], node);
+                if (node.childPairIdx >= 0)
+                    storeUncachedAlign4(&p.tempA[node.childPairIdx >> 1].subtreeWideNodes, totalWideNodes);
+            }
+
+            // Make sure the store is visible before the atomic is incremented
+
+            __threadfence();
+
+            // Advance to the parent node by one thread.
+
+            int* visitCount = (nodeIdx != BVH_ROOT) ? &p.tempA[nodeIdx >> 1].visitCount : NULL;
+            nodeIdx = (visitCount && atomicAdd(visitCount, 1) != 0) ? parentIdx : LOOKING_FOR_WORK;
+        }
+    }
+    while (__any(nodeIdx != OUT_OF_WORK));
+}
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(PLANNER_SQUEEZE_WARPS_PER_BLOCK * 32, PLANNER_SQUEEZE_BLOCKS_PER_SM)
+void PlannerSqueeze(PlannerSqueezeParams p)
+{
+    INIT_SHUFFLE_EMULATION(PLANNER_SQUEEZE_WARPS_PER_BLOCK)
+
+    // Allocate shared memory arrays for storing wide node contents.
+
+    __shared__ volatile int s_inners            [PLANNER_SQUEEZE_WARPS_PER_BLOCK][PLANNER_SQUEEZE_MAX_BFACTOR * PLANNER_SQUEEZE_MAX_LEAF_SIZE - 1];
+    __shared__ volatile int s_prims             [PLANNER_SQUEEZE_WARPS_PER_BLOCK][PLANNER_SQUEEZE_MAX_BFACTOR * PLANNER_SQUEEZE_MAX_LEAF_SIZE];
+    __shared__ volatile int s_childPairIdx      [PLANNER_SQUEEZE_WARPS_PER_BLOCK][PLANNER_SQUEEZE_MAX_BFACTOR];
+    __shared__ volatile int s_childSubtreePrims [PLANNER_SQUEEZE_WARPS_PER_BLOCK][PLANNER_SQUEEZE_MAX_BFACTOR];
+
+    volatile int* inners            = s_inners[threadIdx.y];            // nodePairIdx
+    volatile int* prims             = s_prims[threadIdx.y];             // ~primitiveIdx
+    volatile int* childPairIdx      = s_childPairIdx[threadIdx.y];      // nodePairIdx or ~primitiveIdx
+    volatile int* childSubtreePrims = s_childSubtreePrims[threadIdx.y]; // Same semantics as PlannerBinaryNode.afterPlan.subtreePrims.
+
+    int stackEnd = (int)(sizeof(s_inners[0]) / sizeof(s_inners[0][0]));
+    int lane = threadIdx.x;
+
+    // Persistent threads.
+
+    for (;;)
+    {
+        // Grab a task by the first lane.
+
+        PlannerSqueezeTask task = {};
+        if (lane == 0)
+        {
+            int taskIdx = atomicAdd(p.workCounter, 1);
+            task.subtreeRootPair = -1;
+
+            // First task => setup now.
+
+            if (taskIdx == 0)
+            {
+                bool needToSqueeze = (*p.ioNumWideNodes > p.maxWideNodes);
+                storeUncachedAlign4(p.primCounter, (needToSqueeze) ? p.inPrimRange->span() : 0);
+                storeUncachedAlign4(p.taskCounter, (needToSqueeze) ? 1 : 0);
+
+                if (needToSqueeze)
+                {
+                    task.subtreeRootPair = 0;
+                    task.wideNodeBudget = p.maxWideNodes;
+
+                    storeUncachedAlign4(p.ioNumWideNodes, 0); // start counting from scratch
+                    if (p.ioNumRoots)
+                        storeUncachedAlign4(p.ioNumRoots, 1); // do not generate multiple roots when squeezing
+                }
+            }
+
+            // Subsequent tasks => wait for another warp to setup.
+
+            else if (taskIdx < p.maxWideNodes)
+            {
+                while (*(volatile int*)p.primCounter != 0 && *(volatile int*)&p.squeezeTasks[taskIdx].subtreeRootPair == -1)
+                    __threadfence_system(); // spin
+                task = loadUncachedAlign8(&p.squeezeTasks[taskIdx]);
+            }
+        }
+
+        // Broadcast the task to all lanes.
+
+        task = shfl(task, 0);
+        if (task.subtreeRootPair == -1)
+            break; // no more tasks
+
+        // Callwlate total size of the subtree.
+
+        int totalSubtreePrims = loadCachedAlign4(&p.ioBinaryNodes[task.subtreeRootPair + 0].afterPlan.subtreePrims);
+        totalSubtreePrims += loadCachedAlign4(&p.ioBinaryNodes[task.subtreeRootPair + 1].afterPlan.subtreePrims);
+        totalSubtreePrims &= INT_MAX;
+
+        // Fits trivially within one wide node => nothing to do.
+
+        if (totalSubtreePrims <= p.maxBranchingFactor)
+        {
+            if (lane == 0)
+            {
+                atomicAdd(p.ioNumWideNodes, 1);
+                atomicAdd(p.primCounter, -totalSubtreePrims);
+            }
+            continue;
+        }
+
+        // The current wide node is initially empty.
+
+        int stackPtr    = stackEnd;
+        int numInners   = 0;
+        int numPrims    = 0;
+        int numChildren = 0;
+
+        // Traverse subtree to find the original planned children of the wide node.
+        // The logic here is the same as in XxxConstructor.
+        {
+            PlannerBinaryNode node = {};
+            node.childPairIdx = task.subtreeRootPair;
+            int trail = __brev(lane) >> (32 - PLANNER_EXEC_MAX_DEPTH);
+            do
+            {
+                node = loadCachedAlign16(&p.ioBinaryNodes[node.childPairIdx + (trail & 1)]);
+                trail >>= 1;
+            }
+            while (node.childPairIdx >= 0 && node.afterPlan.ownerSubtreePrims >= totalSubtreePrims);
+
+            bool isChild = (trail == 0 && node.afterPlan.subtreePrims >= 0);
+            unsigned int childMask = __ballot(isChild);
+            int childIdx = __popc(childMask & getLaneMaskLt());
+            if (isChild) childPairIdx[childIdx] = node.childPairIdx, childSubtreePrims[childIdx] = node.afterPlan.subtreePrims;
+            numChildren = __popc(childMask);
+        }
+
+        // Callwlate budget for the children.
+        // Results for a given child are stored on the lane with the same index.
+
+        int childBudgetOrig = (lane < numChildren) ? loadCachedAlign4(&p.inTempA[childPairIdx[lane] >> 1].subtreeWideNodes) : 0;
+        int childBudget = (lane < numChildren) ? min(childBudgetOrig, minWideNodesAfterSqueeze(childSubtreePrims[lane], p.maxBranchingFactor, p.maxLeafSize)) : 0;
+
+        // Total budget exceeded => need to squeeze the wide node.
+
+        int totalBudget = childBudget;
+        for (int i = 1; i < PLANNER_SQUEEZE_MAX_BFACTOR; i *= 2)
+            totalBudget += shfl_xor(totalBudget, i);
+        bool needToSqueeze = (shfl(totalBudget, 0) + 1 > task.wideNodeBudget);
+
+        if (needToSqueeze)
+        {
+            // Find new children and primitives for the wide node.
+
+            numChildren = 0;
+            inners[--stackPtr] = task.subtreeRootPair;
+
+            while (stackPtr < stackEnd)
+            {
+                // Pop one stack entry by each pair of lanes, and append as internal node.
+
+                int numEntries = min(stackEnd - stackPtr, 16);
+                int pairIdx = -1;
+                if (lane < numEntries * 2)
+                {
+                    int i = lane >> 1;
+                    pairIdx = inners[stackPtr + i];
+                    inners[numInners + i] = pairIdx;
+                }
+                stackPtr += numEntries;
+                numInners += numEntries;
+
+                // Fetch node and determine what to do with it.
+
+                PlannerBinaryNode node = {};
+                if (pairIdx != -1)
+                    node = loadCachedAlign16(&p.ioBinaryNodes[pairIdx + (lane & 1)]);
+
+                bool isPrim  = (pairIdx != -1 && node.childPairIdx < 0);
+                bool isChild = (pairIdx != -1 && !isPrim && loadCachedAlign4(&p.inTempA[node.childPairIdx >> 1].squeezeTag) == -1);
+                bool isInner = (pairIdx != -1 && !isPrim && !isChild);
+
+                // Collect results.
+
+                unsigned int primMask  = __ballot(isPrim);
+                unsigned int childMask = __ballot(isChild);
+                unsigned int innerMask = __ballot(isInner);
+
+                stackPtr -= __popc(innerMask);
+
+                int primIdx  = numPrims    + __popc(primMask  & getLaneMaskLt());
+                int childIdx = numChildren + __popc(childMask & getLaneMaskLt());
+                int innerIdx = stackPtr    + __popc(innerMask & getLaneMaskLt());
+
+                numPrims += __popc(primMask);
+                numChildren += __popc(childMask);
+
+                if (isPrim)  prims[primIdx] = node.childPairIdx;
+                if (isChild) childPairIdx[childIdx] = node.childPairIdx, childSubtreePrims[childIdx] = node.afterPlan.subtreePrims & INT_MAX;
+                if (isInner) inners[innerIdx] = node.childPairIdx;
+            }
+
+            // Recallwlate budget for the children.
+
+            childBudgetOrig = (lane < numChildren) ? loadCachedAlign4(&p.inTempA[childPairIdx[lane] >> 1].subtreeWideNodes) : 0;
+            childBudget = (lane < numChildren) ? min(childBudgetOrig, minWideNodesAfterSqueeze(childSubtreePrims[lane], p.maxBranchingFactor, p.maxLeafSize)) : 0;
+        }
+
+        // Distribute excess budget among the children, proportional to their preference.
+
+        totalBudget = childBudget;
+        for (int i = 1; i < PLANNER_SQUEEZE_MAX_BFACTOR; i *= 2)
+            totalBudget += shfl_xor(totalBudget, i);
+        int excessBudget = task.wideNodeBudget - totalBudget - 1;
+
+        if (excessBudget < 0)
+            childBudget = 0; // no budget left => maximal squeeze
+        else
+        {
+            int budgetSum = childBudgetOrig - childBudget;
+            for (int i = 1; i < PLANNER_SQUEEZE_MAX_BFACTOR; i *= 2)
+                budgetSum = shfl_up_add(budgetSum, i);
+            int totalBudgetSum = max(shfl(budgetSum, PLANNER_SQUEEZE_MAX_BFACTOR - 1), 1);
+
+            int tmpB = min((int)((float)excessBudget * (float)budgetSum / (float)totalBudgetSum + 0.5f), excessBudget);
+            int tmpA = shfl(tmpB, lane - 1);
+            childBudget += (lane) ? (tmpB - tmpA) : tmpB;
+        }
+
+        // Setup tasks for child subtrees that still require squeezing.
+
+        int childSubtreePrimsLane = (lane < numChildren) ? childSubtreePrims[lane] : 0;
+        bool setupTask = (lane < numChildren && childBudget < childBudgetOrig && childSubtreePrimsLane > p.maxBranchingFactor);
+
+        unsigned int taskMask = __ballot(setupTask);
+        int taskIdx = 0;
+        if (lane == 0 && taskMask != 0)
+            taskIdx = atomicAdd(p.taskCounter, __popc(taskMask));
+        taskIdx = shfl(taskIdx, 0) + __popc(taskMask & getLaneMaskLt());
+
+        if (setupTask)
+        {
+            PlannerSqueezeTask task;
+            task.subtreeRootPair = childPairIdx[lane];
+            task.wideNodeBudget = childBudget;
+            storeUncachedAlign8(&p.squeezeTasks[taskIdx], task);
+        }
+
+        // Update atomic counters.
+
+        int updateNumWideNodes = 0;
+        int updatePrimCounter  = 0;
+
+        if (lane == 0)      updateNumWideNodes += 1;
+        if (!setupTask)     updateNumWideNodes += childBudgetOrig;
+        if (!setupTask)     updatePrimCounter  += childSubtreePrimsLane;
+        if (lane == 0)      updatePrimCounter  += (needToSqueeze) ? numPrims : totalSubtreePrims;
+        if (!needToSqueeze) updatePrimCounter  -= childSubtreePrimsLane;
+
+        for (int i = 1; i < PLANNER_SQUEEZE_MAX_BFACTOR; i *= 2)
+        {
+            updateNumWideNodes += shfl_xor(updateNumWideNodes, i);
+            updatePrimCounter  += shfl_xor(updatePrimCounter,  i);
+        }
+
+        if (lane == 0 && updateNumWideNodes) atomicAdd(p.ioNumWideNodes, updateNumWideNodes);
+        if (lane == 0 && updatePrimCounter)  atomicAdd(p.primCounter,   -updatePrimCounter);
+
+        // Did not squeeze => task done.
+
+        if (!needToSqueeze)
+            continue;
+
+        // Distribute primitives evenly into leaves.
+
+        int numLeaves = min(numPrims, p.maxBranchingFactor - numChildren);
+        float primCoef = (float)numPrims / (float)numLeaves;
+        int primBase = min((int)((float)lane * primCoef + 0.5f), numPrims);
+        int leafSize = min((int)(((float)lane + 1.0f) * primCoef + 0.5f), numPrims) - primBase;
+
+        // Allocate a bunch of internal nodes for each leaf.
+
+        int innerBase = max(leafSize - 1, 0);
+        for (int i = 1; i < PLANNER_SQUEEZE_MAX_BFACTOR; i *= 2)
+            innerBase = shfl_up_add(innerBase, i);
+        innerBase = numInners - innerBase;
+
+        // Create a subtree for each leaf to contain the primitives.
+
+        for (int i = 1; i < leafSize; i++)
+        {
+            int innerPairIdx = inners[innerBase + i - 1];
+            PlannerBinaryNode node = {};
+
+            node.childPairIdx = prims[primBase];
+            node.afterPlan.subtreePrims = i + (1 << 31); // leaf
+            storeCachedAlign16(&p.ioBinaryNodes[innerPairIdx + 0], node);
+
+            node.childPairIdx = prims[primBase + i];
+            node.afterPlan.subtreePrims = 1 + (1 << 31); // leaf
+            storeCachedAlign16(&p.ioBinaryNodes[innerPairIdx + 1], node);
+
+            prims[primBase] = innerPairIdx;
+        }
+
+        // Append leaf subtrees to the list of children.
+
+        if (leafSize)
+        {
+            childPairIdx[numChildren + lane] = prims[primBase];
+            childSubtreePrims[numChildren + lane] = leafSize + (1 << 31);
+        }
+        numChildren += numLeaves;
+
+        // Create a balanced binary tree out of the remaining internal nodes.
+
+        if (lane < numChildren * 2 - 2)
+        {
+            PlannerBinaryNode node = {};
+            int childIdx = lane - (numChildren - 2);
+            if (childIdx < 0)
+            {
+                node.childPairIdx = inners[lane + 1];
+                node.afterPlan.subtreePrims = INT_MAX / 2; // not leaf, not trivially small
+                node.afterPlan.ownerSubtreePrims = INT_MAX; // inner
+            }
+            else
+            {
+                node.childPairIdx = childPairIdx[childIdx];
+                node.afterPlan.subtreePrims = childSubtreePrims[childIdx];
+                node.afterPlan.ownerSubtreePrims = 0; // not inner
+            }
+            storeCachedAlign16(&p.ioBinaryNodes[inners[lane >> 1] + (lane & 1)], node);
+        }
+    } // persistent threads
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchPlannerExec(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const PlannerExecParams& p)
+{
+    if (lwdaFuncSetCacheConfig(PlannerExec, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    PlannerExec<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchPlannerSqueeze(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const PlannerSqueezeParams& p)
+{
+    if (lwdaFuncSetCacheConfig(PlannerSqueeze, lwdaFuncCachePreferShared) != lwdaSuccess) return false;
+    PlannerSqueeze<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

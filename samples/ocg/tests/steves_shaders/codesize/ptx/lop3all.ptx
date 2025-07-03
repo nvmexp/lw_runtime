@@ -1,0 +1,182 @@
+.version 4.0
+.target sm_50
+
+.global .u32 addr;
+.global .u32 addr1;
+
+.entry main
+{
+   .reg .u32 a;
+   .reg .u32 b, c, d, e, f;
+   .reg .u32 z, x, y, w, v, u, t, s;
+
+   ld.global.u32 a, [addr];
+   ld.global.u32 b, [a+4];
+   ld.global.u32 c, [a+8];
+   ld.global.u32 d, [a+12];
+   ld.global.u32 e, [a+16];
+   ld.global.u32 f, [a+20];
+
+   /* simple lop3 with 3 regs */
+   /* LOP3 c, a, b 0xF6 */
+   xor.b32 x, a, b;
+   or.b32  z, x, c;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* lop3 with imm20 */
+   /* LOP3 c, 28, b 0xF6 */
+   xor.b32 x, 28, b;
+   or.b32  z, x, c;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* lop3 with imm > 20b, gets legalized with cbank */
+   /* LOP3 c, 3000000(becomes cbank), b, 0xF6 */
+   xor.b32 x, 3000000, b;
+   or.b32  z, x, c;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* lop3 input to or, need to swap lop3 postions (0,2) and (1,2) - lut should be 0xFC */
+   /* LOP3 b, c, a 0xFC */
+   and.b32 x, a, b;
+   xor.b32 y, x, c;
+   or.b32  z, y, b;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* same as above, except that the first instance of "b" is negated */
+   /* LOP3 b, c, a 0xF6 */
+   not.b32 w, b;
+   and.b32 x, a, w;
+   xor.b32 y, x, c;
+   or.b32  z, y, b;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* tree of 3 instructions */
+   /* LOP3 a, b, c, 0xDA  (Lwir LOP3 c, a, b, 0xBC) */
+   /* Note - this LOP3 synthesis will require 6 opds - the max we allow */
+   and.b32 x, a, b;
+   xor.b32 y, a, c;
+   or.b32  z, y, x;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* OR of LOP3 and XOR - need to swap lop3 postions (0,1)*/
+   /* LOP3 a, c, b 0xFC */
+   or.b32  w, a, b;
+   and.b32 x, w, c;
+   xor.b32 y, a, c;
+   or.b32  z, x, y;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* generates 2 LOP3s - because evaluating 1st input LOP3 puts us over 3 inputs */
+   /* t = LOP3 c, a, b 0xE0 */
+   /* LOP3 t, a, c 0xF6 */
+   or.b32  w, a, b;
+   and.b32 x, w, c;
+   xor.b32 y, a, c;
+   or.b32  z, y, x;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* negated op appears only once - ~ should not get propagated to LOP3 */
+   /* LOP3 c, a, b, 0xF9 */
+   not.b32 w, a;
+   xor.b32 x, w, b;
+   or.b32  z, x, c;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* generates 2 LOP3s - because evaluating 1st input LOP3 puts us over 3 inputs */
+   /* t = LOP3 c, a, b 0x78 */
+   /* LOP3 t, a, b 0xF8 */
+   /* Lwir can't handle this case, because "x" has more than one use */
+   /* - it generates and AND and LOP3, same cost as Ori */
+   and.b32 x, a, b;
+   xor.b32 y, x, c;
+   or.b32  z, x, y;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* constant needs to be shifted from 2 to 1 */
+   /* LOP3 c, 10, a 0xF8 */
+   and.b32 x, a, 10;
+   or.b32  z, x, c;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* same constant twice, that needs to be shifted from 0 to 1 */
+   /* LOP3 a, 10 0xCC */
+   and.b32 x, a, 10;
+   or.b32  z, x, 10;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* LOP3 with only one input */
+   /* LOP3 a, 0xFF */
+   /* interesting that no optimization catches "and a, a", but might never happen in real code */
+   not.b32 x, a;
+   and.b32  y, a, a;
+   or.b32 z, y, x;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+   
+   /* and/or form one input LOP3, that feeds into xor */
+   /* single LOP3 input needs to be swapped to position 2, before being combined with xor */
+   /* LOP3 c, a, 0x3C */
+   and.b32 x, a, a;
+   or.b32  y, x, a;
+   xor.b32 z, y, c;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   
+   /* and/or form two input LOP3, that feeds into xor */
+   /* LOP3 inputs need be swapped from 0->1 and 1->2, before being combined with xor */
+   and.b32 x, a, b;
+   or.b32  y, x, a;
+   xor.b32 z, y, c;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   /* LOP3 synthesized from and/or, then used to form 2 new LOP3s when feeding into xor. */
+   /* opds of initial LOP3 are shifted when feeding into first xor, as such it tests out code */
+   /* that makes sure we don't assume any ordering between 0 and non-0 LOP3 opds */
+   /* i.e. when feeding into second xor */
+   /* also, since initial LOP3 has non LOP3 use - i.e. store, makes sure this works too */
+   /* LOP3 0, a, b, 0xCC */
+   /* LOP3 c, a, b, 0x3C */
+   /* LOP3 d, a, b, 0x3C */
+   and.b32 x, a, b;
+   or.b32  y, x, a;
+   xor.b32 z, y, c;
+   st.global.u32 [addr1], z;
+   xor.b32 w, d, y;
+   st.global.u32 [addr1], w;
+   st.global.u32 [addr1], y;
+   bar.sync 0;
+
+   /* Form 3 LOP3s from each and/xor pair */
+   /* t1 = LOP3 b, 10, a, 0x78 */
+   /* t2 = LOP3 d, 20, c, 0x78 */
+   /* t3 = LOP3 f, 30, e, 0x78 */
+   /* Form a 4th LOP3 that has inputs t1, t2, t3 */
+   /* LOP3 t3, t1, t2, 0xFE */
+   /* This case reproduces bug 1445606 */
+   and.b32 x, a, 10;
+   xor.b32 y, x, b;
+   and.b32 v, c, 20;
+   xor.b32 w, v, d;
+   and.b32 t, e, 30;
+   xor.b32 u, t, f;
+   or.b32  s, y, w;
+   or.b32  z, s, u;
+   st.global.u32 [addr1], z;
+   bar.sync 0;
+
+   exit;
+}

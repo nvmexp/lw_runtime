@@ -1,0 +1,109 @@
+################################### tell Emacs this is a -*- makefile-gmake -*-
+#
+# Copyright (c) 2018-2022 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+# tmake for LwSci components
+#
+# Repository umbrella makefile fragment for "lwsci"
+#
+###############################################################################
+#
+# Build tools in this repository
+#
+#LW_REPOSITORY_BUILD_TOOLS :=
+
+#
+# Components in this repository
+#
+
+ifeq ($(LW_BUILD_CONFIGURATION_LINUX_USERSPACE_IS_DESKTOP),1)
+#
+# Components common to desktop build
+#
+
+LW_REPOSITORY_COMPONENTS := \
+    lwscicommon         \
+    lwscievent          \
+    lwsciipc            \
+    tests/lwsciipc      \
+
+else
+
+# The unit test build will be disabled by default and the
+# environment variable LWSCISTREAM_ENABLE_UNIT_TEST_BUILD must be set
+# to 1 to enable it.
+# This is done so that the driver changes which require unit test
+# updates are not held up.
+
+ifndef LWSCISTREAM_ENABLE_UNIT_TEST_BUILD
+LWSCISTREAM_ENABLE_UNIT_TEST_BUILD := 0
+endif
+
+#
+# Components common to all other builds
+#
+LW_REPOSITORY_COMPONENTS := \
+    lwscibuf            \
+    lwscievent          \
+    lwsciipc            \
+    lwscisync           \
+    lwscicommon         \
+    tests/lwsciipc      \
+    tests/lwscisync/api \
+    tests/lwscisync/kpi/kpi \
+    tests/lwscisync/kpi/fence_latency \
+    tests/lwscibuf/api \
+    tests/lwscibuf/kpi \
+    tests/lwscicommon/unit \
+    lwscistream         \
+    tests/lwscistream/component_tests \
+    tests/lwscistream/perf_tests \
+    tests/lwscistream/kpi_tests
+
+ifeq ($(LWSCISTREAM_ENABLE_UNIT_TEST_BUILD),1)
+LW_REPOSITORY_COMPONENTS += \
+    tests/lwscistream/unit_tests/block \
+    tests/lwscistream/unit_tests/consumer \
+    tests/lwscistream/unit_tests/ipccomm \
+    tests/lwscistream/unit_tests/ipcdst \
+    tests/lwscistream/unit_tests/ipcsrc \
+    tests/lwscistream/unit_tests/limiter \
+    tests/lwscistream/unit_tests/multicast \
+    tests/lwscistream/unit_tests/lwscistreamcommon \
+    tests/lwscistream/unit_tests/lwsciwrap \
+    tests/lwscistream/unit_tests/packet \
+    tests/lwscistream/unit_tests/pool \
+    tests/lwscistream/unit_tests/producer \
+    tests/lwscistream/unit_tests/publicAPI \
+    tests/lwscistream/unit_tests/queue \
+    tests/lwscistream/unit_tests/safeconnection \
+    tests/lwscistream/unit_tests/trackarray \
+    tests/lwscistream/unit_tests/trackcount
+endif
+
+#
+# Select GVS test script based on OS
+#
+ifdef LW_BUILD_CONFIGURATION_OS_IS_QNX
+LW_REPOSITORY_COMPONENTS += \
+        tests/gvs/qnx
+endif
+
+ifdef LW_BUILD_CONFIGURATION_OS_IS_LINUX
+LW_REPOSITORY_COMPONENTS += \
+        tests/gvs/linux
+endif
+
+endif
+
+# Local Variables:
+# indent-tabs-mode: t
+# tab-width: 8
+# End:
+# vi: set tabstop=8 noexpandtab:

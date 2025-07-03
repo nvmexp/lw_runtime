@@ -1,0 +1,1276 @@
+/******************************************************************************
+ * Copyright 2019 LWPU Corporation. All rights reserved.
+ *****************************************************************************/
+
+#include <cfloat>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
+
+#include <algorithm>
+#include <iomanip>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <numeric>
+#include <sstream>
+#include <string>
+#include <sys/stat.h>
+#include <vector>
+
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+
+#include "forward.h"
+#include "ssim_impl.h"
+#include "util.h"
+
+
+namespace {
+
+// Model colwolutional layer descriptions
+struct Colw_desc
+{
+    int  m_kernel_size;
+    int  m_stride;
+    int  m_padding;
+    bool m_depthwise;
+
+    Colw_desc( int kernel_size, int stride, int padding = 0, bool depthwise = false )
+        : m_kernel_size( kernel_size )
+        , m_stride( stride )
+        , m_padding( padding )
+        , m_depthwise( depthwise )
+    {
+    }
+};
+
+std::vector<Colw_desc> desc_base{
+    {3, 2, 1}, {3, 1, 1, true}, {1, 1}, {3, 2, 1, true}, {1, 1}, {3, 2, 1, true}, {1, 1}, {3, 2, 1, true}, {1, 1},
+};
+
+std::vector<Colw_desc> desc_top_r{
+    {3, 2, 1, true}, {1, 1}, {3, 1, 1, true}, {1, 1}, {3, 1, 1, true}, {1, 1},
+};
+
+std::vector<Colw_desc> desc_top_h{
+    {3, 1, 1, true}, {1, 1}, {3, 1, 1, true}, {1, 1}, {3, 1, 1, true}, {1, 1},
+};
+
+
+std::vector<Colw_desc> desc_top_h_n{
+    {3, 1, 1, true},  // no skip connection
+    {1, 1},          {3, 1, 1, true}, {1, 1}, {3, 1, 1, true}, {1, 1}, {3, 1, 1, true}, {1, 1}, {3, 1, 1, true}, {1, 1},
+};
+
+
+// Unknown/detect
+static const int auto_algo[] = {
+    -1, -1, -1, -1, -1, -1, -1, -1, -1,     // base
+    -1, -1, -1, -1, -1, -1,                 // top_r
+    -1,                                     // classifier
+    -1, -1, -1, -1, -1, -1,                 // top_h
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1  // top_h_n
+};
+
+// Kepler
+static const int gk_algo[] = {
+    1, 0, 0, 1, 1, 0, 1, 0, 0,          // base
+    0, 1, 0, 1, 0, 1,                   // top_r
+    1,                                  // classifier
+    0, 1, 0, 0, 0, 1,                   // top_h
+    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1  // top_h_n
+};
+
+// Maxwell
+static const int gm_algo[] = {
+    1, 0, 1, 1, 1, 0, 1, 0, 1,          // base
+    0, 0, 0, 1, 0, 0,                   // top_r
+    1,                                  // classifier
+    0, 0, 0, 1, 0, 1,                   // top_h
+    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1  // top_h_n
+};
+
+
+// Pascal
+static const int gp_algo[] = {
+    1, 0, 1, 1, 1, 0, 1, 0, 0,          // base
+    0, 0, 0, 0, 0, 0,                   // top_r
+    0,                                  // classifier
+    0, 1, 0, 0, 0, 0,                   // top_h
+    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1  // top_h_n
+};
+
+
+// Volta
+static const int gv_algo[] = {
+    1, 0, 1, 0, 1, 0, 1, 0, 0,          // base
+    0, 1, 0, 1, 0, 1,                   // top_r
+    1,                                  // classifier
+    0, 1, 0, 0, 0, 0,                   // top_h
+    0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1  // top_h_n
+};
+
+// Turing
+static const int gt_algo[] = {
+    0, 0, 1, 0, 1, 0, 1, 0, 0,          // base
+    0, 1, 0, 1, 0, 1,                   // top_r
+    0,                                  // classifier
+    0, 0, 0, 0, 0, 0, 1,                // top_h
+    0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1  // top_h_n
+};
+
+// Turing half. First two needs to be 1 to avoid errors.
+static const int gt16_algo[] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1,          // base
+    1, 1, 1, 1, 1, 1,                   // top_r
+    1,                                  // classifier
+    1, 1, 1, 1, 1, 1,                   // top_h
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1  // top_h_n
+};
+
+
+}  // anonymous namespace
+
+namespace LW {
+namespace SSIM {
+
+
+Compute_base::Compute_base( int device, ILogger* logger )
+    : m_lwdnnHandle( nullptr )
+    , m_device( -1 )
+    , m_device_capability( 0 )
+    , m_stream( lwdaStream_t( 0 ) )  // defautls stream
+    , m_device_workMem( nullptr )
+    , m_device_workMemSize( 0 )
+    , m_compute_base_ok( false )
+
+{
+    set_logger( logger );
+
+    // Choose GPU
+    int num_gpus;
+    lwdaGetDeviceCount( &num_gpus );
+    if( num_gpus <= 0 )
+    {
+        log_error( "No LWCA capable GPUs found" );
+        return;
+    }
+    if( device >= num_gpus )
+    {
+        log_error( "invalid device id %d (found %d gpus))", device, num_gpus );
+        return;
+    }
+
+    lwdaDeviceProp prop;
+    checkLwdaErrors( lwdaGetDeviceProperties( &prop, device ) );
+    m_device_capability = prop.major * 10 + prop.minor;
+    m_device_name       = prop.name;
+    lwdaSetDevice( device );
+
+    checkLWDNN( lwdnnCreate( &m_lwdnnHandle ) );
+    // This is weird: on proturix, this successfull call sets LWCA error. Clean it
+    lwdaGetLastError();
+
+    m_device = device;
+
+    m_compute_base_ok = true;
+}
+
+// Destructor
+Compute_base::~Compute_base()
+{
+    if( m_device >= 0 )  // valid
+        lwdaSetDevice( m_device );
+    if( m_device_workMem )
+        checkLwdaErrors( lwdaFree( m_device_workMem ) );
+    if( m_lwdnnHandle )
+        checkLWDNN( lwdnnDestroy( m_lwdnnHandle ) );
+}
+
+// Set stream base functionality
+void Compute_base::set_stream( lwdaStream_t cs )
+{
+    lwdnnSetStream( m_lwdnnHandle, cs );
+    m_stream = cs;
+}
+
+
+template <typename T>
+Forward<T>::Forward( int device, ILogger* logger )
+    : Forward_base( device, logger )
+    , m_mode( EVAL_NONE )
+    , m_input_layer( 0 )
+    , m_output_layer( 0 )
+    , m_inp_nchannels( 0 )
+    , m_out_nchannels( 0 )
+    , m_layer_buffers( 0 )
+    , m_classifier( nullptr )
+{
+    if( !m_compute_base_ok )
+        return;
+
+    log_info( "SSIM Predictor uses LWCA device %d, \"%s\" (%d.%d), buffers: %s, lwdnn v%ld, lwdart v%ld", device,
+              m_device_name.c_str(), m_device_capability / 10, m_device_capability % 10,
+              half_enabled() ? "fp16" : "fp32", lwdnnGetVersion(), lwdnnGetLwdartVersion() );
+
+    m_copy_buffer = nullptr;
+
+    // Use NHWC only for halfs and only if Tensor Ops are present
+    m_tensor_format = half_enabled() /* && m_device_capability >= 70 */ ? LWDNN_TENSOR_NHWC : LWDNN_TENSOR_NCHW;
+}
+
+template <typename T>
+void Forward<T>::delete_layers()
+{
+    for( auto layer : m_layers )
+        delete layer;
+    m_layers.resize( 0 );
+    m_base_colw.resize( 0 );
+    m_base_bn.resize( 0 );
+    m_top_r_colw.resize( 0 );
+    m_top_r_bn.resize( 0 );
+    m_top_h_colw.resize( 0 );
+    m_top_h_bn.resize( 0 );
+
+
+    if( m_copy_buffer )
+    {
+        checkLwdaErrors( lwdaFree( m_copy_buffer ) );
+        m_copy_buffer = nullptr;
+    }
+
+    for( auto buf : m_layer_buffers )
+    {
+        if( buf != nullptr )
+        {
+            checkLwdaErrors( lwdaFree( buf ) );
+        }
+    }
+    m_layer_buffers.resize( 0 );
+}
+
+// Set weights for all layers
+template <typename T>
+bool Forward<T>::set_weights( const Layerdata& ld )
+{
+    std::vector<float> empty;  //empty bias to pass for all but classifier layers
+
+    for( size_t i = 0; i < ld.m_base_colw.size(); ++i )
+    {
+        m_base_colw[i]->set_weights( ld.m_base_colw[i].m_weights, empty );
+        set_error( *m_base_colw[i] );
+        m_base_bn[i]->set_weights( ld.m_base_bn[i].m_alpha, ld.m_base_bn[i].m_beta, ld.m_base_bn[i].m_mean,
+                                   ld.m_base_bn[i].m_var, ld.m_bn_epsilon );
+        set_error( *m_base_bn[i] );
+    }
+
+    for( size_t i = 0; i < ld.m_top_r_bn.size(); ++i )
+    {
+        m_top_r_colw[i]->set_weights( ld.m_top_r_colw[i].m_weights, empty );
+        set_error( *m_top_r_colw[i] );
+        m_top_r_bn[i]->set_weights( ld.m_top_r_bn[i].m_alpha, ld.m_top_r_bn[i].m_beta, ld.m_top_r_bn[i].m_mean,
+                                    ld.m_top_r_bn[i].m_var, ld.m_bn_epsilon );
+        set_error( *m_top_r_bn[i] );
+    }
+
+    // Classifier
+    std::vector<float> bias;
+    bias.push_back( ld.m_classifier.m_bias );
+    m_classifier->set_weights( ld.m_classifier.m_weights, bias );
+    set_error( *m_classifier );
+
+    for( size_t i = 0; i < ld.m_top_h_bn.size(); ++i )
+    {
+        m_top_h_colw[i]->set_weights( ld.m_top_h_colw[i].m_weights, empty );
+        set_error( *m_top_h_colw[i] );
+        m_top_h_bn[i]->set_weights( ld.m_top_h_bn[i].m_alpha, ld.m_top_h_bn[i].m_beta, ld.m_top_h_bn[i].m_mean,
+                                    ld.m_top_h_bn[i].m_var, ld.m_bn_epsilon );
+        set_error( *m_top_h_bn[i] );
+    }
+
+    m_model_shrink_factor = ld.is_model_n() ? 1 : 16;
+
+    return !!check_error();
+}
+
+
+template <typename T>
+Forward<T>::~Forward()
+{
+    lwdaSetDevice( m_device );
+    delete_layers();
+}
+
+template <typename T>
+void Forward<T>::set_colw_algorithms( const std::vector<int>& alg )
+{
+    if( alg.size() != 9 + 6 + 1 + 6 )
+        log_error( "colwolution algorithm vector has wrong size" );
+    else
+        m_colw_algorithms = alg;
+}
+
+template <typename T>
+bool Forward<T>::half_enabled() const
+{
+    return sizeof( T ) == 2;
+}
+
+template <typename T>
+void Forward<T>::set_stream( lwdaStream_t cs )
+{
+    Compute_base::set_stream( cs );
+    for( auto layer : m_layers )
+        layer->m_stream = cs;
+}
+
+
+template <typename T>
+float Forward<T>::predict_image( Image_buffer*       heatmap_buffer,
+                                 const Image_buffer& buffer,
+                                 const Image_buffer* denoised_buffer,  // denoised image, optional
+                                 int                 tile_height )
+{
+    std::vector<Forward_tile> tiles;
+    // allocated only sub-resolution?
+    tile_height = int( this->m_input_layer->m_height ) >= tile_height ? tile_height : int( this->m_input_layer->m_height )
+                                                                                          - 2 * this->m_overlap;
+    Forward_base::split_image( buffer.m_width, buffer.m_height, m_model_shrink_factor, tile_height, tiles );
+
+    float ssim_sum = 0.0f;
+    int   ssim_h   = 0;
+    float ret_time = 0.f;
+    for( const auto& tile : tiles )
+    {
+        if( buffer.m_nhwc )
+        {
+            m_input_layer->set_channel_rgb( buffer, m_copy_buffer, tile.data_offset * buffer.m_nchannels, 0,
+                                            buffer.m_nchannels, buffer.m_width, tile.data_h );
+        }
+        else
+        {
+            m_input_layer->set_channel( buffer, m_copy_buffer, tile.data_offset, 0, buffer.m_nchannels, buffer.m_width,
+                                        tile.data_h, buffer.m_height );
+        }
+
+        if( denoised_buffer )
+        {
+            if( denoised_buffer->m_nhwc )
+            {
+                m_input_layer->set_channel_rgb( *denoised_buffer, m_copy_buffer, tile.data_offset * denoised_buffer->m_nchannels,
+                                                3,  // buffer.m_nchannes
+                                                denoised_buffer->m_nchannels, denoised_buffer->m_width, tile.data_h );
+            }
+            else
+            {
+                m_input_layer->set_channel( *denoised_buffer, m_copy_buffer, tile.data_offset,
+                                            3,  // buffer.m_nchannes
+                                            denoised_buffer->m_nchannels, denoised_buffer->m_width, tile.data_h,
+                                            denoised_buffer->m_height );
+            }
+        }
+
+        run();
+
+        float tile_ssim = m_classifier->get_ssim();
+        // For small images, estimate tend to overshoop above 1.0, clip
+        if( tile_ssim > 1.0f )
+            tile_ssim = 1.0f;
+        if( tile_ssim < 0.0f )
+            tile_ssim = 0.0f;
+
+        log_debug( "Tile SSIM value: %g", tile_ssim );
+        // this is an approximation, the overlap is counted twice towards the average
+        ssim_sum += tile.copy_h * tile_ssim;
+        ssim_h += tile.copy_h;
+
+        ret_time += get_eval_time();
+
+
+        if( heatmap_buffer )
+        {
+            if( heatmap_buffer->m_width < int( RoundUp( buffer.m_width, m_model_shrink_factor ) )
+                || heatmap_buffer->m_height < int( RoundUp( buffer.m_height, m_model_shrink_factor ) ) )
+            {
+                log_error(
+                    "output buffer resolution (%d x %d) insufficient "
+                    "for storing SSIM heat map, (%d x %d) required",
+                    heatmap_buffer->m_width, heatmap_buffer->m_height, RoundUp( buffer.m_width, m_model_shrink_factor ),
+                    RoundUp( buffer.m_height, m_model_shrink_factor ) );
+            }
+            else
+            {
+                int out_field     = heatmap_buffer->m_nhwc ? heatmap_buffer->m_nchannels : 1;
+                int out_nchannels = heatmap_buffer->m_nchannels >= 3 ? 3 : 1;
+                switch( heatmap_buffer->m_type )
+                {
+                    case DATA_FLOAT:
+                        m_output_layer->copy_output(
+                            &static_cast<float*>( heatmap_buffer->m_data )[tile.out_offset_h * heatmap_buffer->m_width * out_field],
+                            heatmap_buffer->m_device_id < 0, static_cast<float*>( m_copy_buffer ), heatmap_buffer->m_width,
+                            heatmap_buffer->m_height, 1, out_nchannels, out_field, tile.yoffset / m_model_shrink_factor,
+                            std::min( (int)tile.copy_h, heatmap_buffer->m_height - tile.out_offset_h ), true );
+                        break;
+                    case DATA_HALF:
+                        m_output_layer->copy_output(
+                            &static_cast<__half*>( heatmap_buffer->m_data )[tile.out_offset_h * heatmap_buffer->m_width * out_field],
+                            heatmap_buffer->m_device_id < 0, static_cast<__half*>( m_copy_buffer ), heatmap_buffer->m_width,
+                            heatmap_buffer->m_height, 1, out_nchannels, out_field, tile.yoffset / m_model_shrink_factor,
+                            std::min( (int)tile.copy_h, heatmap_buffer->m_height - tile.out_offset_h ), true );
+                        break;
+                    case DATA_INT8:
+                        m_output_layer->copy_output(
+                            &static_cast<unsigned char*>( heatmap_buffer->m_data )[tile.out_offset_h * heatmap_buffer->m_width * out_field],
+                            heatmap_buffer->m_device_id < 0, static_cast<unsigned char*>( m_copy_buffer ),
+                            heatmap_buffer->m_width, heatmap_buffer->m_height, 1, out_nchannels, out_field,
+                            tile.yoffset / m_model_shrink_factor,
+                            std::min( (int)tile.copy_h, heatmap_buffer->m_height - tile.out_offset_h ), true );
+                        break;
+                    default:
+                        MI_ASSERT( 0 );  // not inplemented
+                }
+            }
+        }
+    }
+    lwdaDeviceSynchronize();
+
+    log_debug( "SSIM inference time: %2.3f ms", ret_time );
+    log_info( "SSIM value: %g", ssim_sum / ssim_h );
+
+    return ret_time;
+}
+
+
+// layer callback invocation
+template <typename T>
+static void layer_callback_call_t( std::function<Layer_callback>* lc, const Layer<T>& layer )
+{
+    size_t         sz = layer.m_outHeight * layer.m_outWidth * layer.m_outChannels;
+    std::vector<T> buf( sz );
+
+    // data to Host
+    lwdaMemcpy( &buf[0], layer.m_outData, sz * sizeof( T ), lwdaMemcpyDeviceToHost );
+
+    // on half pipeline, one need half-to-float colwersion, also possible HWC->CHW colwersion is needed
+    std::vector<float> fbuf( sz );
+    for( unsigned int c = 0; c < layer.m_outChannels; ++c )
+        for( unsigned int h = 0; h < layer.m_outHeight; ++h )
+            for( unsigned int w = 0; w < layer.m_outWidth; ++w )
+            {
+                unsigned int out = c * layer.m_outHeight * layer.m_outWidth + h * layer.m_outWidth + w;
+                unsigned int in = layer.m_tensor_format == LWDNN_TENSOR_NCHW ? out : h * layer.m_outWidth * layer.m_outChannels
+                                                                                         + w * layer.m_outChannels + c;
+                fbuf[out] = to_float( buf[in] );  // todo: clip?
+            }
+
+    ( *lc )( layer.name(), layer.m_outChannels, layer.m_outHeight, layer.m_outWidth, &fbuf.front() );
+}
+
+// type dispatcher
+static void layer_callback_call( std::function<Layer_callback>* lc, const Layer_base& layer_base )
+{
+
+    if( layer_base.is_half() )
+    {
+        auto& layer = static_cast<const Layer<__half>&>( layer_base );
+        layer_callback_call_t( lc, layer );
+    }
+    else
+    {
+        auto& layer = static_cast<const Layer<float>&>( layer_base );
+        layer_callback_call_t( lc, layer );
+    }
+}
+
+
+// fill buffer memory with 1.0s
+template <typename T>
+static __global__ void k_Fill1( T* out, int width, int height, int channels )
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z * blockDim.z + threadIdx.z;
+
+    if( x < width && y < height && c < channels )
+        out[c * height * width + y * width + x] = 1.0f;
+}
+
+
+template <typename T>
+void Forward<T>::run()
+{
+    reset_error();
+
+    float ttime = 0.f;
+    for( auto layer : m_layers )
+    {
+        layer->fwd_eval( m_device_workMem, m_device_workMemSize );
+        log_debug( "layer %s:  %f ms", layer->name(), layer->m_evaltime );
+        set_error( *layer );
+        ttime += layer->m_evaltime;
+
+        if( this->m_lc )
+            layer_callback_call( this->m_lc, *layer );
+    }
+    log_debug( "total time over all fwd layers %f ms", ttime );
+}
+
+// generic
+template <typename T>
+std::vector<int> Forward<T>::get_algo_vector() const
+{
+    return std::vector<int>();
+}
+
+template <>
+std::vector<int> Forward<float>::get_algo_vector() const
+{
+    const int        sz   = 9 + 6 + 1 + 6 + 10;  // expected size
+    const int*       algo = 0;
+    std::vector<int> vec;
+
+    const char* sc;
+    if( ( sc = getelw( "SSIM_SET_COLW" ) ) != nullptr )
+    {
+        std::stringstream stream( sc );
+        int               n;
+        while( stream >> n )
+        {
+            vec.push_back( n );
+            if( stream.peek() == ',' || stream.peek() == ' ' )
+                stream.ignore();
+        }
+    }
+    else if( m_colw_algorithms.size() == sz )
+        vec = m_colw_algorithms;
+
+    if( vec.size() != sz )
+    {
+        switch( m_device_capability )
+        {
+            case 30:
+            case 35:
+            case 37:
+                algo = gk_algo;
+                break;
+
+            case 50:
+            case 52:
+                algo = gm_algo;
+                break;
+
+            case 60:
+            case 61:
+                algo = gp_algo;
+                break;
+
+            case 70:
+                algo = gv_algo;
+                break;
+
+            case 73:  // for now, TODO
+            case 75:  // for now, TODO
+                algo = gt_algo;
+                break;
+
+            default:
+                algo = auto_algo;
+                break;
+        }
+    }
+    if( getelw( "SSIM_AUTO_COLW" ) )
+        algo = auto_algo;
+
+    if( algo )
+    {
+        vec.clear();
+        for( int i = 0; i < sz; i++ )
+            vec.push_back( algo[i] );
+    }
+
+    return vec;
+}
+
+template <>
+std::vector<int> Forward<half>::get_algo_vector() const
+{
+    const int        sz   = 9 + 6 + 1 + 6 + 10;  // expected size
+    const int*       algo = 0;
+    std::vector<int> vec;
+
+    const char* sc;
+    if( ( sc = getelw( "SSIM_SET_COLW" ) ) != nullptr )
+    {
+        std::stringstream stream( sc );
+        int               n;
+        while( stream >> n )
+        {
+            vec.push_back( n );
+            if( stream.peek() == ',' || stream.peek() == ' ' )
+                stream.ignore();
+        }
+    }
+    else if( m_colw_algorithms.size() == sz )
+        vec = m_colw_algorithms;
+
+    if( vec.size() != sz )
+    {
+        switch( m_device_capability )
+        {
+
+            case 60:
+            case 61:
+            case 70:
+            // TODO: fall throigh for now
+
+            case 73:  // for now, TODO
+            case 75:  // for now, TODO
+                algo = gt16_algo;
+                break;
+
+            default:
+                algo = auto_algo;
+                break;
+        }
+    }
+    if( getelw( "SSIM_AUTO_COLW" ) )
+        algo = auto_algo;
+
+    if( algo )
+    {
+        vec.clear();
+        for( int i = 0; i < sz; i++ )
+            vec.push_back( algo[i] );
+    }
+
+    return vec;
+}
+
+// cleanup, if not the first invocation
+template <typename T>
+void Forward<T>::clear_layers()
+{
+    for( auto l : m_layers )
+        delete l;
+    m_layers.resize( 0 );
+
+    m_base_colw.resize( 0 );
+    m_base_bn.resize( 0 );
+    m_top_h_colw.resize( 0 );
+    m_top_h_bn.resize( 0 );
+    m_top_r_colw.resize( 0 );
+    m_top_r_bn.resize( 0 );
+    if( m_classifier != nullptr )
+        m_classifier = nullptr;
+    if( m_input_layer != nullptr )
+        m_input_layer = nullptr;
+    if( m_output_layer != nullptr )
+        m_output_layer = nullptr;
+}
+
+
+template <typename T>
+void Forward<T>::fill_layers( const Layerdata& ld, int width, int height, int inp_nchannels, int out_nchannels, bool alloc )
+{
+    clear_layers();
+
+    auto       alg  = get_algo_vector();
+    const int* algo = &alg[0];
+
+    Layer_base*              prevLayer        = nullptr;
+    Layer_base*              baseTop          = nullptr;
+    int                      baseTop_features = 0;
+    Layer_base*              top_rTop         = nullptr;
+    int                      prev_features    = inp_nchannels;
+    std::vector<Layer_base*> keep_upscale;
+
+    auto* input_layer = new Input_layer<T>( m_lwdnnHandle, width, height, inp_nchannels, true, alloc, m_logger );
+    m_layers.push_back( input_layer );
+    prevLayer = input_layer;
+
+
+    if( m_tensor_format == LWDNN_TENSOR_NHWC )
+    {
+        auto* cv = new Colwert_layer<T>( "to_nhwc", m_lwdnnHandle, prevLayer, true, alloc, m_logger );
+        m_layers.push_back( cv );
+        prevLayer = cv;
+    }
+
+    if( ld.is_model_n() )
+    {
+        prevLayer->m_multi_output = true;  // skip connection, keep the buffer
+        keep_upscale.push_back( prevLayer );
+    }
+
+    // base part
+    for( size_t i = 0; i < ld.m_base_colw.size(); ++i )
+    {
+        int        features = ld.m_base_bn[i].m_dim;  // should  match colw. features
+        Colw_desc& desc     = desc_base[i];
+
+        std::string base_colw_name( "base.colw." );
+        base_colw_name.append( std::to_string( 3 * i ) );
+
+        auto* c = new Colwolution_layer<T>( base_colw_name.c_str(), *algo++, m_lwdnnHandle, prevLayer,
+                                            desc.m_kernel_size, desc.m_stride, desc.m_padding, desc.m_depthwise,
+                                            features, desc.m_depthwise, alloc, m_logger );
+        m_layers.push_back( c );
+        m_base_colw.push_back( c );
+        prevLayer = c;
+
+        std::string base_bn_name( "base.bn." );
+        base_bn_name.append( std::to_string( 3 * i + 1 ) );
+
+        auto* b = new Batchnorm_layer<T>( base_bn_name.c_str(), m_lwdnnHandle, prevLayer, alloc, m_logger );
+        m_layers.push_back( b );
+        m_base_bn.push_back( b );
+        prevLayer     = b;
+        prev_features = features;
+
+        if( ld.is_model_n() && i > 0 && i % 2 == 0 )
+        {
+            b->m_multi_output = true;  // skip connection
+            keep_upscale.push_back( b );
+        }
+    }
+
+
+    // drop the last level, skip would be the same as normal output
+    if( ld.is_model_n() )
+    {
+        keep_upscale.back()->m_multi_output = false;
+        keep_upscale.pop_back();
+    }
+
+    baseTop                 = prevLayer;
+    baseTop_features        = prev_features;
+    baseTop->m_multi_output = true;  // wired to both top_h and top_r
+
+    // top_r part
+    prevLayer     = baseTop;
+    prev_features = baseTop_features;
+    for( size_t i = 0; i < ld.m_top_r_colw.size(); ++i )
+    {
+        int        features = ld.m_top_r_bn[i].m_dim;  // should  match colw. features
+        Colw_desc& desc     = desc_top_r[i];
+
+        std::string top_r_colw_name( "top_r.colw." );
+        top_r_colw_name.append( std::to_string( 3 * i ) );
+
+        auto* c = new Colwolution_layer<T>( top_r_colw_name.c_str(), *algo++, m_lwdnnHandle, prevLayer,
+                                            desc.m_kernel_size, desc.m_stride, desc.m_padding, desc.m_depthwise,
+                                            features, desc.m_depthwise, alloc, m_logger );
+        m_layers.push_back( c );
+        m_top_r_colw.push_back( c );
+        prevLayer = c;
+
+        std::string top_r_bn_name( "top_r.bn." );
+        top_r_bn_name.append( std::to_string( 3 * i + 1 ) );
+
+        auto* b = new Batchnorm_layer<T>( top_r_bn_name.c_str(), m_lwdnnHandle, prevLayer, alloc, m_logger );
+        m_layers.push_back( b );
+        m_top_r_bn.push_back( b );
+        prevLayer = b;
+
+        prev_features = features;
+    }
+    top_rTop = prevLayer;
+
+    // Pooling
+    prevLayer = top_rTop;
+    auto* p   = new Avg_pooling_layer<T>( "pool", m_lwdnnHandle, prevLayer, 1, 1, alloc, m_logger );
+    m_layers.push_back( p );
+    prevLayer = p;
+
+    // classifier
+    auto* c = new Classifier_layer<T>( "classifier", *algo++, m_lwdnnHandle, prevLayer, alloc, m_logger );
+    m_layers.push_back( c );
+    m_classifier = c;
+
+    // top_h part
+    // switch to top_h_n algo section
+    if( ld.is_model_n() )
+        algo += 6;
+    prevLayer     = baseTop;
+    prev_features = baseTop_features;
+    for( size_t i = 0; i < ld.m_top_h_colw.size(); ++i )
+    {
+        int features = ld.m_top_h_bn[i].m_dim;  // should  match colw. features
+
+        // upsamples go before bn level couples, but not on the at the first entry
+        if( ld.is_model_n() && i > 0 && i % 2 == 0 )
+        {
+            // just for pretty printing
+            std::string top_h_us_name( "top_h.us." );
+            top_h_us_name.append( std::to_string( 3 * i - 1 + ( ld.is_model_n() ? i / 2 : 0 ) ) );
+
+            auto* u = new Upscale_concat_layer<T>( top_h_us_name.c_str(), m_lwdnnHandle, prevLayer, keep_upscale.back(),
+                                                   alloc, m_logger );
+            keep_upscale.pop_back();  // no longer needed
+            m_layers.push_back( u );
+            prevLayer = u;
+        }
+
+        const auto& desc = ld.is_model_n() ? desc_top_h_n[i] : desc_top_h[i];
+
+        std::string top_h_colw_name( "top_h.colw." );
+        top_h_colw_name.append( std::to_string( 3 * i + ( ld.is_model_n() ? i / 2 : 0 ) ) );
+
+        // hack to patch very slow half layer with float
+        bool use_float_nhwc = false;
+        if( sizeof( T ) == 2 && desc.m_depthwise && features == 128 && prevLayer->m_outChannels == 128 && prevLayer->m_outWidth >= 256 )
+            use_float_nhwc = true;
+
+        if( use_float_nhwc )
+        {
+            auto* cv1 = new Colwert_layer<float>( "to_float", m_lwdnnHandle, prevLayer, false, alloc, m_logger );
+            m_layers.push_back( cv1 );
+            prevLayer = cv1;
+
+            auto* c = new Colwolution_layer<float>( top_h_colw_name.c_str(), *algo++, m_lwdnnHandle, prevLayer,
+                                                    desc.m_kernel_size, desc.m_stride, desc.m_padding, desc.m_depthwise,
+                                                    features, desc.m_depthwise, alloc, m_logger );
+
+            m_layers.push_back( c );
+            m_top_h_colw.push_back( c );
+            prevLayer = c;
+
+            auto* cv2 = new Colwert_layer<T>( "from_float", m_lwdnnHandle, prevLayer, true, alloc, m_logger );
+            m_layers.push_back( cv2 );
+            prevLayer = cv2;
+        }
+        else
+        {
+            auto* c = new Colwolution_layer<T>( top_h_colw_name.c_str(), *algo++, m_lwdnnHandle, prevLayer,
+                                                desc.m_kernel_size, desc.m_stride, desc.m_padding, desc.m_depthwise,
+                                                features, desc.m_depthwise, alloc, m_logger );
+
+            m_layers.push_back( c );
+            m_top_h_colw.push_back( c );
+            prevLayer = c;
+        }
+
+        std::string top_h_bn_name( "top_h.bn." );
+        top_h_bn_name.append( std::to_string( 3 * i + 1 + ( ld.is_model_n() ? i / 2 : 0 ) ) );
+
+        auto* b = new Batchnorm_layer<T>( top_h_bn_name.c_str(), m_lwdnnHandle, prevLayer, alloc, m_logger );
+        m_layers.push_back( b );
+        m_top_h_bn.push_back( b );
+        prevLayer = b;
+
+        prev_features = features;
+    }
+
+    if( m_tensor_format == LWDNN_TENSOR_NHWC )
+    {
+        auto* cv = new Colwert_layer<T>( "from_nhwc", m_lwdnnHandle, prevLayer, false, alloc, m_logger );
+        m_layers.push_back( cv );
+        prevLayer = cv;
+    }
+
+    m_input_layer  = static_cast<Input_layer<T>*>( m_layers.front() );
+    m_output_layer = static_cast<Layer<T>*>( m_layers.back() );
+}
+
+
+template <typename T>
+void Forward<T>::create_layers( const Layerdata& ld, int width, int height, int inp_nchannels, int out_nchannels, size_t mem, Eval_mode mode )
+{
+    int height_orig = height;
+    reset_error();
+
+    if( m_device_workMem )
+        lwdaFree( m_device_workMem );
+    m_device_workMemSize = 0;
+
+    m_mode               = mode;
+    bool      shared_buf = ( mode == EVAL_FWD );
+    const int n_buf      = 2;
+
+    m_inp_nchannels = inp_nchannels;
+    m_out_nchannels = out_nchannels;
+
+    // don't allocate weight buffers yet
+    fill_layers( ld, width, height, inp_nchannels, out_nchannels, false );
+    for( auto layer : m_layers )
+        set_error( *layer );  // set error from any layer it might have oclwrred in
+
+    // Lwdnn7 has 2GB tensor limit
+    size_t tensor_max = 0;
+    for( const auto layer : m_layers )
+    {
+        size_t layer_tensor = layer->m_outChannels * size_t( layer->m_outHeight ) * layer->m_outWidth;
+        if( layer_tensor > tensor_max )
+            tensor_max = layer_tensor;
+    }
+    if( tensor_max >= size_t( 2 ) << 30 )
+    {
+        float f = float( tensor_max ) / ( size_t( 2 ) << 30 );
+        f *= 1.02f;  // "65/64";
+        height = size_t( height / f ) & 0x1f;
+
+        clear_layers();
+
+        // don't allocate weight buffers yet
+        fill_layers( ld, width, height, inp_nchannels, out_nchannels, false );
+        for( auto layer : m_layers )
+            set_error( *layer );  // set error from any layer it might have oclwrred
+    }
+
+    // compute weight size: does not depend on resolution
+    size_t weight_size = 0;
+    for( const auto layer : m_layers )
+        weight_size += layer->get_weights_size( mode );
+
+    // LWCA stats
+    size_t mem_free = 0, mem_total = 0;
+    lwdaMemGetInfo( &mem_free, &mem_total );
+
+    // memory limit set, lower than available?
+    if( mem && mem < mem_free )
+        mem_free = mem;
+
+    //  not even weights fit
+    if( mem_free < weight_size )
+    {
+        log_error( "GPU memory limit %.f MiB too low for SSIM model weights", float( mem_free / ( 1 << 20 ) ) );
+        return;
+    }
+
+    // compute "fullres" memory requirements
+    size_t max_size[n_buf] = {0, 0};
+    int    lwrr_buf        = 0;
+    size_t total_alloc     = 0;
+    size_t ws_size         = 0;
+
+    for( auto layer : m_layers )
+    {
+        ws_size      = max( ws_size, layer->get_workspace_size( mode ) );
+        size_t l_mem = layer->get_out_size();
+
+        if( shared_buf && !layer->m_multi_output )
+        {
+            if( l_mem > max_size[lwrr_buf] )
+                max_size[lwrr_buf] = l_mem;
+            lwrr_buf               = ( lwrr_buf + 1 ) % n_buf;
+        }
+        else
+        {
+            total_alloc += l_mem;
+        }
+    }
+
+    // allocated buffers size if shared
+    if( shared_buf )
+        total_alloc += std::accumulate( max_size, max_size + n_buf, size_t( 0 ) );
+
+    total_alloc += ws_size;
+
+
+    size_t exp_avail = mem_free - weight_size;
+    if( total_alloc > exp_avail * 0.9 )
+    {
+        float f      = exp_avail * 0.9f / total_alloc;
+        int   hlimit = int( height * f );
+        int   eff    = hlimit - ( 2 * this->m_overlap ) & ~0x1f;
+        if( eff < 64 )
+        {
+            log_error( "GPU memory limit %.f MiB too low for SSIM computations", float( mem_free / ( 1 << 20 ) ) );
+            return;
+        }
+        height = eff + 2 * this->m_overlap;
+    }
+
+    while( height == height_orig || height >= 64 + 2 * this->m_overlap )
+    {
+        reset_error();
+
+        for( auto& v : max_size )
+            v       = 0;
+        lwrr_buf    = 0;
+        total_alloc = 0;
+        ws_size     = 0;
+
+        fill_layers( ld, width, height, inp_nchannels, out_nchannels, true );
+        for( auto layer : m_layers )
+            set_error( *layer );  // set error from any layer it might have oclwrred in
+
+
+        for( auto layer : m_layers )
+        {
+            m_device_workMemSize = max( m_device_workMemSize, layer->get_workspace_size( mode ) );
+
+            size_t l_mem = sizeof( T ) * layer->m_outChannels * size_t( layer->m_outHeight ) * layer->m_outWidth;
+            log_debug( "Layer %s (%d x %d x %d) requires %.1f MiB memory", layer->name(), layer->m_outWidth,
+                       layer->m_outHeight, layer->m_outChannels, float( l_mem >> 20 ) );
+
+
+            size_t l_out = layer->get_out_size();
+            if( shared_buf && !layer->m_multi_output )
+            {
+                if( l_out > max_size[lwrr_buf] )
+                    max_size[lwrr_buf] = l_out;
+                lwrr_buf               = ( lwrr_buf + 1 ) % n_buf;
+            }
+            else
+            {
+                T* buf = nullptr;
+                checkLwdaErrors( lwdaMalloc( &buf, l_out ) );
+                layer->m_outData = buf;
+                m_layer_buffers.push_back( buf );
+                total_alloc += l_out;
+            }
+        }
+
+        // allocate buffers if shared
+        if( shared_buf )
+        {
+            size_t max_size_sum = std::accumulate( max_size, max_size + n_buf, size_t( 0 ) );
+            log_debug( "allocating %i shared layer buffers with size %u MiB", n_buf, (unsigned int)( max_size_sum >> 20 ) );
+
+            // insert shared buffers in front of private ones
+            m_layer_buffers.insert( m_layer_buffers.begin(), 3, nullptr );
+
+            for( int i = 0; i < n_buf; ++i )
+                checkLwdaErrors( lwdaMalloc( &m_layer_buffers[i], max_size[i] ) );
+
+            total_alloc += max_size_sum;
+        }
+
+        // assign interleaved shared buffers
+        lwrr_buf = 0;
+        for( auto layer : m_layers )
+        {
+            if( shared_buf && !layer->m_multi_output )
+            {
+                layer->m_outData = m_layer_buffers[lwrr_buf];
+                lwrr_buf         = ( lwrr_buf + 1 ) % n_buf;
+            }
+        }
+
+        total_alloc += m_device_workMemSize;
+        total_alloc += sizeof( T ) * width * height * 4;  // copy buffer
+        total_alloc += ws_size;
+
+        checkLwdaErrors( lwdaMalloc( &m_device_workMem, m_device_workMemSize ) );
+
+        // allocate aux buffer for colwersion. Output may need float.
+        checkLwdaErrors( lwdaMalloc( &m_copy_buffer, sizeof( float ) * width * height * 4 ) );
+
+        if( this->m_status == lwdaError_t( 0 ) )
+        {
+            log_info( "layers created for resolution %d %d, inp %d, outp %d, lwDNN memory %.1f MiB, total %.1f MiB", width, height,
+                      inp_nchannels, out_nchannels, m_device_workMemSize / float( 1 << 20 ), total_alloc / float( 1 << 20 ) );
+            return;
+        }
+
+        clear_layers();
+        height = int( height / 1.3 ) & 0x1f;
+    }
+    while( height >= 64 + 2 * this->m_overlap )
+        ;
+
+    log_error( "Cannot allocate GPU memory buffers for SSIM computations." );
+}
+
+// aux input tansform, x -> 1 - (1-x)^p with sign respect
+static float pwr( float x, float p )
+{
+    if( p == 1.0f )
+        return x;
+
+    float s   = std::signbit( 1.0f - x ) ? -1.0f : 1.0f;
+    float ret = 1.0f - s * std::pow( s * ( 1.0f - x ), p );
+
+    return ret;
+}
+
+
+// In order to speed up compilation, we need put template implementation code into .lw instead of .h/_inline.h,
+// so we need to explicitly instantiate all template parameters possibly used.
+template <typename T>
+Iter_forward<T>::Iter_forward( const Iter_layerdata& ld,
+                               int                   device,  // specify device (gpu)
+                               ILogger*              logger )
+    : Compute_base( device, logger )
+    , m_target( ld.m_old_format ? ld.m_target : 0.0f )
+    , m_power( ld.m_old_format ? 1.0f : ld.m_power )
+    , m_input_layer( m_lwdnnHandle, 1, 1, ld.m_old_format ? s_input_buf_size : s_input_buf_size + 1, false, true, logger )  // 32 or 33 inputs
+{
+    size_t n = ld.m_fc.size();
+
+    m_fc.reserve( n );
+    m_act.reserve( n );
+
+    for( size_t i = 0; i < n; ++i )
+    {
+        std::string fcname( "fc" );
+        fcname.append( std::to_string( i + 1 ) );
+        m_fc.emplace_back( fcname.c_str(), m_lwdnnHandle, i == 0 ? static_cast<const Layer<T>*>( &m_input_layer ) :
+                                                                   static_cast<const Layer<T>*>( &m_act[i - 1] ),
+                           ld.m_fc[i].m_dims[0], true, logger );
+
+        // last layer is FC/classifier
+        if( i == n - 1 )
+            break;
+
+        std::string actname( "act" );
+        actname.append( std::to_string( i + 1 ) );
+        m_act.emplace_back( actname.c_str(), m_lwdnnHandle, &m_fc[i],
+                            i == n - 2 ? LWDNN_ACTIVATION_SIGMOID : LWDNN_ACTIVATION_RELU, true, logger );
+    }
+
+
+    // colwolution buffers working memory
+    m_device_workMemSize = 0;
+    for( auto& l : m_fc )
+    {
+        size_t ws = l.get_workspace_size( EVAL_FWD );
+        if( ws > m_device_workMemSize )
+            m_device_workMemSize = ws;
+    }
+
+    checkLwdaErrors( lwdaMalloc( &m_device_workMem, m_device_workMemSize ) );
+
+    size_t fc_max = 0;
+    for( const auto& l : m_fc )
+    {
+        size_t l_mem = sizeof( T ) * l.m_outChannels * l.m_outHeight * l.m_outWidth;
+        log_debug( "Layer %s (%d x %d x %d) requires %.1f MiB memory", l.name(), l.m_outWidth, l.m_outHeight,
+                   l.m_outChannels, l_mem / 1000000.0 );
+        if( l_mem > fc_max )
+            fc_max = l_mem;
+    }
+
+    size_t act_max = 0;
+    for( const auto& l : m_act )
+    {
+        size_t l_mem = sizeof( T ) * l.m_outChannels * l.m_outHeight * l.m_outWidth;
+        log_debug( "Layer %s (%d x %d x %d) requires %.1f MiB memory", l.name(), l.m_outWidth, l.m_outHeight,
+                   l.m_outChannels, l_mem / 1000000.0 );
+        if( l_mem > act_max )
+            act_max = l_mem;
+    }
+
+    checkLwdaErrors( lwdaMalloc( &m_fc_out, fc_max ) );
+    for( auto& l : m_fc )
+        l.m_outData = static_cast<T*>( m_fc_out );
+
+    checkLwdaErrors( lwdaMalloc( &m_act_out, act_max ) );
+    for( auto& l : m_act )
+        l.m_outData = static_cast<T*>( m_act_out );
+}
+
+// Run iteration colvergence estimate.
+template <typename T>
+float Iter_forward<T>::run( float* val,    // input values
+                            int    n_val,  // number of input values
+                            float  target )
+{
+    // too many or too few values
+    if( n_val > s_input_max_size || n_val < s_input_min_size )
+        return -1.0f;
+
+    T in[s_input_buf_size + 1];
+    for( int i = 0; i < n_val; ++i )
+    {
+        from_float( in[i], pwr( val[i], 1.0f / m_power ) );
+        from_float( in[i + s_input_max_size], 1.0f );  // valid
+    }
+    for( int i = n_val; i < s_input_max_size; ++i )
+    {
+        from_float( in[i], 0.0f );
+        from_float( in[i + s_input_max_size], 0.0f );  // invalid
+    }
+    if( m_target == 0.0f )
+        from_float( in[2 * s_input_max_size], pwr( target, 1.0f / m_power ) );
+
+
+    // shortlwt to skip image buffer creation and copying channel-by-channel
+    this->checkLwdaErrors( lwdaMemcpyAsync( m_input_layer.m_outData, in,
+                                            sizeof( T ) * ( m_target == 0.0f ? s_input_buf_size + 1 : s_input_buf_size ),
+                                            lwdaMemcpyHostToDevice, this->m_stream ) );
+
+    // forward propagation on the model
+    MI_ASSERT( m_fc.size() == m_act.size() + 1 );
+    for( size_t i = 0; i < m_fc.size(); ++i )
+    {
+        m_fc[i].fwd_eval( m_device_workMem, m_device_workMemSize );
+
+        // last layer is FC/classifier
+        if( i == m_fc.size() - 1 )
+            break;
+
+        m_act[i].fwd_eval( m_device_workMem, m_device_workMemSize );
+    }
+
+
+    // retrieving the result - shortlwt
+    T out;
+    this->checkLwdaErrors( lwdaMemcpy( &out, ( m_fc.end() - 1 )->m_outData, sizeof( out ), lwdaMemcpyDeviceToHost ) );
+    float res = to_float( out );
+
+    return res;
+}
+
+
+// Destructor
+template <typename T>
+Iter_forward<T>::~Iter_forward()
+{
+    // free output buffer
+    if( m_fc_out != nullptr )
+        checkLwdaErrors( lwdaFree( m_fc_out ) );
+    if( m_act_out != nullptr )
+        checkLwdaErrors( lwdaFree( m_act_out ) );
+}
+
+
+// set weights for iteratiom prediction
+template <typename T>
+bool Iter_forward<T>::set_weights( const Iter_layerdata& ld )
+{
+    for( size_t i = 0; i < ld.m_fc.size(); ++i )
+    {
+        set_error( m_fc[i] );
+        m_fc[i].set_weights( ld.m_fc[i].m_weights, ld.m_fc[i].m_bias );
+    }
+
+    return !!check_error();
+}
+
+template <typename T>
+void Iter_forward<T>::set_stream( lwdaStream_t cs )
+{
+    Compute_base::set_stream( cs );
+    for( auto& l : m_fc )
+        l.m_stream = cs;
+
+    for( auto& l : m_act )
+        l.m_stream = cs;
+}
+
+template <typename T>
+float Iter_forward<T>::get_eval_time() const
+{
+    float time = 0.0f;
+    time +=
+        std::accumulate( begin( m_fc ), end( m_fc ), 0.0f, []( float a, const Layer<T>& b ) { return a + b.m_evaltime; } );
+    time += std::accumulate( begin( m_act ), end( m_act ), 0.0f,
+                             []( float a, const Layer<T>& b ) { return a + b.m_evaltime; } );
+
+    return time;
+}
+
+
+template class Forward<__half>;
+template class Forward<float>;
+
+template class Iter_forward<__half>;
+template class Iter_forward<float>;
+
+}  // namespace SSIM
+}  // namespace LW

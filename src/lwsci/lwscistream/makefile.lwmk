@@ -1,0 +1,36 @@
+##############################################################################
+# drivers/lwsci/lwscistream/makefile.lwmk
+##############################################################################
+
+OUTPUTDIR_COMMON = $(OUTPUTDIR)
+
+include $(LW_SOURCE)/drivers/lwsci/lwscistream/lwscistream.lwmk
+
+##############################################################################
+# link liblwscistream.so
+##############################################################################
+
+LIBLWSCISTREAM_SONAME = liblwscistream.so.1
+LIBLWSCISTREAM_NAME = liblwscistream.so
+LIBLWSCISTREAM = $(OUTPUTDIR)/$(LIBLWSCISTREAM_SONAME)
+
+LW_SUPPORTS_SEPARATE_DEBUG_INFO = 1
+LIBLWSCISTREAM_LD_TARGET = $(OUTPUTDIR)/$(LIBLWSCISTREAM_NAME).unstripped
+LIBLWSCISTREAM_DEBUG_INFO = $(OUTPUTDIR)/$(LIBLWSCISTREAM_NAME).debug
+$(eval $(call LW_DEBUG_INFO_CMD,$(LIBLWSCISTREAM_LD_TARGET),$(LIBLWSCISTREAM),$(LIBLWSCISTREAM_DEBUG_INFO)))
+
+build: $(LIBLWSCISTREAM)
+
+$(LIBLWSCISTREAM_LD_TARGET): $(LINK_OBJECTS) $(LWSCISTREAM_LINKER_SCRIPT) $(LWSCIBUF_DSO_STUB) $(LWSCISYNC_DSO_STUB) $(LWSCIIPC_DSO_STUB) $(LWSCICOMMON_DSO_STUB) $(LWSCIEVENT_DSO_STUB)
+	$(call quiet_cmd,LINK) -o $@ $(LINK_OBJECTS) \
+	  -Wl,--version-script=$(LWSCISTREAM_LINKER_SCRIPT) \
+	  -Wl,-soname,$(LIBLWSCISTREAM_SONAME) \
+	  $(LINK_LDFLAGS) \
+	  $(LINK_DSO_LDFLAGS) \
+	  $(LWSCIBUF_DSO_STUB) \
+	  $(LWSCISYNC_DSO_STUB) \
+	  $(LWSCIIPC_DSO_STUB) \
+	  $(LWSCICOMMON_DSO_STUB) \
+	  $(LWSCIEVENT_DSO_STUB)
+	$(call quiet_cmd,POST_LINK) $(LWSCISTREAM_EXPORTS)
+	$(call SYMLINK) $(LIBLWSCISTREAM_SONAME) $(OUTPUTDIR)/$(LIBLWSCISTREAM_NAME)

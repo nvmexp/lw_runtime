@@ -1,0 +1,37 @@
+.version 3.1
+.target sm_20
+
+.func (.reg .v2 .b64 out) myadd (.reg .v2 .b64 a, .reg .v2 .s64 b, .reg .v2 .u64 c)
+{
+    .reg .u64 resx, resy, tempx, tempy;
+
+    mov.v2.b64   {resx, resy}, a;
+    mov.v2.b64   {tempx, tempy}, b;
+    add.u64      resx, resx, tempx;
+    add.u64      resy, resy, tempy;
+    mov.v2.b64   {tempx, tempy}, c;
+    add.u64      resx, resx, tempx;
+    add.u64      resy, resy, tempy;
+
+    mov.v2.b64   out, {resx, resy};
+    ret;
+}
+
+.entry main(.param .u32 output)
+{
+    .reg .u32 o;
+    .reg .v2 .b64 inb, out;
+    .reg .v2 .u64 inu;
+    .reg .v2 .s64 ins;
+
+    mov.v2.b64   inb, {1, 2};
+    mov.v2.b64   inu, {11, 12};
+    mov.v2.b64   ins, {111, 112};
+
+    call (out), myadd, (inb, ins, inu);
+
+    ld.param.u32 o, [output];
+    st.v2.b64    [o], out;
+
+    exit;
+}

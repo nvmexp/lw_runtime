@@ -1,0 +1,61 @@
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 texcoord: TexCoord;
+};
+
+cbuffer globalParams
+{
+	int captureState;
+}
+
+cbuffer controlBuf
+{
+	float g_sldIntensity;
+}
+
+Texture2D txDiffuse;
+Texture2D txVignette;
+SamplerState samLinear;
+
+// This should move to a centralized file but not appropriate to make that change now.
+#ifndef LW_COMMON
+#define LW_COMMON
+
+#define CAPTURE_STATE_NOT_STARTED		0
+#define CAPTURE_STATE_REGULAR			1
+#define CAPTURE_STATE_REGULARSTEREO		2
+#define CAPTURE_STATE_HIGHRES			3
+#define CAPTURE_STATE_360				4
+#define CAPTURE_STATE_360STEREO			5
+
+#endif
+
+float4 PS( VSOut frag ): SV_Target
+{
+	float4 color = txDiffuse.Sample(samLinear, frag.texcoord);
+	float4 clr = color;
+	
+	if (captureState == CAPTURE_STATE_REGULAR || captureState == CAPTURE_STATE_NOT_STARTED || captureState == CAPTURE_STATE_REGULARSTEREO)
+		clr *= txVignette.Sample(samLinear, frag.texcoord);
+ 
+	float4 clr_out = float4 (0.5954f * clr.r, 0.58f * clr.g, 0.3487f * clr.b, clr.a);
+
+	float4 clr2 = clr * clr;
+    	clr_out += float4 (-1.492f * clr2.r, -3.916f * clr2.g, -1.835f * clr2.b, 0.0f);
+
+	float4 clr3 = clr2 * clr;
+    	clr_out += float4 (19.17f * clr3.r, 26.03f * clr3.g, 12.92f * clr3.b, 0.0f);
+
+	float4 clr4 = clr2 * clr2;
+    	clr_out += float4 (-45.04f * clr4.r, -50.52 * clr4.g, -19.09 * clr4.b, 0.0f);
+	
+	float4 clr5 = clr3 * clr2;
+    	clr_out += float4 (41.23f * clr5.r, 41.09 * clr5.g, 9.679 * clr5.b, 0.0f);
+
+	float4 clr6 = clr4 * clr2;
+    	clr_out += float4 (-13.47f * clr6.r, -12.28 * clr6.g, -1.066 * clr6.b, 0.0f);
+
+
+	return lerp(color, clamp(clr_out, float4 (0.0f, 0.0f, 0.0f, 0.0f), float4 (1.0f, 1.0f, 1.0f, 1.0f)), g_sldIntensity);
+}

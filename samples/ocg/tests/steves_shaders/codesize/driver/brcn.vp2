@@ -1,0 +1,39 @@
+!!VP2.0
+MOV  R0, v[COL0];              #preheader
+MOV  R1, v[TEX0];              #preheader
+MOV  R2, v[TEX1];              #preheader
+loop:               
+       	ADD R2, R2, R0;        #header
+       	MOVC CC, R2;           #header
+       	BRA if2 (LT.xxxx);     #header
+
+       	ADD R2, R2, v[TEX1];   #if1
+        MOVC CC, R2;
+       	BRA endif1 (GE.xxxx);  #if1
+		       
+	ADD R1, R2, R0; 
+        MOVC CC, R1;
+        BRA tail (LE.xxxx);   #continue        
+endif1:                       
+	ADD R1, R1, v[TEX2];      
+	BRA tail (TR.xxxx);	
+if2:
+        ADD R2, R2, v[TEX1];   #if2
+        MOVC CC, R2;
+        BRA endif2 (GE.xxxx);  #if2
+        
+	MUL R1, R1, v[TEX1]; 
+        MOVC CC, R1;
+        BRA post (GT.xxxx);   #break     
+endif2:
+        ADD R1, R1, R1;                
+tail:
+	SUB R0, R0, v[TEX2];
+        MOVC CC, R0;
+        BRA loop (GE.xxxx);
+post:
+	ADD  R1, R1, v[OPOS];
+	MOV  o[HPOS], R1; 
+END
+
+

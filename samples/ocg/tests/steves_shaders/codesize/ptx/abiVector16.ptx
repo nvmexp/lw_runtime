@@ -1,0 +1,69 @@
+.version 3.1
+.target sm_20
+
+.func (.reg .v2 .b16 out) myadd (.reg .v2 .b16 a, .reg .v2 .s16 b, .reg .v2 .u16 c)
+{
+    .reg .u16 resx, resy, tempx, tempy;
+
+    mov.v2.b16   {resx, resy}, a;
+    mov.v2.b16   {tempx, tempy}, b;
+    add.u16      resx, resx, tempx;
+    add.u16      resy, resy, tempy;
+    mov.v2.b16   {tempx, tempy}, c;
+    add.u16      resx, resx, tempx;
+    add.u16      resy, resy, tempy;
+
+    mov.v2.b16   out, {resx, resy};
+    ret;
+}
+
+.func (.reg .v4 .b16 out) myadd4 (.reg .v4 .b16 a, .reg .v4 .s16 b, .reg .v4 .u16 c)
+{
+    .reg .u16 resx, resy, resz, resw, tempx, tempy, tempz, tempw;
+
+    mov.v4.b16   {resx, resy, resz, resw}, a;
+    mov.v4.b16   {tempx, tempy, tempz, tempw}, b;
+    add.u16      resx, resx, tempx;
+    add.u16      resy, resy, tempy;
+    add.u16      resz, resz, tempz;
+    add.u16      resw, resw, tempw;
+    mov.v4.b16   {tempx, tempy, tempz, tempw}, c;
+    add.u16      resx, resx, tempx;
+    add.u16      resy, resy, tempy;
+    add.u16      resz, resz, tempz;
+    add.u16      resw, resw, tempw;
+
+    mov.v4.b16   out, {resx, resy, resz, resw};
+    ret;
+}
+
+.entry main(.param .u32 output, .param .u32 output1)
+{
+    .reg .u32 o;
+    .reg .v2 .b16 inb, out;
+    .reg .v2 .u16 inu;
+    .reg .v2 .s16 ins;
+    .reg .v4 .b16 inb4, out4;
+    .reg .v4 .u16 inu4;
+    .reg .v4 .s16 ins4;
+
+    mov.v2.b16   inb, {1, 2};
+    mov.v2.b16   inu, {11, 12};
+    mov.v2.b16   ins, {111, 112};
+
+    call (out), myadd, (inb, ins, inu);
+
+    ld.param.u32 o, [output];
+    st.v2.b16    [o], out;
+
+    mov.v4.b16   inb4, {1, 2, 3, 4};
+    mov.v4.b16   inu4, {11, 12, 13, 14};
+    mov.v4.b16   ins4, {111, 112, 113, 114};
+
+    call (out4), myadd4, (inb4, ins4, inu4);
+
+    ld.param.u32 o, [output1];
+    st.v4.b16    [o], out4;
+
+    exit;
+}

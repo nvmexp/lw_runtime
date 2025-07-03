@@ -1,0 +1,241 @@
+#####################################################################################################
+# <branch>/apps/LWSI/makefile.lwmk
+#
+# Valid builds:
+#      lwmake [debug|release]
+#
+# With release builds, an EXE encryptor mechanism is used to re-package the EXE.
+#
+# This application is built as a Windows CONSOLE app; although it has support for basic
+# Windows functionality like popping up a File-Save dialog box.  It supports MFC and ATL for 
+# colwenience in implementing capture routines.  (Use of CString for example)
+#
+# Branching:
+#    LWSI.exe is the capture side of the LWSI system (LWSIReader is the reader).  The capture tool is
+#    branched with the display driver; and builds against that version of LwAPI.  The reader only
+#    has one instance which must be able to read the files produced by any published version of LWSI.exe
+#
+# https://wiki.lwpu.com/engwiki/index.php/LWSI
+#####################################################################################################
+
+PROTOBUF_DIR := $(LW_TOOLS)/protobuf/protobuf-2.0.2
+
+# Dangerous assumption that apps and tools are peer directories...
+#   but we need a way to find \sw\apps from any given driver branch
+
+LW_ROOT ?= $(LW_TOOLS)/..
+lwsiLibPath := $(LW_ROOT)/apps/common/lwsilib
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+# Include the definitions to build the lwapi interface files lwapi.h and lwapi.lib
+include $(LW_SOURCE)/drivers/lwapi/lwapi_iface.lwmk
+
+childLibraries := $(lwsiLibPath)/$(OUTPUTDIR)/lwsilib.lib
+
+SUBDIRS := $(subst /$(OUTPUTDIR)/,,$(dir $(childLibraries)))
+
+PRECOMPILED_HEADER_SRC_FILE := $(LW_SOURCE)/apps/LWSI/StdAfx.cpp
+
+# Force all release builds to be secure builds
+ifeq ($(LW_BUILD_TYPE),release)
+  LW_SELWRITY := 1
+endif
+
+ifneq ($(LW_SELWRITY),0)
+  LW_SELWRITY_POSTPROC := $(LW_SOURCE)/drivers/build_tools/postproc.exe
+endif
+
+ifneq ($(LW_TARGET_OS),winxp)
+    $(error Only Winxp build is supported)
+endif
+
+ifneq ($(LW_BUILD_TYPE),debug)
+  ifneq ($(LW_BUILD_TYPE),release)
+    $(error Only release and debug builds are supported)
+  endif
+endif
+
+ifneq ($(LW_TARGET_ARCH),x86)
+  $(error Only the x86 architecture is supported)
+endif
+
+# TBD: if we use vc90... we could get into trouble with requiring pre-installed libs.
+#      if we do not use vc90... there may be things with dx9 etc. that we cannot access?
+# [why did we move swak to vc90?]
+include $(LW_SOURCE)/drivers/common/build/msvc90_tools_x86.lwmk
+
+TARGET_EXE = LWSI.exe
+
+LW_DEFINES += WILWER=0x0501 _WIN32 _CRT_SELWRE_NO_WARNINGS _CONSOLE
+
+# Enable C++ exception handling
+CFLAGS += -EHsc
+
+ifeq ($(LW_BUILD_TYPE),debug)
+  CFLAGS += -MTd    # static multithreaded debug
+  CFLAGS += -D_MT
+else
+  CFLAGS += -MT     # static multithreaded release
+  CFLAGS += -D_MT
+endif
+
+SOURCES += Main.cpp
+#SOURCES += ZipFile.cpp
+#SOURCES += LwsiException.cpp
+SOURCES += MiscCommands.cpp
+SOURCES += Cmd.cpp
+SOURCES += Utility.cpp
+SOURCES += DataSegment.cpp
+SOURCES += GPUDataSegment.cpp
+
+pchFileList = $(SOURCES)
+
+#SOURCES += ProtobufUtil.cpp
+#SOURCES += tinyxmlerror.cpp
+#SOURCES += tinyxml.cpp
+#SOURCES += tinyxmlparser.cpp
+#SOURCES += tinystr.cpp
+SOURCES += $(OUTPUTDIR)\lwsi.pb.cc
+
+# use the precompiled header built from StdAfx.cpp for all objects built from SOURCES
+$(eval $(call REGISTER_PCH,$(call BUILD_OBJECT_LIST,$(pchFileList)),$(PRECOMPILED_HEADER_SRC_FILE)))
+
+# Set some special things to set just for the Exe Encryptor support file
+#
+# The RING3 tells the inclusion of lwSelwrity.h that we're a user-mode app
+# We need to include our pre-compiled heeader because code in lwSelwrity.h relies on some Windows
+# definitions for PE Exelwtable structures etc.
+$(call BUILD_OBJECT_LIST,ExeEncrypt.cpp): $(OUTPUTDIR)/ExeEncrypt.cpp
+	$(subst /,\,$(CC)) -c $(strip $(CFLAGS)) -DRING3 -FI../../StdAfx.h $(PCH_CFLAGS) $(shell $(FULLPATH) $<)
+
+LW_INCLUDES += $(OUTPUTDIR)  # pick up generated lwapi.h and protobuf header
+
+#includeDirs += $(LW_SOURCE)/common/lwtoolkit
+
+# Our exe-encryption process generates ExeEncrypt.cpp which requires lwtypes.h (probably more) from the RM SDK
+includeDirs += $(LW_SOURCE)/sdk/lwpu/inc
+
+includeDirs += $(LW_TOOLS)/win32/msvc90/VC/atlmfc/include
+includeDirs += $(LW_TOOLS)/win32/msvc90/PlatformSDK/Include
+includeDirs += $(LW_TOOLS)/win32/msvc90/include
+#includeDirs += $(LW_TOOLS)/sdk/DirectX9c_June2007\XP_DX10\x86\Include
+#includeDirs += $(LW_TOOLS)/sdk/DirectX9/Include
+includeDirs += $(PROTOBUF_DIR)/include
+includeDirs += $(lwsiLibPath)
+
+includeDirs += $(LW_SOURCE)/drivers/common/inc    # For lwSelwrity.h, lwVer.h
+
+LW_INCLUDES += $(includeDirs)
+
+LFLAGS += -OUT:./$@
+LFLAGS += -INCREMENTAL:NO
+
+libraryDirs += $(LW_TOOLS)/win32/msvc90/VC/atlmfc/lib
+libraryDirs += $(LW_TOOLS)/win32/msvc90/PlatformSDK/lib
+libraryDirs += $(LW_TOOLS)/win32/msvc90/lib
+#libraryDirs += $(LW_TOOLS)/sdk/DirectX9/lib
+libraryDirs += $(PROTOBUF_DIR)/lib/x86.vc90
+
+LFLAGS += $(addprefix -libpath:,$(libraryDirs))
+
+LFLAGS += $(OUTPUTDIR)/lwapi.lib
+LFLAGS += $(lwsiLibPath)/$(OUTPUTDIR)/lwsilib.lib
+
+ifeq ($(LW_BUILD_TYPE),debug)
+  # Force the linker to put nafxcwd (MFC lib) before libcmtd 
+  # See http://support.microsoft.com/kb/148652
+  LFLAGS += -NODEFAULTLIB:LIBCMTD.lib
+  LFLAGS += nafxcwd.lib libcmtd.lib
+  LFLAGS += libprotobufd.lib
+  LFLAGS += -DEBUG 
+  LFLAGS += -PDB:./$(OUTPUTDIR)/LWSI.pdb
+else
+  LFLAGS += -NODEFAULTLIB:LIBCMT.lib
+  LFLAGS += nafxcw.lib libcmt.lib
+  LFLAGS += libprotobuf.lib
+endif
+
+LFLAGS += -SUBSYSTEM:CONSOLE
+LFLAGS += -machine:x86
+LFLAGS += -LARGEADDRESSAWARE
+LFLAGS += -map
+
+#LFLAGS += d3d9.lib Kernel32.lib ddraw.lib gdi32.lib dxguid.lib 
+LFLAGS += Kernel32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib
+LFLAGS += oleaut32.lib uuid.lib odbc32.lib odbccp32.lib user32.lib 
+#LFLAGS += Version.lib opengl32.lib wbemuuid.lib Ws2_32.lib
+LFLAGS += Version.lib wbemuuid.lib Ws2_32.lib
+
+LFLAGS += $(OBJECTS) $(PCH_OBJECTS)
+
+$(OUTPUTDIR)/LWSI.res: LWSI.rc
+	@$(ECHO) Resource Compiling: [$(shell $(FULLPATH) $<)]
+	$(RC) $(strip $(RCFLAGS)) $(shell $(FULLPATH) $<)
+
+#ProtobufUtil.cpp:: lwsi.pb.h
+Main.cpp:: $(OUTPUTDIR)/lwsi.pb.h
+Main.cpp:: $(OUTPUTDIR)/lwapi.h
+
+$(OUTPUTDIR)/lwsi.pb.cc: lwsi.proto
+
+# Autogenerate the LWSI protocol buffers files
+$(OUTPUTDIR)/lwsi.pb.h: lwsi.proto 
+	@$(ECHO) Generating protocol buffer implementation files from $(shell $(FULLPATH) $<)
+	$(PROTOBUF_DIR)/bin/protoc --cpp_out=$(OUTPUTDIR) lwsi.proto
+	
+$(OUTPUTDIR)/lwsi.pb.obj: $(OUTPUTDIR)/lwsi.pb.cc
+	$(subst /,\,$(CC)) -c $(strip $(CFLAGS)) $(shell $(FULLPATH) $<)
+	
+ifeq ($(LW_SELWRITY),0)
+$(OUTPUTDIR)/LWSI.exe: $(childLibraries) $(LWAPI_IFACE) $(OUTPUTDIR)/lwsi.res $(OBJECTS) $(PCH_OBJECTS)
+	@$(ECHO) Building $@...
+	@$(FILEECHO) $(OUTPUTDIR)/linkParameters.txt $(OUTPUTDIR)/lwsi.res $(strip $(LFLAGS))
+	$(LINK) @$(OUTPUTDIR)/linkParameters.txt
+else
+#
+#
+# Final exe encryption step to produce our EXE
+#
+$(OUTPUTDIR)/LWSI.exe:  $(OUTPUTDIR)/LWSI.exe_
+	$(LW_SELWRITY_POSTPROC) $(OUTPUTDIR)/LWSI.exe_ lwsi_selwrity.cfg
+
+# Here's how the security post processing works:
+#    Build the full unencrypted PreLWSI.exe along with PreLWSI.map
+#    Generate ExeEncrypt.cpp from the exe and map file using postproc.exe and lwsi_selwrity.cfg
+#    RE-build an unencrypted LWSI.exe_ file which includes ExeEncrypt.obj
+#    Build the encrypted LWSI.exe file by running postproc.exe on LWSI.exe_
+
+$(OUTPUTDIR)/LWSI.exe_: $(OUTPUTDIR)/ExeEncrypt.obj $(LWAPI_IFACE) $(OUTPUTDIR)/LWSI.res $(OBJECTS) $(PCH_OBJECTS) 
+	@$(ECHO) Building $@...
+	@$(FILEECHO) $(OUTPUTDIR)/linkParameters.txt $(OUTPUTDIR)/ExeEncrypt.obj $(OUTPUTDIR)/lwsi.res $(strip $(LFLAGS))
+	$(LINK) @$(OUTPUTDIR)/linkParameters.txt
+
+$(OUTPUTDIR)/PreLWSI.exe: $(LWAPI_IFACE) $(OUTPUTDIR)/lwsi.res $(OBJECTS) $(PCH_OBJECTS)
+	@$(ECHO) Building $@...
+	@$(FILEECHO) $(OUTPUTDIR)/linkParameters.txt $(OUTPUTDIR)/lwsi.res $(strip $(LFLAGS))
+	$(LINK) @$(OUTPUTDIR)/linkParameters.txt
+
+$(OUTPUTDIR)/ExeEncrypt.cpp: $(OUTPUTDIR)/PreLWSI.exe lwsi_selwrity.cfg $(LW_SELWRITY_POSTPROC)
+	@$(ECHO) Generating ExeEncrypt.cpp
+	$(LW_SELWRITY_POSTPROC) $(OUTPUTDIR)/PreLWSI.exe lwsi_selwrity.cfg $(OUTPUTDIR)/ExeEncrypt.cpp
+
+endif
+
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/lwapi.h
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/lwapi.lib
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/LWSI.exe_
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/LinkParameters.txt
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/PreLWSI.*
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/LWSI.map
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/LWSI.res
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/LWSI.pdb
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/LWSI.res
+OTHER_FILES_TO_REMOVE += $(OUTPUTDIR)/ExeEncrypt.cpp
+OTHER_FILES_TO_REMOVE += lwsi.pb.*
+
+build: $(addsuffix .build,$(SUBDIRS)) $(OUTPUTDIR)/$(TARGET_EXE)
+
+$(OUTPUTDIR)/$(TARGET_EXE): $(OUTPUTDIR_ABSOLUTE)
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

@@ -1,0 +1,49 @@
+##############################################################################
+#
+# Copyright (c) 2018-2020, LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+###############################################################################
+
+# Makefile variables for using the nn::gll OpenGL loader. For some projects,
+# adding the include directories and linker symbols to the default tmake
+# include path and dummy symbol repository causes build regressions. So we
+# define them in a separate opt-in makefile fragment for the projects that
+# can use them. See Bug 2071999.
+
+ifneq ($(LW_LWSTOMER_HOS_DDK_ROOT),)
+_toolchain_ddk_root := $(LW_LWSTOMER_HOS_DDK_ROOT)
+else
+_toolchain_ddk_root := $(LW_SOURCE)/3rdparty/hos-ddk-minimal/ddk
+endif
+
+# To be added to LW_COMPONENT_INCLUDES
+LW_NN_GLL_INCLUDES = \
+    $(_toolchain_ddk_root)/Programs/Eris/Outputs/Include
+
+ifeq ($(LW_TARGET_ARCH),hos_64)
+  ifeq ($(LW_HOS_SELWRE_BUILD),1)
+    _arch_dir := NX-NXFP2-a64-cfi
+  else
+    _arch_dir := NX-NXFP2-a64
+  endif
+else
+  _arch_dir := NX-NXFP2-a32
+endif
+
+ifeq ($(LW_BUILD_CONFIGURATION_IS_DEBUG),1)
+  _build_dir := Debug
+else ifeq ($(LW_BUILD_CONFIGURATION_IS_DEVELOP),1)
+  _build_dir := Develop
+else
+  _build_dir := Release
+endif
+
+# To be added to LW_COMPONENT_OBJECTS_PREBUILT
+LW_NN_GLL_PREBUILTS := \
+    $(_toolchain_ddk_root)/Programs/Eris/Libraries/$(_arch_dir)/$(_build_dir)/libnn_gll.a

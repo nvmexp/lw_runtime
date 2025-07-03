@@ -1,0 +1,29 @@
+###############################################################################
+#
+# Copyright (c) 2019-2020 LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+#
+###############################################################################
+
+##############################################################################
+# makefile fragment for generating a liblwscibuf.so DSO stub
+##############################################################################
+LWSCIBUF_DSO_STUB = $(OUTPUTDIR)/liblwscibuf-stub.so
+
+LWSCIBUF_TEGRA_EXPORTS = $(LWSCI_PATH)/lwscibuf/liblwscibuf.export
+LWSCIBUF_EXPORTS := $(OUTPUTDIR)/lwscibuf-exports.txt
+
+$(LWSCIBUF_EXPORTS): $(LWSCIBUF_TEGRA_EXPORTS)
+	$(SED) -e 's/@[0-9]\+//' \
+	    -e 's/^\([^#].\+\)$$/\1 func/' \
+	    $(LWSCIBUF_TEGRA_EXPORTS) > \
+	    $(LWSCIBUF_EXPORTS)
+
+$(eval $(call GEN_DSO_STUB_RULE, \
+  $(LWSCIBUF_DSO_STUB),$(LWSCIBUF_EXPORTS),liblwscibuf.so.1,,))

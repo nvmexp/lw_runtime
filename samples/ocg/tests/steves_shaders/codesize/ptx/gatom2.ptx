@@ -1,0 +1,79 @@
+.version 3.1 
+.target sm_30
+.global .f32 gf;
+.global .s32 gs;
+.global .u32 gu;
+.global .u64 gul;
+
+.entry main {
+   .reg .s32 as, bs;
+   .reg .u32 au, bu;
+   .reg .f32 af, bf;
+   .reg .u64 aul, bul;
+   .reg .u64 addr;
+
+   // atomic add
+   mov.f32 af, 0.0;
+   atom.global.add.f32 af, [gf], 3.5;
+
+   atom.global.add.s32 as, [gs], 3;
+   atom.global.add.u32 au, [gu], 44;
+   atom.global.add.u64 aul, [gul + 8], 1;
+
+   // Bitwise operations
+   atom.global.and.b32 au, [gu], au;
+   atom.global.or.b32  au, [gu], au;
+   atom.global.xor.b32 au, [gu], au;
+
+   // Inc/Dec
+   atom.global.inc.u32  au, [gu], 55;
+   atom.global.dec.u32  au, [gu], 101;
+
+   // Min/Max
+   atom.global.min.u32  au, [gu], 55;
+   atom.global.max.s32  as, [gs], 555;
+
+   // exch, swap
+   atom.global.cas.b32   au, [gu], au, 444;
+   atom.global.exch.b32  au, [gu], au;
+
+   mov.b64 bul, 0;
+   atom.global.cas.b64   aul, [gul], aul, bul;
+   atom.global.exch.b64  aul, [gul], aul;
+
+   bar.sync 0;
+  
+   // global atomic ops with extended address 
+   ld.global.u64 addr, [gul + 16];
+   atom.global.add.s32 as, [addr], as;
+   atom.global.cas.b64   aul, [addr], aul, bul;
+
+   st.global.s32 [gs], as;
+   st.global.u32 [gu], au;
+   st.global.f32 [gf], af;
+   st.global.u64 [gul], aul;
+
+
+   bar.sync 0;
+
+   // Global memory reduction
+   // add
+   red.global.add.s32  [gs + 8], 44;
+   red.global.add.u32  [gu + 16], 66;
+   red.global.add.u64  [gul + 64], aul;
+
+   // Bitwise
+   red.global.and.b32  [gs], as;
+   red.global.xor.b32  [gu], 44;
+   red.global.or.b32   [gu], 90;
+
+   // Inc, Dec
+   red.global.inc.u32  [gu], 33;
+   red.global.dec.u32  [gu], 3;
+
+   // Min, Max
+   red.global.min.s32  [gs], 44;
+   red.global.max.u32  [gu], 34;
+
+   exit;
+}

@@ -1,0 +1,365 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include <stdio.h>
+#include <lwda_runtime.h>
+
+#include "lwphy.h"
+#include "lwphy_internal.h"
+#include "tensor_desc.hpp"
+
+#define K 56  // number of pbch layload + crc bits
+#define E 864 // number of pbch bits, always 864
+#define Nc 1600
+#define N 288 // Desired length of the gold sequence
+
+using namespace lwphy_i;
+
+lwphyStatus_t lwphyGenerateSyncSignal(const uint32_t NID, int16_t* outputPSS, int16_t* outputSSS)
+{
+    lwphyStatus_t status = LWPHY_STATUS_SUCCESS;
+    if(NID > 1007)
+    {
+        fprintf(stderr,
+                "ERROR: Maximum value of NID is "
+                "%u\n",
+                1007);
+        status = LWPHY_STATUS_ILWALID_ARGUMENT;
+        return status;
+    }
+
+    // Callwlate NID1 and NID2 using input NID
+    int16_t NID1 = NID / 3;
+    int16_t NID2 = NID % 3;
+
+    // Generate x sequences
+    int16_t PSS_X[127]  = {0, 1, 1, 0, 1, 1, 1};
+    int16_t SSS_X0[127] = {1, 0, 0, 0, 0, 0, 0};
+    int16_t SSS_X1[127] = {1, 0, 0, 0, 0, 0, 0};
+    for(int i = 7; i < 127; i++)
+    {
+        PSS_X[i]  = PSS_X[i - 3] ^ PSS_X[i - 7];
+        SSS_X0[i] = SSS_X0[i - 3] ^ SSS_X0[i - 7];
+        SSS_X1[i] = SSS_X1[i - 6] ^ SSS_X1[i - 7];
+    }
+
+    // Callwlate dPSS and dSSS
+    for(int i = 0; i < 127; i++)
+    {
+        int16_t m    = (i + 43 * NID2) % 127;
+        outputPSS[i] = 1 - 2 * PSS_X[m];
+
+        int16_t m0 = NID1 / 112 * 15 + 5 * NID2;
+        int16_t m1 = NID1 % 112;
+
+        int16_t lower_half = 1 - 2 * SSS_X0[(i + m0) % 127];
+        int16_t upper_half = 1 - 2 * SSS_X1[(i + m1) % 127];
+        outputSSS[i]       = lower_half * upper_half;
+    }
+    return status;
+}
+
+void deriveSSIndex(const uint32_t NID, uint32_t* dmrs_idx, uint32_t* qam_idx, uint32_t* pss_idx, uint32_t* sss_idx)
+{
+    for(int i = 56; i < 183; i++)
+    {
+        pss_idx[i - 56] = i;
+        sss_idx[i - 56] = i + 240 * 2;
+    }
+
+    uint32_t v              = NID % 4;
+    uint32_t basicQAMIdx[9] = {0};
+    for(int i = 0, index = 0; i < 12; i++)
+    {
+        if(i == v || i == v + 4 || i == v + 8)
+            continue;
+        basicQAMIdx[index] = i;
+        ++index;
+    }
+
+    // Compute indicies for 2nd and 4th SS block symbol
+    for(int i = 0; i < 20; i++)
+    {
+        dmrs_idx[3 * i]     = v + 12 * i + 240;
+        dmrs_idx[3 * i + 1] = v + 4 + 12 * i + 240;
+        dmrs_idx[3 * i + 2] = v + 8 + 12 * i + 240;
+
+        dmrs_idx[3 * i + 28 * 3]     = v + 12 * i + 3 * 240;
+        dmrs_idx[3 * i + 1 + 28 * 3] = v + 4 + 12 * i + 3 * 240;
+        dmrs_idx[3 * i + 2 + 28 * 3] = v + 8 + 12 * i + 3 * 240;
+        for(int j = 0; j < 9; j++)
+        {
+            qam_idx[9 * i + j]          = basicQAMIdx[j] + 12 * i + 240;
+            qam_idx[9 * i + j + 28 * 9] = basicQAMIdx[j] + 12 * i + 3 * 240;
+        }
+    }
+
+    // Compute indices for 3rd SS block symbol
+    for(int i = 0; i < 4; i++)
+    {
+        dmrs_idx[3 * i + 20 * 3]     = v + 12 * i + 2 * 240;
+        dmrs_idx[3 * i + 1 + 20 * 3] = v + 4 + 12 * i + 2 * 240;
+        dmrs_idx[3 * i + 2 + 20 * 3] = v + 8 + 12 * i + 2 * 240;
+
+        dmrs_idx[3 * i + 24 * 3]     = v + 12 * i + 2 * 240 + 192;
+        dmrs_idx[3 * i + 1 + 24 * 3] = v + 4 + 12 * i + 2 * 240 + 192;
+        dmrs_idx[3 * i + 2 + 24 * 3] = v + 8 + 12 * i + 2 * 240 + 192;
+
+        for(int j = 0; j < 9; j++)
+        {
+            qam_idx[9 * i + j + 20 * 9] = basicQAMIdx[j] + 12 * i + 2 * 240;
+            qam_idx[9 * i + j + 24 * 9] = basicQAMIdx[j] + 12 * i + 2 * 240 + 192;
+        }
+    }
+}
+
+template <typename TComplex>
+__device__ void qpsk_mod_device(const uint32_t* input, TComplex* out, uint32_t tid)
+{
+    typedef typename scalar_from_complex<TComplex>::type scalar_t;
+    uint32_t                                             bIdx = 2 * tid;
+    out[tid].x                                                = static_cast<scalar_t>(0.70710678f * (1 - 2 * static_cast<float>(input[bIdx])));
+    out[tid].y                                                = static_cast<scalar_t>(0.70710678f * (1 - 2 * static_cast<float>(input[bIdx + 1])));
+}
+
+LWDA_BOTH void build_Gold_sequence(uint32_t L_max, uint32_t block_idx, uint32_t n_hf, uint32_t NID, uint32_t* c)
+{
+    int i_ssb = 0;
+    if(L_max == 4)
+    {
+        i_ssb = block_idx % 4;
+        i_ssb += 4 * n_hf;
+    }
+    else
+    {
+        i_ssb = block_idx % 8;
+    }
+
+    uint32_t c_init = (0x1 << 11) * (i_ssb + 1) * (NID / 4 + 1) +
+                      (0x1 << 6) * (i_ssb + 1) + NID % 4;
+
+    uint32_t x1[N + Nc] = {0}, x2[N + Nc] = {0};
+    x1[0] = 1;
+
+    // uint32_t c_init_shift = c_init;
+    // uint32_t msb = 0x80000000 & c_init;
+    // uint32_t bits_shifted = 0;
+    // // while (bits_to1 < 32)
+    // // {
+    // // 	if (c_init_shift & 1 == 1)
+    // // 	{
+    // // 		bits_shifted = bits_to1;
+    // // 	}
+    // // 	c_init_shift >>= 1;
+    // // 	bits_to1++;
+    // // }
+    // while (msb == 0)
+    // {
+    // 	c_init <<= 1;
+    // 	bits_shifted++;
+    // 	msb = 0x80000000 & c_init;
+    // }
+
+    // for (int i = 0; bits_shifted < 32; i++)
+    // {
+    // 	x2[i] = ((0x80000000 & c_init) == 0)? 0: 1;
+    // 	c_init <<= 1;
+    // 	bits_shifted++;
+    // }
+
+    for(int i = 0; i < 32; i++)
+    {
+        x2[i] = 0x1 & c_init;
+        c_init >>= 1;
+    }
+
+    for(int i = 0; i < N + Nc - 31; i++)
+    {
+        x1[i + 31] = (x1[i + 3] + x1[i]) % 2;                         // x1(n + 31) = mod(x1(n + 3) + x1(n),2)
+        x2[i + 31] = (x2[i + 3] + x2[i + 2] + x2[i + 1] + x2[i]) % 2; // x2(n + 31) = mod(x2(n + 3) + x2(n + 2) + x2(n + 1) + x2(n),2)
+    }
+
+    for(int i = 0; i < N; i++)
+    {
+        c[i] = (x1[i + Nc] + x2[i + Nc]) % 2; // c(n) = mod(x1(n + Nc) + x2(n + Nc),2)
+    }
+}
+
+template <typename TComplex>
+__global__ void qpsk_modulate(const uint32_t* input, TComplex* output, const uint32_t e)
+{
+    uint32_t M_sym = e / 2;
+    uint32_t tid   = blockIdx.x * blockDim.x + threadIdx.x;
+    if(tid >= M_sym) return;
+
+    qpsk_mod_device(input, output, tid);
+}
+
+__global__ void build_pbch_dmrs(uint32_t L_max, uint32_t block_idx, uint32_t n_hf, uint32_t NID, uint32_t* c, lwComplex* r)
+{
+    uint32_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+    if(tid >= N) return;
+
+    if(tid == 0)
+        build_Gold_sequence(L_max, block_idx, n_hf, NID, c);
+
+    qpsk_mod_device(c, r, N);
+}
+
+// The kernel for mapping the signal to time and frequency domain
+// The kernel should be launched with dim3(4, 240)
+template <typename TComplex>
+__global__ void assembleTimeFrequencySignal(TComplex*       d_tfSignal,
+                                            const int16_t*  d_PSS,
+                                            const int16_t*  d_SSS,
+                                            const TComplex* d_xQam,
+                                            const TComplex* d_dmrs,
+                                            TComplex*       d_tfSignalSS,
+                                            const uint32_t* d_pssIdx,
+                                            const uint32_t* d_sssIdx,
+                                            const uint32_t* d_xQamIdx,
+                                            const uint32_t* d_dmrsIdx,
+                                            const uint32_t  t0,
+                                            const uint32_t  f0,
+                                            const uint32_t  nF)
+{
+    uint32_t                                             tid = blockDim.y * threadIdx.x + threadIdx.y;
+    typedef typename scalar_from_complex<TComplex>::type scalar_t;
+
+    // Map xQam
+    if(tid < E / 2)
+    {
+        d_tfSignalSS[d_xQamIdx[tid]] = d_xQam[tid];
+    }
+    // Map dmrs
+    if(E / 2 <= tid && tid < (E / 2 + N / 2))
+    {
+        d_tfSignalSS[d_dmrsIdx[tid - E / 2]] = d_dmrs[tid - E / 2];
+    }
+    // Map PSS and SSS
+    if((E / 2 + N / 2) <= tid && tid < (E / 2 + N / 2 + 127))
+    {
+        d_tfSignalSS[d_pssIdx[tid - (E / 2 + N / 2)]].x = static_cast<scalar_t>(d_PSS[tid - (E / 2 + N / 2)]);
+        d_tfSignalSS[d_sssIdx[tid - (E / 2 + N / 2)]].x = static_cast<scalar_t>(d_SSS[tid - (E / 2 + N / 2)]);
+    }
+    __syncthreads();
+
+    if(tid < 240 * 4)
+    {
+        d_tfSignal[(t0 + threadIdx.x) * nF + f0 + threadIdx.y] = d_tfSignalSS[threadIdx.x * 240 + threadIdx.y];
+    }
+}
+
+lwphyStatus_t lwphySSTxPipelinePrepare(void** workspace)
+{
+    size_t workspace_size = 127 * 2 * sizeof(int16_t) + (N + N / 2 + E / 2 + 2 * 128) * sizeof(uint32_t);
+    LWDA_CHECK(lwdaMallocHost(workspace, workspace_size));
+    return LWPHY_STATUS_SUCCESS;
+}
+
+lwphyStatus_t lwphySSTxPipelineFinalize(void** workspace)
+{
+    LWDA_CHECK(lwdaFreeHost(*workspace));
+    *workspace = nullptr;
+    return LWPHY_STATUS_SUCCESS;
+}
+
+// The pipeline now starts with qpsk modulation, earlier steps are skipped
+lwphyStatus_t lwphySSTxPipeline(__half2*          d_xQam,
+                                int16_t*          d_PSS,
+                                int16_t*          d_SSS,
+                                __half2*          d_dmrs,
+                                uint32_t*         d_c,
+                                uint32_t*         d_dmrsIdx,
+                                uint32_t*         d_qamIdx,
+                                uint32_t*         d_pssIdx,
+                                uint32_t*         d_sssIdx,
+                                __half2*          d_tfSignalSS,
+                                const uint32_t*   d_x_scram,
+                                const SSTxParams* param,
+                                __half2*          d_tfSignal,
+                                void*             workspace,
+                                lwdaStream_t      stream)
+{
+    lwphyStatus_t status = LWPHY_STATUS_SUCCESS;
+    if(!param ||
+       !d_PSS ||
+       !d_SSS ||
+       !d_dmrs ||
+       !d_c ||
+       !d_dmrsIdx ||
+       !d_qamIdx ||
+       !d_pssIdx ||
+       !d_sssIdx ||
+       !d_tfSignalSS ||
+       !d_x_scram ||
+       !d_tfSignal ||
+       !workspace)
+    {
+        return LWPHY_STATUS_ILWALID_ARGUMENT;
+    }
+
+    uint32_t* c       = (uint32_t*)workspace;
+    uint32_t* dmrsIdx = c + N;
+    uint32_t* qamIdx  = dmrsIdx + N / 2;
+    uint32_t* pssIdx  = qamIdx + E / 2;
+    uint32_t* sssIdx  = pssIdx + 128;
+
+    int16_t* PSS = (int16_t*)(sssIdx + 128);
+    int16_t* SSS = PSS + 127;
+
+    if(param->NID > 127)
+    {
+        fprintf(stderr,
+                "ERROR: NID = %u. Maximum NID is %u\n",
+                param->NID,
+                127);
+        status = LWPHY_STATUS_ILWALID_ARGUMENT;
+        return status;
+    }
+
+    qpsk_modulate<<<dim3((E / 2 + 128 - 1) / 128), dim3(128), 0, stream>>>(d_x_scram, d_xQam, E);
+
+    // Build PSS and SSS
+    status = lwphyGenerateSyncSignal(param->NID, PSS, SSS);
+    // Copy PSS and SSS to device
+    LWDA_CHECK(lwdaMemcpyAsync(d_PSS, PSS, 127 * sizeof(int16_t), lwdaMemcpyHostToDevice, stream));
+    LWDA_CHECK(lwdaMemcpyAsync(d_SSS, SSS, 127 * sizeof(int16_t), lwdaMemcpyHostToDevice, stream));
+
+    // dmrs generation
+    build_Gold_sequence(param->Lmax, param->blockIndex, param->nHF, param->NID, c);
+
+    LWDA_CHECK(lwdaMemcpyAsync(d_c, c, N * sizeof(uint32_t), lwdaMemcpyHostToDevice, stream));
+    qpsk_modulate<<<dim3((N / 2 + 128 - 1) / 128), dim3(128), 0, stream>>>(d_c, d_dmrs, N);
+
+    // Generate indices and copy to device
+    deriveSSIndex(param->NID, dmrsIdx, qamIdx, pssIdx, sssIdx);
+
+    LWDA_CHECK(lwdaMemcpyAsync(d_dmrsIdx, dmrsIdx, N / 2 * sizeof(uint32_t), lwdaMemcpyHostToDevice, stream));
+    LWDA_CHECK(lwdaMemcpyAsync(d_qamIdx, qamIdx, E / 2 * sizeof(uint32_t), lwdaMemcpyHostToDevice, stream));
+    LWDA_CHECK(lwdaMemcpyAsync(d_pssIdx, pssIdx, 128 * sizeof(uint32_t), lwdaMemcpyHostToDevice, stream));
+    LWDA_CHECK(lwdaMemcpyAsync(d_sssIdx, sssIdx, 128 * sizeof(uint32_t), lwdaMemcpyHostToDevice, stream));
+
+    // Assemble time-frequency signal sequence
+    assembleTimeFrequencySignal<<<1, dim3(4, 240), 0, stream>>>(d_tfSignal,
+                                                                d_PSS,
+                                                                d_SSS,
+                                                                d_xQam,
+                                                                d_dmrs,
+                                                                d_tfSignalSS,
+                                                                d_pssIdx,
+                                                                d_sssIdx,
+                                                                d_qamIdx,
+                                                                d_dmrsIdx,
+                                                                param->t0,
+                                                                param->f0,
+                                                                param->nF);
+    return status;
+}

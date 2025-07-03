@@ -1,0 +1,42 @@
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+}
+
+cbuffer controlBuf
+{
+	float g_sldExposure;
+	float g_sldHighlightsIntensity;
+	float g_sldShadowsIntensity;
+	float g_sldContrast;
+	float g_sldGamma;
+}
+
+Texture2D texColor;
+
+SamplerState samLinear;
+SamplerState samLinearWrap;
+
+void PSMain(in float4 position : SV_Position, in float2 uv: TexCoord, out float4 color : SV_Target)
+{
+	color = texColor.Sample(samLinear, uv);
+
+	color.rgb = ldexp(color.rgb, g_sldExposure * 2);
+
+	float3 shadows = smoothstep(0.666, 0.0, color.rgb);
+	float3 highlights = smoothstep(0.333, 1.0, color.rgb);
+	float3 rest = 1 - shadows - highlights;
+	color.rgb = pow(saturate(color.rgb), exp2(shadows * exp2(g_sldShadowsIntensity) 
+		                                 + highlights * exp2(-g_sldHighlightsIntensity) 
+		                                 + exp2(-g_sldGamma * 2)  
+		                                 + rest - 2)); //correction so all sliders at 0 give 0 in sum
+
+
+	static const float contrastMin = log(0.5); 
+	static const float contrastMax = log(2.0);
+	float contrastFactor = exp(contrastMin  + (g_sldContrast * 0.5 + 0.5) * (contrastMax  - contrastMin));
+
+	color.rgb = (color.rgb - 0.5) * contrastFactor + 0.5;
+}

@@ -1,0 +1,2644 @@
+// BEGIN_SHADER
+//     BEGIN_SECTION SHADER_ID
+//         DIRECTX: 10.0
+//         TYPE: PIXEL 
+//         SHADER_HASH: 0xc63c3083ea23c70b
+//         FINGERPRINTER_HASH: 0x0000000000000000
+//         UCODE_HASH: 0xb45c70aa24f90894
+//         POOL: APP
+//         VERSION: 20
+//         # USES: 2225
+//         # Constant Folding: 1
+//         # Disable 595261: 0
+//         # Reduction Hack: 0
+//         # Tex / Tld vectorized: 0
+//         # Texture Filtering: 0
+//     END_SECTION
+//     BEGIN_SECTION CHIP_ID
+//         CLASS: FERMI
+//         CHIP_ID: GF100
+//         SM_VERSION: SMClassic  // SM 2.0
+//     END_SECTION
+//     BEGIN_SECTION RESOURCES
+//         REGISTER_COUNT: 50
+//         TEXTURE_SLOTS: 20
+//         SAMPLER_SLOTS: 4
+//         THREAD_LOCAL_MEMORY_SIZE: 0x10
+//     END_SECTION
+//     BEGIN_SECTION FERMI_SHADER_HEADER
+//         SPHType: TYPE_02_PS
+//         Version: 3
+//         ShaderType: PIXEL
+//         SassVersion: 1
+//         PROPERTIES:
+//             DOES_LOAD_OR_STORE
+//             SHADER_LOCAL_MEMORY_LOW_SIZE 0x10
+//             MRT_ENABLE
+//         IMAP:
+//             POSITION_W
+//             GENERIC01_X          PERSPECTIVE
+//             GENERIC01_Y          PERSPECTIVE
+//             GENERIC01_Z          PERSPECTIVE
+//             GENERIC02_X          PERSPECTIVE
+//             GENERIC02_Y          PERSPECTIVE
+//             GENERIC02_Z          PERSPECTIVE
+//             GENERIC03_X          PERSPECTIVE
+//             GENERIC03_Y          PERSPECTIVE
+//             GENERIC04_X          PERSPECTIVE
+//             GENERIC04_Y          PERSPECTIVE
+//             GENERIC04_Z          PERSPECTIVE
+//             GENERIC05_X          PERSPECTIVE
+//             GENERIC05_Y          PERSPECTIVE
+//             GENERIC05_Z          PERSPECTIVE
+//         OMAP:
+//             TARGET00_R
+//             TARGET00_G
+//             TARGET00_B
+//             TARGET00_A
+//     END_SECTION
+//     BEGIN_SECTION APP_SHADER_INFO
+        ps_4_0
+        dcl_input_ps_siv v0.w, position, linear noperspective
+        dcl_input_ps v1.xyz, linear
+        dcl_input_ps v2.xyz, linear
+        dcl_input_ps v3.xy, linear
+        dcl_input_ps v4.xyz, linear
+        dcl_input_ps v5.xyz, linear
+        dcl_output o0.xyzw
+        dcl_constantbuffer cb0[9].xyzw, immediateIndexed
+        dcl_constantbuffer cb1[5].xyzw, immediateIndexed
+        dcl_constantbuffer cb2[64].xyzw, dynamicIndexed
+        dcl_constantbuffer cb3[160].xyzw, dynamicIndexed
+        dcl_constantbuffer cb4[7].xyzw, immediateIndexed
+        dcl_constantbuffer cb5[14].xyzw, dynamicIndexed
+        dcl_constantbuffer cb6[7].xyzw, immediateIndexed
+        dcl_immediateconstantbuffer { { 0, 0, 0, 0 } } 
+        dcl_sampler s0, mode_default
+        dcl_sampler s1, mode_default
+        dcl_sampler s2, mode_default
+        dcl_sampler s3, mode_default
+        dcl_resource t0, texture2d, (float, float, float, float)
+        dcl_resource t1, texture2d, (float, float, float, float)
+        dcl_resource t2, texture2d, (float, float, float, float)
+        dcl_resource t3, texture2d, (float, float, float, float)
+        dcl_resource t4, texture2d, (float, float, float, float)
+        dcl_resource t5, texture2d, (float, float, float, float)
+        dcl_resource t6, texture2d, (float, float, float, float)
+        dcl_resource t7, texture2d, (float, float, float, float)
+        dcl_resource t8, texture1d, (float, float, float, float)
+        dcl_resource t9, texture2d, (float, float, float, float)
+        dcl_resource t10, texture2darray, (float, float, float, float)
+        dcl_resource t11, texture1d, (float, float, float, float)
+        dcl_resource t12, texture2darray, (float, float, float, float)
+        dcl_resource t13, texture1d, (float, float, float, float)
+        dcl_resource t14, texture2darray, (float, float, float, float)
+        dcl_resource t15, texture1d, (float, float, float, float)
+        dcl_resource t16, texture1d, (float, float, float, float)
+        dcl_resource t17, texture1d, (float, float, float, float)
+        dcl_resource t18, texture2darray, (float, float, float, float)
+        dcl_resource t19, texture1d, (float, float, float, float)
+        dcl_temps 21 
+        dp3 r0.x, v4.xyzx, v4.xyzx
+        rsq r0.x, r0.x
+        mul r0.xyzw, r0.xxxx, v4.yzzx
+        dp3 r1.x, v5.xyzx, v5.xyzx
+        rsq r1.x, r1.x
+        mul r1.xyzw, r1.xxxx, v5.zyxz
+        dp3 r2.x, v2.xyzx, v2.xyzx
+        rsq r2.x, r2.x
+        mul r2.xyzw, r2.xxxx, v2.yzzx
+        add r3.xyz, -v1.xyzx, cb0[8].xyzx
+        dp3 r3.w, r3.xyzx, r3.xyzx
+        rsq r3.w, r3.w
+        mul r4.xyz, r3.xyzx, r3.wwww
+        mul r5.xy, r1.wzww, r2.xzxx
+        mul r5.zw, r0.xxxz, r2.yyyw
+        mul r6.xy, r0.ywyy, r1.ywyy
+        mad r7.xy, r2.zwzz, r1.ywyy, -r5.xyxx
+        mad r5.xy, r2.xzxx, r0.zwzz, -r5.zwzz
+        mad r0.yz, r1.xxzx, r0.xxzx, -r6.xxyx
+        mul r1.x, r1.y, r2.w
+        mad r6.x, r2.x, r1.z, -r1.x
+        mul r1.x, r0.w, r2.x
+        mad r6.y, r2.w, r0.x, -r1.x
+        mul r0.x, r0.x, r1.z
+        mad r6.z, r1.y, r0.w, -r0.x
+        mul r0.x, r1.z, r5.x
+        mad r0.x, r0.w, r7.x, r0.x
+        mad r0.x, r2.w, r0.y, r0.x
+        mov r7.z, r5.x
+        mov r7.w, r0.y
+        div r1.xyz, r7.xzwx, r0.xxxx
+        mov r5.z, r7.y
+        mov r5.w, r0.z
+        div r0.yzw, r5.zzyw, r0.xxxx
+        div r2.xyz, r6.xyzx, r0.xxxx
+        mul r5.xy, v3.xyxx, cb1[1].wwww
+        sample r5.xyzw, r5.xyxx, t0.xyzw, s0
+        mul r6.xy, v3.xyxx, cb1[2].xxxx
+        sample r6.xyzw, r6.xyxx, t1.xyzw, s0
+        add r6.xyz, -r5.xyzx, r6.xyzx
+        mad r5.xyz, cb1[2].yyyy, r6.xyzx, r5.xyzx
+        sample r6.xyzw, v3.xyxx, t2.xyzw, s0
+        mul r5.xyz, r5.xyzx, cb1[0].xyzx
+        mad r0.x, -cb1[2].z, r6.x, l(1.00000000)
+        mul r5.xyz, r5.xyzx, r0.xxxx
+        mul r6.yz, v3.xxyx, cb1[4].zzzz
+        sample r7.xyzw, r6.yzyy, t6.xyzw, s0
+        mul r6.yz, v3.xxyx, cb1[4].wwww
+        sample r8.xyzw, r6.yzyy, t7.xyzw, s0
+        mul r0.x, r7.x, r8.x
+        mul r6.yz, v3.xxyx, cb1[3].yyyy
+        sample r7.xyzw, r6.yzyy, t3.xyzw, s0
+        mad r6.yz, r7.xxyx, l(0.00000000, 2.00000000, 2.00000000, 0.00000000), l(0.00000000, -1.00000000, -1.00000000, 0.00000000)
+        mad r1.w, -r6.y, r6.y, l(1.00000000)
+        mad r1.w, -r6.z, r6.z, r1.w
+        max r1.w, r1.w, l(0.00000000)
+        sqrt r6.w, r1.w
+        mul r7.xy, v3.xyxx, cb1[3].zzzz
+        sample r7.xyzw, r7.xyxx, t4.xyzw, s0
+        mad r7.xy, r7.xyxx, l(2.00000000, 2.00000000, 0.00000000, 0.00000000), l(-1.00000000, -1.00000000, 0.00000000, 0.00000000)
+        mad r1.w, -r7.x, r7.x, l(1.00000000)
+        mad r1.w, -r7.y, r7.y, r1.w
+        max r1.w, r1.w, l(0.00000000)
+        sqrt r1.w, r1.w
+        mul r7.zw, v3.xxxy, cb1[3].wwww
+        sample r8.xyzw, r7.zwzz, t5.xyzw, s0
+        mad r7.zw, r8.xxxy, l(0.00000000, 0.00000000, 2.00000000, 2.00000000), l(0.00000000, 0.00000000, -1.00000000, -1.00000000)
+        mad r2.w, -r7.z, r7.z, l(1.00000000)
+        mad r2.w, -r7.w, r7.w, r2.w
+        max r2.w, r2.w, l(0.00000000)
+        sqrt r2.w, r2.w
+        div r4.w, -r7.y, r1.w
+        min r5.w, |r4.w|, l(1.00000000)
+        max r7.y, |r4.w|, l(1.00000000)
+        div r7.y, l(1.00000000, 1.00000000, 1.00000000, 1.00000000), r7.y
+        mul r5.w, r5.w, r7.y
+        mul r7.y, r5.w, r5.w
+        mad r8.x, r7.y, l(0.02083510), l(-0.08513300)
+        mad r8.x, r7.y, r8.x, l(0.18014100)
+        mad r8.x, r7.y, r8.x, l(-0.33029950)
+        mad r7.y, r7.y, r8.x, l(0.99986601)
+        mul r8.x, r5.w, r7.y
+        lt r8.y, l(1.00000000), |r4.w|
+        mad r8.x, r8.x, l(-2.00000000), l(1.57079637)
+        and r8.x, r8.y, r8.x
+        mad r5.w, r5.w, r7.y, r8.x
+        min r4.w, r4.w, l(1.00000000)
+        lt r4.w, r4.w, -r4.w
+        movc r4.w, r4.w, -r5.w, r5.w
+        div r5.w, -r7.w, r2.w
+        min r7.y, |r5.w|, l(1.00000000)
+        max r7.w, |r5.w|, l(1.00000000)
+        div r7.w, l(1.00000000, 1.00000000, 1.00000000, 1.00000000), r7.w
+        mul r7.y, r7.y, r7.w
+        mul r7.w, r7.y, r7.y
+        mad r8.x, r7.w, l(0.02083510), l(-0.08513300)
+        mad r8.x, r7.w, r8.x, l(0.18014100)
+        mad r8.x, r7.w, r8.x, l(-0.33029950)
+        mad r7.w, r7.w, r8.x, l(0.99986601)
+        mul r8.x, r7.y, r7.w
+        lt r8.y, l(1.00000000), |r5.w|
+        mad r8.x, r8.x, l(-2.00000000), l(1.57079637)
+        and r8.x, r8.y, r8.x
+        mad r7.y, r7.y, r7.w, r8.x
+        min r5.w, r5.w, l(1.00000000)
+        lt r5.w, r5.w, -r5.w
+        movc r5.w, r5.w, -r7.y, r7.y
+        mul r5.w, r5.w, cb1[4].y
+        mad r4.w, cb1[4].x, r4.w, r5.w
+        div r1.w, r7.x, r1.w
+        min r5.w, |r1.w|, l(1.00000000)
+        max r7.x, |r1.w|, l(1.00000000)
+        div r7.x, l(1.00000000, 1.00000000, 1.00000000, 1.00000000), r7.x
+        mul r5.w, r5.w, r7.x
+        mul r7.x, r5.w, r5.w
+        mad r7.y, r7.x, l(0.02083510), l(-0.08513300)
+        mad r7.y, r7.x, r7.y, l(0.18014100)
+        mad r7.y, r7.x, r7.y, l(-0.33029950)
+        mad r7.x, r7.x, r7.y, l(0.99986601)
+        mul r7.y, r5.w, r7.x
+        lt r7.w, l(1.00000000), |r1.w|
+        mad r7.y, r7.y, l(-2.00000000), l(1.57079637)
+        and r7.y, r7.w, r7.y
+        mad r5.w, r5.w, r7.x, r7.y
+        min r1.w, r1.w, l(1.00000000)
+        lt r1.w, r1.w, -r1.w
+        movc r1.w, r1.w, -r5.w, r5.w
+        div r2.w, r7.z, r2.w
+        min r5.w, |r2.w|, l(1.00000000)
+        max r7.x, |r2.w|, l(1.00000000)
+        div r7.x, l(1.00000000, 1.00000000, 1.00000000, 1.00000000), r7.x
+        mul r5.w, r5.w, r7.x
+        mul r7.x, r5.w, r5.w
+        mad r7.y, r7.x, l(0.02083510), l(-0.08513300)
+        mad r7.y, r7.x, r7.y, l(0.18014100)
+        mad r7.y, r7.x, r7.y, l(-0.33029950)
+        mad r7.x, r7.x, r7.y, l(0.99986601)
+        mul r7.y, r5.w, r7.x
+        lt r7.z, l(1.00000000), |r2.w|
+        mad r7.y, r7.y, l(-2.00000000), l(1.57079637)
+        and r7.y, r7.z, r7.y
+        mad r5.w, r5.w, r7.x, r7.y
+        min r2.w, r2.w, l(1.00000000)
+        lt r2.w, r2.w, -r2.w
+        movc r2.w, r2.w, -r5.w, r5.w
+        mul r2.w, r2.w, cb1[4].y
+        mad r1.w, cb1[4].x, r1.w, r2.w
+        sincos null, r7.x, r4.w
+        sincos r2.w, null, r4.w
+        mov r7.y, -r2.w
+        sincos null, r8.x, r1.w
+        sincos r1.w, null, r1.w
+        mov r9.x, -r1.w
+        mul r8.y, r2.w, r1.w
+        mul r8.z, r7.x, r1.w
+        mul r9.y, r2.w, r8.x
+        mul r9.z, r7.x, r8.x
+        dp3 r8.x, r8.xyzx, r6.yzwy
+        dp2 r8.y, r7.xyxx, r6.zwzz
+        dp3 r8.z, r9.xyzx, r6.yzwy
+        dp3 r1.w, r8.xyzx, r8.xyzx
+        rsq r1.w, r1.w
+        mul r6.yzw, r8.xxyz, r1.wwww
+        mul r7.xyz, r6.xxxx, cb1[1].xyzx
+        dp3 r1.x, r1.xyzx, r6.yzwy
+        dp3 r1.w, r0.yzwy, r6.yzwy
+        dp3 r1.y, r2.xyzx, r6.yzwy
+        mul r0.z, cb4[4].w, cb4[4].y
+        add r2.x, v1.y, l(1.00000000)
+        add_sat r2.y, r1.w, l(1.00000000)
+        mul r2.y, r2.y, cb4[6].z
+        mov r1.z, l(0)
+        dp3 r2.z, cb4[4].xyzx, v1.xyzx
+        add r2.z, r2.z, -cb4[4].w
+        mov r6.yzw, l(0, 0, 0, 0)
+        mov r8.w, l(0x3f800000)
+        mov r9.yzw, l(0, 0, 0, 0)
+        mov r10.y, l(0)
+        mov r0.yw, v1.xxxz
+        mov r11.w, l(0x3f800000)
+        mov r12.y, cb4[5].w
+        mov r12.x, l(0)
+        mov r13.yz, l(0, 0, 0, 0)
+        mov r14.y, l(0)
+        mov r14.x, cb4[5].y
+        mov r15.z, cb4[5].x
+        mov r15.y, l(0)
+        mov r16.xyzw, l(0, 0, 0, 0)
+        mov r2.w, l(0)
+        loop 
+          ige r4.w, r2.w, cb6[0].x
+          breakc_nz r4.w
+          mov r17.xyz, l(0, 0, 0, 0)
+          mov r4.w, l(0)
+          mov r5.w, l(0)
+          mov r7.w, l(0)
+          loop 
+            ge r10.w, r7.w, l(4.00000000)
+            breakc_nz r10.w
+            ftou r10.w, r7.w
+            mov r10.xz, icb[r10.w].xxyx
+            mad r10.xzw, r10.xxyz, r2.xxxx, r0.yyzw
+            mad r10.xzw, r1.xxzy, r2.yyyy, r10.xxzw
+            add r10.xzw, r10.xxzw, -v1.xxyz
+            mul r12.zw, -r10.xxxz, cb4[4].xxxy
+            add r12.z, r12.w, r12.z
+            mad r12.z, cb4[4].z, -r10.w, r12.z
+            ne r12.w, r12.z, l(0.00000000)
+            div r12.z, r2.z, r12.z
+            mad r10.xzw, r12.zzzz, r10.xxzw, v1.xxyz
+            movc r11.xyz, r12.wwww, r10.xzwx, v1.xyzx
+            dp4 r10.x, cb4[0].xyzw, r11.xyzw
+            dp4 r10.z, cb4[1].xyzw, r11.xyzw
+            add r10.x, r10.x, l(1.00000000)
+            mul r10.x, r10.x, l(0.50000000)
+            add r10.z, r10.z, l(1.00000000)
+            mul r10.w, r10.z, l(0.50000000)
+            sample r18.xyzw, r10.xwxx, t9.xyzw, s1
+            add r12.zw, r12.yyyx, r10.xxxw
+            sample r19.xyzw, r12.zwzz, t9.xyzw, s1
+            add r10.xz, r12.xxyx, r10.xxwx
+            sample r20.xyzw, r10.xzxx, t9.xyzw, s1
+            mul r13.x, r18.x, cb4[6].x
+            mul r15.x, r19.x, cb4[6].x
+            mul r14.z, r20.x, cb4[6].x
+            add r10.xzw, -r13.zzyx, r14.xxyz
+            add r18.xyz, -r13.xyzx, r15.xyzx
+            mul r19.xyz, r10.xzwx, r18.xyzx
+            mad r10.xzw, r10.wwxz, r18.yyzx, -r19.xxyz
+            dp3 r12.z, r10.xzwx, r10.xzwx
+            rsq r12.z, r12.z
+            mul r18.xyz, r10.xzwx, r12.zzzz
+            add r19.xyz, r11.xyzx, -v1.xyzx
+            dp3 r10.x, r19.xyzx, r19.xyzx
+            rsq r10.w, r10.x
+            mul r19.xyz, r19.xyzx, r10.wwww
+            dp3 r10.w, r18.xyzx, r19.xyzx
+            mad r10.z, -r10.z, r12.z, l(1.00000000)
+            mad r4.w, |r10.w|, r10.z, r4.w
+            sqrt r10.x, r10.x
+            add r5.w, r5.w, r10.x
+            add r17.xyz, r17.xyzx, r11.xyzx
+            add r7.w, r7.w, l(1.00000000)
+          endloop 
+          mul r7.w, r5.w, l(0.25000000)
+          mul_sat r10.x, r4.w, l(0.25000000)
+          add r10.x, -r10.x, l(1.00000000)
+          log r10.x, r10.x
+          mul r10.x, r10.x, cb4[5].z
+          exp r10.x, r10.x
+          mad r11.xyz, r17.xyzx, l(0.25000000, 0.25000000, 0.25000000, 0.00000000), -v1.xyzx
+          dp3 r10.z, r11.xyzx, r11.xyzx
+          rsq r10.z, r10.z
+          mul r18.xyz, r11.xyzx, r10.zzzz
+          mov r6.x, r2.w
+          ld r19.xyzw, r6.xyzw, t11.xyzw
+          umul null, r6.x, r16.x, l(0x4)
+          dp3 r10.w, cb3[r16.x+128].xyzx, v1.xyzx
+          add r10.w, r10.w, cb3[r16.x+128].w
+          mul r12.zw, -r18.xxxy, cb3[r16.x+128].xxxy
+          add r12.z, r12.w, r12.z
+          mad r12.z, cb3[r16.x+128].z, -r18.z, r12.z
+          ne r12.w, r12.z, l(0.00000000)
+          div r10.w, r10.w, r12.z
+          mad r19.yzw, r10.wwww, r18.xxyz, v1.xxyz
+          movc r8.xyz, r12.wwww, r19.yzwy, v1.xyzx
+          dp4 r10.w, cb3[r6.x].xyzw, r8.xyzw
+          dp4 r6.x, cb3[r6.x+1].xyzw, r8.xyzw
+          add r8.x, r10.w, l(1.00000000)
+          mul r8.x, r8.x, l(0.50000000)
+          add r6.x, r6.x, l(1.00000000)
+          mul r8.y, r6.x, l(0.50000000)
+          mov r8.z, r19.x
+          sample r19.xyzw, r8.xyzx, t10.xyzw, s1
+          div r6.x, r7.w, cb4[6].w
+          add_sat r6.x, -r6.x, l(1.00000000)
+          mul r6.x, r6.x, r6.x
+          mov r9.x, r16.x
+          ld r20.xyzw, r9.xyzw, t8.xyzw
+          mul r8.xyz, r6.xxxx, r20.xyzx
+          mul r8.xyz, r8.xyzx, cb2[r16.x+32].wwww
+          mul r8.xyz, r10.xxxx, r8.xyzx
+          mul r8.xyz, r19.xyzx, r8.xyzx
+          dp3_sat r6.x, r1.xwyx, r18.xyzx
+          mad r10.xzw, r11.xxyz, r10.zzzz, r4.xxyz
+          mul r10.xzw, r10.xxzw, l(0.50000000, 0.00000000, 0.50000000, 0.50000000)
+          dp3_sat r7.w, r1.xwyx, r10.xzwx
+          log r7.w, r7.w
+          mul r7.w, r7.w, cb1[2].w
+          exp r7.w, r7.w
+          mul r10.xzw, r7.xxyz, r7.wwww
+          log r7.w, r6.x
+          mul r7.w, r7.w, cb1[2].w
+          exp r7.w, r7.w
+          mad r11.xyz, r7.wwww, r7.xyzx, -r10.xzwx
+          mad r10.xzw, cb1[3].xxxx, r11.xxyz, r10.xxzw
+          mad r10.xzw, r6.xxxx, r5.xxyz, r10.xxzw
+          mul r10.xzw, r0.xxxx, r10.xxzw
+          mad r16.yzw, r10.xxzw, r8.xxyz, r16.yyzw
+          iadd r16.x, r16.x, l(0x1)
+          iadd r2.w, r2.w, l(0x1)
+        endloop 
+        mov r2.yzw, l(0, 0, 0, 0)
+        mov r6.xyzw, r16.xyzw
+        mov r0.y, l(0)
+        loop 
+          ige r0.z, r0.y, cb6[1].x
+          breakc_nz r0.z
+          mov r2.x, r6.x
+          ld r8.xyzw, r2.xyzw, t8.xyzw
+          mul r8.xyz, r8.xyzx, cb2[r6.x+32].wwww
+          dp3_sat r0.z, r1.xwyx, cb2[r6.x+32].xyzx
+          mad r9.xyz, r3.xyzx, r3.wwww, cb2[r6.x+32].xyzx
+          mul r9.xyz, r9.xyzx, l(0.50000000, 0.50000000, 0.50000000, 0.00000000)
+          dp3_sat r0.w, r1.xwyx, r9.xyzx
+          log r0.w, r0.w
+          mul r0.w, r0.w, cb1[2].w
+          exp r0.w, r0.w
+          mul r9.xyz, r7.xyzx, r0.wwww
+          log r0.w, r0.z
+          mul r0.w, r0.w, cb1[2].w
+          exp r0.w, r0.w
+          mad r10.xyz, r0.wwww, r7.xyzx, -r9.xyzx
+          mad r9.xyz, cb1[3].xxxx, r10.xyzx, r9.xyzx
+          mad r9.xyz, r0.zzzz, r5.xyzx, r9.xyzx
+          mul r9.xyz, r0.xxxx, r9.xyzx
+          mad r6.yzw, r9.xxyz, r8.xxyz, r6.yyzw
+          iadd r6.x, r6.x, l(0x1)
+          iadd r0.y, r0.y, l(0x1)
+        endloop 
+        mov r2.yzw, l(0, 0, 0, 0)
+        mov r8.w, l(0x3f800000)
+        mov r9.yzw, l(0, 0, 0, 0)
+        mov r10.xyzw, r6.xyzw
+        mov r0.y, l(0)
+        loop 
+          ige r0.z, r0.y, cb6[2].x
+          breakc_nz r0.z
+          mov r2.x, r0.y
+          ld r11.xyzw, r2.xyzw, t13.xyzw
+          umul null, r0.z, r10.x, l(0x4)
+          dp3 r0.w, cb3[r10.x+128].xyzx, v1.xyzx
+          add r0.w, r0.w, cb3[r10.x+128].w
+          mul r11.yz, -cb2[r10.x+32].xxyx, cb3[r10.x+128].xxyx
+          add r1.z, r11.z, r11.y
+          mad r1.z, cb3[r10.x+128].z, -cb2[r10.x+32].z, r1.z
+          ne r2.x, r1.z, l(0.00000000)
+          div r0.w, r0.w, r1.z
+          mad r11.yzw, r0.wwww, cb2[r10.x+32].xxyz, v1.xxyz
+          movc r8.xyz, r2.xxxx, r11.yzwy, v1.xyzx
+          dp4 r0.w, cb3[r0.z].xyzw, r8.xyzw
+          dp4 r0.z, cb3[r0.z+1].xyzw, r8.xyzw
+          add r0.w, r0.w, l(1.00000000)
+          mul r8.x, r0.w, l(0.50000000)
+          add r0.z, r0.z, l(1.00000000)
+          mul r8.y, r0.z, l(0.50000000)
+          mov r8.z, r11.x
+          sample r11.xyzw, r8.xyzx, t12.xyzw, s2
+          mov r9.x, r10.x
+          ld r12.xyzw, r9.xyzw, t8.xyzw
+          mul r8.xyz, r11.xyzx, r12.xyzx
+          mul r8.xyz, r8.xyzx, cb2[r10.x+32].wwww
+          dp3_sat r0.z, r1.xwyx, cb2[r10.x+32].xyzx
+          mad r11.xyz, r3.xyzx, r3.wwww, cb2[r10.x+32].xyzx
+          mul r11.xyz, r11.xyzx, l(0.50000000, 0.50000000, 0.50000000, 0.00000000)
+          dp3_sat r0.w, r1.xwyx, r11.xyzx
+          log r0.w, r0.w
+          mul r0.w, r0.w, cb1[2].w
+          exp r0.w, r0.w
+          mul r11.xyz, r7.xyzx, r0.wwww
+          log r0.w, r0.z
+          mul r0.w, r0.w, cb1[2].w
+          exp r0.w, r0.w
+          mad r12.xyz, r0.wwww, r7.xyzx, -r11.xyzx
+          mad r11.xyz, cb1[3].xxxx, r12.xyzx, r11.xyzx
+          mad r11.xyz, r0.zzzz, r5.xyzx, r11.xyzx
+          mul r11.xyz, r0.xxxx, r11.xyzx
+          mad r10.yzw, r11.xxyz, r8.xxyz, r10.yyzw
+          iadd r10.x, r10.x, l(0x1)
+          iadd r0.y, r0.y, l(0x1)
+        endloop 
+        ilt r0.y, l(0), cb6[3].x
+        if_nz r0.y
+          itof r0.y, cb5[13].x
+          itof r0.z, cb5[12].x
+          mov r2.z, l(0)
+          mov r0.w, l(0)
+          loop 
+            ge r1.z, r0.w, r0.y
+            breakc_nz r1.z
+            add r1.z, r0.z, r0.w
+            ftou r1.z, r1.z
+            lt r1.z, cb5[r1.z+8].x, v0.w
+            add r2.w, r2.z, l(1.00000000)
+            movc r2.z, r1.z, r2.w, r2.z
+            add r0.w, r0.w, l(1.00000000)
+          endloop 
+          lt r0.y, r2.z, r0.y
+          if_nz r0.y
+            add r0.y, r0.z, r2.z
+            ftou r0.y, r0.y
+            umul null, r0.z, r0.y, l(0x4)
+            mov r6.xyz, v1.xyzx
+            mov r6.w, l(0x3f800000)
+            dp4 r0.w, cb5[r0.z].xyzw, r6.xyzw
+            dp4 r1.z, cb5[r0.z+1].xyzw, r6.xyzw
+            dp4 r2.w, cb5[r0.z+3].xyzw, r6.xyzw
+            div r0.w, r0.w, r2.w
+            mad r2.x, r0.w, l(0.50000000), l(0.50000000)
+            div r0.w, -r1.z, r2.w
+            mad r2.y, r0.w, l(0.50000000), l(0.50000000)
+            mov_sat r8.xy, r2.xyxx
+            ne r8.xy, r2.xyxx, r8.xyxx
+            or r0.w, r8.y, r8.x
+            if_z r0.w
+              dp4 r0.z, cb5[r0.z+2].xyzw, r6.xyzw
+              div r0.z, r0.z, r2.w
+              ld r6.xyzw, l(0, 0, 0, 0), t17.xyzw
+              add r0.z, r0.z, -r6.x
+              ld r6.xyzw, l(0, 0, 0, 0), t16.xyzw
+              mul r0.w, r6.x, l(1000.00000000)
+              div r6.xyzw, r0.wwww, cb5[r0.y+10].xyxy
+              sample_l r8.xyzw, r2.xyzx, t18.xyzw, s3, l(0)
+              ge r0.y, r0.z, r8.x
+              and r0.y, r0.y, l(0x3f800000)
+              mul r8.yz, r6.xxyx, l(0.00000000, 0.12500000, 0.12500000, 0.00000000)
+              mad r9.xy, r6.zwzz, l(-0.00000572, -0.00000191, 0.00000000, 0.00000000), r2.xyxx
+              mov r9.z, r2.z
+              sample_l r11.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.xyxx, l(0.00000191, -0.00000572, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r12.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(-0.00000191, 0.00000572, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mul r2.zw, r6.zzzw, l(0.00000000, 0.00000000, 0.25000000, 0.25000000)
+              mad r9.xy, r6.xyxx, l(0.00000572, 0.00000191, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r14.x, r11.x
+              mov r14.y, r12.x
+              mov r14.z, r13.x
+              ge r11.xyzw, r0.zzzz, r14.xyzw
+              and r11.xyzw, r11.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r0.w, r11.xyzw, r14.xyzw
+              mad r0.w, r8.x, r0.y, r0.w
+              dp4 r1.z, r11.xyzw, l(1.00000000, 1.00000000, 1.00000000, 1.00000000)
+              add r0.y, r0.y, r1.z
+              mad r9.xy, r6.xyxx, l(-0.00002289, -0.00000763, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r11.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(0.00000763, -0.00002289, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r12.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.xyxx, l(-0.00000763, 0.00002289, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(0.00002289, 0.00000763, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r14.x, r11.x
+              mov r14.y, r12.x
+              mov r14.z, r13.x
+              ge r11.xyzw, r0.zzzz, r14.xyzw
+              and r11.xyzw, r11.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r11.xyzw, r14.xyzw
+              add r0.w, r0.w, r1.z
+              dp4 r1.z, r11.xyzw, l(1.00000000, 1.00000000, 1.00000000, 1.00000000)
+              add r0.y, r0.y, r1.z
+              mul r8.xw, r6.xxxy, l(0.37500000, 0.00000000, 0.00000000, 0.37500000)
+              mad r9.xy, r6.zwzz, l(-0.00005150, -0.00001717, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r11.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.xyxx, l(0.00001717, -0.00005150, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r12.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(-0.00001717, 0.00005150, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mul r11.yz, r6.zzwz, l(0.00000000, 0.50000000, 0.50000000, 0.00000000)
+              mad r9.xy, r6.xyxx, l(0.00005150, 0.00001717, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r14.x, r11.x
+              mov r14.y, r12.x
+              mov r14.z, r13.x
+              ge r12.xyzw, r0.zzzz, r14.xyzw
+              and r12.xyzw, r12.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r12.xyzw, r14.xyzw
+              add r0.w, r0.w, r1.z
+              dp4 r1.z, r12.xyzw, l(1.00000000, 1.00000000, 1.00000000, 1.00000000)
+              add r0.y, r0.y, r1.z
+              mad r9.xy, r6.xyxx, l(-0.00009155, -0.00003052, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r12.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(0.00003052, -0.00009155, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.xyxx, l(-0.00003052, 0.00009155, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(0.00009155, 0.00003052, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r15.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r15.x, r12.x
+              mov r15.y, r13.x
+              mov r15.z, r14.x
+              ge r12.xyzw, r0.zzzz, r15.xyzw
+              and r12.xyzw, r12.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r12.xyzw, r15.xyzw
+              add r0.w, r0.w, r1.z
+              dp4 r1.z, r12.xyzw, l(1.00000000, 1.00000000, 1.00000000, 1.00000000)
+              add r0.y, r0.y, r1.z
+              mul r11.xw, r6.xxxy, l(0.62500000, 0.00000000, 0.00000000, 0.62500000)
+              mad r9.xy, r6.zwzz, l(-0.00014305, -0.00004768, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r12.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.xyxx, l(0.00004768, -0.00014305, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(-0.00004768, 0.00014305, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mul r12.yz, r6.zzwz, l(0.00000000, 0.75000000, 0.75000000, 0.00000000)
+              mad r9.xy, r6.xyxx, l(0.00014305, 0.00004768, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r15.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r15.x, r12.x
+              mov r15.y, r13.x
+              mov r15.z, r14.x
+              ge r13.xyzw, r0.zzzz, r15.xyzw
+              and r13.xyzw, r13.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r13.xyzw, r15.xyzw
+              add r0.w, r0.w, r1.z
+              dp4 r1.z, r13.xyzw, l(1.00000000, 1.00000000, 1.00000000, 1.00000000)
+              add r0.y, r0.y, r1.z
+              mad r9.xy, r6.xyxx, l(-0.00020599, -0.00006866, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(0.00006866, -0.00020599, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.xyxx, l(-0.00006866, 0.00020599, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r15.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(0.00020599, 0.00006866, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r16.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r16.x, r13.x
+              mov r16.y, r14.x
+              mov r16.z, r15.x
+              ge r13.xyzw, r0.zzzz, r16.xyzw
+              and r13.xyzw, r13.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r13.xyzw, r16.xyzw
+              add r0.w, r0.w, r1.z
+              dp4 r1.z, r13.xyzw, l(1.00000000, 1.00000000, 1.00000000, 1.00000000)
+              add r0.y, r0.y, r1.z
+              mul r12.xw, r6.xxxy, l(0.87500000, 0.00000000, 0.00000000, 0.87500000)
+              mad r9.xy, r6.zwzz, l(-0.00028038, -0.00009346, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.xyxx, l(0.00009346, -0.00028038, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(-0.00009346, 0.00028038, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r15.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.xyxx, l(0.00028038, 0.00009346, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r16.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r16.x, r13.x
+              mov r16.y, r14.x
+              mov r16.z, r15.x
+              ge r13.xyzw, r0.zzzz, r16.xyzw
+              and r13.xyzw, r13.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r13.xyzw, r16.xyzw
+              add r0.w, r0.w, r1.z
+              dp4 r1.z, r13.xyzw, l(1.00000000, 1.00000000, 1.00000000, 1.00000000)
+              add r0.y, r0.y, r1.z
+              mad r9.xy, r6.zwzz, l(-0.00036621, -0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.xyxx, l(0.00012207, -0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(-0.00012207, 0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r15.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.xyxx, l(0.00036621, 0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r16.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r16.x, r13.x
+              mov r16.y, r14.x
+              mov r16.z, r15.x
+              ge r13.xyzw, r0.zzzz, r16.xyzw
+              and r13.xyzw, r13.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r13.xyzw, r16.xyzw
+              add r0.w, r0.w, r1.z
+              dp4 r1.z, r13.xyzw, l(1.00000000, 1.00000000, 1.00000000, 1.00000000)
+              add r0.y, r0.y, r1.z
+              div r0.y, r0.w, r0.y
+              add r0.w, r0.z, -r0.y
+              div r0.y, r0.w, r0.y
+              mul r13.xyzw, r8.yzyz, r0.yyyy
+              mad r9.xy, r13.xyxx, l(-0.00036621, -0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r13.zwzz, l(0.00012207, -0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r15.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r13.xyxx, l(-0.00012207, 0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r16.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r13.zwzz, l(0.00036621, 0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r13.x, r14.x
+              mov r13.y, r15.x
+              mov r13.z, r16.x
+              ge r13.xyzw, r13.xyzw, r0.zzzz
+              and r13.xyzw, r13.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r0.w, r13.xyzw, l(0.25000000, 0.25000000, 0.25000000, 0.25000000)
+              mul r13.xyzw, r2.zwzw, r0.yyyy
+              mad r9.xy, r13.xyxx, l(-0.00036621, -0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r13.zwzz, l(0.00012207, -0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r15.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r13.xyxx, l(-0.00012207, 0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r16.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r13.zwzz, l(0.00036621, 0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r13.x, r14.x
+              mov r13.y, r15.x
+              mov r13.z, r16.x
+              ge r13.xyzw, r13.xyzw, r0.zzzz
+              and r13.xyzw, r13.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r13.xyzw, l(0.25000000, 0.25000000, 0.25000000, 0.25000000)
+              add r0.w, r0.w, r1.z
+              mul r8.xyzw, r8.xwxw, r0.yyyy
+              mad r9.xy, r8.xyxx, l(-0.00036621, -0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.zwzz, l(0.00012207, -0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.xyxx, l(-0.00012207, 0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r15.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.zwzz, l(0.00036621, 0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r8.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r8.x, r13.x
+              mov r8.y, r14.x
+              mov r8.z, r15.x
+              ge r8.xyzw, r8.xyzw, r0.zzzz
+              and r8.xyzw, r8.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r8.xyzw, l(0.25000000, 0.25000000, 0.25000000, 0.25000000)
+              add r0.w, r0.w, r1.z
+              mul r8.xyzw, r11.yzyz, r0.yyyy
+              mad r9.xy, r8.xyxx, l(-0.00036621, -0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.zwzz, l(0.00012207, -0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.xyxx, l(-0.00012207, 0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r15.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.zwzz, l(0.00036621, 0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r8.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r8.x, r13.x
+              mov r8.y, r14.x
+              mov r8.z, r15.x
+              ge r8.xyzw, r8.xyzw, r0.zzzz
+              and r8.xyzw, r8.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r8.xyzw, l(0.25000000, 0.25000000, 0.25000000, 0.25000000)
+              add r0.w, r0.w, r1.z
+              mul r8.xyzw, r11.xwxw, r0.yyyy
+              mad r9.xy, r8.xyxx, l(-0.00036621, -0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r11.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.zwzz, l(0.00012207, -0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.xyxx, l(-0.00012207, 0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.zwzz, l(0.00036621, 0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r8.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r8.x, r11.x
+              mov r8.y, r13.x
+              mov r8.z, r14.x
+              ge r8.xyzw, r8.xyzw, r0.zzzz
+              and r8.xyzw, r8.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r8.xyzw, l(0.25000000, 0.25000000, 0.25000000, 0.25000000)
+              add r0.w, r0.w, r1.z
+              mul r8.xyzw, r12.yzyz, r0.yyyy
+              mad r9.xy, r8.xyxx, l(-0.00036621, -0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r11.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.zwzz, l(0.00012207, -0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.xyxx, l(-0.00012207, 0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r14.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.zwzz, l(0.00036621, 0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r8.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r8.x, r11.x
+              mov r8.y, r13.x
+              mov r8.z, r14.x
+              ge r8.xyzw, r8.xyzw, r0.zzzz
+              and r8.xyzw, r8.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r8.xyzw, l(0.25000000, 0.25000000, 0.25000000, 0.25000000)
+              add r0.w, r0.w, r1.z
+              mul r8.xyzw, r12.xwxw, r0.yyyy
+              mad r9.xy, r8.xyxx, l(-0.00036621, -0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r11.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.zwzz, l(0.00012207, -0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r12.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.xyxx, l(-0.00012207, 0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r13.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r8.zwzz, l(0.00036621, 0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r8.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r8.x, r11.x
+              mov r8.y, r12.x
+              mov r8.z, r13.x
+              ge r8.xyzw, r8.xyzw, r0.zzzz
+              and r8.xyzw, r8.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r1.z, r8.xyzw, l(0.25000000, 0.25000000, 0.25000000, 0.25000000)
+              add r0.w, r0.w, r1.z
+              mul r6.xyzw, r6.xyzw, r0.yyyy
+              mad r9.xy, r6.xyxx, l(-0.00036621, -0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r8.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(0.00012207, -0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r11.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.xyxx, l(-0.00012207, 0.00036621, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r12.xyzw, r9.xyzx, t18.xyzw, s3, l(0)
+              mad r9.xy, r6.zwzz, l(0.00036621, 0.00012207, 0.00000000, 0.00000000), r2.xyxx
+              sample_l r2.xyzw, r9.xyzx, t18.yzwx, s3, l(0)
+              mov r2.x, r8.x
+              mov r2.y, r11.x
+              mov r2.z, r12.x
+              ge r2.xyzw, r2.xyzw, r0.zzzz
+              and r2.xyzw, r2.xyzw, l(0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000)
+              dp4 r0.y, r2.xyzw, l(0.25000000, 0.25000000, 0.25000000, 0.25000000)
+              add r0.y, r0.w, r0.y
+              mul r0.y, r0.y, l(0.12500000)
+            else 
+              mov r0.y, l(0x3f800000)
+            endif 
+          else 
+            mov r0.y, l(0x3f800000)
+          endif 
+          ld r2.xyzw, l(0, 0, 0, 0), t15.xyzw
+          umul null, r0.z, r10.x, l(0x4)
+          dp3 r0.w, cb3[r10.x+128].xyzx, v1.xyzx
+          add r0.w, r0.w, cb3[r10.x+128].w
+          mul r2.yz, -cb2[r10.x+32].xxyx, cb3[r10.x+128].xxyx
+          add r1.z, r2.z, r2.y
+          mad r1.z, cb3[r10.x+128].z, -cb2[r10.x+32].z, r1.z
+          ne r2.y, r1.z, l(0.00000000)
+          div r0.w, r0.w, r1.z
+          mad r6.xyz, r0.wwww, cb2[r10.x+32].xyzx, v1.xyzx
+          movc r6.xyz, r2.yyyy, r6.xyzx, v1.xyzx
+          mov r6.w, l(0x3f800000)
+          dp4 r0.w, cb3[r0.z].xyzw, r6.xyzw
+          dp4 r0.z, cb3[r0.z+1].xyzw, r6.xyzw
+          add r0.w, r0.w, l(1.00000000)
+          mul r2.y, r0.w, l(0.50000000)
+          add r0.z, r0.z, l(1.00000000)
+          mul r2.z, r0.z, l(0.50000000)
+          mov r2.w, r2.x
+          sample r2.xyzw, r2.yzwy, t14.xyzw, s3
+          mov r6.x, r10.x
+          mov r6.yzw, l(0, 0, 0, 0)
+          ld r6.xyzw, r6.xyzw, t8.xyzw
+          mul r2.xyz, r2.xyzx, r6.xyzx
+          mul r0.yzw, r0.yyyy, r2.xxyz
+          mul r0.yzw, r0.yyzw, cb2[r10.x+32].wwww
+          dp3_sat r1.z, r1.xwyx, cb2[r10.x+32].xyzx
+          mad r2.xyz, r3.xyzx, r3.wwww, cb2[r10.x+32].xyzx
+          mul r2.xyz, r2.xyzx, l(0.50000000, 0.50000000, 0.50000000, 0.00000000)
+          dp3_sat r2.x, r1.xwyx, r2.xyzx
+          log r2.x, r2.x
+          mul r2.x, r2.x, cb1[2].w
+          exp r2.x, r2.x
+          mul r2.xyz, r7.xyzx, r2.xxxx
+          log r2.w, r1.z
+          mul r2.w, r2.w, cb1[2].w
+          exp r2.w, r2.w
+          mad r3.xyz, r2.wwww, r7.xyzx, -r2.xyzx
+          mad r2.xyz, cb1[3].xxxx, r3.xyzx, r2.xyzx
+          mad r2.xyz, r1.zzzz, r5.xyzx, r2.xyzx
+          mul r2.xyz, r0.xxxx, r2.xyzx
+          mad r10.yzw, r2.xxyz, r0.yyzw, r10.yyzw
+          iadd r10.x, r10.x, l(0x1)
+        endif 
+        mov r2.yzw, l(0, 0, 0, 0)
+        mov r3.xyzw, r10.xyzw
+        mov r0.y, l(0)
+        loop 
+          ige r0.z, r0.y, cb6[4].x
+          breakc_nz r0.z
+          add r6.xyz, -v1.xyzx, cb2[r3.x].xyzx
+          dp3 r0.z, r6.xyzx, r6.xyzx
+          sqrt r0.w, r0.z
+          ge r1.z, cb2[r3.x].w, r0.w
+          if_nz r1.z
+            div r0.w, r0.w, cb2[r3.x].w
+            add_sat r0.w, -r0.w, l(1.00000000)
+            mov r2.x, r3.x
+            ld r8.xyzw, r2.xyzw, t8.xyzw
+            mul r8.xyz, r0.wwww, r8.xyzx
+            mul r8.xyz, r8.xyzx, cb2[r3.x+32].wwww
+            rsq r0.z, r0.z
+            mul r9.xyz, r6.xyzx, r0.zzzz
+            dp3_sat r0.w, r1.xwyx, r9.xyzx
+            mad r6.xyz, r6.xyzx, r0.zzzz, r4.xyzx
+            mul r6.xyz, r6.xyzx, l(0.50000000, 0.50000000, 0.50000000, 0.00000000)
+            dp3_sat r0.z, r1.xwyx, r6.xyzx
+            log r0.z, r0.z
+            mul r0.z, r0.z, cb1[2].w
+            exp r0.z, r0.z
+            mul r6.xyz, r7.xyzx, r0.zzzz
+            log r0.z, r0.w
+            mul r0.z, r0.z, cb1[2].w
+            exp r0.z, r0.z
+            mad r9.xyz, r0.zzzz, r7.xyzx, -r6.xyzx
+            mad r6.xyz, cb1[3].xxxx, r9.xyzx, r6.xyzx
+            mad r6.xyz, r0.wwww, r5.xyzx, r6.xyzx
+            mul r6.xyz, r0.xxxx, r6.xyzx
+            mad r3.yzw, r6.xxyz, r8.xxyz, r3.yyzw
+          endif 
+          iadd r3.x, r3.x, l(0x1)
+          iadd r0.y, r0.y, l(0x1)
+        endloop 
+        mov r2.yzw, l(0, 0, 0, 0)
+        mov r6.xyzw, r3.yzwx
+        mov r0.y, l(0)
+        loop 
+          ige r0.z, r0.y, cb6[5].x
+          breakc_nz r0.z
+          add r8.xyz, -v1.xyzx, cb2[r6.w].xyzx
+          dp3 r0.z, r8.xyzx, r8.xyzx
+          sqrt r0.w, r0.z
+          ge r1.z, cb2[r6.w].w, r0.w
+          if_nz r1.z
+            div r0.w, r0.w, cb2[r6.w].w
+            add_sat r0.w, -r0.w, l(1.00000000)
+            mov r2.x, r6.w
+            ld r9.xyzw, r2.xyzw, t8.xyzw
+            mul r9.xyz, r0.wwww, r9.xyzx
+            mul r9.xyz, r9.xyzx, cb2[r6.w+32].wwww
+            rsq r0.z, r0.z
+            mul r10.xyz, r8.xyzx, r0.zzzz
+            dp3_sat r0.w, r1.xwyx, r10.xyzx
+            mad r8.xyz, r8.xyzx, r0.zzzz, r4.xyzx
+            mul r8.xyz, r8.xyzx, l(0.50000000, 0.50000000, 0.50000000, 0.00000000)
+            dp3_sat r0.z, r1.xwyx, r8.xyzx
+            log r0.z, r0.z
+            mul r0.z, r0.z, cb1[2].w
+            exp r0.z, r0.z
+            mul r8.xyz, r7.xyzx, r0.zzzz
+            log r0.z, r0.w
+            mul r0.z, r0.z, cb1[2].w
+            exp r0.z, r0.z
+            mad r10.xyz, r0.zzzz, r7.xyzx, -r8.xyzx
+            mad r8.xyz, cb1[3].xxxx, r10.xyzx, r8.xyzx
+            mad r8.xyz, r0.wwww, r5.xyzx, r8.xyzx
+            mul r8.xyz, r0.xxxx, r8.xyzx
+            mad r6.xyz, r8.xyzx, r9.xyzx, r6.xyzx
+          endif 
+          iadd r6.w, r6.w, l(0x1)
+          iadd r0.y, r0.y, l(0x1)
+        endloop 
+        mov r2.yzw, l(0, 0, 0, 0)
+        mov r3.yzw, l(0, 0, 0, 0)
+        mov r0.yzw, r6.xxyz
+        mov r1.z, r6.w
+        mov r4.w, l(0)
+        loop 
+          ige r5.w, r4.w, cb6[6].x
+          breakc_nz r5.w
+          add r8.xyz, -v1.xyzx, cb2[r1.z].xyzx
+          dp3 r5.w, r8.xyzx, r8.xyzx
+          sqrt r7.w, r5.w
+          ge r8.w, cb2[r1.z].w, r7.w
+          if_nz r8.w
+            rsq r5.w, r5.w
+            mul r9.xyz, r8.xyzx, r5.wwww
+            dp3 r8.w, r9.xyzx, cb2[r1.z+32].xyzx
+            mov r2.x, r4.w
+            ld r10.xyzw, r2.xyzw, t19.xyzw
+            mul r2.x, r10.x, l(0.00872665)
+            sincos null, r2.x, r2.x
+            lt r9.w, r2.x, r8.w
+            if_nz r9.w
+              div r7.w, r7.w, cb2[r1.z].w
+              add_sat r7.w, -r7.w, l(1.00000000)
+              add r9.w, -r2.x, l(1.00000000)
+              add r2.x, r8.w, -r2.x
+              div r8.w, l(1.00000000, 1.00000000, 1.00000000, 1.00000000), r9.w
+              mul_sat r2.x, r2.x, r8.w
+              mad r8.w, r2.x, l(-2.00000000), l(3.00000000)
+              mul r2.x, r2.x, r2.x
+              mul r2.x, r8.w, r2.x
+              mov r3.x, r1.z
+              ld r10.xyzw, r3.xyzw, t8.xyzw
+              mul r10.xyz, r7.wwww, r10.xyzx
+              mul r10.xyz, r2.xxxx, r10.xyzx
+              mul r10.xyz, r10.xyzx, cb2[r1.z+32].wwww
+              dp3_sat r2.x, r1.xwyx, r9.xyzx
+              mad r8.xyz, r8.xyzx, r5.wwww, r4.xyzx
+              mul r8.xyz, r8.xyzx, l(0.50000000, 0.50000000, 0.50000000, 0.00000000)
+              dp3_sat r3.x, r1.xwyx, r8.xyzx
+              log r3.x, r3.x
+              mul r3.x, r3.x, cb1[2].w
+              exp r3.x, r3.x
+              mul r8.xyz, r7.xyzx, r3.xxxx
+              log r3.x, r2.x
+              mul r3.x, r3.x, cb1[2].w
+              exp r3.x, r3.x
+              mad r9.xyz, r3.xxxx, r7.xyzx, -r8.xyzx
+              mad r8.xyz, cb1[3].xxxx, r9.xyzx, r8.xyzx
+              mad r8.xyz, r2.xxxx, r5.xyzx, r8.xyzx
+              mul r8.xyz, r0.xxxx, r8.xyzx
+              mad r0.yzw, r8.xxyz, r10.xxyz, r0.yyzw
+            endif 
+          endif 
+          iadd r1.z, r1.z, l(0x1)
+          iadd r4.w, r4.w, l(0x1)
+        endloop 
+        mov o0.xyz, r0.yzwy
+        mov o0.w, l(0x3f800000)
+        ret 
+//     END_SECTION
+//     BEGIN_SECTION COP_CONSTANTS
+//         COP_CONST[0]: 0x3f2a7efa // 0.666000
+//         COP_CONST[1]: 0xbf333333 // -0.700000
+//         COP_CONST[2]: 0x3caaae5f // 0.020835
+//         COP_CONST[3]: 0x3e3876e2 // 0.180141
+//         COP_CONST[4]: 0xbea91d04 // -0.330299
+//         COP_CONST[5]: 0x3f7ff738 // 0.999866
+//         COP_CONST[6]: 0x3fc90fdb // 1.570796
+//         COP_CONST[7]: 0xbf0f5c29 // -0.560000
+//         COP_CONST[8]: 0xafbf9653 // -0.000000
+//         COP_CONST[9]: 0x3c029fab // 0.007973
+//         COP_CONST[10]: 0x410b4bc7 // 8.706000
+//         COP_CONST[11]: 0x3a04e1ae // 0.000507
+//         COP_CONST[12]: 0xbcb87057 // -0.022515
+//         COP_CONST[13]: 0x3cac7692 // 0.021053
+//         COP_CONST[14]: 0x3f333333 // 0.700000
+//         COP_CONST[15]: 0x3f800000 // 1.000000
+//     END_SECTION
+//     BEGIN_SECTION HLSL_CONSTANTS
+//         HLSL_CONST[0]: 0xbff00000 // -1.875000
+//         HLSL_CONST[1]: 0xbf200000 // -0.625000
+//         HLSL_CONST[2]: 0x00000000 // 0.000000
+//         HLSL_CONST[3]: 0x00000000 // 0.000000
+//         HLSL_CONST[4]: 0x3f200000 // 0.625000
+//         HLSL_CONST[5]: 0xbff00000 // -1.875000
+//         HLSL_CONST[6]: 0x00000000 // 0.000000
+//         HLSL_CONST[7]: 0x00000000 // 0.000000
+//         HLSL_CONST[8]: 0xbf200000 // -0.625000
+//         HLSL_CONST[9]: 0x3ff00000 // 1.875000
+//         HLSL_CONST[10]: 0x00000000 // 0.000000
+//         HLSL_CONST[11]: 0x00000000 // 0.000000
+//         HLSL_CONST[12]: 0x3ff00000 // 1.875000
+//         HLSL_CONST[13]: 0x3f200000 // 0.625000
+//         HLSL_CONST[14]: 0x00000000 // 0.000000
+//         HLSL_CONST[15]: 0x00000000 // 0.000000
+//     END_SECTION
+//     BEGIN_SECTION USER_CONSTANTS
+//         USER_CONST: c[0][32] = 0x415a9f46 // 13.663885
+//         USER_CONST: c[0][34] = 0x42dd0b2a // 110.521805
+//         USER_CONST: c[1][0] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][1] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][2] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][4] = 0x3f147ae1 // 0.580000
+//         USER_CONST: c[1][5] = 0x3f039581 // 0.514000
+//         USER_CONST: c[1][6] = 0x3ed70a3d // 0.420000
+//         USER_CONST: c[1][7] = 0x41300000 // 11.000000
+//         USER_CONST: c[1][8] = 0x41d00000 // 26.000000
+//         USER_CONST: c[1][9] = 0x3f2a7efa // 0.666000
+//         USER_CONST: c[1][10] = 0x3f333333 // 0.700000
+//         USER_CONST: c[1][11] = 0x42700000 // 60.000000
+//         USER_CONST: c[1][12] = 0x3f333333 // 0.700000
+//         USER_CONST: c[1][13] = 0x41b00000 // 22.000000
+//         USER_CONST: c[1][14] = 0x42100000 // 36.000000
+//         USER_CONST: c[1][15] = 0x42480000 // 50.000000
+//         USER_CONST: c[1][16] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][17] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][18] = 0x3f800000 // 1.000000
+//         USER_CONST: c[1][19] = 0x41b00000 // 22.000000
+//         USER_CONST: c[4][0] = 0x3d0e9e50 // 0.034819
+//         USER_CONST: c[4][1] = 0x00000000 // 0.000000
+//         USER_CONST: c[4][2] = 0x00000000 // 0.000000
+//         USER_CONST: c[4][3] = 0xbdfcdaf6 // -0.123465
+//         USER_CONST: c[4][4] = 0x00000000 // 0.000000
+//         USER_CONST: c[4][5] = 0xafbf9653 // -0.000000
+//         USER_CONST: c[4][6] = 0x3c029fab // 0.007973
+//         USER_CONST: c[4][7] = 0xbf77fec8 // -0.968731
+//         USER_CONST: c[4][16] = 0x00000000 // 0.000000
+//         USER_CONST: c[4][17] = 0x3f800000 // 1.000000
+//         USER_CONST: c[4][18] = 0x00000000 // 0.000000
+//         USER_CONST: c[4][19] = 0xbf0f5c29 // -0.560000
+//         USER_CONST: c[4][22] = 0x40800000 // 4.000000
+//         USER_CONST: c[4][24] = 0x410b4bc7 // 8.706000
+//         USER_CONST: c[4][26] = 0x40000000 // 2.000000
+//         USER_CONST: c[4][27] = 0x423e0000 // 47.500000
+//         USER_CONST: c[4][20] = 0x3e130be1 // 0.143600
+//         USER_CONST: c[4][21] = 0x3e208c93 // 0.156786
+//         USER_CONST: c[4][23] = 0x3ec10625 // 0.377000
+//         USER_CONST: c[5][48] = 0x00000000 // 0.000000
+//         USER_CONST: c[6][0] = 0x00000001 // 0.000000
+//         USER_CONST: c[6][4] = 0x00000000 // 0.000000
+//     END_SECTION
+//     # Exelwtion Time: 580.753ms [17.141 percent]
+//     BEGIN_SECTION USER_CONSTANT_HISTOGRAM_INFO
+//                 ~c[0][32] = 100.00%@13.66388512
+//                  c[0][33] = 68.39%@-2.65876555 31.61%@1.62876558
+//                 ~c[0][34] = 100.00%@110.52180481
+//                 ~c[1][0] = 100.00%@1.00000000
+//                 ~c[1][1] = 100.00%@1.00000000
+//                 ~c[1][2] = 100.00%@1.00000000
+//                 ~c[1][4] = 100.00%@0.57999998
+//                 ~c[1][5] = 100.00%@0.51400000
+//                 ~c[1][6] = 100.00%@0.41999999
+//                 ~c[1][7] = 100.00%@11.00000000
+//                 ~c[1][8] = 100.00%@26.00000000
+//                 ~c[1][9] = 100.00%@0.66600001
+//                 ~c[1][10] = 100.00%@0.69999999
+//                 ~c[1][11] = 100.00%@60.00000000
+//                 ~c[1][12] = 100.00%@0.69999999
+//                 ~c[1][13] = 100.00%@22.00000000
+//                 ~c[1][14] = 100.00%@36.00000000
+//                 ~c[1][15] = 100.00%@50.00000000
+//                 ~c[1][16] = 100.00%@1.00000000
+//                 ~c[1][17] = 100.00%@1.00000000
+//                 ~c[1][18] = 100.00%@1.00000000
+//                 ~c[1][19] = 100.00%@22.00000000
+//                 ~c[4][0] = 100.00%@0.03481895
+//                 ~c[4][1] = 100.00%@0.00000000
+//                 ~c[4][2] = 100.00%@0.00000000
+//                 ~c[4][3] = 100.00%@-0.12346451
+//                 ~c[4][4] = 100.00%@0.00000000
+//                 ~c[4][5] = 100.00%@-0.00000000
+//                 ~c[4][6] = 100.00%@0.00797264
+//                 ~c[4][7] = 100.00%@-0.96873140
+//                 ~c[4][16] = 100.00%@0.00000000
+//                 ~c[4][17] = 100.00%@1.00000000
+//                 ~c[4][18] = 100.00%@0.00000000
+//                 ~c[4][19] = 100.00%@-0.56000000
+//                 ~c[4][22] = 100.00%@4.00000000
+//                 ~c[4][24] = 100.00%@8.70600033
+//                 ~c[4][26] = 100.00%@2.00000000
+//                 ~c[4][27] = 100.00%@47.50000000
+//                 ~c[4][20] = 100.00%@0x3e130be1
+//                 ~c[4][21] = 100.00%@0x3e208c93
+//                 ~c[4][23] = 100.00%@0x3ec10625
+//                 ~c[5][48] = 100.00%@0x0
+//                  c[5][52] = 78.93%@0x2 21.07%@0x0
+//                 ~c[6][0] = 100.00%@0x1
+//                 ~c[6][4] = 100.00%@0x0
+//                  c[6][8] = 68.49%@0x2 31.51%@0x1
+//                  c[6][12] = 78.93%@0x1 21.07%@0x0
+//                  c[6][16] = 94.73%@0x0 5.27%@0x1
+//                  c[6][20] = 63.17%@0x1 36.83%@0x0
+//                  c[6][24] = 31.51%@0x2 21.07%@0x3 21.07%@0x1 10.54%@0x7 10.54%@0xa 5.27%@0x0
+//     END_SECTION
+//     BEGIN_SECTION TEXTURE_STATE_HISTOGRAM_INFO
+//         TEXTURE_SLOT 0x0
+//         100.00% width=0x400, height=0x400, mips=0xb, DXGI_FORMAT_BC1_UNORM_SRGB
+//         TEXTURE_SLOT 0x1
+//         100.00% width=0x400, height=0x400, mips=0xb, DXGI_FORMAT_BC1_UNORM_SRGB
+//         TEXTURE_SLOT 0x2
+//         100.00% width=0x200, height=0x200, mips=0xa, DXGI_FORMAT_BC4_UNORM
+//         TEXTURE_SLOT 0x3
+//         100.00% width=0x400, height=0x400, mips=0xb, DXGI_FORMAT_BC5_UNORM
+//         TEXTURE_SLOT 0x4
+//         100.00% width=0x400, height=0x400, mips=0xb, DXGI_FORMAT_BC5_UNORM
+//         TEXTURE_SLOT 0x5
+//         100.00% width=0x400, height=0x400, mips=0xb, DXGI_FORMAT_BC5_UNORM
+//         TEXTURE_SLOT 0x6
+//         100.00% width=0x400, height=0x400, mips=0xb, DXGI_FORMAT_BC4_UNORM
+//         TEXTURE_SLOT 0x7
+//         100.00% width=0x400, height=0x400, mips=0xb, DXGI_FORMAT_BC4_UNORM
+//         TEXTURE_SLOT 0x8
+//         26.28% width=0x5, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32_FLOAT
+//         21.06% width=0x7, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32_FLOAT
+//         21.06% width=0x6, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32_FLOAT
+//         10.53% width=0xc, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32_FLOAT
+//         10.53% width=0xe, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32_FLOAT
+//         5.27% width=0x8, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32_FLOAT
+//         5.27% width=0x4, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32_FLOAT
+//         TEXTURE_SLOT 0x9
+//         100.00% width=0x190, height=0x640, mips=0x1, DXGI_FORMAT_R16G16_FLOAT
+//         TEXTURE_SLOT 0xa
+//         100.00% width=0x100, height=0x40, mips=0x1, DXGI_FORMAT_R8G8B8A8_UNORM
+//         TEXTURE_SLOT 0xb
+//         100.00% width=0x1, height=0x1, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         TEXTURE_SLOT 0xc
+//         100.00% width=0x100, height=0x40, mips=0x1, DXGI_FORMAT_R8G8B8A8_UNORM
+//         TEXTURE_SLOT 0xd
+//         68.46% width=0x2, height=0x1, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         31.54% width=0x1, height=0x1, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         TEXTURE_SLOT 0xe
+//         78.94% width=0x100, height=0x40, mips=0x1, DXGI_FORMAT_R8G8B8A8_UNORM
+//         21.06% width=0x1, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32A32_FLOAT
+//         TEXTURE_SLOT 0xf
+//         78.94% width=0x1, height=0x1, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         21.06% width=0x1, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32A32_FLOAT
+//         TEXTURE_SLOT 0x10
+//         78.94% width=0x1, height=0x1, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         21.06% width=0x1, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32A32_FLOAT
+//         TEXTURE_SLOT 0x11
+//         78.94% width=0x1, height=0x1, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         21.06% width=0x1, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32A32_FLOAT
+//         TEXTURE_SLOT 0x12
+//         78.94% width=0x800, height=0x800, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         21.06% width=0x1, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32A32_FLOAT
+//         TEXTURE_SLOT 0x13
+//         31.54% width=0x2, height=0x1, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         21.06% width=0x3, height=0x1, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         21.06% width=0x1, height=0x1, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         10.53% width=0x7, height=0x1, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         10.53% width=0xa, height=0x1, mips=0x1, DXGI_FORMAT_R32_FLOAT
+//         5.27% width=0x1, height=0x1, mips=0x1, DXGI_FORMAT_R32G32B32A32_FLOAT
+//     END_SECTION
+//     BEGIN_SECTION SAMPLER_STATE_INFO
+//         SAMPLER_SLOT 0x0
+//         100.00%  min=Anisotropic, mag=Linear, mip=Linear aniso=16, minLOD=0.000000, maxLOD=340282346638528860000000000000000000000.000000
+//         addressU=WRAP, addressV=WRAP, addressW=WRAP
+//         SAMPLER_SLOT 0x1
+//         100.00%  min=Linear, mag=Linear, mip=Linear aniso=1, minLOD=0.000000, maxLOD=340282346638528860000000000000000000000.000000
+//         addressU=CLAMP, addressV=CLAMP, addressW=CLAMP
+//         SAMPLER_SLOT 0x2
+//         100.00%  min=Anisotropic, mag=Linear, mip=Linear aniso=16, minLOD=0.000000, maxLOD=340282346638528860000000000000000000000.000000
+//         addressU=CLAMP, addressV=CLAMP, addressW=CLAMP
+//         SAMPLER_SLOT 0x3
+//         100.00%  min=Linear, mag=Linear, mip=Linear aniso=1, minLOD=0.000000, maxLOD=340282346638528860000000000000000000000.000000
+//         addressU=CLAMP, addressV=CLAMP, addressW=CLAMP
+//     END_SECTION
+//     BEGIN_SECTION UCODE
+//     	!!SPA2.1
+//     	.THREAD_TYPE PIXEL
+//     	IPA.PASS R0, a[0x7c];            # [  0][000000] POSITION_W
+//     	MUFU.RCP R4, R0;                 # [  1][000008]
+//     	IPA R19, a[0xb4], R4;            # [  2][000010] GENERIC_ATTRIBUTE_03_Y
+//     	IPA R18, a[0xb0], R4;            # [  3][000018] ATTR3
+//     	FMUL.FTZ R1, R19, 36;            # [  4][000020]
+//     	FMUL.FTZ R0, R18, 36;            # [  5][000028]
+//     	TEX.T R16, R0, 0x4, 0x0, 2D, 0x3; # [  6][000030]
+//     	IPA R8, a[0x90], R4;             # [  7][000038] ATTR1
+//     	IPA R9, a[0x94], R4;             # [  8][000040] GENERIC_ATTRIBUTE_01_Y
+//     	IPA R7, a[0xc4], R4;             # [  9][000048] GENERIC_ATTRIBUTE_04_Y
+//     	IPA R11, a[0xc0], R4;            # [ 10][000050] ATTR4
+//     	IPA R6, a[0xc8], R4;             # [ 11][000058] GENERIC_ATTRIBUTE_04_Z
+//     	IPA R28, a[0xd4], R4;            # [ 12][000060] GENERIC_ATTRIBUTE_05_Y
+//     	IPA R32, a[0xd0], R4;            # [ 13][000068] ATTR5
+//     	IPA R30, a[0xd8], R4;            # [ 14][000070] GENERIC_ATTRIBUTE_05_Z
+//     	IPA R22, a[0xa4], R4;            # [ 15][000078] GENERIC_ATTRIBUTE_02_Y
+//     	IPA R36, a[0xa0], R4;            # [ 16][000080] ATTR2
+//     	IPA R10, a[0xa8], R4;            # [ 17][000088] GENERIC_ATTRIBUTE_02_Z
+//     	IPA R12, a[0x98], R4;            # [ 18][000090] GENERIC_ATTRIBUTE_01_Z
+//     	IPA R15, a[0x98], R4;            # [ 19][000098] GENERIC_ATTRIBUTE_01_Z
+//     	IPA R26, a[0x90], R4;            # [ 20][0000a0] ATTR1
+//     	FMUL.FTZ R5, R19, 50;            # [ 21][0000a8]
+//     	FMUL.FTZ R4, R18, 50;            # [ 22][0000b0]
+//     	FADD32I.FTZ R48, -R8, 0x415a9f46; # [ 23][0000b8]
+//     	MOV32I R3, 0x3f800000;           # [ 24][0000c0]
+//     	MOV32I R34, -0x4251a5ca;         # [ 25][0000c8]
+//     	MOV32I R33, 0x40000000;          # [ 26][0000d0]
+//     	MOV R2, RZ;                      # [ 27][0000d8]
+//     	MOV R1, RZ;                      # [ 28][0000e0]
+//     	MOV R0, RZ;                      # [ 29][0000e8]
+//     	MOV R23, RZ;                     # [ 30][0000f0]
+//     	MOV R27, RZ;                     # [ 31][0000f8]
+//     	STL [0x4], R48;                  # [ 32][000100]
+//     	FFMA.FTZ R13, RZ, R8, R9;        # [ 33][000108]
+//     	FADD.FTZ R35, -R9, c[0x0][0x84]; # [ 34][000110]
+//     	TEX.T R20, R4, 0x5, 0x0, 2D, 0x3; # [ 35][000118]
+//     	FMUL.FTZ R38, R11, R11;          # [ 36][000120]
+//     	FMUL.FTZ R31, R36, R36;          # [ 37][000128]
+//     	FFMA.FTZ R29, RZ, R12, R13;      # [ 38][000130]
+//     	FFMA.FTZ R38, R7, R7, R38;       # [ 39][000138]
+//     	FADD32I.FTZ R39, -R12, 0x42dd0b2a; # [ 40][000140]
+//     	FFMA.FTZ R13, R22, R22, R31;     # [ 41][000148]
+//     	FMUL.FTZ R37, R32, R32;          # [ 42][000150]
+//     	FMUL.FTZ R12, R48, R48;          # [ 43][000158]
+//     	FFMA.FTZ R38, R6, R6, R38;       # [ 44][000160]
+//     	FFMA.FTZ R31, R10, R10, R13;     # [ 45][000168]
+//     	FFMA.FTZ R37, R28, R28, R37;     # [ 46][000170]
+//     	FFMA.FTZ R13, R35, R35, R12;     # [ 47][000178]
+//     	MUFU.RSQ R38, R38;               # [ 48][000180]
+//     	FADD32I.FTZ R12, R29, 0.56;      # [ 49][000188]
+//     	FMUL.FTZ R5, R19, 11;            # [ 50][000190]
+//     	FMUL.FTZ R4, R18, 11;            # [ 51][000198]
+//     	FFMA.FTZ R37, R30, R30, R37;     # [ 52][0001a0]
+//     	FFMA.FTZ R29, R39, R39, R13;     # [ 53][0001a8]
+//     	FMUL.FTZ R13, R38, R11;          # [ 54][0001b0]
+//     	FADD.FTZ R14, R9, 1;             # [ 55][0001b8]
+//     	FMUL.FTZ R11, R38, R6;           # [ 56][0001c0]
+//     	FMUL.FTZ R9, R19, 26;            # [ 57][0001c8]
+//     	FMUL.FTZ R8, R18, 26;            # [ 58][0001d0]
+//     	FMUL.FTZ R25, R19, 22;           # [ 59][0001d8]
+//     	FMUL.FTZ R24, R18, 22;           # [ 60][0001e0]
+//     	STL [0x0], R39;                  # [ 61][0001e8]
+//     	MUFU.RSQ R37, R37;               # [ 62][0001f0]
+//     	TEX.NODEP.T R4, R4, 0x0, 0x0, 2D, 0x7; # [ 63][0001f8]
+//     	MUFU.RSQ R31, R31;               # [ 64][000200]
+//     	FMUL.FTZ R7, R38, R7;            # [ 65][000208]
+//     	FMUL.FTZ R30, R37, R30;          # [ 66][000210]
+//     	FMUL.FTZ R44, R31, R22;          # [ 67][000218]
+//     	FMUL.FTZ R32, R37, R32;          # [ 68][000220]
+//     	FMUL.FTZ R22, R31, R10;          # [ 69][000228]
+//     	FMUL.FTZ R28, R37, R28;          # [ 70][000230]
+//     	FMUL.FTZ R36, R31, R36;          # [ 71][000238]
+//     	MUFU.RSQ R47, R29;               # [ 72][000240]
+//     	FMUL.FTZ R31, R30, R44;          # [ 73][000248]
+//     	FMUL.FTZ R37, R32, R22;          # [ 74][000250]
+//     	TEX.NODEP.T R8, R8, 0x1, 0x0, 2D, 0x7; # [ 75][000258]
+//     	FMUL.FTZ R29, R7, R22;           # [ 76][000260]
+//     	FMUL.FTZ R46, R13, R30;          # [ 77][000268]
+//     	FMUL.FTZ R45, R28, R36;          # [ 78][000270]
+//     	FFMA.FTZ R41, R44, R11, -R29;    # [ 79][000278]
+//     	FMUL.FTZ R43, R11, R28;          # [ 80][000280]
+//     	FMUL.FTZ R38, R11, R36;          # [ 81][000288]
+//     	FFMA.FTZ R29, R32, R11, -R46;    # [ 82][000290]
+//     	FMUL.FTZ R42, R13, R44;          # [ 83][000298]
+//     	FFMA.FTZ R11, R44, R32, -R45;    # [ 84][0002a0]
+//     	FFMA.FTZ R31, R22, R28, -R31;    # [ 85][0002a8]
+//     	FMUL.FTZ R44, R32, R41;          # [ 86][0002b0]
+//     	FMUL.FTZ R40, R7, R32;           # [ 87][0002b8]
+//     	FFMA.FTZ R32, R30, R7, -R43;     # [ 88][0002c0]
+//     	FFMA.FTZ R43, R13, R31, R44;     # [ 89][0002c8]
+//     	FFMA.FTZ R30, R36, R30, -R37;    # [ 90][0002d0]
+//     	FFMA.FTZ R7, R36, R7, -R42;      # [ 91][0002d8]
+//     	FFMA.FTZ R37, R36, R32, R43;     # [ 92][0002e0]
+//     	FFMA.FTZ R22, R22, R13, -R38;    # [ 93][0002e8]
+//     	FFMA.FTZ R40, R28, R13, -R40;    # [ 94][0002f0]
+//     	MUFU.RCP R37, R37;               # [ 95][0002f8]
+//     	FMUL.FTZ R46, R48, R47;          # [ 96][000300]
+//     	FMUL.FTZ R28, R41, R37;          # [ 97][000308]
+//     	FMUL.FTZ R13, R32, R37;          # [ 98][000310]
+//     	FMUL.FTZ R31, R31, R37;          # [ 99][000318]
+//     	FMUL.FTZ R32, R30, R37;          # [100][000320]
+//     	FMUL.FTZ R22, R22, R37;          # [101][000328]
+//     	FFMA.FTZ R36, R16, 2, -R3;       # [102][000330]
+//     	FFMA.FTZ R38, R17, 2, -R3;       # [103][000338]
+//     	FFMA.FTZ R16, R36, -R36, R3;     # [104][000340]
+//     	FFMA.FTZ R16, R38, -R38, R16;    # [105][000348]
+//     	FMNMX.FTZ R16, R16, RZ, !PT;     # [106][000350]
+//     	MUFU.RSQ R41, R16;               # [107][000358]
+//     	TEX.T R16, R24, 0x3, 0x0, 2D, 0x3; # [108][000360]
+//     	FMUL.FTZ R30, R11, R37;          # [109][000368]
+//     	FMUL.FTZ R38, R38, -R41;         # [110][000370]
+//     	FMUL.FTZ R11, R7, R37;           # [111][000378]
+//     	FMUL.FTZ R29, R29, R37;          # [112][000380]
+//     	FMNMX.FTZ R42, |R38|, 1, !PT;    # [113][000388]
+//     	FMUL.FTZ R7, R40, R37;           # [114][000390]
+//     	FMUL.FTZ R37, R36, R41;          # [115][000398]
+//     	FMNMX.FTZ R40, |R38|, 1, PT;     # [116][0003a0]
+//     	MUFU.RCP R42, R42;               # [117][0003a8]
+//     	FMNMX.FTZ R41, |R37|, 1, !PT;    # [118][0003b0]
+//     	TEX.NODEP.T R36, R18, 0x2, 0x0, 2D, 0x1; # [119][0003b8]
+//     	FMUL.FTZ R40, R40, R42;          # [120][0003c0]
+//     	FMNMX.FTZ R42, |R37|, 1, PT;     # [121][0003c8]
+//     	MUFU.RCP R44, R41;               # [122][0003d0]
+//     	FMUL.FTZ R41, R40, R40;          # [123][0003d8]
+//     	FMUL.FTZ R43, R35, R47;          # [124][0003e0]
+//     	FMUL.FTZ R35, R42, R44;          # [125][0003e8]
+//     	FFMA.FTZ R42, R41, c[0x10][0x8], R34; # [126][0003f0]
+//     	FSETP.GT.FTZ.AND P1, PT, |R38|, 1, PT; # [127][0003f8]
+//     	FMNMX.FTZ R38, R38, 1, PT;       # [128][000400]
+//     	FFMA.FTZ R44, R41, R42, c[0x10][0xc]; # [129][000408]
+//     	TEX.NODEP.T R18, R18, 0x6, 0x0, 2D, 0x1; # [130][000410]
+//     	FSETP.LT.FTZ.AND P0, PT, R38, -R38, PT; # [131][000418]
+//     	FFMA.FTZ R44, R41, R44, c[0x10][0x10]; # [132][000420]
+//     	FMUL.FTZ R42, R35, R35;          # [133][000428]
+//     	FFMA.FTZ R38, R20, 2, -R3;       # [134][000430]
+//     	FFMA.FTZ R41, R41, R44, c[0x10][0x14]; # [135][000438]
+//     	FFMA.FTZ R19, R42, c[0x10][0x8], R34; # [136][000440]
+//     	FFMA.FTZ R20, R21, 2, -R3;       # [137][000448]
+//     	FFMA.FTZ R44, R38, -R38, R3;     # [138][000450]
+//     	FFMA.FTZ R21, R42, R19, c[0x10][0xc]; # [139][000458]
+//     	FSETP.GT.FTZ.AND P2, PT, |R37|, 1, PT; # [140][000460]
+//     	FFMA.FTZ R44, R20, -R20, R44;    # [141][000468]
+//     	TEX.NODEP.T R19, R24, 0x7, 0x0, 2D, 0x1; # [142][000470]
+//     	FMUL.FTZ R25, R40, R41;          # [143][000478]
+//     	FMNMX.FTZ R24, R44, RZ, !PT;     # [144][000480]
+//     	FFMA.FTZ R21, R42, R21, c[0x10][0x10]; # [145][000488]
+//     	FFMA.FTZ R44, R25, -R33, c[0x10][0x18]; # [146][000490]
+//     	MUFU.RSQ R25, R24;               # [147][000498]
+//     	FFMA.FTZ R24, R42, R21, c[0x10][0x14]; # [148][0004a0]
+//     	SEL R21, R44, RZ, P1;            # [149][0004a8]
+//     	FMUL.FTZ R20, R20, -R25;         # [150][0004b0]
+//     	FMUL.FTZ R25, R38, R25;          # [151][0004b8]
+//     	FFMA.FTZ R21, R40, R41, R21;     # [152][0004c0]
+//     	FMNMX.FTZ R40, |R20|, 1, !PT;    # [153][0004c8]
+//     	FMUL.FTZ R42, R35, R24;          # [154][0004d0]
+//     	FMNMX.FTZ R38, |R20|, 1, PT;     # [155][0004d8]
+//     	MUFU.RCP R41, R40;               # [156][0004e0]
+//     	FMNMX.FTZ R40, |R25|, 1, !PT;    # [157][0004e8]
+//     	FFMA.FTZ R42, R42, -R33, c[0x10][0x18]; # [158][0004f0]
+//     	FMUL.FTZ R38, R38, R41;          # [159][0004f8]
+//     	FMNMX.FTZ R41, |R25|, 1, PT;     # [160][000500]
+//     	MUFU.RCP R44, R40;               # [161][000508]
+//     	FMNMX.FTZ R40, R37, 1, PT;       # [162][000510]
+//     	SEL R42, R42, RZ, P2;            # [163][000518]
+//     	FMUL.FTZ R37, R41, R44;          # [164][000520]
+//     	FMUL.FTZ R41, R38, R38;          # [165][000528]
+//     	FFMA.FTZ R24, R35, R24, R42;     # [166][000530]
+//     	FMUL.FTZ R35, R37, R37;          # [167][000538]
+//     	FFMA.FTZ R42, R41, c[0x10][0x8], R34; # [168][000540]
+//     	FSETP.LT.FTZ.AND P1, PT, R40, -R40, PT; # [169][000548]
+//     	FFMA.FTZ R34, R35, c[0x10][0x8], R34; # [170][000550]
+//     	FFMA.FTZ R42, R41, R42, c[0x10][0xc]; # [171][000558]
+//     	FADD.FTZ R8, -R4, R8;            # [172][000560]
+//     	FFMA.FTZ R34, R35, R34, c[0x10][0xc]; # [173][000568]
+//     	FFMA.FTZ R44, R41, R42, c[0x10][0x10]; # [174][000570]
+//     	FADD.FTZ R9, -R5, R9;            # [175][000578]
+//     	FFMA.FTZ R42, R35, R34, c[0x10][0x10]; # [176][000580]
+//     	FFMA.FTZ R34, R41, R44, c[0x10][0x14]; # [177][000588]
+//     	F2F R41, -R21;                   # [178][000590]
+//     	FFMA.FTZ R35, R35, R42, c[0x10][0x14]; # [179][000598]
+//     	FFMA.FTZ R4, R8, c[0x10][0x0], R4; # [180][0005a0]
+//     	SEL R21, R21, R41, !P0;          # [181][0005a8]
+//     	FMUL.FTZ R41, R38, R34;          # [182][0005b0]
+//     	FSETP.GT.FTZ.AND P0, PT, |R20|, 1, PT; # [183][0005b8]
+//     	FMUL.FTZ R42, R37, R35;          # [184][0005c0]
+//     	FFMA.FTZ R41, R41, -R33, c[0x10][0x18]; # [185][0005c8]
+//     	FMNMX.FTZ R20, R20, 1, PT;       # [186][0005d0]
+//     	FFMA.FTZ R42, R42, -R33, c[0x10][0x18]; # [187][0005d8]
+//     	SEL R41, R41, RZ, P0;            # [188][0005e0]
+//     	FSETP.GT.FTZ.AND P0, PT, |R25|, 1, PT; # [189][0005e8]
+//     	FMNMX.FTZ R25, R25, 1, PT;       # [190][0005f0]
+//     	FFMA.FTZ R38, R38, R34, R41;     # [191][0005f8]
+//     	SEL R34, R42, RZ, P0;            # [192][000600]
+//     	FSETP.LT.FTZ.AND P0, PT, R20, -R20, PT; # [193][000608]
+//     	F2F R20, -R38;                   # [194][000610]
+//     	FFMA.FTZ R34, R37, R35, R34;     # [195][000618]
+//     	F2F R33, -R24;                   # [196][000620]
+//     	FSETP.LT.FTZ.AND P2, PT, R25, -R25, PT; # [197][000628]
+//     	SEL R25, R38, R20, !P0;          # [198][000630]
+//     	F2F R35, -R34;                   # [199][000638]
+//     	SEL R20, R24, R33, !P1;          # [200][000640]
+//     	FADD.FTZ R24, R21, R25;          # [201][000648]
+//     	SEL R21, R34, R35, !P2;          # [202][000650]
+//     	FFMA.FTZ R5, R9, c[0x10][0x0], R5; # [203][000658]
+//     	RRO.SINCOS R25, R24;             # [204][000660]
+//     	FADD.FTZ R20, R20, R21;          # [205][000668]
+//     	FADD.FTZ R10, -R6, R10;          # [206][000670]
+//     	MUFU.COS R8, R25;                # [207][000678]
+//     	FFMA.FTZ R21, R16, 2, -R3;       # [208][000680]
+//     	FFMA.FTZ R17, R17, 2, -R3;       # [209][000688]
+//     	RRO.SINCOS R24, R20;             # [210][000690]
+//     	FFMA.FTZ R33, R21, -R21, R3;     # [211][000698]
+//     	MUFU.SIN R20, R25;               # [212][0006a0]
+//     	FFMA.FTZ R10, R10, c[0x10][0x0], R6; # [213][0006a8]
+//     	FFMA.FTZ R9, R17, -R17, R33;     # [214][0006b0]
+//     	MUFU.COS R25, R24;               # [215][0006b8]
+//     	FMUL.FTZ R40, R39, R47;          # [216][0006c0]
+//     	MUFU.SIN R16, R24;               # [217][0006c8]
+//     	FMNMX.FTZ R34, R9, RZ, !PT;      # [218][0006d0]
+//     	FMUL.FTZ R24, R20, R25;          # [219][0006d8]
+//     	FMUL.FTZ R9, R8, R25;            # [220][0006e0]
+//     	FMUL.FTZ R33, R20, R16;          # [221][0006e8]
+//     	FMUL.FTZ R25, R25, R21;          # [222][0006f0]
+//     	MUFU.RSQ R35, R34;               # [223][0006f8]
+//     	FMUL.FTZ R34, R8, R16;           # [224][000700]
+//     	FFMA.FTZ R25, R33, R17, R25;     # [225][000708]
+//     	MUFU.RCP R33, R35;               # [226][000710]
+//     	FMUL.FTZ R21, R16, -R21;         # [227][000718]
+//     	FMUL.FTZ R16, R8, R17;           # [228][000720]
+//     	FFMA.FTZ R8, R34, R33, R25;      # [229][000728]
+//     	FFMA.FTZ R17, R24, R17, R21;     # [230][000730]
+//     	FFMA.FTZ R20, R20, -R33, R16;    # [231][000738]
+//     	FMUL.FTZ R16, R8, R8;            # [232][000740]
+//     	FFMA.FTZ R9, R9, R33, R17;       # [233][000748]
+//     	FFMA.FTZ R21, R36, c[0x10][0x4], R3; # [234][000750]
+//     	FFMA.FTZ R6, R20, R20, R16;      # [235][000758]
+//     	FMUL32I.FTZ R3, R36, 0.42;       # [236][000760]
+//     	FMUL.FTZ R38, R4, R21;           # [237][000768]
+//     	FFMA.FTZ R6, R9, R9, R6;         # [238][000770]
+//     	FMUL.FTZ R25, R5, R21;           # [239][000778]
+//     	FMUL32I.FTZ R16, R36, 0.514;     # [240][000780]
+//     	MUFU.RSQ R6, R6;                 # [241][000788]
+//     	FMUL32I.FTZ R17, R36, 0.58;      # [242][000790]
+//     	FMUL.FTZ R24, R10, R21;          # [243][000798]
+//     	FMUL.FTZ R4, R8, R6;             # [244][0007a0]
+//     	FMUL.FTZ R8, R20, R6;            # [245][0007a8]
+//     	FMUL.FTZ R6, R9, R6;             # [246][0007b0]
+//     	FMUL.FTZ R5, R32, R4;            # [247][0007b8]
+//     	FMUL.FTZ R9, R31, R4;            # [248][0007c0]
+//     	FMUL.FTZ R4, R30, R4;            # [249][0007c8]
+//     	FFMA.FTZ R5, R22, R8, R5;        # [250][0007d0]
+//     	FFMA.FTZ R9, R28, R8, R9;        # [251][0007d8]
+//     	FMUL.FTZ R20, R18, R19;          # [252][0007e0]
+//     	FFMA.FTZ R22, R29, R6, R5;       # [253][0007e8]
+//     	FFMA.FTZ R5, R11, R8, R4;        # [254][0007f0]
+//     	FFMA.FTZ R19, R13, R6, R9;       # [255][0007f8]
+//     	FADD.FTZ.SAT R4, R22, 1;         # [256][000800]
+//     	FFMA.FTZ R18, R7, R6, R5;        # [257][000808]
+//     	FMUL.FTZ R13, R4, 2;             # [258][000810]
+//     L0818:
+//     	IPA.PASS R4, a[0x7c];            # [259][000818] POSITION_W
+//     	MOV R8, RZ;                      # [260][000820]
+//     	MOV R9, RZ;                      # [261][000828]
+//     	MOV R10, RZ;                     # [262][000830]
+//     	MOV R31, RZ;                     # [263][000838]
+//     	MOV R29, RZ;                     # [264][000840]
+//     	MUFU.RCP R4, R4;                 # [265][000848]
+//     	MOV R11, RZ;                     # [266][000850]
+//     	IPA R4, a[0x94], R4;             # [267][000858] GENERIC_ATTRIBUTE_01_Y
+//     	FADD.FTZ R4, R4, 1;              # [268][000860]
+//     	FFMA.FTZ R4, RZ, R4, c[0x10][0x1c]; # [269][000868]
+//     	FFMA.FTZ R28, RZ, R13, R4;       # [270][000870]
+//     	IPA.PASS R4, a[0x7c];            # [271][000878] POSITION_W
+//     	MUFU.RCP R21, R4;                # [272][000880]
+//     L0888:
+//     	F2I.U32.TRUNC R4, R11;           # [273][000888]
+//     	IPA R36, a[0x90], R21;           # [274][000890] ATTR1
+//     	IPA R35, a[0x94], R21;           # [275][000898] GENERIC_ATTRIBUTE_01_Y
+//     	SHL.W R6, R4, 0x4;               # [276][0008a0]
+//     	IPA R34, a[0x98], R21;           # [277][0008a8] GENERIC_ATTRIBUTE_01_Z
+//     	LDC.64 R4, c[0xf][R6];           # [278][0008b0]
+//     	MOV R6, R4;                      # [279][0008b8]
+//     	MOV R4, R5;                      # [280][0008c0]
+//     	FFMA.FTZ R5, R6, R14, R26;       # [281][0008c8]
+//     	FFMA.FTZ R4, R4, R14, R15;       # [282][0008d0]
+//     	FADD.FTZ R6, R28, -R35;          # [283][0008d8]
+//     	FFMA.FTZ R5, R19, R13, R5;       # [284][0008e0]
+//     	FFMA.FTZ R4, R18, R13, R4;       # [285][0008e8]
+//     	FADD.FTZ R7, R5, -R36;           # [286][0008f0]
+//     	FADD.FTZ R5, R4, -R34;           # [287][0008f8]
+//     	FFMA.FTZ R4, R7, -RZ, -R6;       # [288][000900]
+//     	FFMA.FTZ R4, RZ, -R5, R4;        # [289][000908]
+//     	MUFU.RCP R30, R4;                # [290][000910]
+//     	FMUL.FTZ R30, R12, R30;          # [291][000918]
+//     	FFMA.FTZ R7, R30, R7, R36;       # [292][000920]
+//     	FFMA.FTZ R6, R30, R6, R35;       # [293][000928]
+//     	FFMA.FTZ R5, R30, R5, R34;       # [294][000930]
+//     	FCMP.EQ.FTZ R32, R36, R7, R4;    # [295][000938]
+//     	FCMP.EQ.FTZ R30, R35, R6, R4;    # [296][000940]
+//     	FCMP.EQ.FTZ R33, R34, R5, R4;    # [297][000948]
+//     	FMUL32I.FTZ R6, R32, 0x3d0e9e50; # [298][000950]
+//     	FMUL.FTZ R7, RZ, R32;            # [299][000958]
+//     	FFMA.FTZ R4, RZ, R30, R6;        # [300][000960]
+//     	FFMA.FTZ R5, R30, c[0x10][0x20], R7; # [301][000968]
+//     	FFMA.FTZ R4, RZ, R33, R4;        # [302][000970]
+//     	FFMA.FTZ R5, R33, c[0x10][0x24], R5; # [303][000978]
+//     	FADD32I.FTZ R4, R4, 0xbdfcdaf6;  # [304][000980]
+//     	FADD32I.FTZ R5, R5, 0xbf77fec8;  # [305][000988]
+//     	FADD.FTZ R4, R4, 1;              # [306][000990]
+//     	FADD.FTZ R5, R5, 1;              # [307][000998]
+//     	FMUL.FTZ R4, R4, 0.5;            # [308][0009a0]
+//     	FMUL.FTZ R5, R5, 0.5;            # [309][0009a8]
+//     	FADD32I.FTZ R6, R4, 0.377;       # [310][0009b0]
+//     	MOV R7, R5;                      # [311][0009b8]
+//     	TEX.NODEP.T R6, R6, 0x9, 0x1, 2D, 0x1; # [312][0009c0]
+//     	TEX.NODEP.T R7, R4, 0x9, 0x1, 2D, 0x1; # [313][0009c8]
+//     	FADD32I.FTZ R5, R5, 0.377;       # [314][0009d0]
+//     	TEX.NODEP.T R37, R4, 0x9, 0x1, 2D, 0x1; # [315][0009d8]
+//     	FADD.FTZ R5, R30, -R35;          # [316][0009e0]
+//     	FADD.FTZ R4, R32, -R36;          # [317][0009e8]
+//     	FADD.FTZ R11, R11, 1;            # [318][0009f0]
+//     	FADD.FTZ R8, R8, R33;            # [319][0009f8]
+//     	FADD.FTZ R9, R9, R30;            # [320][000a00]
+//     	FSETP.GE.FTZ.AND P0, PT, R11, 4, PT; # [321][000a08]
+//     	FADD.FTZ R10, R10, R32;          # [322][000a10]
+//     	FMUL32I.FTZ R7, R7, 8.706;       # [323][000a18]
+//     	FFMA.FTZ R35, R6, c[0x10][0x28], -R7; # [324][000a20]
+//     	FADD.FTZ R6, R33, -R34;          # [325][000a28]
+//     	FMUL.FTZ R34, R4, R4;            # [326][000a30]
+//     	FMUL32I.FTZ R36, R35, 0x3e208c93; # [327][000a38]
+//     	FFMA.FTZ R7, R37, c[0x10][0x28], -R7; # [328][000a40]
+//     	FMUL32I.FTZ R37, R7, 0.1436;     # [329][000a48]
+//     	FFMA.FTZ R7, R7, RZ, -R36;       # [330][000a50]
+//     	FFMA.FTZ R36, R5, R5, R34;       # [331][000a58]
+//     	FFMA.FTZ R34, RZ, R35, -R37;     # [332][000a60]
+//     	FFMA.FTZ R37, R7, R7, c[0x10][0x2c]; # [333][000a68]
+//     	FFMA.FTZ R35, R6, R6, R36;       # [334][000a70]
+//     	FFMA.FTZ R37, R34, R34, R37;     # [335][000a78]
+//     	MUFU.RSQ R36, R35;               # [336][000a80]
+//     	MOV32I R35, 0x3f800000;          # [337][000a88]
+//     	MUFU.RSQ R37, R37;               # [338][000a90]
+//     	FMUL.FTZ R41, R4, R36;           # [339][000a98]
+//     	FMUL.FTZ R42, R5, R36;           # [340][000aa0]
+//     	FMUL.FTZ R4, R7, R37;            # [341][000aa8]
+//     	FMUL32I.FTZ R5, R37, 0x3cb87057; # [342][000ab0]
+//     	FMUL.FTZ R6, R6, R36;            # [343][000ab8]
+//     	FMUL.FTZ R7, R4, R41;            # [344][000ac0]
+//     	FMUL.FTZ R4, R34, R37;           # [345][000ac8]
+//     	FFMA.FTZ R5, R5, R42, R7;        # [346][000ad0]
+//     	FFMA.FTZ R5, R4, R6, R5;         # [347][000ad8]
+//     	MUFU.RCP R4, R36;                # [348][000ae0]
+//     	FFMA.FTZ R6, R37, c[0x10][0x30], R35; # [349][000ae8]
+//     	F2F R5, |R5|;                    # [350][000af0]
+//     	FADD.FTZ R29, R29, R4;           # [351][000af8]
+//     	FFMA.FTZ R31, R5, R6, R31;       # [352][000b00]
+//     	@!P0 BRA L0888;                  # [353][000b08]
+//     	TLD.LZ.T R41, R27, 0xb, 1D, 0x1; # [354][000b10]
+//     	IPA R42, a[0x90], R21;           # [355][000b18] ATTR1
+//     	IPA R44, a[0x94], R21;           # [356][000b20] GENERIC_ATTRIBUTE_01_Y
+//     	IPA R45, a[0x98], R21;           # [357][000b28] GENERIC_ATTRIBUTE_01_Z
+//     	SHL.W R36, R23, 0x4;             # [358][000b30]
+//     	FFMA.FTZ R30, R10, 0.25, -R42;   # [359][000b38]
+//     	FFMA.FTZ R28, R9, 0.25, -R44;    # [360][000b40]
+//     	FFMA.FTZ R33, R8, 0.25, -R45;    # [361][000b48]
+//     	FMUL.FTZ R4, R30, R30;           # [362][000b50]
+//     	FFMA.FTZ R4, R28, R28, R4;       # [363][000b58]
+//     	FFMA.FTZ R8, R33, R33, R4;       # [364][000b60]
+//     	LDC.128 R4, c[0x3][R36+0x800];   # [365][000b68]
+//     	MUFU.RSQ R32, R8;                # [366][000b70]
+//     	FMUL.FTZ R9, R4, R42;            # [367][000b78]
+//     	FMUL.FTZ R35, R28, R32;          # [368][000b80]
+//     	FMUL.FTZ R34, R30, R32;          # [369][000b88]
+//     	FMUL.FTZ R37, R33, R32;          # [370][000b90]
+//     	FMUL.FTZ R8, R35, -R5;           # [371][000b98]
+//     	FFMA.FTZ R5, R5, R44, R9;        # [372][000ba0]
+//     	FFMA.FTZ R4, R34, -R4, R8;       # [373][000ba8]
+//     	FFMA.FTZ R8, R6, R45, R5;        # [374][000bb0]
+//     	FFMA.FTZ R5, R6, -R37, R4;       # [375][000bb8]
+//     	SHL.W R4, R23, 0x2;              # [376][000bc0]
+//     	FADD.FTZ R6, R8, R7;             # [377][000bc8]
+//     	MUFU.RCP R7, R5;                 # [378][000bd0]
+//     	SHL.W R48, R4, 0x4;              # [379][000bd8]
+//     	FSETP.NEU.FTZ.AND P0, PT, R5, RZ, PT; # [380][000be0]
+//     	FMUL.FTZ R49, R6, R7;            # [381][000be8]
+//     	LDC.128 R4, c[0x3][R48];         # [382][000bf0]
+//     	LDC.128 R8, c[0x3][R48+0x10];    # [383][000bf8]
+//     	@P0 FFMA.FTZ R42, R49, R34, R42; # [384][000c00]
+//     	@P0 FFMA.FTZ R44, R49, R35, R44; # [385][000c08]
+//     	@P0 FFMA.FTZ R45, R49, R37, R45; # [386][000c10]
+//     	FMUL.FTZ R4, R4, R42;            # [387][000c18]
+//     	FMUL.FTZ R8, R8, R42;            # [388][000c20]
+//     	FFMA.FTZ R4, R5, R44, R4;        # [389][000c28]
+//     	FFMA.FTZ R5, R9, R44, R8;        # [390][000c30]
+//     	FFMA.FTZ R8, R6, R45, R4;        # [391][000c38]
+//     	FFMA.FTZ R9, R10, R45, R5;       # [392][000c40]
+//     	TLD.LZ.NODEP.T R4, R23, 0x8, 1D, 0x7; # [393][000c48]
+//     	FFMA.FTZ R7, R7, 1, R8;          # [394][000c50]
+//     	FFMA.FTZ R9, R11, 1, R9;         # [395][000c58]
+//     	FADD.FTZ R8, R7, 1;              # [396][000c60]
+//     	FADD.FTZ R10, R9, 1;             # [397][000c68]
+//     	FMUL.FTZ R9, R8, 0.5;            # [398][000c70]
+//     	FMUL.FTZ R10, R10, 0.5;          # [399][000c78]
+//     	F2I.FTZ.U32 R7, R41;             # [400][000c80]
+//     	I2I.U16.U32.SAT R8, R7;          # [401][000c88]
+//     	TEX.NODEP.T R8, R8, 0xa, 0x1, ARRAY_2D, 0x7; # [402][000c90]
+//     	FMUL.FTZ R7, R29, 0.25;          # [403][000c98]
+//     	MOV32I R11, 0x3f800000;          # [404][000ca0]
+//     	FFMA.FTZ R28, R28, R32, R43;     # [405][000ca8]
+//     	FMUL.FTZ.SAT R29, R31, 0.25;     # [406][000cb0]
+//     	FFMA.FTZ.SAT R7, R7, -c[0x10][0x34], R11; # [407][000cb8]
+//     	FFMA.FTZ R11, R30, R32, R46;     # [408][000cc0]
+//     	FFMA.FTZ R31, R33, R32, R40;     # [409][000cc8]
+//     	FMUL.FTZ R30, R28, 0.5;          # [410][000cd0]
+//     	FMUL.FTZ R11, R11, 0.5;          # [411][000cd8]
+//     	FMUL.FTZ R28, R19, R34;          # [412][000ce0]
+//     	FMUL.FTZ R31, R31, 0.5;          # [413][000ce8]
+//     	FMUL.FTZ R11, R19, R11;          # [414][000cf0]
+//     	FADD.FTZ R29, -R29, 1;           # [415][000cf8]
+//     	FFMA.FTZ R28, R22, R35, R28;     # [416][000d00]
+//     	FFMA.FTZ R30, R22, R30, R11;     # [417][000d08]
+//     	MUFU.LG2 R29, R29;               # [418][000d10]
+//     	FFMA.FTZ.SAT R28, R18, R37, R28; # [419][000d18]
+//     	FFMA.FTZ.SAT R30, R18, R31, R30; # [420][000d20]
+//     	FMUL.FTZ R32, R29, 4;            # [421][000d28]
+//     	MUFU.LG2 R29, R28;               # [422][000d30]
+//     	FMUL.FTZ R7, R7, R7;             # [423][000d38]
+//     	MUFU.LG2 R30, R30;               # [424][000d40]
+//     	RRO.EX2 R32, R32;                # [425][000d48]
+//     	LDC R11, c[0x2][R36+0x20c];      # [426][000d50]
+//     	FMUL.FTZ R31, R30, 60;           # [427][000d58]
+//     	FMUL.FTZ R30, R29, 60;           # [428][000d60]
+//     	MUFU.EX2 R29, R32;               # [429][000d68]
+//     	RRO.EX2 R31, R31;                # [430][000d70]
+//     	RRO.EX2 R30, R30;                # [431][000d78]
+//     	IADD R27, R27, 0x1;              # [432][000d80]
+//     	MUFU.EX2 R31, R31;               # [433][000d88]
+//     	IADD R23, R23, 0x1;              # [434][000d90]
+//     	MUFU.EX2 R30, R30;               # [435][000d98]
+//     	FMUL.FTZ R32, R16, R31;          # [436][000da0]
+//     	FMUL.FTZ R34, R17, R31;          # [437][000da8]
+//     	FMUL.FTZ R31, R3, R31;           # [438][000db0]
+//     	FFMA.FTZ R33, R30, R16, -R32;    # [439][000db8]
+//     	FFMA.FTZ R35, R30, R17, -R34;    # [440][000dc0]
+//     	FFMA.FTZ R30, R30, R3, -R31;     # [441][000dc8]
+//     	FFMA.FTZ R32, R33, c[0x10][0x38], R32; # [442][000dd0]
+//     	FFMA.FTZ R34, R35, c[0x10][0x38], R34; # [443][000dd8]
+//     	FFMA.FTZ R30, R30, c[0x10][0x38], R31; # [444][000de0]
+//     	FFMA.FTZ R32, R28, R25, R32;     # [445][000de8]
+//     	FFMA.FTZ R33, R28, R38, R34;     # [446][000df0]
+//     	FFMA.FTZ R31, R28, R24, R30;     # [447][000df8]
+//     	FMUL.FTZ R30, R20, R32;          # [448][000e00]
+//     	FMUL.FTZ R32, R7, R4;            # [449][000e08]
+//     	FMUL.FTZ R5, R7, R5;             # [450][000e10]
+//     	FMUL.FTZ R4, R7, R6;             # [451][000e18]
+//     	FMUL.FTZ R6, R32, R11;           # [452][000e20]
+//     	FMUL.FTZ R5, R5, R11;            # [453][000e28]
+//     	FMUL.FTZ R4, R4, R11;            # [454][000e30]
+//     	FMUL.FTZ R6, R29, R6;            # [455][000e38]
+//     	FMUL.FTZ R5, R29, R5;            # [456][000e40]
+//     	FMUL.FTZ R4, R29, R4;            # [457][000e48]
+//     	FMUL.FTZ R28, R20, R33;          # [458][000e50]
+//     	FMUL.FTZ R31, R20, R31;          # [459][000e58]
+//     	ISETP.GE.AND P0, PT, R27, 0x1, PT; # [460][000e60]
+//     	FMUL.FTZ R6, R8, R6;             # [461][000e68]
+//     	FMUL.FTZ R5, R9, R5;             # [462][000e70]
+//     	FMUL.FTZ R4, R10, R4;            # [463][000e78]
+//     	FFMA.FTZ R0, R28, R6, R0;        # [464][000e80]
+//     	FFMA.FTZ R1, R30, R5, R1;        # [465][000e88]
+//     	FFMA.FTZ R2, R31, R4, R2;        # [466][000e90]
+//     	@!P0 BRA L0818;                  # [467][000e98]
+//     	IPA.PASS R4, a[0x7c];            # [468][000ea0] POSITION_W
+//     	ISETP.GE.AND P0, PT, RZ, c[0x6][0x20], PT; # [469][000ea8]
+//     	MOV R27, RZ;                     # [470][000eb0]
+//     	MUFU.RCP R4, R4;                 # [471][000eb8]
+//     	IPA R4, a[0x94], R4;             # [472][000ec0] GENERIC_ATTRIBUTE_01_Y
+//     	FADD.FTZ R26, -R4, c[0x0][0x84]; # [473][000ec8]
+//     	@P0 BRA L11a0;                   # [474][000ed0]
+//     L0ed8:
+//     	TLD.LZ.T R28, R27, 0xd, 1D, 0x1; # [475][000ed8]
+//     	SHL.W R12, R23, 0x4;             # [476][000ee0]
+//     	IPA R29, a[0x90], R21;           # [477][000ee8] ATTR1
+//     	IPA R30, a[0x94], R21;           # [478][000ef0] GENERIC_ATTRIBUTE_01_Y
+//     	LDC.128 R8, c[0x3][R12+0x800];   # [479][000ef8]
+//     	LDC.128 R4, c[0x2][R12+0x200];   # [480][000f00]
+//     	IPA R31, a[0x98], R21;           # [481][000f08] GENERIC_ATTRIBUTE_01_Z
+//     	FMUL.FTZ R13, R8, R29;           # [482][000f10]
+//     	FMUL.FTZ R12, R5, -R9;           # [483][000f18]
+//     	FFMA.FTZ R9, R9, R30, R13;       # [484][000f20]
+//     	FFMA.FTZ R8, R4, -R8, R12;       # [485][000f28]
+//     	FFMA.FTZ R12, R10, R31, R9;      # [486][000f30]
+//     	FFMA.FTZ R9, R10, -R6, R8;       # [487][000f38]
+//     	SHL.W R8, R23, 0x2;              # [488][000f40]
+//     	FADD.FTZ R10, R12, R11;          # [489][000f48]
+//     	MUFU.RCP R11, R9;                # [490][000f50]
+//     	SHL.W R32, R8, 0x4;              # [491][000f58]
+//     	FSETP.NEU.FTZ.AND P0, PT, R9, RZ, PT; # [492][000f60]
+//     	FMUL.FTZ R33, R10, R11;          # [493][000f68]
+//     	LDC.128 R8, c[0x3][R32];         # [494][000f70]
+//     	LDC.128 R12, c[0x3][R32+0x10];   # [495][000f78]
+//     	@P0 FFMA.FTZ R29, R33, R4, R29;  # [496][000f80]
+//     	@P0 FFMA.FTZ R30, R33, R5, R30;  # [497][000f88]
+//     	@P0 FFMA.FTZ R31, R33, R6, R31;  # [498][000f90]
+//     	FMUL.FTZ R8, R8, R29;            # [499][000f98]
+//     	FMUL.FTZ R12, R12, R29;          # [500][000fa0]
+//     	FFMA.FTZ R8, R9, R30, R8;        # [501][000fa8]
+//     	FFMA.FTZ R9, R13, R30, R12;      # [502][000fb0]
+//     	FFMA.FTZ R8, R10, R31, R8;       # [503][000fb8]
+//     	FFMA.FTZ R9, R14, R31, R9;       # [504][000fc0]
+//     	FFMA.FTZ R8, R11, 1, R8;         # [505][000fc8]
+//     	FFMA.FTZ R10, R15, 1, R9;        # [506][000fd0]
+//     	FADD.FTZ R9, R8, 1;              # [507][000fd8]
+//     	FADD.FTZ R10, R10, 1;            # [508][000fe0]
+//     	FMUL.FTZ R9, R9, 0.5;            # [509][000fe8]
+//     	FMUL.FTZ R10, R10, 0.5;          # [510][000ff0]
+//     	F2I.FTZ.U32 R8, R28;             # [511][000ff8]
+//     	I2I.U16.U32.SAT R8, R8;          # [512][001000]
+//     	TEX.NODEP.T R12, R8, 0xc, 0x2, ARRAY_2D, 0x7; # [513][001008]
+//     	TLD.LZ.NODEP.T R8, R23, 0x8, 1D, 0x7; # [514][001010]
+//     	LDL R11, [0x4];                  # [515][001018]
+//     	FFMA.FTZ R15, R26, R47, R5;      # [516][001020]
+//     	FFMA.FTZ R28, R39, R47, R6;      # [517][001028]
+//     	IADD R27, R27, 0x1;              # [518][001030]
+//     	FMUL.FTZ R15, R15, 0.5;          # [519][001038]
+//     	FMUL.FTZ R28, R28, 0.5;          # [520][001040]
+//     	FFMA.FTZ R11, R11, R47, R4;      # [521][001048]
+//     	FMUL.FTZ R4, R19, R4;            # [522][001050]
+//     	ISETP.GE.AND P0, PT, R27, c[0x6][0x20], PT; # [523][001058]
+//     	FMUL.FTZ R11, R11, 0.5;          # [524][001060]
+//     	FFMA.FTZ R4, R22, R5, R4;        # [525][001068]
+//     	IADD R23, R23, 0x1;              # [526][001070]
+//     	FMUL.FTZ R11, R19, R11;          # [527][001078]
+//     	FFMA.FTZ.SAT R4, R18, R6, R4;    # [528][001080]
+//     	FFMA.FTZ R11, R22, R15, R11;     # [529][001088]
+//     	FFMA.FTZ.SAT R5, R18, R28, R11;  # [530][001090]
+//     	MUFU.LG2 R6, R5;                 # [531][001098]
+//     	MUFU.LG2 R5, R4;                 # [532][0010a0]
+//     	FMUL.FTZ R6, R6, 60;             # [533][0010a8]
+//     	FMUL.FTZ R5, R5, 60;             # [534][0010b0]
+//     	RRO.EX2 R6, R6;                  # [535][0010b8]
+//     	RRO.EX2 R5, R5;                  # [536][0010c0]
+//     	MUFU.EX2 R6, R6;                 # [537][0010c8]
+//     	MUFU.EX2 R5, R5;                 # [538][0010d0]
+//     	FMUL.FTZ R11, R16, R6;           # [539][0010d8]
+//     	FMUL.FTZ R28, R17, R6;           # [540][0010e0]
+//     	FMUL.FTZ R6, R3, R6;             # [541][0010e8]
+//     	FFMA.FTZ R15, R5, R16, -R11;     # [542][0010f0]
+//     	FFMA.FTZ R29, R5, R17, -R28;     # [543][0010f8]
+//     	FFMA.FTZ R5, R5, R3, -R6;        # [544][001100]
+//     	FFMA.FTZ R11, R15, c[0x10][0x38], R11; # [545][001108]
+//     	FFMA.FTZ R28, R29, c[0x10][0x38], R28; # [546][001110]
+//     	FFMA.FTZ R5, R5, c[0x10][0x38], R6; # [547][001118]
+//     	FFMA.FTZ R6, R4, R25, R11;       # [548][001120]
+//     	FFMA.FTZ R15, R4, R38, R28;      # [549][001128]
+//     	FFMA.FTZ R4, R4, R24, R5;        # [550][001130]
+//     	FMUL.FTZ R5, R20, R6;            # [551][001138]
+//     	FMUL.FTZ R11, R20, R15;          # [552][001140]
+//     	FMUL.FTZ R4, R20, R4;            # [553][001148]
+//     	FMUL.FTZ R12, R12, R8;           # [554][001150]
+//     	FMUL.FTZ R8, R13, R9;            # [555][001158]
+//     	FMUL.FTZ R6, R14, R10;           # [556][001160]
+//     	FMUL.FTZ R9, R12, R7;            # [557][001168]
+//     	FMUL.FTZ R8, R8, R7;             # [558][001170]
+//     	FMUL.FTZ R6, R6, R7;             # [559][001178]
+//     	FFMA.FTZ R0, R11, R9, R0;        # [560][001180]
+//     	FFMA.FTZ R1, R5, R8, R1;         # [561][001188]
+//     	FFMA.FTZ R2, R4, R6, R2;         # [562][001190]
+//     	@!P0 BRA L0ed8;                  # [563][001198]
+//     L11a0:
+//     	ISETP.LT.AND P0, PT, RZ, c[0x6][0x30], PT; # [564][0011a0]
+//     	@!P0 BRA L2478;                  # [565][0011a8]
+//     	I2F R5, c[0x5][0xd0];            # [566][0011b0]
+//     	MOV R27, RZ;                     # [567][0011b8]
+//     	MOV R6, RZ;                      # [568][0011c0]
+//     	FSETP.GE.FTZ.AND P0, PT, RZ, R5, PT; # [569][0011c8]
+//     	@P0 BRA L1220;                   # [570][0011d0]
+//     L11d8:
+//     	F2I.U32.TRUNC R4, R6;            # [571][0011d8]
+//     	FADD.FTZ R6, R6, 1;              # [572][0011e0]
+//     	SHL.W R4, R4, 0x4;               # [573][0011e8]
+//     	FSETP.GE.FTZ.AND P1, PT, R6, R5, PT; # [574][0011f0]
+//     	LDC R7, c[0x5][R4+0x80];         # [575][0011f8]
+//     	FADD.FTZ R4, R27, 1;             # [576][001200]
+//     	FSETP.LT.FTZ.AND P0, PT, R7, R21, PT; # [577][001208]
+//     	SEL R27, R27, R4, !P0;           # [578][001210]
+//     	@!P1 BRA L11d8;                  # [579][001218]
+//     L1220:
+//     	FSETP.LT.FTZ.AND P0, PT, R27, R5, PT; # [580][001220]
+//     	SSY L2188;                       # [581][001228]
+//     	@!P0 BRA L2180;                  # [582][001230]
+//     	F2F.FTZ R4, R27;                 # [583][001238]
+//     	F2I.U32.TRUNC R21, R4;           # [584][001240]
+//     	IPA.PASS R4, a[0x7c];            # [585][001248] POSITION_W
+//     	SHL.W R26, R21, 0x2;             # [586][001250]
+//     	SHL.W R29, R26, 0x4;             # [587][001258]
+//     	MUFU.RCP R30, R4;                # [588][001260]
+//     	LDC.128 R12, c[0x5][R29+0x30];   # [589][001268]
+//     	IPA R28, a[0x90], R30;           # [590][001270] ATTR1
+//     	LDC.128 R4, c[0x5][R29];         # [591][001278]
+//     	IPA R31, a[0x94], R30;           # [592][001280] GENERIC_ATTRIBUTE_01_Y
+//     	LDC.128 R8, c[0x5][R29+0x10];    # [593][001288]
+//     	IPA R48, a[0x98], R30;           # [594][001290] GENERIC_ATTRIBUTE_01_Z
+//     	FMUL.FTZ R12, R12, R28;          # [595][001298]
+//     	FMUL.FTZ R29, R4, R28;           # [596][0012a0]
+//     	FMUL.FTZ R4, R8, R28;            # [597][0012a8]
+//     	FFMA.FTZ R12, R13, R31, R12;     # [598][0012b0]
+//     	FFMA.FTZ R8, R5, R31, R29;       # [599][0012b8]
+//     	FFMA.FTZ R4, R9, R31, R4;        # [600][0012c0]
+//     	FFMA.FTZ R5, R14, R48, R12;      # [601][0012c8]
+//     	FFMA.FTZ R6, R6, R48, R8;        # [602][0012d0]
+//     	FFMA.FTZ R4, R10, R48, R4;       # [603][0012d8]
+//     	FFMA.FTZ R49, R15, 1, R5;        # [604][0012e0]
+//     	FFMA.FTZ R5, R7, 1, R6;          # [605][0012e8]
+//     	FFMA.FTZ R4, R11, 1, R4;         # [606][0012f0]
+//     	MUFU.RCP R6, R49;                # [607][0012f8]
+//     	MOV32I R7, 0x3f000000;           # [608][001300]
+//     	FMUL.FTZ R5, R5, R6;             # [609][001308]
+//     	FMUL.FTZ R4, R4, -R6;            # [610][001310]
+//     	FFMA.FTZ R5, R5, 0.5, R7;        # [611][001318]
+//     	FFMA.FTZ R6, R4, 0.5, R7;        # [612][001320]
+//     	F2F.SAT R7, R5;                  # [613][001328]
+//     	F2F.SAT R4, R6;                  # [614][001330]
+//     	FSETP.NEU.FTZ.AND P0, PT, R5, R7, PT; # [615][001338]
+//     	FSETP.NEU.FTZ.OR P0, PT, R6, R4, P0; # [616][001340]
+//     	@P0 BRA L2178;                   # [617][001348]
+//     	TLD.LZ.T R4, RZ, 0x10, 1D, 0x1;  # [618][001350]
+//     	SHL.W R7, R21, 0x4;              # [619][001358]
+//     	F2I.FTZ.U32 R10, R27;            # [620][001360]
+//     	LDC.64 R8, c[0x5][R7+0xa0];      # [621][001368]
+//     	MUFU.RCP R11, R9;                # [622][001370]
+//     	TLD.LZ.T R7, RZ, 0x11, 1D, 0x1;  # [623][001378]
+//     	MUFU.RCP R8, R8;                 # [624][001380]
+//     	FMUL.FTZ R9, R4, 1000;           # [625][001388]
+//     	I2I.U16.U32.SAT R4, R10;         # [626][001390]
+//     	FMUL.FTZ R45, R9, R11;           # [627][001398]
+//     	FMUL.FTZ R44, R9, R8;            # [628][0013a0]
+//     	MOV R8, R4;                      # [629][0013a8]
+//     	FFMA.FTZ R10, R45, 0xb6000, R6;  # [630][0013b0]
+//     	FFMA.FTZ R9, R44, 0xb6c00, R5;   # [631][0013b8]
+//     	TEX.LZ.T R35, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [632][0013c0]
+//     	FFMA.FTZ R10, R45, 0xb6c00, R6;  # [633][0013c8]
+//     	FFMA.FTZ R9, R44, 0x36000, R5;   # [634][0013d0]
+//     	TEX.LZ.T R11, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [635][0013d8]
+//     	FFMA.FTZ R10, R45, 0x36c00, R6;  # [636][0013e0]
+//     	FFMA.FTZ R9, R44, 0xb6000, R5;   # [637][0013e8]
+//     	TEX.LZ.T R13, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [638][0013f0]
+//     	FFMA.FTZ R10, R45, 0x36000, R6;  # [639][0013f8]
+//     	FFMA.FTZ R9, R44, 0x36c00, R5;   # [640][001400]
+//     	TEX.LZ.T R21, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [641][001408]
+//     	FFMA.FTZ R10, R45, 0xb7000, R6;  # [642][001410]
+//     	FFMA.FTZ R9, R44, 0xb7c00, R5;   # [643][001418]
+//     	TEX.LZ.T R36, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [644][001420]
+//     	FFMA.FTZ R10, R45, 0xb7c00, R6;  # [645][001428]
+//     	FFMA.FTZ R9, R44, 0x37000, R5;   # [646][001430]
+//     	TEX.LZ.T R27, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [647][001438]
+//     	FFMA.FTZ R10, R45, 0x37c00, R6;  # [648][001440]
+//     	FFMA.FTZ R9, R44, 0xb7000, R5;   # [649][001448]
+//     	TEX.LZ.T R29, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [650][001450]
+//     	FFMA.FTZ R10, R45, 0x37000, R6;  # [651][001458]
+//     	FFMA.FTZ R9, R44, 0x37c00, R5;   # [652][001460]
+//     	TEX.LZ.T R30, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [653][001468]
+//     	FFMA.FTZ R10, R45, 0xb7900, R6;  # [654][001470]
+//     	FFMA.FTZ R9, R44, 0xb8580, R5;   # [655][001478]
+//     	TEX.LZ.T R41, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [656][001480]
+//     	FFMA.FTZ R10, R45, 0xb8580, R6;  # [657][001488]
+//     	FFMA.FTZ R9, R44, 0x37900, R5;   # [658][001490]
+//     	TEX.LZ.T R32, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [659][001498]
+//     	FFMA.FTZ R10, R45, 0x38580, R6;  # [660][0014a0]
+//     	FFMA.FTZ R9, R44, 0xb7900, R5;   # [661][0014a8]
+//     	TEX.LZ.T R33, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [662][0014b0]
+//     	FFMA.FTZ R10, R45, 0x37900, R6;  # [663][0014b8]
+//     	FFMA.FTZ R9, R44, 0x38580, R5;   # [664][0014c0]
+//     	TEX.LZ.T R34, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [665][0014c8]
+//     	FFMA.FTZ R10, R45, 0xb8000, R6;  # [666][0014d0]
+//     	FFMA.FTZ R9, R44, 0xb8c00, R5;   # [667][0014d8]
+//     	TEX.LZ.T R42, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [668][0014e0]
+//     	FFMA.FTZ R10, R45, 0xb8c00, R6;  # [669][0014e8]
+//     	FFMA.FTZ R9, R44, 0x38000, R5;   # [670][0014f0]
+//     	TEX.LZ.T R37, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [671][0014f8]
+//     	FFMA.FTZ R10, R45, 0x38c00, R6;  # [672][001500]
+//     	FFMA.FTZ R9, R44, 0xb8000, R5;   # [673][001508]
+//     	TEX.LZ.T R39, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [674][001510]
+//     	SHL.W R8, R26, 0x4;              # [675][001518]
+//     	FFMA.FTZ R10, R45, 0x38000, R6;  # [676][001520]
+//     	FFMA.FTZ R9, R44, 0x38c00, R5;   # [677][001528]
+//     	LDC R26, c[0x5][R8+0x2c];        # [678][001530]
+//     	LDC R15, c[0x5][R8+0x28];        # [679][001538]
+//     	LDC R14, c[0x5][R8+0x24];        # [680][001540]
+//     	LDC R12, c[0x5][R8+0x20];        # [681][001548]
+//     	MOV R8, R4;                      # [682][001550]
+//     	FMUL.FTZ R12, R12, R28;          # [683][001558]
+//     	TEX.LZ.T R28, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [684][001560]
+//     	FFMA.FTZ R12, R14, R31, R12;     # [685][001568]
+//     	TEX.LZ.T R31, R4, 0x12, 0x3, ARRAY_2D, 0x1; # [686][001570]
+//     	FFMA.FTZ R10, R45, 0xb8480, R6;  # [687][001578]
+//     	FFMA.FTZ R9, R44, 0xb9160, R5;   # [688][001580]
+//     	MOV R14, R26;                    # [689][001588]
+//     	TEX.LZ.T R26, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [690][001590]
+//     	FFMA.FTZ R10, R45, 0xb9160, R6;  # [691][001598]
+//     	FFMA.FTZ R9, R44, 0x38480, R5;   # [692][0015a0]
+//     	FFMA.FTZ R12, R15, R48, R12;     # [693][0015a8]
+//     	TEX.LZ.T R15, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [694][0015b0]
+//     	FFMA.FTZ R10, R45, 0x39160, R6;  # [695][0015b8]
+//     	FFMA.FTZ R9, R44, 0xb8480, R5;   # [696][0015c0]
+//     	MOV R48, R14;                    # [697][0015c8]
+//     	TEX.LZ.T R14, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [698][0015d0]
+//     	FFMA.FTZ R10, R45, 0x38480, R6;  # [699][0015d8]
+//     	FFMA.FTZ R9, R44, 0x39160, R5;   # [700][0015e0]
+//     	FFMA.FTZ R48, R48, 1, R12;       # [701][0015e8]
+//     	TEX.LZ.T R12, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [702][0015f0]
+//     	MUFU.RCP R8, R49;                # [703][0015f8]
+//     	FFMA.FTZ R10, R45, 0xb8900, R6;  # [704][001600]
+//     	FFMA.FTZ R9, R44, 0xb9580, R5;   # [705][001608]
+//     	FFMA.FTZ R7, R48, R8, -R7;       # [706][001610]
+//     	FSET.BF.GE.FTZ.AND R48, R7, R35, PT; # [707][001618]
+//     	FSET.BF.GE.FTZ.AND R49, R7, R11, PT; # [708][001620]
+//     	FMUL.FTZ R8, R48, R35;           # [709][001628]
+//     	FADD.FTZ R48, R48, R49;          # [710][001630]
+//     	FFMA.FTZ R35, R49, R11, R8;      # [711][001638]
+//     	MOV R8, R4;                      # [712][001640]
+//     	TEX.LZ.T R11, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [713][001648]
+//     	FSET.BF.GE.FTZ.AND R8, R7, R13, PT; # [714][001650]
+//     	FFMA.FTZ R10, R45, 0xb9580, R6;  # [715][001658]
+//     	FFMA.FTZ R9, R44, 0x38900, R5;   # [716][001660]
+//     	FFMA.FTZ R35, R8, R13, R35;      # [717][001668]
+//     	FADD.FTZ R48, R48, R8;           # [718][001670]
+//     	MOV R8, R4;                      # [719][001678]
+//     	FSET.BF.GE.FTZ.AND R49, R7, R21, PT; # [720][001680]
+//     	TEX.LZ.T R13, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [721][001688]
+//     	FFMA.FTZ R8, R49, R21, R35;      # [722][001690]
+//     	FSET.BF.GE.FTZ.AND R21, R7, R31, PT; # [723][001698]
+//     	FADD.FTZ R35, R48, R49;          # [724][0016a0]
+//     	FFMA.FTZ R10, R45, 0x39580, R6;  # [725][0016a8]
+//     	FFMA.FTZ R31, R31, R21, R8;      # [726][0016b0]
+//     	MOV R8, R4;                      # [727][0016b8]
+//     	FFMA.FTZ R9, R44, 0xb8900, R5;   # [728][0016c0]
+//     	FADD.FTZ R49, R21, R35;          # [729][0016c8]
+//     	FSET.BF.GE.FTZ.AND R48, R7, R36, PT; # [730][0016d0]
+//     	TEX.LZ.T R21, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [731][0016d8]
+//     	FSET.BF.GE.FTZ.AND R35, R7, R27, PT; # [732][0016e0]
+//     	FMUL.FTZ R8, R48, R36;           # [733][0016e8]
+//     	FFMA.FTZ R10, R45, 0x38900, R6;  # [734][0016f0]
+//     	FFMA.FTZ R9, R44, 0x39580, R5;   # [735][0016f8]
+//     	FFMA.FTZ R36, R35, R27, R8;      # [736][001700]
+//     	MOV R8, R4;                      # [737][001708]
+//     	TEX.LZ.T R27, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [738][001710]
+//     	FADD.FTZ R35, R48, R35;          # [739][001718]
+//     	FSET.BF.GE.FTZ.AND R48, R7, R29, PT; # [740][001720]
+//     	FFMA.FTZ R10, R45, 0xb8c40, R6;  # [741][001728]
+//     	FFMA.FTZ R9, R44, 0xb9930, R5;   # [742][001730]
+//     	FFMA.FTZ R36, R48, R29, R36;     # [743][001738]
+//     	TEX.LZ.T R29, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [744][001740]
+//     	FADD.FTZ R35, R35, R48;          # [745][001748]
+//     	FSET.BF.GE.FTZ.AND R48, R7, R30, PT; # [746][001750]
+//     	FFMA.FTZ R10, R45, 0xb9930, R6;  # [747][001758]
+//     	FFMA.FTZ R9, R44, 0x38c40, R5;   # [748][001760]
+//     	FFMA.FTZ R36, R48, R30, R36;     # [749][001768]
+//     	TEX.LZ.T R30, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [750][001770]
+//     	FADD.FTZ R48, R35, R48;          # [751][001778]
+//     	FFMA.FTZ R10, R45, 0x39930, R6;  # [752][001780]
+//     	FFMA.FTZ R9, R44, 0xb8c40, R5;   # [753][001788]
+//     	FADD.FTZ R35, R31, R36;          # [754][001790]
+//     	FADD.FTZ R48, R49, R48;          # [755][001798]
+//     	FSET.BF.GE.FTZ.AND R49, R7, R41, PT; # [756][0017a0]
+//     	TEX.LZ.T R31, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [757][0017a8]
+//     	FSET.BF.GE.FTZ.AND R36, R7, R32, PT; # [758][0017b0]
+//     	FMUL.FTZ R8, R49, R41;           # [759][0017b8]
+//     	FFMA.FTZ R10, R45, 0x38c40, R6;  # [760][0017c0]
+//     	FFMA.FTZ R9, R44, 0x39930, R5;   # [761][0017c8]
+//     	FFMA.FTZ R41, R36, R32, R8;      # [762][0017d0]
+//     	MOV R8, R4;                      # [763][0017d8]
+//     	TEX.LZ.T R32, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [764][0017e0]
+//     	FADD.FTZ R36, R49, R36;          # [765][0017e8]
+//     	FSET.BF.GE.FTZ.AND R49, R7, R33, PT; # [766][0017f0]
+//     	FFMA.FTZ R10, R45, 0xb9000, R6;  # [767][0017f8]
+//     	FFMA.FTZ R9, R44, 0xb9c00, R5;   # [768][001800]
+//     	FFMA.FTZ R41, R49, R33, R41;     # [769][001808]
+//     	TEX.LZ.T R33, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [770][001810]
+//     	FADD.FTZ R36, R36, R49;          # [771][001818]
+//     	FSET.BF.GE.FTZ.AND R49, R7, R34, PT; # [772][001820]
+//     	FFMA.FTZ R10, R45, 0xb9c00, R6;  # [773][001828]
+//     	FFMA.FTZ R9, R44, 0x39000, R5;   # [774][001830]
+//     	FFMA.FTZ R41, R49, R34, R41;     # [775][001838]
+//     	TEX.LZ.T R34, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [776][001840]
+//     	FADD.FTZ R36, R36, R49;          # [777][001848]
+//     	FFMA.FTZ R10, R45, 0x39c00, R6;  # [778][001850]
+//     	FFMA.FTZ R9, R44, 0xb9000, R5;   # [779][001858]
+//     	FADD.FTZ R36, R48, R36;          # [780][001860]
+//     	FADD.FTZ R35, R35, R41;          # [781][001868]
+//     	FSET.BF.GE.FTZ.AND R49, R7, R42, PT; # [782][001870]
+//     	TEX.LZ.T R48, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [783][001878]
+//     	FSET.BF.GE.FTZ.AND R41, R7, R37, PT; # [784][001880]
+//     	FMUL.FTZ R8, R49, R42;           # [785][001888]
+//     	FFMA.FTZ R10, R45, 0x39000, R6;  # [786][001890]
+//     	FFMA.FTZ R9, R44, 0x39c00, R5;   # [787][001898]
+//     	FFMA.FTZ R37, R41, R37, R8;      # [788][0018a0]
+//     	MOV R8, R4;                      # [789][0018a8]
+//     	TEX.LZ.T R8, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [790][0018b0]
+//     	FSET.BF.GE.FTZ.AND R9, R7, R39, PT; # [791][0018b8]
+//     	FADD.FTZ R41, R49, R41;          # [792][0018c0]
+//     	FSET.BF.GE.FTZ.AND R10, R7, R28, PT; # [793][0018c8]
+//     	FFMA.FTZ R39, R9, R39, R37;      # [794][0018d0]
+//     	FADD.FTZ R37, R41, R9;           # [795][0018d8]
+//     	FSET.BF.GE.FTZ.AND R9, R7, R26, PT; # [796][0018e0]
+//     	FFMA.FTZ R39, R10, R28, R39;     # [797][0018e8]
+//     	FSET.BF.GE.FTZ.AND R28, R7, R15, PT; # [798][0018f0]
+//     	FMUL.FTZ R26, R9, R26;           # [799][0018f8]
+//     	FADD.FTZ R37, R37, R10;          # [800][001900]
+//     	FADD.FTZ R10, R35, R39;          # [801][001908]
+//     	FFMA.FTZ R26, R28, R15, R26;     # [802][001910]
+//     	FSET.BF.GE.FTZ.AND R35, R7, R14, PT; # [803][001918]
+//     	FADD.FTZ R9, R9, R28;            # [804][001920]
+//     	FADD.FTZ R15, R36, R37;          # [805][001928]
+//     	FFMA.FTZ R14, R35, R14, R26;     # [806][001930]
+//     	FSET.BF.GE.FTZ.AND R26, R7, R12, PT; # [807][001938]
+//     	FADD.FTZ R28, R9, R35;           # [808][001940]
+//     	FSET.BF.GE.FTZ.AND R9, R7, R11, PT; # [809][001948]
+//     	FFMA.FTZ R12, R26, R12, R14;     # [810][001950]
+//     	FSET.BF.GE.FTZ.AND R14, R7, R13, PT; # [811][001958]
+//     	FMUL.FTZ R11, R9, R11;           # [812][001960]
+//     	FADD.FTZ R10, R10, R12;          # [813][001968]
+//     	FADD.FTZ R26, R28, R26;          # [814][001970]
+//     	FFMA.FTZ R12, R14, R13, R11;     # [815][001978]
+//     	FSET.BF.GE.FTZ.AND R13, R7, R21, PT; # [816][001980]
+//     	FADD.FTZ R14, R9, R14;           # [817][001988]
+//     	FADD.FTZ R11, R15, R26;          # [818][001990]
+//     	FFMA.FTZ R9, R13, R21, R12;      # [819][001998]
+//     	FSET.BF.GE.FTZ.AND R12, R7, R27, PT; # [820][0019a0]
+//     	FADD.FTZ R21, R14, R13;          # [821][0019a8]
+//     	FSET.BF.GE.FTZ.AND R13, R7, R29, PT; # [822][0019b0]
+//     	FFMA.FTZ R9, R12, R27, R9;       # [823][0019b8]
+//     	FSET.BF.GE.FTZ.AND R15, R7, R30, PT; # [824][0019c0]
+//     	FMUL.FTZ R14, R13, R29;          # [825][0019c8]
+//     	FADD.FTZ R21, R21, R12;          # [826][0019d0]
+//     	FADD.FTZ R9, R10, R9;            # [827][0019d8]
+//     	FFMA.FTZ R10, R15, R30, R14;     # [828][0019e0]
+//     	FSET.BF.GE.FTZ.AND R12, R7, R31, PT; # [829][0019e8]
+//     	FADD.FTZ R13, R13, R15;          # [830][0019f0]
+//     	FADD.FTZ R15, R11, R21;          # [831][0019f8]
+//     	FFMA.FTZ R10, R12, R31, R10;     # [832][001a00]
+//     	FADD.FTZ R21, R13, R12;          # [833][001a08]
+//     	FSET.BF.GE.FTZ.AND R12, R7, R33, PT; # [834][001a10]
+//     	FSET.BF.GE.FTZ.AND R11, R7, R32, PT; # [835][001a18]
+//     	FMUL.FTZ R13, R12, R33;          # [836][001a20]
+//     	FFMA.FTZ R10, R11, R32, R10;     # [837][001a28]
+//     	FADD.FTZ R21, R21, R11;          # [838][001a30]
+//     	FADD.FTZ R9, R9, R10;            # [839][001a38]
+//     	FSET.BF.GE.FTZ.AND R14, R7, R34, PT; # [840][001a40]
+//     	FADD.FTZ R26, R12, R14;          # [841][001a48]
+//     	FFMA.FTZ R11, R14, R34, R13;     # [842][001a50]
+//     	FADD.FTZ R14, R15, R21;          # [843][001a58]
+//     	FSET.BF.GE.FTZ.AND R12, R7, R48, PT; # [844][001a60]
+//     	FADD.FTZ R26, R26, R12;          # [845][001a68]
+//     	FFMA.FTZ R11, R12, R48, R11;     # [846][001a70]
+//     	FSET.BF.GE.FTZ.AND R13, R7, R8, PT; # [847][001a78]
+//     	FADD.FTZ R12, R26, R13;          # [848][001a80]
+//     	FFMA.FTZ R8, R13, R8, R11;       # [849][001a88]
+//     	FADD.FTZ R10, R14, R12;          # [850][001a90]
+//     	FADD.FTZ R8, R9, R8;             # [851][001a98]
+//     	MUFU.RCP R9, R10;                # [852][001aa0]
+//     	FMUL.FTZ R10, R45, 0.125;        # [853][001aa8]
+//     	FMUL.FTZ R8, R8, R9;             # [854][001ab0]
+//     	FADD.FTZ R9, R7, -R8;            # [855][001ab8]
+//     	MUFU.RCP R8, R8;                 # [856][001ac0]
+//     	FMUL.FTZ R42, R9, R8;            # [857][001ac8]
+//     	FMUL.FTZ R8, R44, 0.125;         # [858][001ad0]
+//     	FMUL.FTZ R14, R10, R42;          # [859][001ad8]
+//     	FMUL.FTZ R12, R8, R42;           # [860][001ae0]
+//     	MOV R8, R4;                      # [861][001ae8]
+//     	FFMA.FTZ R10, R14, 0xb9000, R6;  # [862][001af0]
+//     	FFMA.FTZ R9, R12, 0xb9c00, R5;   # [863][001af8]
+//     	TEX.LZ.NODEP.T R34, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [864][001b00]
+//     	FFMA.FTZ R10, R14, 0xb9c00, R6;  # [865][001b08]
+//     	FFMA.FTZ R9, R12, 0x39000, R5;   # [866][001b10]
+//     	TEX.LZ.NODEP.T R11, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [867][001b18]
+//     	FFMA.FTZ R10, R14, 0x39c00, R6;  # [868][001b20]
+//     	FFMA.FTZ R9, R12, 0xb9000, R5;   # [869][001b28]
+//     	TEX.LZ.NODEP.T R13, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [870][001b30]
+//     	FFMA.FTZ R10, R14, 0x39000, R6;  # [871][001b38]
+//     	FFMA.FTZ R9, R12, 0x39c00, R5;   # [872][001b40]
+//     	TEX.LZ.NODEP.T R15, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [873][001b48]
+//     	FMUL.FTZ R9, R45, 0.25;          # [874][001b50]
+//     	FMUL.FTZ R8, R44, 0.25;          # [875][001b58]
+//     	FMUL.FTZ R14, R9, R42;           # [876][001b60]
+//     	FMUL.FTZ R12, R8, R42;           # [877][001b68]
+//     	MOV R8, R4;                      # [878][001b70]
+//     	FFMA.FTZ R10, R14, 0xb9000, R6;  # [879][001b78]
+//     	FFMA.FTZ R9, R12, 0xb9c00, R5;   # [880][001b80]
+//     	TEX.LZ.NODEP.T R35, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [881][001b88]
+//     	FFMA.FTZ R10, R14, 0xb9c00, R6;  # [882][001b90]
+//     	FFMA.FTZ R9, R12, 0x39000, R5;   # [883][001b98]
+//     	TEX.LZ.NODEP.T R27, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [884][001ba0]
+//     	FFMA.FTZ R10, R14, 0x39c00, R6;  # [885][001ba8]
+//     	FFMA.FTZ R9, R12, 0xb9000, R5;   # [886][001bb0]
+//     	TEX.LZ.NODEP.T R30, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [887][001bb8]
+//     	FFMA.FTZ R10, R14, 0x39000, R6;  # [888][001bc0]
+//     	FFMA.FTZ R9, R12, 0x39c00, R5;   # [889][001bc8]
+//     	TEX.LZ.NODEP.T R32, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [890][001bd0]
+//     	FMUL.FTZ R9, R45, 0.375;         # [891][001bd8]
+//     	FMUL.FTZ R8, R44, 0.375;         # [892][001be0]
+//     	FMUL.FTZ R14, R9, R42;           # [893][001be8]
+//     	FMUL.FTZ R12, R8, R42;           # [894][001bf0]
+//     	MOV R8, R4;                      # [895][001bf8]
+//     	FFMA.FTZ R10, R14, 0xb9000, R6;  # [896][001c00]
+//     	FFMA.FTZ R9, R12, 0xb9c00, R5;   # [897][001c08]
+//     	TEX.LZ.NODEP.T R33, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [898][001c10]
+//     	FFMA.FTZ R10, R14, 0xb9c00, R6;  # [899][001c18]
+//     	FFMA.FTZ R9, R12, 0x39000, R5;   # [900][001c20]
+//     	TEX.LZ.NODEP.T R28, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [901][001c28]
+//     	FFMA.FTZ R10, R14, 0x39c00, R6;  # [902][001c30]
+//     	FFMA.FTZ R9, R12, 0xb9000, R5;   # [903][001c38]
+//     	TEX.LZ.NODEP.T R41, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [904][001c40]
+//     	FFMA.FTZ R10, R14, 0x39000, R6;  # [905][001c48]
+//     	FFMA.FTZ R9, R12, 0x39c00, R5;   # [906][001c50]
+//     	TEX.LZ.NODEP.T R39, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [907][001c58]
+//     	FMUL.FTZ R9, R45, 0.5;           # [908][001c60]
+//     	FMUL.FTZ R8, R44, 0.5;           # [909][001c68]
+//     	FMUL.FTZ R12, R9, R42;           # [910][001c70]
+//     	FMUL.FTZ R14, R8, R42;           # [911][001c78]
+//     	MOV R8, R4;                      # [912][001c80]
+//     	FFMA.FTZ R10, R12, 0xb9000, R6;  # [913][001c88]
+//     	FFMA.FTZ R9, R14, 0xb9c00, R5;   # [914][001c90]
+//     	TEX.LZ.NODEP.T R37, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [915][001c98]
+//     	FFMA.FTZ R10, R12, 0xb9c00, R6;  # [916][001ca0]
+//     	FFMA.FTZ R9, R14, 0x39000, R5;   # [917][001ca8]
+//     	TEX.LZ.NODEP.T R36, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [918][001cb0]
+//     	FFMA.FTZ R10, R12, 0x39c00, R6;  # [919][001cb8]
+//     	FFMA.FTZ R9, R14, 0xb9000, R5;   # [920][001cc0]
+//     	TEX.LZ.NODEP.T R31, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [921][001cc8]
+//     	FFMA.FTZ R10, R12, 0x39000, R6;  # [922][001cd0]
+//     	FFMA.FTZ R9, R14, 0x39c00, R5;   # [923][001cd8]
+//     	TEX.LZ.NODEP.T R29, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [924][001ce0]
+//     	FMUL.FTZ R9, R45, 0.625;         # [925][001ce8]
+//     	FMUL.FTZ R8, R44, 0.625;         # [926][001cf0]
+//     	FMUL.FTZ R12, R9, R42;           # [927][001cf8]
+//     	FMUL.FTZ R48, R8, R42;           # [928][001d00]
+//     	MOV R8, R4;                      # [929][001d08]
+//     	FFMA.FTZ R10, R12, 0xb9000, R6;  # [930][001d10]
+//     	FFMA.FTZ R9, R48, 0xb9c00, R5;   # [931][001d18]
+//     	TEX.LZ.NODEP.T R26, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [932][001d20]
+//     	FFMA.FTZ R10, R12, 0xb9c00, R6;  # [933][001d28]
+//     	FFMA.FTZ R9, R48, 0x39000, R5;   # [934][001d30]
+//     	TEX.LZ.NODEP.T R21, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [935][001d38]
+//     	FFMA.FTZ R10, R12, 0x39c00, R6;  # [936][001d40]
+//     	FFMA.FTZ R9, R48, 0xb9000, R5;   # [937][001d48]
+//     	TEX.LZ.NODEP.T R14, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [938][001d50]
+//     	FFMA.FTZ R10, R12, 0x39000, R6;  # [939][001d58]
+//     	FFMA.FTZ R9, R48, 0x39c00, R5;   # [940][001d60]
+//     	TEX.LZ.NODEP.T R12, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [941][001d68]
+//     	FSET.BF.GE.FTZ.AND R8, R34, R7, PT; # [942][001d70]
+//     	FMUL.FTZ R9, R45, 0.75;          # [943][001d78]
+//     	FSET.BF.GE.FTZ.AND R11, R11, R7, PT; # [944][001d80]
+//     	FMUL.FTZ R10, R8, 0.25;          # [945][001d88]
+//     	FMUL.FTZ R8, R44, 0.75;          # [946][001d90]
+//     	FMUL.FTZ R34, R9, R42;           # [947][001d98]
+//     	FFMA.FTZ R49, R11, 0.25, R10;    # [948][001da0]
+//     	FMUL.FTZ R48, R8, R42;           # [949][001da8]
+//     	MOV R8, R4;                      # [950][001db0]
+//     	FFMA.FTZ R10, R34, 0xb9000, R6;  # [951][001db8]
+//     	FFMA.FTZ R9, R48, 0xb9c00, R5;   # [952][001dc0]
+//     	TEX.LZ.NODEP.T R11, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [953][001dc8]
+//     	FSET.BF.GE.FTZ.AND R8, R13, R7, PT; # [954][001dd0]
+//     	FFMA.FTZ R10, R34, 0xb9c00, R6;  # [955][001dd8]
+//     	FFMA.FTZ R9, R48, 0x39000, R5;   # [956][001de0]
+//     	FFMA.FTZ R49, R8, 0.25, R49;     # [957][001de8]
+//     	MOV R8, R4;                      # [958][001df0]
+//     	TEX.LZ.NODEP.T R13, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [959][001df8]
+//     	FSET.BF.GE.FTZ.AND R8, R15, R7, PT; # [960][001e00]
+//     	FFMA.FTZ R10, R34, 0x39c00, R6;  # [961][001e08]
+//     	FFMA.FTZ R9, R48, 0xb9000, R5;   # [962][001e10]
+//     	FFMA.FTZ R49, R8, 0.25, R49;     # [963][001e18]
+//     	MOV R8, R4;                      # [964][001e20]
+//     	TEX.LZ.NODEP.T R15, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [965][001e28]
+//     	FSET.BF.GE.FTZ.AND R9, R35, R7, PT; # [966][001e30]
+//     	FFMA.FTZ R10, R34, 0x39000, R6;  # [967][001e38]
+//     	FSET.BF.GE.FTZ.AND R27, R27, R7, PT; # [968][001e40]
+//     	FMUL.FTZ R34, R9, 0.25;          # [969][001e48]
+//     	FFMA.FTZ R9, R48, 0x39c00, R5;   # [970][001e50]
+//     	FFMA.FTZ R34, R27, 0.25, R34;    # [971][001e58]
+//     	TEX.LZ.NODEP.T R27, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [972][001e60]
+//     	FSET.BF.GE.FTZ.AND R10, R30, R7, PT; # [973][001e68]
+//     	FMUL.FTZ R9, R45, 0.875;         # [974][001e70]
+//     	FMUL.FTZ R8, R44, 0.875;         # [975][001e78]
+//     	FFMA.FTZ R48, R10, 0.25, R34;    # [976][001e80]
+//     	FMUL.FTZ R34, R9, R42;           # [977][001e88]
+//     	FMUL.FTZ R35, R8, R42;           # [978][001e90]
+//     	MOV R8, R4;                      # [979][001e98]
+//     	FFMA.FTZ R10, R34, 0xb9000, R6;  # [980][001ea0]
+//     	FFMA.FTZ R9, R35, 0xb9c00, R5;   # [981][001ea8]
+//     	TEX.LZ.NODEP.T R30, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [982][001eb0]
+//     	FSET.BF.GE.FTZ.AND R8, R32, R7, PT; # [983][001eb8]
+//     	MOV R32, R49;                    # [984][001ec0]
+//     	FFMA.FTZ R10, R34, 0xb9c00, R6;  # [985][001ec8]
+//     	FFMA.FTZ R49, R8, 0.25, R48;     # [986][001ed0]
+//     	MOV R8, R4;                      # [987][001ed8]
+//     	FFMA.FTZ R9, R35, 0x39000, R5;   # [988][001ee0]
+//     	MOV R48, R32;                    # [989][001ee8]
+//     	TEX.LZ.NODEP.T R32, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [990][001ef0]
+//     	FSET.BF.GE.FTZ.AND R8, R33, R7, PT; # [991][001ef8]
+//     	FSET.BF.GE.FTZ.AND R9, R28, R7, PT; # [992][001f00]
+//     	MOV R33, R48;                    # [993][001f08]
+//     	FMUL.FTZ R8, R8, 0.25;           # [994][001f10]
+//     	FFMA.FTZ R10, R34, 0x39c00, R6;  # [995][001f18]
+//     	FFMA.FTZ R48, R9, 0.25, R8;      # [996][001f20]
+//     	MOV R8, R4;                      # [997][001f28]
+//     	FFMA.FTZ R9, R35, 0xb9000, R5;   # [998][001f30]
+//     	TEX.LZ.NODEP.T R28, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [999][001f38]
+//     	FFMA.FTZ R10, R34, 0x39000, R6;  # [1000][001f40]
+//     	FFMA.FTZ R9, R35, 0x39c00, R5;   # [1001][001f48]
+//     	MOV R34, R33;                    # [1002][001f50]
+//     	TEX.LZ.NODEP.T R33, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [1003][001f58]
+//     	FMUL.FTZ R35, R45, R42;          # [1004][001f60]
+//     	FMUL.FTZ R42, R44, R42;          # [1005][001f68]
+//     	MOV R45, R34;                    # [1006][001f70]
+//     	FFMA.FTZ R10, R35, 0xb9000, R6;  # [1007][001f78]
+//     	FFMA.FTZ R9, R42, 0xb9c00, R5;   # [1008][001f80]
+//     	TEX.LZ.NODEP.T R34, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [1009][001f88]
+//     	FFMA.FTZ R10, R35, 0xb9c00, R6;  # [1010][001f90]
+//     	FFMA.FTZ R9, R42, 0x39000, R5;   # [1011][001f98]
+//     	TEX.LZ.NODEP.T R44, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [1012][001fa0]
+//     	FFMA.FTZ R10, R35, 0x39c00, R6;  # [1013][001fa8]
+//     	FFMA.FTZ R9, R42, 0xb9000, R5;   # [1014][001fb0]
+//     	FFMA.FTZ R6, R35, 0x39000, R6;   # [1015][001fb8]
+//     	TEX.LZ.NODEP.T R8, R8, 0x12, 0x3, ARRAY_2D, 0x1; # [1016][001fc0]
+//     	FFMA.FTZ R5, R42, 0x39c00, R5;   # [1017][001fc8]
+//     	TEX.LZ.NODEP.T R4, R4, 0x12, 0x3, ARRAY_2D, 0x1; # [1018][001fd0]
+//     	FSET.BF.GE.FTZ.AND R6, R37, R7, PT; # [1019][001fd8]
+//     	FSET.BF.GE.FTZ.AND R10, R36, R7, PT; # [1020][001fe0]
+//     	FSET.BF.GE.FTZ.AND R5, R41, R7, PT; # [1021][001fe8]
+//     	FMUL.FTZ R9, R6, 0.25;           # [1022][001ff0]
+//     	FSET.BF.GE.FTZ.AND R31, R31, R7, PT; # [1023][001ff8]
+//     	FFMA.FTZ R6, R5, 0.25, R48;      # [1024][002000]
+//     	FFMA.FTZ R10, R10, 0.25, R9;     # [1025][002008]
+//     	FSET.BF.GE.FTZ.AND R9, R39, R7, PT; # [1026][002010]
+//     	FSET.BF.GE.FTZ.AND R26, R26, R7, PT; # [1027][002018]
+//     	FADD.FTZ R5, R45, R49;           # [1028][002020]
+//     	FFMA.FTZ R6, R9, 0.25, R6;       # [1029][002028]
+//     	FFMA.FTZ R9, R31, 0.25, R10;     # [1030][002030]
+//     	FSET.BF.GE.FTZ.AND R10, R29, R7, PT; # [1031][002038]
+//     	FSET.BF.GE.FTZ.AND R29, R21, R7, PT; # [1032][002040]
+//     	FMUL.FTZ R21, R26, 0.25;         # [1033][002048]
+//     	FADD.FTZ R5, R5, R6;             # [1034][002050]
+//     	FFMA.FTZ R6, R10, 0.25, R9;      # [1035][002058]
+//     	FFMA.FTZ R9, R29, 0.25, R21;     # [1036][002060]
+//     	FSET.BF.GE.FTZ.AND R11, R11, R7, PT; # [1037][002068]
+//     	FSET.BF.GE.FTZ.AND R10, R14, R7, PT; # [1038][002070]
+//     	FSET.BF.GE.FTZ.AND R14, R13, R7, PT; # [1039][002078]
+//     	FMUL.FTZ R13, R11, 0.25;         # [1040][002080]
+//     	FFMA.FTZ R10, R10, 0.25, R9;     # [1041][002088]
+//     	FSET.BF.GE.FTZ.AND R11, R12, R7, PT; # [1042][002090]
+//     	FADD.FTZ R9, R5, R6;             # [1043][002098]
+//     	FSET.BF.GE.FTZ.AND R5, R30, R7, PT; # [1044][0020a0]
+//     	FFMA.FTZ R12, R14, 0.25, R13;    # [1045][0020a8]
+//     	FSET.BF.GE.FTZ.AND R13, R15, R7, PT; # [1046][0020b0]
+//     	FFMA.FTZ R10, R11, 0.25, R10;    # [1047][0020b8]
+//     	FSET.BF.GE.FTZ.AND R6, R32, R7, PT; # [1048][0020c0]
+//     	FMUL.FTZ R5, R5, 0.25;           # [1049][0020c8]
+//     	FFMA.FTZ R11, R13, 0.25, R12;    # [1050][0020d0]
+//     	FADD.FTZ R10, R9, R10;           # [1051][0020d8]
+//     	FSET.BF.GE.FTZ.AND R12, R27, R7, PT; # [1052][0020e0]
+//     	FFMA.FTZ R6, R6, 0.25, R5;       # [1053][0020e8]
+//     	FSET.BF.GE.FTZ.AND R9, R28, R7, PT; # [1054][0020f0]
+//     	FSET.BF.GE.FTZ.AND R5, R34, R7, PT; # [1055][0020f8]
+//     	FFMA.FTZ R11, R12, 0.25, R11;    # [1056][002100]
+//     	FFMA.FTZ R9, R9, 0.25, R6;       # [1057][002108]
+//     	FMUL.FTZ R12, R5, 0.25;          # [1058][002110]
+//     	FADD.FTZ R11, R10, R11;          # [1059][002118]
+//     	FSET.BF.GE.FTZ.AND R10, R33, R7, PT; # [1060][002120]
+//     	FSET.BF.GE.FTZ.AND R6, R44, R7, PT; # [1061][002128]
+//     	FSET.BF.GE.FTZ.AND R5, R8, R7, PT; # [1062][002130]
+//     	FFMA.FTZ R8, R6, 0.25, R12;      # [1063][002138]
+//     	FFMA.FTZ R6, R10, 0.25, R9;      # [1064][002140]
+//     	FSET.BF.GE.FTZ.AND R4, R4, R7, PT; # [1065][002148]
+//     	FFMA.FTZ R7, R5, 0.25, R8;       # [1066][002150]
+//     	FADD.FTZ R5, R11, R6;            # [1067][002158]
+//     	FFMA.FTZ R4, R4, 0.25, R7;       # [1068][002160]
+//     	FADD.FTZ R4, R5, R4;             # [1069][002168]
+//     	FMUL.FTZ.S R26, R4, 0.125;       # [1070][002170]
+//     L2178:
+//     	MOV32I.S R26, 0x3f800000;        # [1071][002178]
+//     L2180:
+//     	MOV32I.S R26, 0x3f800000;        # [1072][002180]
+//     L2188:
+//     	TLD.LZ.T R27, RZ, 0xf, 1D, 0x1;  # [1073][002188]
+//     	IPA.PASS R4, a[0x7c];            # [1074][002190] POSITION_W
+//     	SHL.W R8, R23, 0x4;              # [1075][002198]
+//     	LDC.128 R12, c[0x2][R8+0x200];   # [1076][0021a0]
+//     	MUFU.RCP R21, R4;                # [1077][0021a8]
+//     	LDC.128 R4, c[0x3][R8+0x800];    # [1078][0021b0]
+//     	IPA R28, a[0x90], R21;           # [1079][0021b8] ATTR1
+//     	IPA R29, a[0x94], R21;           # [1080][0021c0] GENERIC_ATTRIBUTE_01_Y
+//     	IPA R30, a[0x98], R21;           # [1081][0021c8] GENERIC_ATTRIBUTE_01_Z
+//     	FMUL.FTZ R8, R13, -R5;           # [1082][0021d0]
+//     	FMUL.FTZ R9, R4, R28;            # [1083][0021d8]
+//     	FFMA.FTZ R4, R12, -R4, R8;       # [1084][0021e0]
+//     	FFMA.FTZ R5, R5, R29, R9;        # [1085][0021e8]
+//     	FFMA.FTZ R8, R6, R30, R5;        # [1086][0021f0]
+//     	FFMA.FTZ R5, R6, -R14, R4;       # [1087][0021f8]
+//     	SHL.W R4, R23, 0x2;              # [1088][002200]
+//     	FADD.FTZ R6, R8, R7;             # [1089][002208]
+//     	MUFU.RCP R7, R5;                 # [1090][002210]
+//     	SHL.W R31, R4, 0x4;              # [1091][002218]
+//     	FSETP.NEU.FTZ.AND P0, PT, R5, RZ, PT; # [1092][002220]
+//     	FMUL.FTZ R32, R6, R7;            # [1093][002228]
+//     	LDC.128 R4, c[0x3][R31];         # [1094][002230]
+//     	LDC.128 R8, c[0x3][R31+0x10];    # [1095][002238]
+//     	@P0 FFMA.FTZ R28, R32, R12, R28; # [1096][002240]
+//     	@P0 FFMA.FTZ R29, R32, R13, R29; # [1097][002248]
+//     	@P0 FFMA.FTZ R30, R32, R14, R30; # [1098][002250]
+//     	FMUL.FTZ R4, R4, R28;            # [1099][002258]
+//     	FMUL.FTZ R8, R8, R28;            # [1100][002260]
+//     	FFMA.FTZ R4, R5, R29, R4;        # [1101][002268]
+//     	FFMA.FTZ R5, R9, R29, R8;        # [1102][002270]
+//     	FFMA.FTZ R4, R6, R30, R4;        # [1103][002278]
+//     	FFMA.FTZ R5, R10, R30, R5;       # [1104][002280]
+//     	FFMA.FTZ R4, R7, 1, R4;          # [1105][002288]
+//     	FFMA.FTZ R6, R11, 1, R5;         # [1106][002290]
+//     	FADD.FTZ R5, R4, 1;              # [1107][002298]
+//     	FADD.FTZ R6, R6, 1;              # [1108][0022a0]
+//     	FMUL.FTZ R5, R5, 0.5;            # [1109][0022a8]
+//     	FMUL.FTZ R6, R6, 0.5;            # [1110][0022b0]
+//     	F2I.FTZ.U32 R4, R27;             # [1111][0022b8]
+//     	I2I.U16.U32.SAT R4, R4;          # [1112][0022c0]
+//     	TEX.NODEP.T R8, R4, 0xe, 0x3, ARRAY_2D, 0x7; # [1113][0022c8]
+//     	TLD.LZ.NODEP.T R4, R23, 0x8, 1D, 0x7; # [1114][0022d0]
+//     	IPA R11, a[0x94], R21;           # [1115][0022d8] GENERIC_ATTRIBUTE_01_Y
+//     	LDL.LU R7, [0x4];                # [1116][0022e0]
+//     	LDL.LU R27, [0x0];               # [1117][0022e8]
+//     	IADD R23, R23, 0x1;              # [1118][0022f0]
+//     	FADD.FTZ R11, -R11, c[0x0][0x84]; # [1119][0022f8]
+//     	FFMA.FTZ R7, R7, R47, R12;       # [1120][002300]
+//     	FFMA.FTZ R28, R27, R47, R14;     # [1121][002308]
+//     	FFMA.FTZ R11, R11, R47, R13;     # [1122][002310]
+//     	FMUL.FTZ R7, R7, 0.5;            # [1123][002318]
+//     	FMUL.FTZ R27, R11, 0.5;          # [1124][002320]
+//     	FMUL.FTZ R11, R19, R7;           # [1125][002328]
+//     	FMUL.FTZ R7, R19, R12;           # [1126][002330]
+//     	FMUL.FTZ R12, R28, 0.5;          # [1127][002338]
+//     	FFMA.FTZ R11, R22, R27, R11;     # [1128][002340]
+//     	FFMA.FTZ R7, R22, R13, R7;       # [1129][002348]
+//     	FFMA.FTZ.SAT R11, R18, R12, R11; # [1130][002350]
+//     	FFMA.FTZ.SAT R7, R18, R14, R7;   # [1131][002358]
+//     	MUFU.LG2 R12, R11;               # [1132][002360]
+//     	MUFU.LG2 R11, R7;                # [1133][002368]
+//     	FMUL.FTZ R12, R12, 60;           # [1134][002370]
+//     	FMUL.FTZ R11, R11, 60;           # [1135][002378]
+//     	RRO.EX2 R12, R12;                # [1136][002380]
+//     	RRO.EX2 R11, R11;                # [1137][002388]
+//     	MUFU.EX2 R12, R12;               # [1138][002390]
+//     	MUFU.EX2 R11, R11;               # [1139][002398]
+//     	FMUL.FTZ R27, R17, R12;          # [1140][0023a0]
+//     	FMUL.FTZ R13, R16, R12;          # [1141][0023a8]
+//     	FMUL.FTZ R12, R3, R12;           # [1142][0023b0]
+//     	FFMA.FTZ R28, R11, R17, -R27;    # [1143][0023b8]
+//     	FFMA.FTZ R14, R11, R16, -R13;    # [1144][0023c0]
+//     	FFMA.FTZ R11, R11, R3, -R12;     # [1145][0023c8]
+//     	FFMA.FTZ R27, R28, c[0x10][0x38], R27; # [1146][0023d0]
+//     	FFMA.FTZ R13, R14, c[0x10][0x38], R13; # [1147][0023d8]
+//     	FFMA.FTZ R11, R11, c[0x10][0x38], R12; # [1148][0023e0]
+//     	FFMA.FTZ R14, R7, R38, R27;      # [1149][0023e8]
+//     	FFMA.FTZ R12, R7, R25, R13;      # [1150][0023f0]
+//     	FFMA.FTZ R7, R7, R24, R11;       # [1151][0023f8]
+//     	FMUL.FTZ R13, R20, R14;          # [1152][002400]
+//     	FMUL.FTZ R11, R20, R12;          # [1153][002408]
+//     	FMUL.FTZ R7, R20, R7;            # [1154][002410]
+//     	FMUL.FTZ R8, R8, R4;             # [1155][002418]
+//     	FMUL.FTZ R4, R9, R5;             # [1156][002420]
+//     	FMUL.FTZ R6, R10, R6;            # [1157][002428]
+//     	FMUL.FTZ R8, R26, R8;            # [1158][002430]
+//     	FMUL.FTZ R5, R26, R4;            # [1159][002438]
+//     	FMUL.FTZ R4, R26, R6;            # [1160][002440]
+//     	FMUL.FTZ R6, R8, R15;            # [1161][002448]
+//     	FMUL.FTZ R5, R5, R15;            # [1162][002450]
+//     	FMUL.FTZ R4, R4, R15;            # [1163][002458]
+//     	FFMA.FTZ R0, R13, R6, R0;        # [1164][002460]
+//     	FFMA.FTZ R1, R11, R5, R1;        # [1165][002468]
+//     	FFMA.FTZ R2, R7, R4, R2;         # [1166][002470]
+//     L2478:
+//     	ISETP.GE.AND P0, PT, RZ, c[0x6][0x40], PT; # [1167][002478]
+//     	MOV R8, RZ;                      # [1168][002480]
+//     	@P0 BRA L26d8;                   # [1169][002488]
+//     L2490:
+//     	SHL.W R10, R23, 0x4;             # [1170][002490]
+//     	IPA R9, a[0x90], R21;            # [1171][002498] ATTR1
+//     	IPA R11, a[0x94], R21;           # [1172][0024a0] GENERIC_ATTRIBUTE_01_Y
+//     	LDC.128 R4, c[0x2][R10];         # [1173][0024a8]
+//     	IPA R12, a[0x98], R21;           # [1174][0024b0] GENERIC_ATTRIBUTE_01_Z
+//     	FADD.FTZ R10, -R9, R4;           # [1175][0024b8]
+//     	FADD.FTZ R11, -R11, R5;          # [1176][0024c0]
+//     	FADD.FTZ R12, -R12, R6;          # [1177][0024c8]
+//     	FMUL.FTZ R4, R10, R10;           # [1178][0024d0]
+//     	FFMA.FTZ R4, R11, R11, R4;       # [1179][0024d8]
+//     	FFMA.FTZ R13, R12, R12, R4;      # [1180][0024e0]
+//     	MUFU.RSQ R4, R13;                # [1181][0024e8]
+//     	MUFU.RCP R9, R4;                 # [1182][0024f0]
+//     	FSETP.GE.FTZ.AND P0, PT, R7, R9, PT; # [1183][0024f8]
+//     	@!P0 BRA.U L26b8;                # [1184][002500]
+//     	@P0 TLD.LZ.NODEP.T R4, R23, 0x8, 1D, 0x7; # [1185][002508]
+//     	@P0 MUFU.RSQ R7, R13;            # [1186][002510]
+//     	@P0 FMUL.FTZ R13, R10, R7;       # [1187][002518]
+//     	@P0 FFMA.FTZ R10, R10, R7, R46;  # [1188][002520]
+//     	@P0 FMUL.FTZ R14, R11, R7;       # [1189][002528]
+//     	@P0 FFMA.FTZ R11, R11, R7, R43;  # [1190][002530]
+//     	@P0 FMUL.FTZ R10, R10, 0.5;      # [1191][002538]
+//     	@P0 FFMA.FTZ R26, R12, R7, R40;  # [1192][002540]
+//     	@P0 FMUL.FTZ R15, R11, 0.5;      # [1193][002548]
+//     	@P0 FMUL.FTZ R11, R19, R10;      # [1194][002550]
+//     	@P0 FMUL.FTZ R10, R19, R13;      # [1195][002558]
+//     	@P0 FMUL.FTZ R26, R26, 0.5;      # [1196][002560]
+//     	@P0 FFMA.FTZ R13, R22, R15, R11; # [1197][002568]
+//     	@P0 FMUL.FTZ R11, R12, R7;       # [1198][002570]
+//     	@P0 FFMA.FTZ R7, R22, R14, R10;  # [1199][002578]
+//     	@P0 FFMA.FTZ.SAT R12, R18, R26, R13; # [1200][002580]
+//     	@P0 SHL.W R13, R23, 0x4;         # [1201][002588]
+//     	@P0 FFMA.FTZ.SAT R10, R18, R11, R7; # [1202][002590]
+//     	@P0 MUFU.LG2 R7, R12;            # [1203][002598]
+//     	@P0 LDC R14, c[0x2][R13+0xc];    # [1204][0025a0]
+//     	@P0 MUFU.LG2 R11, R10;           # [1205][0025a8]
+//     	@P0 FMUL.FTZ R12, R7, 60;        # [1206][0025b0]
+//     	@P0 LDC R7, c[0x2][R13+0x20c];   # [1207][0025b8]
+//     	@P0 FMUL.FTZ R11, R11, 60;       # [1208][0025c0]
+//     	@P0 RRO.EX2 R12, R12;            # [1209][0025c8]
+//     	@P0 MUFU.RCP R13, R14;           # [1210][0025d0]
+//     	@P0 RRO.EX2 R11, R11;            # [1211][0025d8]
+//     	@P0 MUFU.EX2 R12, R12;           # [1212][0025e0]
+//     	@P0 FFMA.FTZ.SAT R26, R9, -R13, c[0x10][0x3c]; # [1213][0025e8]
+//     	@P0 MUFU.EX2 R9, R11;            # [1214][0025f0]
+//     	@P0 FMUL.FTZ R11, R3, R12;       # [1215][0025f8]
+//     	@P0 FMUL.FTZ R13, R16, R12;      # [1216][002600]
+//     	@P0 FMUL.FTZ R15, R17, R12;      # [1217][002608]
+//     	@P0 FFMA.FTZ R12, R9, R3, -R11;  # [1218][002610]
+//     	@P0 FFMA.FTZ R14, R9, R16, -R13; # [1219][002618]
+//     	@P0 FFMA.FTZ R9, R9, R17, -R15;  # [1220][002620]
+//     	@P0 FFMA.FTZ R11, R12, c[0x10][0x38], R11; # [1221][002628]
+//     	@P0 FFMA.FTZ R12, R14, c[0x10][0x38], R13; # [1222][002630]
+//     	@P0 FFMA.FTZ R13, R9, c[0x10][0x38], R15; # [1223][002638]
+//     	@P0 FFMA.FTZ R9, R10, R24, R11;  # [1224][002640]
+//     	@P0 FFMA.FTZ R11, R10, R25, R12; # [1225][002648]
+//     	@P0 FFMA.FTZ R12, R10, R38, R13; # [1226][002650]
+//     	@P0 FMUL.FTZ R10, R20, R9;       # [1227][002658]
+//     	@P0 FMUL.FTZ R11, R20, R11;      # [1228][002660]
+//     	@P0 FMUL.FTZ R12, R20, R12;      # [1229][002668]
+//     	@P0 FMUL.FTZ R6, R26, R6;        # [1230][002670]
+//     	@P0 FMUL.FTZ R5, R26, R5;        # [1231][002678]
+//     	@P0 FMUL.FTZ R9, R26, R4;        # [1232][002680]
+//     	@P0 FMUL.FTZ R4, R6, R7;         # [1233][002688]
+//     	@P0 FMUL.FTZ R5, R5, R7;         # [1234][002690]
+//     	@P0 FMUL.FTZ R6, R9, R7;         # [1235][002698]
+//     	@P0 FFMA.FTZ R2, R10, R4, R2;    # [1236][0026a0]
+//     	@P0 FFMA.FTZ R1, R11, R5, R1;    # [1237][0026a8]
+//     	@P0 FFMA.FTZ R0, R12, R6, R0;    # [1238][0026b0]
+//     L26b8:
+//     	IADD R8, R8, 0x1;                # [1239][0026b8]
+//     	IADD R23, R23, 0x1;              # [1240][0026c0]
+//     	ISETP.GE.AND P0, PT, R8, c[0x6][0x40], PT; # [1241][0026c8]
+//     	@!P0 BRA L2490;                  # [1242][0026d0]
+//     L26d8:
+//     	ISETP.GE.AND P0, PT, RZ, c[0x6][0x50], PT; # [1243][0026d8]
+//     	MOV R8, RZ;                      # [1244][0026e0]
+//     	@P0 BRA L2938;                   # [1245][0026e8]
+//     L26f0:
+//     	SHL.W R10, R23, 0x4;             # [1246][0026f0]
+//     	IPA R9, a[0x90], R21;            # [1247][0026f8] ATTR1
+//     	IPA R11, a[0x94], R21;           # [1248][002700] GENERIC_ATTRIBUTE_01_Y
+//     	LDC.128 R4, c[0x2][R10];         # [1249][002708]
+//     	IPA R12, a[0x98], R21;           # [1250][002710] GENERIC_ATTRIBUTE_01_Z
+//     	FADD.FTZ R10, -R9, R4;           # [1251][002718]
+//     	FADD.FTZ R11, -R11, R5;          # [1252][002720]
+//     	FADD.FTZ R12, -R12, R6;          # [1253][002728]
+//     	FMUL.FTZ R4, R10, R10;           # [1254][002730]
+//     	FFMA.FTZ R4, R11, R11, R4;       # [1255][002738]
+//     	FFMA.FTZ R13, R12, R12, R4;      # [1256][002740]
+//     	MUFU.RSQ R4, R13;                # [1257][002748]
+//     	MUFU.RCP R9, R4;                 # [1258][002750]
+//     	FSETP.GE.FTZ.AND P0, PT, R7, R9, PT; # [1259][002758]
+//     	@!P0 BRA.U L2918;                # [1260][002760]
+//     	@P0 TLD.LZ.NODEP.T R4, R23, 0x8, 1D, 0x7; # [1261][002768]
+//     	@P0 MUFU.RSQ R7, R13;            # [1262][002770]
+//     	@P0 FMUL.FTZ R13, R10, R7;       # [1263][002778]
+//     	@P0 FFMA.FTZ R10, R10, R7, R46;  # [1264][002780]
+//     	@P0 FMUL.FTZ R14, R11, R7;       # [1265][002788]
+//     	@P0 FFMA.FTZ R11, R11, R7, R43;  # [1266][002790]
+//     	@P0 FMUL.FTZ R10, R10, 0.5;      # [1267][002798]
+//     	@P0 FFMA.FTZ R26, R12, R7, R40;  # [1268][0027a0]
+//     	@P0 FMUL.FTZ R15, R11, 0.5;      # [1269][0027a8]
+//     	@P0 FMUL.FTZ R11, R19, R10;      # [1270][0027b0]
+//     	@P0 FMUL.FTZ R10, R19, R13;      # [1271][0027b8]
+//     	@P0 FMUL.FTZ R26, R26, 0.5;      # [1272][0027c0]
+//     	@P0 FFMA.FTZ R13, R22, R15, R11; # [1273][0027c8]
+//     	@P0 FMUL.FTZ R11, R12, R7;       # [1274][0027d0]
+//     	@P0 FFMA.FTZ R7, R22, R14, R10;  # [1275][0027d8]
+//     	@P0 FFMA.FTZ.SAT R12, R18, R26, R13; # [1276][0027e0]
+//     	@P0 SHL.W R13, R23, 0x4;         # [1277][0027e8]
+//     	@P0 FFMA.FTZ.SAT R10, R18, R11, R7; # [1278][0027f0]
+//     	@P0 MUFU.LG2 R7, R12;            # [1279][0027f8]
+//     	@P0 LDC R14, c[0x2][R13+0xc];    # [1280][002800]
+//     	@P0 MUFU.LG2 R11, R10;           # [1281][002808]
+//     	@P0 FMUL.FTZ R12, R7, 60;        # [1282][002810]
+//     	@P0 LDC R7, c[0x2][R13+0x20c];   # [1283][002818]
+//     	@P0 FMUL.FTZ R11, R11, 60;       # [1284][002820]
+//     	@P0 RRO.EX2 R12, R12;            # [1285][002828]
+//     	@P0 MUFU.RCP R13, R14;           # [1286][002830]
+//     	@P0 RRO.EX2 R11, R11;            # [1287][002838]
+//     	@P0 MUFU.EX2 R12, R12;           # [1288][002840]
+//     	@P0 FFMA.FTZ.SAT R26, R9, -R13, c[0x10][0x3c]; # [1289][002848]
+//     	@P0 MUFU.EX2 R9, R11;            # [1290][002850]
+//     	@P0 FMUL.FTZ R11, R3, R12;       # [1291][002858]
+//     	@P0 FMUL.FTZ R13, R16, R12;      # [1292][002860]
+//     	@P0 FMUL.FTZ R15, R17, R12;      # [1293][002868]
+//     	@P0 FFMA.FTZ R12, R9, R3, -R11;  # [1294][002870]
+//     	@P0 FFMA.FTZ R14, R9, R16, -R13; # [1295][002878]
+//     	@P0 FFMA.FTZ R9, R9, R17, -R15;  # [1296][002880]
+//     	@P0 FFMA.FTZ R11, R12, c[0x10][0x38], R11; # [1297][002888]
+//     	@P0 FFMA.FTZ R12, R14, c[0x10][0x38], R13; # [1298][002890]
+//     	@P0 FFMA.FTZ R13, R9, c[0x10][0x38], R15; # [1299][002898]
+//     	@P0 FFMA.FTZ R9, R10, R24, R11;  # [1300][0028a0]
+//     	@P0 FFMA.FTZ R11, R10, R25, R12; # [1301][0028a8]
+//     	@P0 FFMA.FTZ R12, R10, R38, R13; # [1302][0028b0]
+//     	@P0 FMUL.FTZ R10, R20, R9;       # [1303][0028b8]
+//     	@P0 FMUL.FTZ R11, R20, R11;      # [1304][0028c0]
+//     	@P0 FMUL.FTZ R12, R20, R12;      # [1305][0028c8]
+//     	@P0 FMUL.FTZ R6, R26, R6;        # [1306][0028d0]
+//     	@P0 FMUL.FTZ R5, R26, R5;        # [1307][0028d8]
+//     	@P0 FMUL.FTZ R9, R26, R4;        # [1308][0028e0]
+//     	@P0 FMUL.FTZ R4, R6, R7;         # [1309][0028e8]
+//     	@P0 FMUL.FTZ R5, R5, R7;         # [1310][0028f0]
+//     	@P0 FMUL.FTZ R6, R9, R7;         # [1311][0028f8]
+//     	@P0 FFMA.FTZ R2, R10, R4, R2;    # [1312][002900]
+//     	@P0 FFMA.FTZ R1, R11, R5, R1;    # [1313][002908]
+//     	@P0 FFMA.FTZ R0, R12, R6, R0;    # [1314][002910]
+//     L2918:
+//     	IADD R8, R8, 0x1;                # [1315][002918]
+//     	IADD R23, R23, 0x1;              # [1316][002920]
+//     	ISETP.GE.AND P0, PT, R8, c[0x6][0x50], PT; # [1317][002928]
+//     	@!P0 BRA L26f0;                  # [1318][002930]
+//     L2938:
+//     	ISETP.GE.AND P0, PT, RZ, c[0x6][0x60], PT; # [1319][002938]
+//     	MOV R8, RZ;                      # [1320][002940]
+//     	@P0 BRA L2c58;                   # [1321][002948]
+//     L2950:
+//     	SHL.W R10, R23, 0x4;             # [1322][002950]
+//     	IPA R9, a[0x90], R21;            # [1323][002958] ATTR1
+//     	IPA R11, a[0x94], R21;           # [1324][002960] GENERIC_ATTRIBUTE_01_Y
+//     	LDC.128 R4, c[0x2][R10];         # [1325][002968]
+//     	IPA R12, a[0x98], R21;           # [1326][002970] GENERIC_ATTRIBUTE_01_Z
+//     	FADD.FTZ R10, -R9, R4;           # [1327][002978]
+//     	FADD.FTZ R11, -R11, R5;          # [1328][002980]
+//     	FADD.FTZ R12, -R12, R6;          # [1329][002988]
+//     	FMUL.FTZ R4, R10, R10;           # [1330][002990]
+//     	FFMA.FTZ R4, R11, R11, R4;       # [1331][002998]
+//     	FFMA.FTZ R4, R12, R12, R4;       # [1332][0029a0]
+//     	MUFU.RSQ R5, R4;                 # [1333][0029a8]
+//     	MUFU.RCP R9, R5;                 # [1334][0029b0]
+//     	FSETP.GE.FTZ.AND P0, PT, R7, R9, PT; # [1335][0029b8]
+//     	SSY L2c40;                       # [1336][0029c0]
+//     	@!P0 BRA L2c38;                  # [1337][0029c8]
+//     	TLD.LZ.T R6, R8, 0x13, 1D, 0x1;  # [1338][0029d0]
+//     	SHL.W R7, R23, 0x4;              # [1339][0029d8]
+//     	MUFU.RSQ R14, R4;                # [1340][0029e0]
+//     	LDC.64 R4, c[0x2][R7+0x200];     # [1341][0029e8]
+//     	FMUL.FTZ R15, R10, R14;          # [1342][0029f0]
+//     	LDC R27, c[0x2][R7+0x208];       # [1343][0029f8]
+//     	FMUL.FTZ R26, R11, R14;          # [1344][002a00]
+//     	FMUL.FTZ R13, R15, R4;           # [1345][002a08]
+//     	FMUL.FTZ R7, R12, R14;           # [1346][002a10]
+//     	FFMA.FTZ R5, R26, R5, R13;       # [1347][002a18]
+//     	FFMA.FTZ R27, R7, R27, R5;       # [1348][002a20]
+//     	FMUL32I.FTZ R4, R6, 0x3c0efa35;  # [1349][002a28]
+//     	RRO.SINCOS R4, R4;               # [1350][002a30]
+//     	MUFU.COS R13, R4;                # [1351][002a38]
+//     	FSETP.LT.FTZ.AND P0, PT, R13, R27, PT; # [1352][002a40]
+//     	@!P0 BRA.U L2c38;                # [1353][002a48]
+//     	@P0 TLD.LZ.NODEP.T R4, R23, 0x8, 1D, 0x7; # [1354][002a50]
+//     	@P0 FFMA.FTZ R28, R10, R14, R46; # [1355][002a58]
+//     	@P0 FMUL.FTZ R10, R19, R15;      # [1356][002a60]
+//     	@P0 FFMA.FTZ R29, R11, R14, R43; # [1357][002a68]
+//     	@P0 FFMA.FTZ R30, R12, R14, R40; # [1358][002a70]
+//     	@P0 FFMA.FTZ R11, R22, R26, R10; # [1359][002a78]
+//     	@P0 FMUL.FTZ R10, R28, 0.5;      # [1360][002a80]
+//     	@P0 FADD.FTZ R12, R27, -R13;     # [1361][002a88]
+//     	@P0 FADD.FTZ R13, -R13, 1;       # [1362][002a90]
+//     	@P0 FMUL.FTZ R15, R29, 0.5;      # [1363][002a98]
+//     	@P0 FMUL.FTZ R10, R19, R10;      # [1364][002aa0]
+//     	@P0 MUFU.RCP R13, R13;           # [1365][002aa8]
+//     	@P0 FMUL.FTZ R26, R30, 0.5;      # [1366][002ab0]
+//     	@P0 FFMA.FTZ R15, R22, R15, R10; # [1367][002ab8]
+//     	@P0 FMUL.FTZ.SAT R12, R12, R13;  # [1368][002ac0]
+//     	@P0 SHL.W R14, R23, 0x4;         # [1369][002ac8]
+//     	@P0 FFMA.FTZ.SAT R13, R18, R26, R15; # [1370][002ad0]
+//     	@P0 FFMA.FTZ.SAT R7, R18, R7, R11; # [1371][002ad8]
+//     	@P0 LDC R28, c[0x2][R14+0xc];    # [1372][002ae0]
+//     	@P0 MUFU.LG2 R15, R13;           # [1373][002ae8]
+//     	@P0 LDC R10, c[0x2][R14+0x20c];  # [1374][002af0]
+//     	@P0 MUFU.LG2 R11, R7;            # [1375][002af8]
+//     	@P0 FMUL.FTZ R15, R15, 60;       # [1376][002b00]
+//     	@P0 MOV32I R27, 0x40400000;      # [1377][002b08]
+//     	@P0 MUFU.RCP R14, R28;           # [1378][002b10]
+//     	@P0 FMUL.FTZ R11, R11, 60;       # [1379][002b18]
+//     	@P0 RRO.EX2 R15, R15;            # [1380][002b20]
+//     	@P0 FFMA.FTZ R13, R12, -2, R27;  # [1381][002b28]
+//     	@P0 FMUL.FTZ R12, R12, R12;      # [1382][002b30]
+//     	@P0 FFMA.FTZ.SAT R14, R9, -R14, c[0x10][0x3c]; # [1383][002b38]
+//     	@P0 RRO.EX2 R9, R11;             # [1384][002b40]
+//     	@P0 MUFU.EX2 R15, R15;           # [1385][002b48]
+//     	@P0 FMUL.FTZ R11, R13, R12;      # [1386][002b50]
+//     	@P0 MUFU.EX2 R9, R9;             # [1387][002b58]
+//     	@P0 FMUL.FTZ R12, R3, R15;       # [1388][002b60]
+//     	@P0 FMUL.FTZ R26, R16, R15;      # [1389][002b68]
+//     	@P0 FMUL.FTZ R27, R17, R15;      # [1390][002b70]
+//     	@P0 FFMA.FTZ R13, R9, R3, -R12;  # [1391][002b78]
+//     	@P0 FFMA.FTZ R15, R9, R16, -R26; # [1392][002b80]
+//     	@P0 FFMA.FTZ R9, R9, R17, -R27;  # [1393][002b88]
+//     	@P0 FFMA.FTZ R12, R13, c[0x10][0x38], R12; # [1394][002b90]
+//     	@P0 FFMA.FTZ R13, R15, c[0x10][0x38], R26; # [1395][002b98]
+//     	@P0 FFMA.FTZ R15, R9, c[0x10][0x38], R27; # [1396][002ba0]
+//     	@P0 FFMA.FTZ R9, R7, R24, R12;   # [1397][002ba8]
+//     	@P0 FFMA.FTZ R12, R7, R25, R13;  # [1398][002bb0]
+//     	@P0 FFMA.FTZ R7, R7, R38, R15;   # [1399][002bb8]
+//     	@P0 FMUL.FTZ R9, R20, R9;        # [1400][002bc0]
+//     	@P0 FMUL.FTZ R12, R20, R12;      # [1401][002bc8]
+//     	@P0 FMUL.FTZ R13, R20, R7;       # [1402][002bd0]
+//     	@P0 FMUL.FTZ R6, R14, R6;        # [1403][002bd8]
+//     	@P0 FMUL.FTZ R5, R14, R5;        # [1404][002be0]
+//     	@P0 FMUL.FTZ R7, R14, R4;        # [1405][002be8]
+//     	@P0 FMUL.FTZ R4, R11, R6;        # [1406][002bf0]
+//     	@P0 FMUL.FTZ R5, R11, R5;        # [1407][002bf8]
+//     	@P0 FMUL.FTZ R6, R11, R7;        # [1408][002c00]
+//     	@P0 FMUL.FTZ R4, R4, R10;        # [1409][002c08]
+//     	@P0 FMUL.FTZ R5, R5, R10;        # [1410][002c10]
+//     	@P0 FMUL.FTZ R6, R6, R10;        # [1411][002c18]
+//     	@P0 FFMA.FTZ R2, R9, R4, R2;     # [1412][002c20]
+//     	@P0 FFMA.FTZ R1, R12, R5, R1;    # [1413][002c28]
+//     	@P0 FFMA.FTZ R0, R13, R6, R0;    # [1414][002c30]
+//     L2c38:
+//     	IADD.S R8, R8, 0x1;              # [1415][002c38]
+//     L2c40:
+//     	IADD R23, R23, 0x1;              # [1416][002c40]
+//     	ISETP.GE.AND P0, PT, R8, c[0x6][0x60], PT; # [1417][002c48]
+//     	@!P0 BRA L2950;                  # [1418][002c50]
+//     L2c58:
+//     	MOV32I R3, 0x3f800000;           # [1419][002c58]
+//     	EXIT;                            # [1420][002c60]
+//     	END
+//     END_SECTION
+// END_SHADER
+// 

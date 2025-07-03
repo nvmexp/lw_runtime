@@ -1,0 +1,77 @@
+#
+#  Copyright (c) 2017 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *Device IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HDevice BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+FrontEnd_NEEDS_LWVM_HEADERS = 1
+
+FrontEnd_INCLUDES = $(LWVM_LW_SDK_INCLUDES)
+
+FrontEnd_SOURCES += $(addprefix $(LW_OPTIX)/src/FrontEnd/Canonical/, \
+  CanonicalProgram.cpp \
+  GetSetOptimization.cpp \
+  IntrinsicsManager.cpp \
+  Mangle.cpp \
+  FrontEndHelpers.cpp \
+  VariableReference.cpp \
+  VariableSemantic.cpp \
+  LineInfo.cpp \
+  CallSiteIdentifier.cpp \
+)
+
+PTX_LIB_GEN = $(LW_OPTIX)/src/FrontEnd/scripts/ptx_lib_gen.py
+PTX_INSTR_ENUM = $(LW_OPTIX)/src/FrontEnd/scripts/ptx_instr_enum.py
+ptxInstructionDefs = $(OPTIX_PTXPARSE_GENERATED_DIR)/ptxInstructionDefs.adapted.incl
+
+FRONTEND_LLVM_VERSION=70
+
+LW_DIRS_TO_CREATE += $(LW_OPTIX_OUTPUTDIR)/src/FrontEnd/PTX
+
+# Generate this LLVM IR file by running a python script.
+$(LW_OPTIX_OUTPUTDIR)/src/FrontEnd/PTX/PTXInstructions.ll: $(ptxInstructionDefs) $(PTX_LIB_GEN) $(PTX_INSTR_ENUM)  | $(LW_OPTIX_OUTPUTDIR)/src/FrontEnd/PTX
+	$(ECHO) Generating $(subst $(LW_OPTIX_OUTPUTDIR)/,,$(@))
+	$(RM) $(@)
+	$(PYTHON) $(PTX_LIB_GEN) -a $(@) $(ptxInstructionDefs) "-b$(LLVM_TOOLS_BINARY_DIR)" -p $(BITNESS) -l $(FRONTEND_LLVM_VERSION)
+
+# Generate this bitcode file by running the "d2irWrapperGenerator" tool.
+$(LW_OPTIX_OUTPUTDIR)/src/FrontEnd/PTX/D2IRPTXInstructions_linked_opt.bc: $(d2irWrapperGenerator_EXE) | $(LW_OPTIX_OUTPUTDIR)/src/FrontEnd/PTX
+	$(ECHO) Generating $(subst $(LW_OPTIX_OUTPUTDIR)/,,$(@))
+	$(RM) $(@)
+	$(d2irWrapperGenerator_EXE) $(@)
+
+FrontEnd_LLVM_IR_FILES = \
+  $(LW_OPTIX)/src/FrontEnd/Canonical/C14nRuntime.ll \
+  $(LW_OPTIX_OUTPUTDIR)/src/FrontEnd/PTX/PTXInstructions.ll
+
+ifneq ($(LW_BUILD_TYPE),release)
+  # only add this file in non-release builds
+  FrontEnd_BITCODE_FILES = \
+    $(LW_OPTIX_OUTPUTDIR)/src/FrontEnd/PTX/D2IRPTXInstructions_linked_opt.bc
+endif
+
+$(call optix_module,FrontEnd)
+
+# If we start supporting Apple again for OptiX, then we need to set this to something real.
+PTXPARSE_APPLE_DEFS ?=
+CMAKE_CONFIGURED_FILES += $(LW_OPTIX)/src/FrontEnd/PTX/PTXStitch/stdPlatformDefs.h.in
+
+include $(LW_OPTIX)/src/FrontEnd/Canonical/tests/tests.lwmk

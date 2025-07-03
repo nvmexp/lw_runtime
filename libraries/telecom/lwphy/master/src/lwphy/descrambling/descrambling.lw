@@ -1,0 +1,314 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include <lwda_runtime.h>
+#include <stdio.h>
+#include "GOLD_2_COALESCED_P_LUT.h"
+#include "GOLD_1_SEQ_LUT.h"
+#include "lwphy.h"
+#include "lwphy_internal.h"
+#include "descrambling.lwh"
+#include "descrambling.hpp"
+#include "crc.hpp"
+
+using namespace lwphy_i;
+using namespace crc;
+
+namespace descrambling
+{
+// Compute 32 bits of the Gold sequence starting from bit n//32
+__device__ inline uint32_t gold32(uint32_t seed2, uint32_t n)
+{
+    uint32_t prod2;
+
+    //    uint32_t state1 = 0x40000000;         // reverse of 0x1
+    uint32_t state2 = __brev(seed2) >> 1; // reverse 31 bits
+
+    state2 = polyMulHigh31(state2, POLY_2);
+
+    prod2 = mulModPoly31_Coalesced(state2,
+                                   &GOLD_2_COALESCED_P_LUT[(n) / WORD_SIZE],
+                                   GOLD_2_COALESCED_P_LUT_OFFSET,
+                                   POLY_2);
+
+    uint32_t fstate2 = galois31LFSRWord(prod2, POLY_2_GMASK, 31);
+
+    uint32_t output2 = fibonacciLFSR2_1bit(fstate2);
+
+    //    return output1 ^ output2;
+    return GOLD_1_SEQ_LUT[n / WORD_SIZE] ^ output2;
+}
+
+// KERNEL for descrambling
+
+__global__ void descrambleKernel(float*          llrs,
+                                 uint32_t        size,
+                                 const uint32_t* tbBoundaryArray,
+                                 const uint32_t* cinitArray)
+{
+    extern __shared__ uint32_t sharedSeq[];
+
+    int      tid      = blockIdx.x * blockDim.x + threadIdx.x;
+    uint32_t myTBBase = tbBoundaryArray[blockIdx.y];
+    uint32_t myTBEnd  = tbBoundaryArray[blockIdx.y + 1];
+    uint32_t myCinit  = cinitArray[blockIdx.y];
+
+    uint32_t seq;
+
+    uint32_t blockEnd = myTBEnd + ((blockDim.x - myTBEnd % blockDim.x) % blockDim.x);
+
+    // apply descrambling (sign change)
+    for(int t = tid + myTBBase; t < blockEnd; t += blockDim.x * gridDim.x)
+    {
+        __syncthreads();
+        if(threadIdx.x < blockDim.x / WARP_SIZE)
+            sharedSeq[threadIdx.x] = gold32(myCinit, t + threadIdx.x * WARP_SIZE - myTBBase);
+
+        __syncthreads();
+
+        if(t < myTBEnd)
+        { // end of transport block guard
+            seq         = sharedSeq[threadIdx.x / WARP_SIZE];
+            uint32_t s  = (seq >> (threadIdx.x & (WARP_SIZE - 1))) & 1; // modulo warp size
+            uint32_t sn = (s + 1) & 0x1;
+            // change sign based on scrambling sequence bit
+            llrs[t] = -llrs[t] * s + llrs[t] * sn;
+        }
+    }
+}
+// lwphyDescramble class
+
+class lwphyDescramble //
+{
+public:
+    lwphyDescramble() :
+        d_llrs_(nullptr),
+        d_tbBoundaryArray_(nullptr),
+        d_cinitArray_(nullptr),
+        nTBs_(0),
+        maxNCodeBlocks_(0),
+        totalSize_(0){};
+
+    lwphyStatus_t loadParams(const uint32_t* tbBoundaryArray,
+                             const uint32_t* cinitArray,
+                             uint32_t        nTBs,
+                             uint32_t        maxNCodeBlocks);
+    lwphyStatus_t loadInput(float* llrs);
+
+    lwphyStatus_t launch(float*       llrs   = nullptr,
+                         bool         timeIt = false,
+                         uint32_t     NRUNS  = 10000,
+                         lwdaStream_t strm   = 0);
+
+    lwphyStatus_t storeOutput(float* llrs);
+
+    void cleanup();
+
+private:
+    unique_device_ptr<float>    d_llrs_;
+    unique_device_ptr<uint32_t> d_tbBoundaryArray_;
+    unique_device_ptr<uint32_t> d_cinitArray_;
+    uint32_t                    maxNCodeBlocks_;
+    uint32_t                    nTBs_;
+    uint32_t                    totalSize_;
+};
+
+lwphyStatus_t lwphyDescramble::loadInput(float* llrs)
+{
+    lwphyStatus_t status = LWPHY_STATUS_SUCCESS;
+
+    d_llrs_ = make_unique_device<float>(totalSize_);
+    if(d_llrs_ != nullptr)
+    {
+        LWDA_CHECK(lwdaMemcpy(d_llrs_.get(),
+                              llrs,
+                              sizeof(float) * totalSize_,
+                              lwdaMemcpyHostToDevice));
+    }
+    else
+    {
+        status = LWPHY_STATUS_ALLOC_FAILED;
+    }
+
+    return status;
+}
+
+lwphyStatus_t lwphyDescramble::loadParams(const uint32_t* tbBoundaryArray,
+                                          const uint32_t* cinitArray,
+                                          uint32_t        nTBs,
+                                          uint32_t        maxNCodeBlocks)
+{
+    lwphyStatus_t status = LWPHY_STATUS_SUCCESS;
+    nTBs_                = nTBs;
+    maxNCodeBlocks_      = maxNCodeBlocks;
+    totalSize_           = tbBoundaryArray[nTBs];
+
+    d_tbBoundaryArray_ = make_unique_device<uint32_t>(nTBs + 1);
+    d_cinitArray_      = make_unique_device<uint32_t>(nTBs);
+
+    LWDA_CHECK(lwdaMemcpy(d_tbBoundaryArray_.get(),
+                          tbBoundaryArray,
+                          sizeof(uint32_t) * (nTBs + 1),
+                          lwdaMemcpyHostToDevice));
+    LWDA_CHECK(lwdaMemcpy(d_cinitArray_.get(),
+                          cinitArray,
+                          sizeof(uint32_t) * nTBs,
+                          lwdaMemcpyHostToDevice));
+
+    return status;
+}
+
+lwphyStatus_t lwphyDescramble::launch(float*       d_llrs_i,
+                                      bool         timeIt,
+                                      uint32_t     NRUNS,
+                                      lwdaStream_t strm)
+{
+    const int blockSize = GLOBAL_BLOCK_SIZE;
+    int       gridSizeX = maxNCodeBlocks_;
+    int       gridSizeY = nTBs_;
+    dim3      gridSize(gridSizeX, gridSizeY);
+
+    float* d_input = (d_llrs_i == nullptr) ? d_llrs_.get() : d_llrs_i;
+
+    descrambleKernel<<<gridSize, blockSize, (blockSize / WARP_SIZE) * sizeof(uint32_t), strm>>>(d_input,
+                                                                                                totalSize_,
+                                                                                                d_tbBoundaryArray_.get(),
+                                                                                                d_cinitArray_.get());
+
+    if(timeIt)
+    {
+        lwdaEvent_t start, stop;
+        lwdaEventCreate(&start);
+        lwdaEventCreate(&stop);
+
+        float time1 = 0.0;
+        lwdaEventRecord(start);
+
+        for(int i = 0; i < NRUNS; i++)
+        {
+            descrambleKernel<<<gridSize, blockSize, (blockSize / WARP_SIZE) * sizeof(uint32_t), strm>>>(d_input,
+                                                                                                        totalSize_,
+                                                                                                        d_tbBoundaryArray_.get(),
+                                                                                                        d_cinitArray_.get());
+        }
+        lwdaEventRecord(stop);
+        lwdaEventSynchronize(stop);
+        lwdaEventElapsedTime(&time1, start, stop);
+
+        lwdaEventDestroy(start);
+        lwdaEventDestroy(stop);
+
+        time1 /= NRUNS;
+
+        printf(
+            "Descramble Kernel"
+            "\n %.2f us",
+            time1 * 1000);
+    }
+    return LWPHY_STATUS_SUCCESS;
+}
+
+lwphyStatus_t lwphyDescramble::storeOutput(float* llrs)
+{
+    LWDA_CHECK(lwdaMemcpy(llrs,
+                          d_llrs_.get(),
+                          sizeof(float) * totalSize_,
+                          lwdaMemcpyDeviceToHost));
+
+    return LWPHY_STATUS_SUCCESS;
+}
+
+void lwphyDescramble::cleanup()
+{
+    d_tbBoundaryArray_ = nullptr;
+
+    d_cinitArray_ = nullptr;
+
+    d_llrs_ = nullptr;
+}
+
+} // namespace descrambling
+
+void lwphyDescrambleInit(void** descrambleElw)
+{
+    descrambling::lwphyDescramble* descramblePtr = new descrambling::lwphyDescramble();
+    *descrambleElw                               = descramblePtr;
+}
+
+void lwphyDescrambleCleanUp(void** descrambleElw)
+{
+    delete static_cast<descrambling::lwphyDescramble*>((*descrambleElw));
+}
+
+lwphyStatus_t lwphyDescrambleLoadParams(void**          descrambleElw,
+                                        uint32_t        nTBs,
+                                        uint32_t        maxNCodeBlocks,
+                                        const uint32_t* tbBoundaryArray,
+                                        const uint32_t* cinitArray)
+{
+    descrambling::lwphyDescramble* descramblePtr = static_cast<descrambling::lwphyDescramble*>(*descrambleElw);
+    lwphyStatus_t                  status        = descramblePtr->loadParams(tbBoundaryArray,
+                                                     cinitArray,
+                                                     nTBs,
+                                                     maxNCodeBlocks);
+    return status;
+}
+
+lwphyStatus_t lwphyDescrambleLoadInput(void** descrambleElw, float* llrs)
+
+{
+    descrambling::lwphyDescramble* descramblePtr = static_cast<descrambling::lwphyDescramble*>(*descrambleElw);
+    lwphyStatus_t                  status        = descramblePtr->loadInput(llrs);
+    return status;
+}
+
+lwphyStatus_t lwphyDescramble(void** descrambleElw, float* d_llrs, bool timeIt, uint32_t NRUNS, lwdaStream_t strm)
+{
+    descrambling::lwphyDescramble* descramblePtr = static_cast<descrambling::lwphyDescramble*>(*descrambleElw);
+
+    lwphyStatus_t status = descramblePtr->launch(d_llrs, timeIt, NRUNS, strm);
+    return LWPHY_STATUS_SUCCESS;
+}
+
+lwphyStatus_t lwphyDescrambleStoreOutput(void** descrambleElw, float* llrs)
+{
+    descrambling::lwphyDescramble* descramblePtr = static_cast<descrambling::lwphyDescramble*>(*descrambleElw);
+    lwphyStatus_t                  status        = descramblePtr->storeOutput(llrs);
+
+    return status;
+}
+
+lwphyStatus_t lwphyDescrambleAllParams(float*          llrs,
+                                       const uint32_t* tbBoundaryArray,
+                                       const uint32_t* cinitArray,
+                                       uint32_t        nTBs,
+                                       uint32_t        maxNCodeBlocks,
+                                       int             timeIt,
+                                       uint32_t        NRUNS,
+                                       lwdaStream_t    stream)
+{
+    descrambling::lwphyDescramble descramble;
+
+    lwphyStatus_t status = descramble.loadParams(tbBoundaryArray, cinitArray, nTBs, maxNCodeBlocks);
+
+    if(status != LWPHY_STATUS_SUCCESS) return status;
+
+    descramble.loadInput(llrs);
+
+    if(status != LWPHY_STATUS_SUCCESS) return status;
+
+    status = descramble.launch(nullptr, timeIt, NRUNS, stream);
+
+    if(status != LWPHY_STATUS_SUCCESS) return status;
+
+    status = descramble.storeOutput(llrs);
+
+    return LWPHY_STATUS_SUCCESS;
+}

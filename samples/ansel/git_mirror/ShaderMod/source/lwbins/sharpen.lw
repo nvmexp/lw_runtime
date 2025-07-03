@@ -1,0 +1,345 @@
+/*
+ * Copyright (c) 2019, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+typedef unsigned int uint;
+typedef unsigned short ushort;
+
+#include "core.h"
+//#include "pixel_utils.h"
+#include "vector_operators.lwh"
+
+enum PixelFormat
+{
+    RGBA8UI,
+    RGB10A2UI,
+    RG11B10F,
+    RGBA16F,
+    Luma8UI,
+    NativeRGBA,
+    NativeLuma
+};
+
+__forceinline__ __device__ void PixelWriteOut(lwdaSurfaceObject_t dst_surf, int ox, int oy, float4 &p)
+{
+    asm volatile("sust.p.2d.v4.b32.zero [%0, {%1,%2}], {%3,%4,%5,%6};"
+                 : "+l"(dst_surf)
+                 : "r"(ox), "r"(oy), "f"(p.x), "f"(p.y), "f"(p.z), "f"(p.w));
+}
+
+namespace lw {
+
+namespace {
+
+constexpr int kCTASize   = 128;
+constexpr int kMinBlocks = 8;
+
+constexpr int kTileWidth  = 32;
+constexpr int kTileHeight = 32;
+
+// highlight fall-off start (prevents halos and noise in bright areas)
+constexpr float kHighBlock = 0.65f;
+// offset reducing sharpening in the shadows
+constexpr float kLowBlock = 1.0f / 256.0f;
+
+float GetKernelSharpness(float sharpness)
+{
+    constexpr float kSharpnessMin = -1.0f / 14.0f;
+    constexpr float kSharpnessMax = -1.0f / 6.5f;
+    return kSharpnessMin + (kSharpnessMax - kSharpnessMin) * min(max(sharpness, 0.0f), 1.0f);
+}
+
+__device__ float GetLuma(float r, float g, float b)
+{
+    // Y from JPEG spec
+    return 0.299f * r + 0.587f * g + 0.114f * b;
+}
+
+__device__ float GetLuma(const float4 &p)
+{
+    return GetLuma(p.x, p.y, p.z);
+}
+
+__device__ float GetLuma(const float3 &p)
+{
+    return GetLuma(p.x, p.y, p.z);
+}
+
+__device__ float Square(float v)
+{
+    return v * v;
+}
+
+#ifdef USE_HDR
+
+#define pq_m1 0.1593017578125f
+#define pq_m2 78.84375f
+#define pq_c1 0.8359375f
+#define pq_c2 18.8515625f
+#define pq_c3 18.6875f
+
+__device__ float3 hdr_to_ldr(float3 clr)
+{
+    constexpr float pq_C = 10000.0f;
+    {
+        float3 L = clr / pq_C;
+        float3 Lm = pow3(max3(L, make_float3(0.0f)), pq_m1);
+        float3 N = (pq_c1 + pq_c2 * Lm) / (1.0f + pq_c3 * Lm);
+        clr = pow3(N, pq_m2);
+    }
+    return clr;
+}
+
+__device__ float3 ldr_to_hdr(float3 clr)
+{
+    constexpr float pq_C = 10000.0f;
+    {
+        float3 Np = pow3(max3(clr, 0.0f), __frcp_rn(pq_m2));
+        float3 L = Np - pq_c1;
+        L = max3(L, 0.0f);
+        L = L / (pq_c2 - pq_c3 * Np);
+        L = pow3(L, __frcp_rn(pq_m1));
+        clr = L * pq_C; // returns cd/m^2            
+    }
+    return clr;
+}
+#endif
+
+template<PixelFormat IF, int W, int H, int S, typename T>
+__device__ void ReadLuminanceTile(T &dst, uint src, float src_xnorm, float src_ynorm)
+{
+    static_assert(IF == NativeLuma || IF == NativeRGBA, "unsupported input texture format!");
+
+    const int bx = blockIdx.x * W - S;
+    const int by = blockIdx.y * H - S;
+
+    constexpr int kLoadWidth  = W + S * 2;
+    constexpr int kLoadHeight = H + S * 2;
+    static_assert(kLoadWidth % 2 == 0 && kLoadHeight % 2 == 0, "invalid tile size!");
+
+    lwdaTextureObject_t src_tex = static_cast<lwdaTextureObject_t>(src);
+
+    // sample pixel centers with a bias of 0.25 to prevent tex2Dgather from grabbing a wrong quad due to numerical issues
+    const float ixs = 0.75f * src_xnorm;
+    const float iys = 0.75f * src_ynorm;
+
+    for (uint i = threadIdx.x; i < kLoadWidth * kLoadHeight / 4; i += blockDim.x)
+    {
+        const int2 t = IndexToCoord<kLoadWidth / 2>(i);
+
+        const int ox = t.x * 2;
+        const int oy = t.y * 2;
+
+        const float ix = (bx + ox) * src_xnorm + ixs;
+        const float iy = (by + oy) * src_ynorm + iys;
+
+        float4 p;
+        if (IF == NativeLuma)
+        {
+            // input is a luma texture
+            p = tex2Dgather<float4>(src_tex, ix, iy, 0);
+        }
+        else
+        {
+            // input is a RGBA texture
+            const float4 pr = tex2Dgather<float4>(src_tex, ix, iy, 0);
+            const float4 pg = tex2Dgather<float4>(src_tex, ix, iy, 1);
+            const float4 pb = tex2Dgather<float4>(src_tex, ix, iy, 2);
+
+            float3 c0 = make_float3(pr.x, pg.x, pb.x);
+            float3 c1 = make_float3(pr.y, pg.y, pb.y);
+            float3 c2 = make_float3(pr.z, pg.z, pb.z);
+            float3 c3 = make_float3(pr.w, pg.w, pb.w);
+
+#ifdef USE_HDR
+            c0 = hdr_to_ldr(c0);
+            c1 = hdr_to_ldr(c1);
+            c2 = hdr_to_ldr(c2);
+            c3 = hdr_to_ldr(c3);
+#endif
+
+            p.x = GetLuma(c0);//pr.x, pg.x, pb.x);
+            p.y = GetLuma(c1);//pr.y, pg.y, pb.y);
+            p.z = GetLuma(c2);//pr.z, pg.z, pb.z);
+            p.w = GetLuma(c3);//pr.w, pg.w, pb.w);
+        }
+
+        const float p00 = __saturatef(p.w);
+        const float p01 = __saturatef(p.z);
+        const float p10 = __saturatef(p.x);
+        const float p11 = __saturatef(p.y);
+
+        AssignAs<float2>(dst(ox, oy), make_float2(p00, p01));
+        AssignAs<float2>(dst(ox, oy + 1), make_float2(p10, p11));
+    }
+}
+
+template<PixelFormat IF, PixelFormat OF>
+__device__ void DeepISP_Composite(uint dst_surf, uint src_luma_tex, uint src_color_tex, float ilw_dst_width,
+                                  float ilw_dst_height, float sharpness, float denoise)
+{
+    // local luminance tile storage
+    using LumaTile = TileBufferStatic<float, 1, kTileWidth + 2, kTileWidth + 2, kTileHeight + 2>;
+    __shared__ StaticArray<LumaTile::kSize> shm_data;
+
+    LumaTile ltile(shm_data);
+
+    // read high-resolution luminance tile from a luma texture
+    ReadLuminanceTile<IF, kTileWidth, kTileHeight, 1>(ltile, static_cast<lwdaTextureObject_t>(src_luma_tex),
+                                                      ilw_dst_width, ilw_dst_height);
+    __syncthreads();
+
+    // low-resolution color texture
+    lwdaTextureObject_t src_color = static_cast<lwdaTextureObject_t>(src_color_tex);
+
+    const int bx = blockIdx.x * kTileWidth;
+    const int by = blockIdx.y * kTileHeight;
+
+    constexpr int kVUnroll = 4;
+    static_assert(kTileHeight % kVUnroll == 0, "unroll/tile height mismatch!");
+
+    for (uint i = threadIdx.x; i < kTileWidth * kTileHeight / kVUnroll; i += blockDim.x)
+    {
+        int2 t = IndexToCoord<kTileWidth>(i);
+        t.y *= kVUnroll;
+
+        // read 3 x (3+kVUnroll-1) neighborhood
+        float n[3][3 + kVUnroll - 1];
+        for (int ny = 0; ny < 3 + kVUnroll - 1; ++ny)
+        {
+            for (int nx = 0; nx < 3; ++nx)
+            {
+                n[nx][ny] = ltile(t.x + nx, t.y + ny);
+            }
+        }
+
+        // sharpen & composite with color
+#pragma unroll
+        for (int j = 0; j < kVUnroll; ++j)
+        {
+            // high-res pixel coord
+            const uint ox = bx + t.x;
+            const uint oy = by + t.y + j;
+
+            // high-res pixel center in normalized space
+            const float ix = (ox + 0.5f) * ilw_dst_width;
+            const float iy = (oy + 0.5f) * ilw_dst_height;
+
+            // cross min/max
+            const float ncmin = min(min(n[0][j + 0], n[0][j + 2]), min(n[2][j + 0], n[2][j + 2]));
+            const float ncmax = max(max(n[0][j + 0], n[0][j + 2]), max(n[2][j + 0], n[2][j + 2]));
+
+            // plus min/max
+            const float npmin = min(min(min(n[0][j + 1], n[2][j + 1]), min(n[1][j + 0], n[1][j + 2])), n[1][j + 1]);
+            const float npmax = max(max(max(n[0][j + 1], n[2][j + 1]), max(n[1][j + 0], n[1][j + 2])), n[1][j + 1]);
+
+            // compute "soft" local dynamic range -- average of 3x3 and plus shape
+            const float lmin = 0.5f * min(ncmin, npmin) + 0.5f * npmin;
+            const float lmax = 0.5f * max(ncmax, npmax) + 0.5f * npmax;
+
+            // compute local contrast enhancement kernel
+            const float lw = lmin / (lmax + kLowBlock);
+            const float hw = Square(1.0f - Square(max(lmax - kHighBlock, 0.0f) * (1.0f / (1.0f - kHighBlock))));
+
+             // noise suppression
+            const float nw = Square((lmax - lmin) * denoise);
+
+            // pick conservative boost
+            const float boost = min(min(lw, hw), nw);
+
+            // run variable-sigma 3x3 sharpening colwolution
+            const float k = boost * sharpness;
+
+            float aclwm = n[1][j + 1];
+            aclwm += n[0][j + 1] * k;
+            aclwm += n[2][j + 1] * k;
+            aclwm += n[1][j + 0] * k;
+            aclwm += n[1][j + 2] * k;
+            aclwm += n[0][j + 0] * (k * 0.5f);
+            aclwm += n[2][j + 0] * (k * 0.5f);
+            aclwm += n[0][j + 2] * (k * 0.5f);
+            aclwm += n[2][j + 2] * (k * 0.5f);
+
+            // normalize (divide the aclwmulator by the sum of colwolution weights)
+            aclwm /= 1.0f + 6.0f * k;
+
+            // get low-res color and transfer output luma to low-res color
+            float4 c = tex2D<float4>(src_color, ix, iy);
+
+            const float d = aclwm - GetLuma(c);
+            c.x += d;
+            c.y += d;
+            c.z += d;
+
+#ifdef USE_HDR
+            float3 c1 = ldr_to_hdr(make_float3(c));
+            c.x = c1.x;
+            c.y = c1.y;
+            c.z = c1.z;
+#endif
+            // write-out
+            PixelWriteOut(static_cast<lwdaSurfaceObject_t>(dst_surf), ox, oy, c);
+        }
+    }
+}
+
+} // namespace
+
+/*extern "C" __global__ void __launch_bounds__(kCTASize, kMinBlocks)
+    DeepISP_Composite_NativeRGBA(uint dst_surf, uint src_luma_tex, uint src_color_tex, float ilw_dst_width,
+                                 float ilw_dst_height, float sharpness)
+{
+    DeepISP_Composite<NativeLuma, NativeRGBA>(dst_surf, src_luma_tex, src_color_tex, ilw_dst_width, ilw_dst_height,
+                                              sharpness);
+}
+
+extern "C" __global__ void __launch_bounds__(kCTASize, kMinBlocks)
+    DeepISP_Composite_RGBA8UI(uint dst_surf, uint src_luma_tex, uint src_color_tex, float ilw_dst_width,
+                              float ilw_dst_height, float sharpness)
+{
+    DeepISP_Composite<NativeLuma, RGBA8UI>(dst_surf, src_luma_tex, src_color_tex, ilw_dst_width, ilw_dst_height,
+                                           sharpness);
+}*/
+
+extern "C" __global__ void __launch_bounds__(kCTASize, kMinBlocks)
+    DeepISP_Sharpen_NativeRGBA(uint dst_surf, uint src_color_tex, float ilw_dst_width, float ilw_dst_height,
+                               float sharpness, float denoise)
+{
+    DeepISP_Composite<NativeRGBA, NativeRGBA>(dst_surf, src_color_tex, src_color_tex, ilw_dst_width, ilw_dst_height,
+                                              sharpness, denoise);
+}
+
+/*extern "C" __global__ void __launch_bounds__(kCTASize, kMinBlocks)
+    DeepISP_Sharpen_RGBA8UI(uint dst_surf, uint src_color_tex, float ilw_dst_width, float ilw_dst_height,
+                            float sharpness)
+{
+    DeepISP_Composite<NativeRGBA, RGBA8UI>(dst_surf, src_color_tex, src_color_tex, ilw_dst_width, ilw_dst_height,
+                                           sharpness);
+}
+
+void DeepISPComposite(uint dst_surf, uint hr_luma_tex, uint lr_color_tex, uint hr_width, uint hr_height,
+                      float sharpness)
+{
+    const dim3 grid_dim((hr_width + kTileWidth - 1) / kTileWidth, (hr_height + kTileHeight - 1) / kTileHeight, 1);
+    const dim3 block_dim(kCTASize, 1, 1);
+
+    DeepISP_Composite_RGBA8UI<<<grid_dim, block_dim>>>(dst_surf, hr_luma_tex, lr_color_tex, 1.0f / hr_width,
+                                                       1.0f / hr_height, GetKernelSharpness(sharpness));
+}
+
+void DeepISPSharpen(uint dst_surf, uint src_color_tex, uint src_width, uint src_height, float sharpness)
+{
+    const dim3 grid_dim((src_width + kTileWidth - 1) / kTileWidth, (src_height + kTileHeight - 1) / kTileHeight, 1);
+    const dim3 block_dim(kCTASize, 1, 1);
+
+    DeepISP_Sharpen_RGBA8UI<<<grid_dim, block_dim>>>(dst_surf, src_color_tex, 1.0f / src_width, 1.0f / src_height,
+                                                     GetKernelSharpness(sharpness));
+}*/
+
+} // namespace lw

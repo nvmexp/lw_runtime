@@ -1,0 +1,34 @@
+//
+// Copyright 2021 LWPU Corporation. All rights reserved.
+//
+
+#include <xmma/ampere/traits.h>
+#include <xmma/ampere/fragment.h>
+#include <xmma/ampere/smem_tile.h>
+#include <xmma/ampere/smem_tile_with_halo.h>
+
+#include "colw_fused.h"
+
+using Traits = xmma::Ampere_hmma_fp16_traits;
+using Cta_tile = typename Traits::template Cta_tile_extd<256, 64, 64, 4, 1, 1, 1>;
+
+#include "colw_nopool.lwh"
+
+namespace optix_exp {
+
+__global__
+__launch_bounds__(Kernel_traits::Cta_tile::THREADS_PER_CTA)
+void colw_ampere_256_64_64_kernel(Colw_params params)
+{
+    // Initialize the tile distribution.
+    typename Kernel_traits::Tile_distribution tile(params, blockIdx);
+
+    // Create the compute tile and clear the aclwmulators.
+    typename Kernel_traits::Compute_tile compute_tile;
+    compute_tile.clear();
+
+    // Start the real work.
+    xmma::gemm::matmul<Kernel_traits>(params, compute_tile, tile);
+}
+
+};

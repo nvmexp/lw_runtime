@@ -1,0 +1,57 @@
+include build/Common.lwmk
+
+LWWATCH_LIB_DIR ?= ../lib
+LWWATCH_INC_DIR ?= ../inc
+
+# source files
+SOURCES += flcndwarf.cpp
+SOURCES += flcndump.cpp
+SOURCES += flcnextractinfo.cpp
+SOURCES += naming.cpp
+
+CFLAGS += -DHAVE_CONFIG_H
+CFLAGS += -D__LIBELF_INTERNAL__
+
+#code search path 
+LW_INCLUDES += $(MSVC_COMPILER_DIR)/include
+LW_INCLUDES += ./
+LW_INCLUDES += ./win32/
+LW_INCLUDES += $(LWWATCH_INC_DIR)
+LW_INCLUDES += libelf
+LW_INCLUDES += libelf/win32
+LW_INCLUDES += libdwarf
+LW_INCLUDES += ../../../sdk/lwpu/inc
+
+L_INCLUDES += $(LWWATCH_LIB_DIR)
+
+ifeq ($(LW_TARGET_ARCH),x86) 
+    L_INCLUDES += $(MSVC_COMPILER_DIR)/lib
+    LIBEXE   := $(MSVC_COMPILER_DIR)/bin/LIB /LTCG /NOLOGO
+else
+    L_INCLUDES += $(MSVC_COMPILER_DIR)/lib/amd64
+    LIBEXE   := $(MSVC_COMPILER_DIR)/bin/amd64/LIB /LTCG /NOLOGO
+endif
+
+# linker options
+LIBFLAGS += -NODEFAULTLIB:libc
+LIBFLAGS += -subsystem:console
+
+LIBFLAGS += -OUT:./$(OUTPUTDIR)/libflcndwarf.lib
+
+LIBFLAGS += $(addprefix -LIBPATH:,$(L_INCLUDES))
+LIBFLAGS += liblwdwarf.lib
+
+# adding list of obj files
+LIBFLAGS += $(OBJECTS)
+
+# finally... building libflcndwarf
+$(OUTPUTDIR)/libflcndwarf.lib: $(OBJECTS)
+	@echo   Building libflcndwarf
+	@echo   OuputDir  $(OUTPUTDIR)
+	@echo   $(LIBEXE)
+	@echo   $(LIBFLAGS)
+	$(LIBEXE) $(strip $(LIBFLAGS))
+
+build: startTimer  $(OUTPUTDIR)/libflcndwarf.lib  stopTimer
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

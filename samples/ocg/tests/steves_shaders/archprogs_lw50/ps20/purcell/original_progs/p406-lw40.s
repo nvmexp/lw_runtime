@@ -1,0 +1,41 @@
+ps_2_0
+def c1, 1.000000, 0.333333, 0.000000, 0.000000
+dcl_pp t0.rg
+dcl_pp t2.rg
+dcl t4.rgb
+dcl t7.rgb
+dcl v0
+dcl_2d s0
+dcl_2d s1
+dcl_lwbe s2
+nrm r0.rgb, t4
+dp3 r0.r, t7, r0
+add r2.a, -r0.r, c1.r
+mul r1.a, r2.a, r2.a
+dp3 r0.r, t7, t7
+rcp r0.a, r0.r
+mov r0.rgb, t7
+dp3 r1.r, r0, t4
+mul r1.a, r1.a, r1.a
+mul r0.a, r0.a, r1.r
+mul r1.a, r2.a, r1.a
+add r0.a, r0.a, r0.a
+mov_pp r1.r, c5.a
+mad r3.a, r1.a, r1.r, c4.a
+mad r0.rgb, r0.a, r0, -t4
+texld_pp r2, r0, s2
+texld_pp r1, t0, s0
+texld_pp r0, t2, s1
+add r0.a, -r1.a, c1.r
+mul_pp r2.rgb, r2, r0.a
+mul_pp r3.rgb, r2, c0
+mad_pp r2.rgb, r3, r3, -r3
+mad_pp r3.rgb, c2, r2, r3
+dp3_pp r4.r, r3, c1.g
+mul_pp r2.rgb, r1, v0
+lrp_pp r1.rgb, c3, r3, r4.r
+mul_pp r1.rgb, r3.a, r1
+mul_pp r0.rgb, r0, r2
+mad_pp r0.rgb, r0, c6.r, r1
+mov_pp r0.a, v0.a
+mov_pp oC0, r0

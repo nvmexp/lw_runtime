@@ -1,0 +1,73 @@
+# File should be included in main dcgm/makefile.lwmk
+
+##############################################################################
+# make Linux stub library
+# Windows build doesn't need one since dcgm.lib is enough
+##############################################################################
+
+##############################################################################
+# define SOURCES
+##############################################################################
+LWRRENT_DIR := $(DCGM_DIR)/dcgm_stub
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += dcgm_stub_static.c
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+
+##############################################################################
+# define LOCAL_CFLAGS
+##############################################################################
+
+LOCAL_INCLUDES += $(LWRRENT_DIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/$(OUTPUTDIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/common/
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/common/inc/
+LOCAL_INCLUDES += $(LW_SOURCE)/drivers/resman/inc/libraries
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/
+LOCAL_INCLUDES += $(LWML_DIR)/$(OUTPUTDIR)
+
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+LOCAL_CFLAGS += -fPIC
+
+##############################################################################
+# define LOCAL_LDFLAGS
+##############################################################################
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+
+#  LOCAL_LDFLAGS += -Xlinker --version-script=dcgm.linux_def
+#  dcgm_stub_DEPENDS  += dcgm.linux_def
+
+##############################################################################
+# build
+##############################################################################
+
+DCGM_STATIC_LIBRARY_NAME := libdcgm_stub.a
+dcgm_stub_static_LIB := $(DCGM_STATIC_LIBRARY_NAME)
+
+dcgm_stub_static_TARGET  := $(OUTPUTDIR)/$(dcgm_stub_static_LIB)
+dcgm_stub_static_OBJECTS := $(LOCAL_OBJECTS)
+dcgm_stub_static_CFLAGS  := $(LOCAL_CFLAGS)
+dcgm_stub_static_LDFLAGS := $(LOCAL_LDFLAGS)
+dcgm_stub_static_DEPENDS ?=
+
+build: $(dcgm_stub_static_TARGET)
+dcgmbuildsyncpoint:: $(dcgm_stub_static_TARGET)
+$(eval $(call MAKE_STATIC_LIBRARY,dcgm_stub_static))
+build: $(dcgm_stub_static_TARGET).guardwords
+
+$(shell $(MKDIR) $(dir $(dcgm_stub_static_TARGET)))
+
+clean:
+
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

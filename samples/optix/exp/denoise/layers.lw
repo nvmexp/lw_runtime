@@ -1,0 +1,59 @@
+//
+// Copyright 2020 LWPU Corporation. All rights reserved.
+//
+
+#include <lwda_runtime.h>
+#include <device_launch_parameters.h>
+
+#include "layers.h"
+
+namespace optix_exp {
+
+AELayer::AELayer( const char* name, const deviceInfo& info )
+    : m_deviceInfo( info )
+{
+    m_outWidth        = 0;
+    m_outHeight       = 0;
+    m_outChannels     = 0;
+    m_input           = NULL;
+    m_nextLayer       = NULL;
+    m_fused           = false;
+    m_outDataIndex    = 0;
+    m_outsize         = 0;
+    m_outbufferShared = true;
+
+    m_width  = 0;
+    m_height = 0;
+
+    m_dtype = m_deviceInfo.m_device_capability >= 60 ? DATA_HALF : DATA_FLOAT;
+    m_tc    = m_deviceInfo.m_device_capability >= 70 ? true : false;
+
+    m_name = std::string( name );
+
+    m_tensorFormat = m_tc ? TENSOR_NHWC : TENSOR_NCHW;
+}
+
+AELayer::~AELayer()
+{
+}
+
+OptixResult AELayer::init( ErrorDetails& errDetails )
+{
+#ifdef DENOISE_DEBUG_TIMING
+    lwdaEventCreate( &m_startEvent );
+    lwdaEventCreate( &m_stopEvent );
+    m_evaltime = 0.f;
+#endif
+    return OPTIX_SUCCESS;
+}
+
+OptixResult AELayer::destroy( ErrorDetails& errDetails )
+{
+#ifdef DENOISE_DEBUG_TIMING
+        lwdaEventDestroy( m_startEvent );
+        lwdaEventDestroy( m_stopEvent );
+#endif
+    return OPTIX_SUCCESS;
+}
+
+};  // namespace optix_exp

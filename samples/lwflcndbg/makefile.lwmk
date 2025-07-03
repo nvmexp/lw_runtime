@@ -1,0 +1,215 @@
+##############################################################################
+# lwflcndbg Debugger Extension Makefile
+#
+# windows-specific lwmake fragment used for building the flcndbg.dll.
+##############################################################################
+
+# Setup LWPU specific options (Warning level 3 and link time code gen LTCG)
+LW_COPT_WARN := -W3
+LW_LTCG := 1
+
+ifdef RELEASE_BRANCH
+  BRANCH_DIR := $(RELEASE_BRANCH)
+else
+  BRANCH_DIR := dev/gpu_drv/tahoma_a
+endif
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+ifdef LWCFG_INITIALIZED
+LW_WARNINGS_AS_ERRORS = 0
+include makefile-tools.lwmk
+
+LINKSASS := 1
+ifdef USE_SASS
+  LINKSASS := $(USE_SASS)
+endif
+
+PMU_DEBUG ?= 0
+
+CFLAGS += -DWIN32_LEAN_AND_MEAN=1
+CFLAGS += -DDEPRECATE_DDK_FUNCTIONS=1
+CFLAGS += -D_CRT_SELWRE_NO_WARNINGS
+CFLAGS += -EHsc -GF -GR- -GS -Gm- -Gz -Oy-
+CFLAGS += -D_STATIC_CPPLIB
+CFLAGS += -DDRF_WINDOWS
+CFLAGS += -DLWWATCH_DEBUG_OUTPUT_CALLBACK -DFMODEL_REG08_BUG -DHWINIT_ENABLE -DSIGDUMP_ENABLE -DOS_win32
+
+ifeq ($(LW_TARGET_ARCH),x86)
+  CFLAGS += -DWIN32 -D_X86_=1 -Di386=1
+else
+  CFLAGS += -DWIN32 -D_WIN64 -D_AMD64_ -DAMD64
+endif
+
+CFLAGS += -DLINKSASS=$(LINKSASS)
+
+ifdef PMU_DEBUG
+  CFLAGS += -DPMU_DEBUG=$(PMU_DEBUG)
+endif
+
+CFLAGS += -DHAVE_CONFIG_H
+CFLAGS += -D__LIBELF_INTERNAL__
+
+# Define our subdirectory dependencies
+SUBDIRS := config
+targetList_pass1 = $(addsuffix .build,$(SUBDIRS))
+
+LW_DEFINES += XP_WIN
+
+include sources.mk
+include elfsources.mk
+include dwsources.mk
+include flcndwarfsources.mk
+
+SOURCES += $(FLCNDBG_COMMON_SOURCES)
+SOURCES += $(ELF_SOURCES)
+SOURCES += $(DWARF_SOURCES)
+SOURCES += $(FLCNDWARF_SOURCES)
+
+SOURCES += flcndbg.cpp
+SOURCES += osMods.c
+SOURCES += osWin.c
+SOURCES += outputCb.cpp
+SOURCES += pdb.cpp
+SOURCES += regMods.cpp
+SOURCES += windbg_CSymModule.cpp
+SOURCES += windbg_CSymType.cpp
+SOURCES += windbg_CSymHelpers.cpp
+SOURCES += windbg_CException.cpp
+
+LW_INCLUDES += $(OUTPUTDIR)
+LW_INCLUDES += ..
+LW_INCLUDES += inc
+LW_INCLUDES += hwref
+LW_INCLUDES += config
+LW_INCLUDES += $(LW_SOURCE)\sdk\lwpu\inc
+LW_INCLUDES += $(LW_SOURCE)\drivers\common\inc\hwref
+LW_INCLUDES += $(LW_SOURCE)\drivers\resman\kernel\inc
+LW_INCLUDES += $(MSVC_COMPILER_DIR)\include
+LW_INCLUDES += flcndwarf\libdwarf\win32
+LW_INCLUDES += flcndwarf\libdwarf
+LW_INCLUDES += flcndwarf\libelf
+LW_INCLUDES += flcndwarf\libelf\win32
+LW_INCLUDES += flcndwarf
+LW_INCLUDES += flcndwarf\win32
+LW_INCLUDES += $(LW_SOURCE)\drivers\resman\arch\lwalloc\common\inc
+LW_INCLUDES += $(LW_SOURCE)\drivers\common\inc\cheetah\thermal
+
+ifeq ($(LINKSASS),1)
+LW_INCLUDES += $(LW_SOURCE)\drivers\common\HW\tesla2\tools\SASS13\sasslib
+LW_INCLUDES += $(LW_SOURCE)\drivers\common\HW\sass3lib
+endif
+
+
+LW_INCLUDES += $(LW_SOURCE)\drivers\common\inc
+LW_INCLUDES += $(LW_SOURCE)\tools\lwlog\inc
+
+_drf_lwidia_dir = $(LW_TOOLS)/win32/libdrf-lwpu-1.0
+_mcpp_dir = $(LW_TOOLS)/win32/mcpp-2.7.2
+_regex_dir = $(LW_TOOLS)/win32/regex-3.8
+LW_INCLUDES += $(_drf_lwidia_dir)/include
+LW_INCLUDES += $(_mcpp_dir)/include
+
+# use the precompiled header built from precomp.h for all objects built from SOURCES
+#$(eval $(call REGISTER_PCH,$(call BUILD_OBJECT_LIST,$(SOURCES)),$(LW_SOURCE)/tools/lwwddm/precomp.cpp))
+
+# add the lwdebug files and generate the protobuf headers
+include lwdebug.lwmk
+
+LFLAGS += -dll
+LFLAGS += -map:$(OUTPUTDIR)/$(DRIVER_BASE_NAME).map
+LFLAGS += -OUT:./$@
+LFLAGS += -def:$(DRIVER_BASE_NAME).def
+LFLAGS += $(OUTPUTDIR)/lwwatch.res
+LFLAGS += $(lib_sdk_path)/User32.lib
+LFLAGS += $(addprefix -libpath:,$(libraryDirs))
+
+libraries += gdi32.lib
+libraries += runtmchk.lib
+
+ifeq ($(PMU_DEBUG),1)
+  LFLAGS += lib\falconDebug.lib
+endif
+
+ifeq ($(LW_TARGET_ARCH),x86)
+  libraries += $(_mcpp_dir)/lib/x86/libmcpp.lib
+  libraries += $(_drf_lwidia_dir)/lib/x86/libdrf-lwpu.lib
+  libraries += $(_regex_dir)/lib/x86/regex.lib
+else ifeq ($(LW_TARGET_ARCH),amd64)
+  libraries += $(_mcpp_dir)/lib/amd64/libmcpp.lib
+  libraries += $(_drf_lwidia_dir)/lib/amd64/libdrf-lwpu.lib
+  libraries += $(_regex_dir)/lib/amd64/regex.lib
+endif
+
+DRIVER_BASE_NAME := flcndbg
+
+targetList_pass2 := $(OUTPUTDIR)/$(DRIVER_BASE_NAME).dll
+
+ifeq ($(LW_GEN_BSC),1)
+  targetList_pass2 += $(LW_BSC_FILE)
+endif
+
+ifeq ($(LW_DO_INSTALL),1)
+  targetList_pass3 += $(LW_INSTALL_DIR)/$(DRIVER_BASE_NAME).dll
+  targetList_pass3 += $(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).map
+  ifeq ($(LW_GEN_PDB),1)
+    targetList_pass3 += $(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).pdb
+  endif
+endif
+
+$(OUTPUTDIR)/$(DRIVER_BASE_NAME).map: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).dll
+$(OUTPUTDIR)/$(DRIVER_BASE_NAME).pdb: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).dll
+
+########################################################################################################
+# Break our build into 3 passes that cannot be parallelized
+#   In pass 1, we do any subdirectories, this builds any .libs or whatever that are out of date
+#   In pass 2, we build our main targets, DLLs, EXEs etc.
+#   In pass 3, we copy our built items to our install and symbol directories
+#
+# We do this in 3 passes by calling this makefile relwrsively so that our time stamps on dependencies
+# are re-evaluated.  If we try to do all this in 1 pass during a parallel build, we'd find that subdirs
+# could trigger a .lib to be rebuilt -- but we wouldn't relink the DLL because when the makefile for
+# this directory was STARTED... the .lib was not out of date.  [It was only out of date AFTER the child
+# directory was complete.]
+########################################################################################################
+build: buildSequence
+
+buildSequence:
+	@$(MAKE) -f makefile.lwmk LW_TARGET_OS=$(LW_TARGET_OS) LW_TARGET_ARCH=$(LW_TARGET_ARCH) LW_BUILD_TYPE=$(LW_BUILD_TYPE) pass1
+	@$(MAKE) -f makefile.lwmk LW_TARGET_OS=$(LW_TARGET_OS) LW_TARGET_ARCH=$(LW_TARGET_ARCH) LW_BUILD_TYPE=$(LW_BUILD_TYPE) pass2
+	@$(MAKE) -f makefile.lwmk LW_TARGET_OS=$(LW_TARGET_OS) LW_TARGET_ARCH=$(LW_TARGET_ARCH) LW_BUILD_TYPE=$(LW_BUILD_TYPE) pass3
+
+pass1: $(targetList_pass1)
+pass2: $(targetList_pass2)
+pass3: $(targetList_pass3)
+
+# Code a couple of dependencies manually... since we don't auto-generate dependencies for RC files
+$(OUTPUTDIR)/lwwatch.res: lwwatch.rc
+
+$(OUTPUTDIR)/$(DRIVER_BASE_NAME).dll: $(OBJECTS) $(OUTPUTDIR)/lwwatch.res
+	$(FILEECHO) $(OUTPUTDIR)/linkParameters.txt $(strip $(LFLAGS)) $(OBJECTS) $(libraries) -out:$@
+	$(call_linker)
+
+$(LW_INSTALL_DIR)/$(DRIVER_BASE_NAME).dll: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).dll
+	$(standard_install)
+
+$(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).pdb: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).pdb
+	$(standard_install)
+
+$(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).map: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).map
+	$(standard_install)
+
+# These extra rules are required to properly pull the LwDebug sources in from
+# the common source, instead of accidentally picking up the (old) local copies
+LWDEBUG_ROOT := $(LW_SOURCE)/drivers/common/lwdebug
+
+$(OUTPUTDIR)/%.obj: $(LWDEBUG_ROOT)/zlib/%.c
+	$(call_C_compiler)
+
+$(OUTPUTDIR)/%.obj: $(LWDEBUG_ROOT)/lib/%.c
+	$(call_C_compiler)
+
+endif # LWCFG_INITIALIZED
+    
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

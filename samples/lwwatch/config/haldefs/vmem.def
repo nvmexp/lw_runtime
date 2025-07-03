@@ -1,0 +1,502 @@
+# -*- mode: perl; -*-
+
+# VMEM Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $vmemHal = [
+
+    # per-GPU defaults for VMEM engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [  ],
+    ],
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+
+        PDE_GET_BY_INDEX => [
+
+            DESCRIPTION   => "vmem get pde by index",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "VMemSpace *, LwU32, GMMU_ENTRY_VALUE *",
+            STUB_RETURNS  => ZERO,
+
+            _T124         => [ T234_and_later, ],
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        PDE_GET_BY_VA => [
+
+            DESCRIPTION   => "vmem get pde by Va",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, LwU64, PdeEntry *pPde",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ USED_BY_T124, dMAXWELL_and_later, ],
+            _T124         => [ T234_and_later, ],
+        ],
+
+        PTE_GET_BY_INDEX => [
+
+            DESCRIPTION   => "vmem get pte by index",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, LwU32, PdeEntry *pPde, PteEntry *pPte",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ USED_BY_T124, dMAXWELL_and_later, ],
+            _T124         => [ T234_and_later, ],
+        ],
+
+        PTE_GET_BY_VA => [
+
+            DESCRIPTION   => "vmem get pte by va",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, LwU64 va, PdeEntry *pPde, PteEntry *pPte",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ USED_BY_T124, dMAXWELL_and_later, ],
+            _T124         => [ T234_and_later, ],
+        ],
+
+        GET_INSTANCE_MEMORY_ADDR_FOR_IFB => [
+
+            DESCRIPTION   => "setup any necessary state to prepare for lwwatch IFB reads, also returns PDE and offset to program bar1 with",
+            RETURN_TYPE   => LwU64,
+            ARGUMENTS     => "readFn_t* readFn, writeFn_t* writeFn, MEM_TYPE* pMemType",
+            STUB_RETURNS  => ZERO,
+            STUB_BODY     => "*readFn = NULL; *writeFn = NULL;",
+
+            _GK104        => [ KEPLER_thru_PASCAL, ],
+            _STUB         => [ dVOLTA_and_later, T194_and_later, ],
+        ],
+
+        BEGIN_IFB_MAPPING => [
+
+            DESCRIPTION   => "setup any necessary state to prepare for lwwatch IFB reads, also returns PDE and offset to program bar1 with",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, LwU64 va, PdeEntry* pPde, PdeEntry* pOrigIfbPde, LwU64* pParam",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL, ],
+            _STUB         => [ dPASCAL_and_later, T234_and_later, ],
+        ],
+
+        END_IFB_MAPPING => [
+
+            DESCRIPTION   => "restore any state changed at BEGIN_IFB_MAPPING time",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "PdeEntry origIfbPde, LwU64 param",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL, ],
+            _STUB         => [ dPASCAL_and_later, T234_and_later, ],
+        ],
+
+        READ_IFB => [
+
+            DESCRIPTION   => "Read the data at the *current* IFB addr",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ dMAXWELL, ],
+            _STUB         => [ dPASCAL_and_later, T234_and_later, ],
+        ],
+
+        WRITE_IFB => [
+
+            DESCRIPTION   => "Write data at the *current* IFB addr",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "LwU32 writeData",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ dMAXWELL, ],
+            _STUB         => [ dPASCAL_and_later, T234_and_later, ],
+        ],
+
+        GET_BY_CH_ID => [
+
+            DESCRIPTION   => "vmem get by chid",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, VMEM_INPUT_TYPE_CHANNEL*",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        GET_BY_AS_ID => [
+
+            DESCRIPTION   => "vmem get by ASID",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, VMEM_INPUT_TYPE_IOMMU*",
+            STUB_RETURNS  => ERROR,
+
+            _T194         => [ CHEETAH, ],
+            _STUB         => [ ALL, -CHEETAH, ],
+        ],
+
+        GET_PMU => [
+
+            DESCRIPTION   => "vmem get pmu",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL, ],
+            _STUB         => [ T234_and_later, dPASCAL_and_later, ],
+        ],
+
+        GET_BAR1 => [
+
+            DESCRIPTION   => "vmem get bar1",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        GET_BAR2 => [
+
+            DESCRIPTION   => "vmem get bar2",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        GET_IFB => [
+
+            DESCRIPTION   => "vmem get ifb",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ dMAXWELL, ],
+            _STUB         => [ dPASCAL_and_later, T234_and_later, ],
+        ],
+
+        GET_FLA => [
+
+            DESCRIPTION   => "vmem get fla",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, VMEM_INPUT_TYPE_FLA*",
+            STUB_RETURNS  => ERROR,
+
+            _GA100        => [ AMPERE_and_later ],
+            _STUB         => [ pre_AMPERE ],
+        ],
+
+        GET_BY_INST_PTR => [
+
+            DESCRIPTION   => "vmem get by instance pointer",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, VMEM_INPUT_TYPE_INST*",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        V_TO_P => [
+
+            DESCRIPTION   => "vmem VtoP",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, LwU64, LwU64 *pa, GMMU_APERTURE *pAperture",
+            STUB_RETURNS  => ERROR,
+
+            _T124         => [ T234_and_later, ],
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        READ => [
+
+            DESCRIPTION   => "vmem read",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, LwU64 va, LwU32 length, void *pData",
+            STUB_RETURNS  => ERROR,
+
+            _T194         => [ T234_and_later, ],
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        WRITE => [
+
+            DESCRIPTION   => "vmem write",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, LwU64 va, LwU32 length, void *pData",
+            STUB_RETURNS  => ERROR,
+
+            _T194         => [ T234_and_later, ],
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        FILL => [
+
+            DESCRIPTION   => "vmem fill",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, LwU64 va, LwU32 length, LwU32 data",
+            STUB_RETURNS  => ERROR,
+
+            _T194         => [ T234_and_later, ],
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        DO_PTE_DUMP => [
+
+            DESCRIPTION   => "vmem do pte dump",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, LwU32 pdeIndex, LwU32 begin, LwU32 end",
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        DO_V_TO_P_DUMP => [
+
+            DESCRIPTION   => "vmem do vtop dump",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, LwU64 va",
+
+            _T124         => [ T234_and_later, ],
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        P_TO_V => [
+
+            DESCRIPTION   => "colwerts physical to GPU virtual address",
+            RETURN_TYPE   =>  void,
+            ARGUMENTS     => "VMemTypes, VMEM_INPUT_TYPE*, LwU64 physAddr, BOOL vidMem",
+
+            _T124         => [ T234_and_later, ],
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_INSTANCE_MEMORY_ADDR_FOR_CH_ID => [
+
+            DESCRIPTION   => "vmemGetInstanceMemoryAddrForChId",
+            RETURN_TYPE   =>  LwU64,
+            ARGUMENTS     => "ChannelId*, readFn_t*, writeFn_t*, MEM_TYPE*",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ ],
+            _GM107        => [ dMAXWELL_and_later, T234_and_later,],
+        ],
+
+        GET_MEM_TYPE_FROM_TARGET => [
+
+            DESCRIPTION   => "vmemGetMemTypeFromTarget",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU64, LwU64*",
+            STUB_RETURNS  =>  ERROR,
+
+            _GK104        => [ dMAXWELL_thru_dTURING, T234_and_later, ],
+            _GA100        => [ dAMPERE_and_later, ],
+        ],
+
+        GET_BIG_PAGE_SIZE => [
+
+            DESCRIPTION   => "Get Big Page Size",
+            RETURN_TYPE   =>  LwU32,
+            ARGUMENTS     => "VMemSpace *pVMemSpace",
+            STUB_RETURNS  =>  ZERO,
+
+            _GK104        => [ GM10X, ],
+            _GM200        => [ GM20X_and_later, tAMPERE_and_later, ],
+        ],
+
+        SET_BIG_PAGE_SIZE => [
+
+            DESCRIPTION   => "Set Big Page Size",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *pVMemSpace, LwU32",
+            STUB_RETURNS  =>  ERROR,
+
+            _GK104        => [ GM10X, ],
+            _GM200        => [ GM20X_and_later, tAMPERE_and_later, ],
+        ],
+
+        GMMU_FMT_INIT_PTE => [
+
+            DESCRIPTION  => "Initialize MMU.",
+            RETURN_TYPE  => void,
+            ARGUMENTS    => "GMMU_FMT_PTE *pPte, LW_FIELD_ENUM_ENTRY *pteApertures",
+            STUB_RETURNS => ERROR,
+
+            _GK104        => [ KEPLER_thru_MAXWELL, ],
+            _GP100        => [ PASCAL_thru_VOLTA, ],
+            _TU102        => [ TURING_thru_ADA, ],
+            _GH100        => [ HOPPER_and_later, ],
+        ],
+
+        INIT_LAYOUT => [
+
+            DESCRIPTION  => "vmem init layout",
+            RETURN_TYPE  =>  LW_STATUS,
+            ARGUMENTS    => "VMemSpace*",
+            STUB_RETURNS => ERROR,
+
+            _GK104        => [ MAXWELL, USED_BY_GP100, ],
+            _GP100        => [ PASCAL_thru_TURING, USED_BY_GA100, ],
+            _GA100        => [ AMPERE_thru_ADA, ],
+            _GH100        => [ HOPPER_and_later, ],
+        ],
+
+        ILWALIDATE_PDB => [
+
+            DESCRIPTION   => "vmem ilwalidate pdb",
+            INTERFACE_TAG => "vmemIlwalidatePDB",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "VMemSpace *",
+            STUB_RETURNS  =>  ERROR,
+
+            _GK104        => [ MAXWELL, ],
+            _GP100        => [ PASCAL_thru_VOLTA, ],
+            _TU102        => [ TURING_and_later, ],
+        ],
+
+        GET_PDB_APERTURE => [
+
+            DESCRIPTION   => "vmem get pdb aperture",
+            INTERFACE_TAG => "vmemGetPDBAperture",
+            RETURN_TYPE   =>  GMMU_APERTURE,
+            ARGUMENTS     => "VMemSpace *",
+            STUB_RETURNS  => GMMU_APERTURE_ILWALID,
+
+            _GK104        => [ MAXWELL_and_later, ],
+        ],
+
+        GET_PTE_FMT => [
+
+            DESCRIPTION   => "vmem get pte fmt",
+            INTERFACE_TAG => "vmemGetPTEFmt",
+            RETURN_TYPE   => "const MMU_FMT_PTE *",
+            ARGUMENTS     => "VMemSpace *",
+            STUB_RETURNS  => NULL,
+
+            _GK104        => [ MAXWELL, USED_BY_GP100, ],
+            _GP100        => [ PASCAL_thru_ADA, ],
+            _GH100        => [ HOPPER_and_later, ],
+        ],
+
+        GET_PDE_FMT => [
+
+            DESCRIPTION   => "vmem get pde fmt",
+            INTERFACE_TAG => "vmemGetPDEFmt",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "VMemSpace *, VMemFmtPde*, LwU32",
+            STUB_RETURNS  => ERROR,
+
+            LIKE_INTERFACE => GET_PTE_FMT,
+        ],
+
+        SW_TO_HW_LEVEL => [
+
+            DESCRIPTION   => "colwerts software iteration level to hardware named level",
+            INTERFACE_TAG => "vmemSWToHWLevel",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "VMemSpace *, LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ MAXWELL, USED_BY_GP100, ],
+            _GP100        => [ PASCAL_thru_ADA, ],
+            _GH100        => [ HOPPER_and_later, ],
+            _STUB         => [ USED_BY_GK104, ],
+        ],
+
+        GET_LARGEST_VIRT_ADDR => [
+            DESCRIPTION   => "Returns the largest virtual address for the given vmem space",
+            RETURN_TYPE   => LwU64,
+            ARGUMENTS     => "VMemSpace *",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ pre_PASCAL, ],
+            _GP100        => [ PASCAL_thru_TURING, GA100, ],
+            _STUB         => [ AMPERE_and_later, -GA100, ],
+        ],
+
+        GET_INSTANCE_MEMORY_ADDR_FOR_BAR1 => [
+            DESCRIPTION   => "Returns the instance memory address for BAR1",
+            INTERFACE_TAG => "vmemGetInstanceMemoryAddrForBAR1",
+            RETURN_TYPE   => LwU64,
+            ARGUMENTS     => "readFn_t *, writeFn_t*, MEM_TYPE*",
+            STUB_RETURNS  => ERROR,
+
+            _GK104        => [ MAXWELL_thru_VOLTA ],
+            _TU102        => [ TURING_thru_ADA ],
+            _GH100        => [ HOPPER_and_later ],
+        ],
+
+        GET_INSTANCE_MEMORY_ADDR_FOR_BAR2 => [
+            DESCRIPTION    => "Returns the instance memory address for BAR2",
+            INTERFACE_TAG  => "vmemGetInstanceMemoryAddrForBAR2",
+            RETURN_TYPE    => LwU64,
+            ARGUMENTS      => "readFn_t *, writeFn_t*, MEM_TYPE*",
+            LIKE_INTERFACE => GET_INSTANCE_MEMORY_ADDR_FOR_BAR1,
+        ],
+
+        REBIND_BAR1_BLOCK => [
+            DESCRIPTION   => "Rebind BAR1 Block",
+            INTERFACE_TAG => "vmemRebindBAR1Block",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => void,
+
+            _GM200        => [ GM20X_thru_VOLTA, ],
+            _TU102        => [ TURING_thru_ADA, tAMPERE],
+            _GH100        => [ HOPPER_and_later ],
+            _STUB         => [ GM10X ],
+        ],
+
+        DUMP_PDE_FLAGS => [
+            DESCRIPTION   => "Dump PDE information",
+            INTERFACE_TAG => "vmemDumpPdeFlags",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "const GMMU_FMT_PDE *pFmt, const GMMU_ENTRY_VALUE *pPde",
+
+            _GK104        => [ MAXWELL_thru_ADA, ],
+            _GH100        => [ HOPPER_and_later, ],
+        ],
+
+        DUMP_PTE_PCF => [
+            DESCRIPTION   => "Dump PDE information",
+            INTERFACE_TAG => "vmemDumpPtePcf",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "const GMMU_FMT_PTE *pFmt, const GMMU_ENTRY_VALUE *pPte",
+            STUB_RETURNS  => void,
+
+            _GH100        => [ HOPPER_and_later, ],
+            _STUB         => [ MAXWELL_thru_ADA, ],
+        ],
+        
+        IS_PDE_VOLATILE => [
+            DESCRIPTION   => "Check if PDE entry is volatile",
+            INTERFACE_TAG => "vmemIsPdeVolatile",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => "const GMMU_FMT_PDE *pFmt, const GMMU_ENTRY_VALUE *pPde",
+            STUB_RETURNS  => void,
+
+            _GK104        => [ MAXWELL_thru_ADA, ],
+            _GH100        => [ HOPPER_and_later ],
+        ],
+
+        IS_GVPTE_DEPRECATED => [
+            DESCRIPTION   => "Check if we are running on Hopper or later and return true",
+            INTERFACE_TAG => "vmemIsGvpteDeprecated",
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => "",
+            STUB_RETURNS  => FALSE,
+
+            _GH100        => [ HOPPER_and_later, ],
+            _STUB         => [ MAXWELL_thru_ADA, ],
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $vmemHal;
+

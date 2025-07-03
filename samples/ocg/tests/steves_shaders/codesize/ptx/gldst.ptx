@@ -1,0 +1,32 @@
+.version 3.1
+.target sm_20
+.global .f32  gresult;
+.global .s16  gs;
+
+.entry main {
+   .reg .f32 a, b;
+   .reg .u64 c;
+   .reg .s16 p, q;
+
+
+   ld.global.f32  a, [gresult];
+   ld.global.f32  b, [gresult + 4];
+   add.f32   a, b, a;
+   st.global.f32 [gresult], a;
+
+   ld.global.u64  c, [gresult];
+   ld.global.f32  a, [c];
+   st.global.f32  [gresult], a;
+   st.global.f32  [c+4], a;
+
+   ld.global.v2.f32 {a,b}, [gresult];
+   add.f32          a, a, 1.0;
+   min.f32          b, b, 2.0;
+   st.global.v2.f32 [gresult + 8], {b,a};
+
+   ld.global.v2.s16 {p,q}, [gs];
+   min.s16          p, p, 1;
+   add.s16          q, q, p;
+   st.global.v2.s16 [gs], {q,p};
+   exit;
+}

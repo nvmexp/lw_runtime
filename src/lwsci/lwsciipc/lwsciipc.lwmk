@@ -1,0 +1,175 @@
+##############################################################################
+# Copyright (c) 2019-2022, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+##############################################################################
+
+##############################################################################
+# drivers/lwsci/lwsciipc/lwsciipc.lwmk
+##############################################################################
+
+##############################################################################
+# Identify this module to lwCommon.lwmk so it can decide the build type
+##############################################################################
+
+LW_MODULE_BUILD_TYPE_ALIASES = lwsciipc
+
+include $(LW_SOURCE)/drivers/lwsci/lwsci.lwmk
+
+ifdef RMAPI_TEGRA_MIRROR_LWMK
+  # Include header from rmapi_tegra mirror
+  CFLAGS += -DRMAPI_TEGRA_MIRROR
+endif
+
+CFLAGS += -DLINUX
+
+# Any warnings to outright disable
+LW_WARNINGS_DISABLE += unused-parameter
+# Any warnings to not error on
+LW_WARNINGS_NOERROR += cast-qual
+
+##############################################################################
+# string to prepend in unix builds when exelwting rules in this gmake instance
+##############################################################################
+
+LW_MODULE_LOGGING_NAME = "lwsciipc"
+
+##############################################################################
+# Build liblwsciipc as position-independent code
+##############################################################################
+
+LW_BUILD_PIC = 1
+
+##############################################################################
+# Path shorthands
+##############################################################################
+
+LWSCI_PATH    = $(LW_SOURCE)/drivers/lwsci
+LWSCIIPC_PATH = $(LWSCI_PATH)/lwsciipc
+
+##############################################################################
+# define SOURCES
+##############################################################################
+
+LWSCIIPC_SOURCES += lwsciipc.c
+LWSCIIPC_SOURCES += lwsciipc_ivc.c
+LWSCIIPC_SOURCES += lwsciipc_c2c.c
+
+ifeq ($(LW_TARGET_OS),Linux)
+LWSCIIPC_SOURCES += lwsciipc_ipc_linux.c
+LWSCIIPC_SOURCES += lwsciipc_os_linux.c
+endif
+
+LWSCIIPC_SOURCES += lwsciipc_os_error.c
+
+SOURCES += $(addprefix $(LWSCIIPC_PATH)/src/,$(LWSCIIPC_SOURCES))
+SOURCES += $(LWSCIIPC_PATH)/ivclib/sivc.c
+
+##############################################################################
+# define LW_INCLUDES
+##############################################################################
+
+ifeq ($(LW_BACKEND_RESMAN), 1)
+  include $(LW_SOURCE)/drivers/unix/rmapi_tegra/mirror/rmapi_tegra_mirror.lwmk
+  LW_INCLUDES += $(LW_SOURCE)/drivers/unix/allocator/include
+endif
+
+LW_INCLUDES += $(LWSCIIPC_PATH)/inc
+LW_INCLUDES += $(LWSCIIPC_PATH)/inc-linux
+LW_INCLUDES += $(LWSCI_PATH)/inc/public
+LW_INCLUDES += $(LWSCI_PATH)/inc/internal
+LW_INCLUDES += $(LWSCIIPC_PATH)/ivclib/
+
+LW_INCLUDES += $(RMAPI_TEGRA_MIRROR_INCLUDES)
+LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+
+LW_INCLUDES += $(OUTPUTDIR)
+
+##############################################################################
+# define LW_DEFINES
+##############################################################################
+
+# For lwmake builds, lwcfg feature flags are available to LWSCI.
+ifdef LWCFG_INITIALIZED
+  LW_DEFINES += LWCFG_ENABLED
+endif
+
+# Embedded defines this on the command line for their builds.
+LW_BUILD_EMBEDDED ?= 0
+
+LW_DEFINES += LW_BUILD_EMBEDDED=1
+
+LDFLAGS += $(PTHREAD_LDFLAGS)
+
+ifeq ($(LW_TARGET_OS),Linux)
+  LDFLAGS += -lrt -ldl
+endif
+
+##############################################################################
+# Definitions for the LWID string
+##############################################################################
+
+LWID_STRINGNAME = "LW_LWSCIIPC_ID"
+LWID_MODULENAME = "LwSciIpc Shared Library"
+
+SOURCES += $(LWIDSTRING)
+
+##############################################################################
+# define DSO stubs
+##############################################################################
+include $(LWSCI_PATH)/lwscievent/lwscievent-dso-stub.lwmk
+
+DSO_STUBS += $(LWSCIEVENT_DSO_STUB)
+
+##############################################################################
+# Colwert the mobile exports file to the desktop format.
+##############################################################################
+
+LWSCIIPC_EXPORTS = $(OUTPUTDIR_COMMON)/liblwsciipc-exports.txt
+
+LWSCIIPC_EXPORTS_SOURCES = liblwsciipc.export
+
+
+$(LWSCIIPC_EXPORTS): $(LWSCIIPC_EXPORTS_SOURCES)
+	$(CAT) $(LWSCIIPC_EXPORTS_SOURCES) | \
+	$(SORT) | $(UNIQ) | \
+	$(SED) -e 's/@[0-9]\+//' \
+	    -e 's/^\([^#].\+\)$$/\1 func/' > $@
+
+##############################################################################
+# define how to mangle the object files
+##############################################################################
+
+ifeq ($(LW_MANGLE_SYMBOLS),1)
+  # If the component has symbols needing mangling, such as internal API entry
+  # points, generate a mangle list and define the mangling rule here.
+
+  # liblwsciipc contains no exposed symbols requiring mangling.
+  LINK_OBJECTS = $(OBJECTS)
+  LWSCIIPC_MANGLE_FILE =
+else
+  # If symbol mangling is disabled, LINK_OBJECTS == OBJECTS and there is
+  # no mangle file.
+  LINK_OBJECTS = $(OBJECTS)
+  LWSCIIPC_MANGLE_FILE =
+endif
+
+##############################################################################
+# define how to build the linker script used when linking liblwsciipc
+##############################################################################
+
+LWSCIIPC_LINKER_SCRIPT = $(OUTPUTDIR_COMMON)/liblwsciipc.map$(MANGLE_SUFFIX)
+
+$(eval $(call LINKER_SCRIPT_RULE, \
+  $(LWSCIIPC_LINKER_SCRIPT), \
+  $(LWSCIIPC_EXPORTS), \
+  $(LWSCIIPC_MANGLE_FILE)))
+
+##############################################################################
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk
+

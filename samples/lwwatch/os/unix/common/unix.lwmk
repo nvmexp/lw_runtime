@@ -1,0 +1,232 @@
+##############################################################################
+# dynamic libraries to be included
+##############################################################################
+
+##############################################################################
+# common paths
+##############################################################################
+
+_target_tools_dir := $(LW_TOOLS)/unix/targets/$(LW_TARGET_TOOLS_DIR)
+
+##############################################################################
+# common include paths
+##############################################################################
+
+LWWATCH_DIR ?= $(LW_SOURCE)/apps/lwwatch
+
+LW_INCLUDES += $(LWWATCH_DIR)
+LW_INCLUDES += $(LWWATCH_DIR)/inc
+LW_INCLUDES += $(LWWATCH_DIR)/os/unix/common/inc
+LW_INCLUDES += $(LWWATCH_DIR)/config
+LW_INCLUDES += $(LWWATCH_DIR)/manual-parser/libdrf-lwpu
+LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc/displayport/
+LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc
+LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc/swref
+LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc/hwref
+LW_INCLUDES += $(LW_SOURCE)/drivers/common/shared/inc
+LW_INCLUDES += $(LW_SOURCE)/drivers/resman/inc/libraries
+LW_INCLUDES += $(LW_SOURCE)/drivers/resman/kernel/inc
+LW_INCLUDES += $(LW_SOURCE)/drivers/resman/arch/lwalloc/common/inc
+LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LW_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc/class
+LW_INCLUDES += $(OUTPUTDIR)
+
+##############################################################################
+# common defines
+##############################################################################
+
+# Set LWWATCH_SIGDUMP to the empty string to disable sigdump support (this
+# removes the dependency on pmlsplitter and libstdc++).
+LWWATCH_SIGDUMP ?= 1
+
+LW_DEFINES += $(if $(LWWATCH_SIGDUMP),SIGDUMP_ENABLE)
+LW_DEFINES += LWWATCH
+LW_DEFINES += LWRM
+
+##############################################################################
+# common extra CFLAGS/warnings
+##############################################################################
+
+CFLAGS += -Wall
+CFLAGS += -Wno-multichar
+CFLAGS += -Wno-unused
+CFLAGS += -Wno-write-strings
+
+# disable -Wcast-qual
+LW_CAST_QUAL_WARNING =
+
+# enable -Werror
+LW_WARNINGS_AS_ERRORS = 1
+
+##############################################################################
+# Pull in the readline library.  Although lwwatch doesn't use nlwrses directly,
+# readline depends on nlwrses to provide termcap information so we need to link
+# in that static archive as well.
+##############################################################################
+
+ifeq ($(LW_TARGET_OS),FreeBSD)
+  # FreeBSD 10.4 provides readline and nlwrses libraries in the base system, so
+  # we can just link against those.
+  LDFLAGS += -Bstatic -lreadline -lnlwrses -Bdynamic
+else
+  _readline_dir = $(_target_tools_dir)/readline-6.1
+  _nlwrses_dir = $(_target_tools_dir)/nlwrses-5.5
+
+  LW_INCLUDES += $(_readline_dir)/include/
+
+  LDFLAGS += $(_readline_dir)/lib/libreadline.a
+  LDFLAGS += $(_nlwrses_dir)/lib/libnlwrses.a
+endif
+
+include $(LW_SOURCE)/drivers/common/build/lwconfig.lwmk
+
+##############################################################################
+# include makefile snippet to generate lwwatch config
+##############################################################################
+
+LWWATCHCFG_OUTPUTDIR = $(OUTPUTDIR)
+
+include $(LWWATCH_DIR)/config/makefile.mk
+
+##############################################################################
+# common source files to build into lwwatch
+##############################################################################
+
+ifdef LWWATCHCFG_INITIALIZED
+  include $(OUTPUTDIR)/g_sources.mk
+
+  # Include source files in .../apps/lwwatch perspective
+  SOURCES := $(addprefix $(LWWATCH_DIR)/,$(LWWATCHSRC_ALL))
+
+  #
+  # Include source files from drivers/common/shared
+  # Tell the makefile to append the values to LW_{DEFINES,INCLUDES} and SOURCES
+  #
+  LWPORT_IS_KERNEL_BUILD := 0
+  # sync module required to include various RM headers
+  LWPORT_ENABLED_MODULES += sync
+  LW_RMSHARED_DISABLE_RESSERV := 1
+  LW_RMSHARED_DISABLE_LWTLS := 1
+  LW_RMSHARED_DISABLE_LWLOCKVAL := 1
+  LW_RMSHARED_APPEND_TO_GLOBAL_VARS := 1
+  include $(LW_SOURCE)/drivers/common/shared/shared.lwmk
+endif
+
+UNIX_OBJECT = $(call BUILD_OBJECT_LIST,$(LWWATCHSRC_CORE_UNIX))
+$(UNIX_OBJECT): CFLAGS += -O
+
+include $(LWWATCH_DIR)/manual-parser/libdrf-lwpu/drf.lwmk
+
+##############################################################################
+# Link libstdc++ statically, if possible - this is needed for dfdasm and sigdump
+##############################################################################
+
+LINK_LDFLAGS += $(if $(LW_GCC_HAS_STATIC_LIBSTDCXX_OPTION),-static-libstdc++)
+
+##############################################################################
+# pmlsplitter -- only necessary for sigdump-enabled builds
+##############################################################################
+
+ifeq ($(LWWATCH_SIGDUMP),1)
+  _pmlsplitter_dir = $(LW_SOURCE)/tools/pmlsplitter
+
+  # Rule to run lexer to generate source file.
+  #
+  # $(1): source/output subdirectory
+  # $(2): targets
+  # $(3): prerequisites (within source subdir)
+  # $(4): flags
+  define PMLSPLITTER_GENERATE_FLEX
+    $$(addprefix $$(OUTPUTDIR)/$(1)/,$$(notdir $(2))): $$(_pmlsplitter_dir)/$(1)/$(3)
+	  $(MKDIR) $$(OUTPUTDIR)/$(1)
+	  $$(call quiet_cmd,FLEX) $(4) -o$$@ $$<
+  endef
+
+  # Rule to run yacc/bison to generate parser.
+  #
+  # $(1): source/output subdirectory
+  # $(2): targets
+  # $(3): prerequisites (within source subdir)
+  define PMLSPLITTER_GENERATE_YACC
+    # Copy the source prerequisite to the output directory; the pattern rule
+    # should do the rest.
+    $$(OUTPUTDIR)/$(1)/$(3): $$(_pmlsplitter_dir)/$(1)/$(3)
+	$$(MKDIR) $$(dir $$@)
+	$$(COPY) $$< $$@
+  endef
+
+  # Rule to generate a source file in the output directory.
+  # This colwerts slashes to underscores so that the basename of the object
+  # file generated for this source file is unique even if multiple generated
+  # source files with the same basename exist in different directories.
+  #
+  # $(1): Path within output directory from which to generate unique source file
+  define process_generated_source
+    $$(OUTPUTDIR)/$$(subst /,_,$(1)): $$(OUTPUTDIR)/$(1)
+	  $$(COPY) $$< $$@
+
+    LWWATCH_PMLS_$(2)_SOURCES += $$(OUTPUTDIR)/$$(subst /,_,$(1))
+  endef
+
+  # Process a directory within pmlsplitter source.  This ilwolves including the
+  # source file definitions from pmlsplitter, and then adding all of the
+  # sources and rules specified by that file to the lwwatch build.
+  #
+  # $(1): subdirectory
+  # $(2): variable prefix
+  define build_pmlsplitter_component
+    include $(_pmlsplitter_dir)/$(1)/sources.mk
+
+    # Pattern rule to process yacc/bison files in the output directory (if any).
+    # This has to be a pattern rule or else GNU make turns it into two recipes.
+    $$(addprefix $$(OUTPUTDIR)/$(1)/,%.tab.hpp %.tab.cpp): $$(OUTPUTDIR)/$(1)/%.ypp
+	cd $$(OUTPUTDIR)/$(1) && \
+	  $$(call quiet_cmd,BISON) $$(notdir $$<)
+
+    LWWATCH_PMLS_$(2)_SOURCES += $$(addprefix $(_pmlsplitter_dir)/$(1)/,$$(PMLSPLITTER_$(2)_SOURCES))
+    LWWATCH_PMLS_$(2)_GENERATED_HEADERS += $$(addprefix $$(OUTPUTDIR)/$(1)/,$$(notdir $$(PMLSPLITTER_$(2)_GENERATED_HEADERS)))
+
+    $$(foreach gen,$$(addprefix $(1)/,$$(PMLSPLITTER_$(2)_GENERATED_SOURCES)), \
+      $$(eval $$(call process_generated_source,$$(gen),$(2))))
+
+    SOURCES += $$(LWWATCH_PMLS_$(2)_SOURCES)
+
+    LWWATCH_PMLS_$(2)_OBJECTS = $$(call BUILD_OBJECT_LIST,$$(LWWATCH_PMLS_$(2)_SOURCES))
+
+    $$(LWWATCH_PMLS_$(2)_OBJECTS):| $$(LWWATCH_PMLS_$(2)_GENERATED_HEADERS)
+    $$(LWWATCH_PMLS_$(2)_OBJECTS): LW_INCLUDES += $$(addprefix $(_pmlsplitter_dir)/$(1)/,$$(PMLSPLITTER_$(2)_INCLUDES))
+    $$(LWWATCH_PMLS_$(2)_OBJECTS): LW_INCLUDES += $$(dir $$(LWWATCH_PMLS_$(2)_GENERATED_HEADERS))
+
+    $$(LWWATCH_PMLS_$(2)_OBJECTS): LW_DEFINES += DISABLE_GTEST
+    $$(LWWATCH_PMLS_$(2)_OBJECTS): CFLAGS += -Wno-non-virtual-dtor
+    $$(LWWATCH_PMLS_$(2)_OBJECTS): LW_WARNINGS_AS_ERRORS =
+  endef
+
+  include $(_pmlsplitter_dir)/src/pmlsplitter.mk
+
+  $(foreach p,$(PMLSPLITTER_SOURCE_MKS),\
+    $(eval $(call build_pmlsplitter_component,$(firstword $(subst :, ,$(p))),$(lastword $(subst :, ,$(p))))))
+
+  # pmlsplitter requires runtime type information
+  LW_CXX_RTTI = 1
+
+  # pmlsplitter public interface used by lwwatch sigdump HAL.
+  LW_INCLUDES += $(addprefix $(_pmlsplitter_dir)/,src)
+endif
+
+clean clobber: _lwwatch_cfg_clean
+
+ifdef LWWATCHCFG_INITIALIZED
+  include $(LWWATCH_DIR)/lwdebug.lwmk
+endif # LWWATCHCFG_INITIALIZED
+
+##############################################################################
+# common rule to link lwwatch
+##############################################################################
+
+LWWATCH = $(OUTPUTDIR)/lwwatch
+
+build: $(LWWATCH)
+
+$(LWWATCH): $(OBJECTS)
+	$(call quiet_cmd,LINKXX) $(OBJECTS) -o $@ $(LINK_LDFLAGS) $(BIN_LDFLAGS)

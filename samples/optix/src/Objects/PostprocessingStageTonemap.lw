@@ -1,0 +1,107 @@
+// Copyright (c) 2017, LWPU CORPORATION.
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+
+#include <LWCA/ComputeCapability.h>
+#include <internal/optix_internal.h>
+#include <optixu/optixu_math.h>
+
+
+using namespace optix;
+using namespace optix::lwca;
+
+// Compute parent pointers for every node
+extern "C" __device__ float uncharted2Tonemap( const float x )
+{
+    // somewhat arbitrary hardcoded values that tend to give a good filmic-looking image in many cases
+    // (pronounced toe, medium-strength shoulder)
+    // http://filmicworlds.com/blog/filmic-tonemapping-operators/
+    // https://www.slideshare.net/ozlael/hable-john-uncharted2-hdr-lighting (slide 142)
+    const float A = 0.35;  // shoulder strength
+    const float B = 0.10;  // linear strength
+    const float C = 0.77;  // linear angle
+    const float D = 0.62;  // toe strength
+    const float E = 0.01;  // toe numerator
+    const float F = 0.7;   // toe denominator
+    return ( ( ( x * ( A * x + C * B ) + D * E ) / ( x * ( A * x + B ) + D * F ) ) - E / F );
+}
+
+
+extern "C" __global__ void kernel_postprocessing_tonemap( const float* pixel_data_in,
+                                                          float*       pixel_data_out,
+                                                          uint         num_components,
+                                                          float        exposure,
+                                                          float        gamma,
+                                                          uint         width,
+                                                          uint         height )
+{
+    uint x = threadIdx.x + blockDim.x * blockIdx.x;
+    uint y = threadIdx.y + blockDim.y * blockIdx.y;
+    if( x >= width )
+        return;
+    if( y >= height )
+        return;
+
+
+    uint pixel_index = x + y * width;
+
+    const float W = 11.0;  // white point (not the same as exposure). this means that everything above 11.0 will be white by definition.
+    const float whiteScale = 1.0f / uncharted2Tonemap( W );
+    const float gamma_ilw  = 1.0f / gamma;
+    for( uint i = 0; i < num_components; i++ )
+    {
+        if( i < 4 )
+        {
+            pixel_data_out[pixel_index * num_components + i] =
+                powf( __saturatef( uncharted2Tonemap( pixel_data_in[pixel_index * num_components + i] * exposure ) * whiteScale ),
+                      gamma_ilw );
+        }
+        else
+        {
+            pixel_data_out[pixel_index * num_components + i] = __saturatef( pixel_data_in[pixel_index * num_components + i] );
+        }
+    }
+}
+
+
+//---------------------------------------------------------------
+// Trampoline functions to call lwca kernels
+//---------------------------------------------------------------
+
+// This is just a helper function used to compute grid and block.
+extern "C" void optix_lwda_postprocessing_tonemap_getKernelDim( dim3& Dg, dim3& Db, uint width, uint height, const ComputeCapability sm_ver )
+{
+    // clang-format off
+       if( sm_ver < SM( 12 ) ) Db = dim3( 32, 2 );
+  else if( sm_ver < SM( 20 ) ) Db = dim3( 32, 4 );
+  else if( sm_ver < SM( 30 ) ) Db = dim3( 32, 8 );
+  else /*  >= SM(30)  */       Db = dim3( 32, 16 );
+    // clang-format on
+
+    int grid_x = ( width + Db.x - 1 ) / ( Db.x );
+    int grid_y = ( height + Db.y - 1 ) / ( Db.y );
+    Dg         = dim3( grid_x, grid_y );
+}
+
+extern "C" void optix_lwda_postprocessing_tonemap( const ComputeCapability sm_ver,
+                                                   const float*            pixel_data_in,
+                                                   float*                  pixel_data_out,
+                                                   uint                    num_components,
+                                                   float                   exposure,
+                                                   float                   gamma,
+                                                   uint                    width,
+                                                   uint                    height )
+{
+    dim3 grid, block;
+    optix_lwda_postprocessing_tonemap_getKernelDim( grid, block, width, height, sm_ver );
+
+    kernel_postprocessing_tonemap<<<grid, block>>>( pixel_data_in, pixel_data_out, num_components, exposure, gamma, width, height );
+}

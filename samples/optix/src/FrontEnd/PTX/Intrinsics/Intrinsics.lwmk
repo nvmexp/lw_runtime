@@ -1,0 +1,46 @@
+#
+#  Copyright (c) 2021 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *Device IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HDevice BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+Intrinsics_NEEDS_LWVM_HEADERS = 1
+
+Intrinsics_INCLUDES = \
+  $(LWVM_LW_SDK_INCLUDES) \
+  $(LWVM_COMMON_INCLUDES) \
+  $(LWVM_INCLUDES) \
+  $(OPTIX_INCLUDES) \
+  $(OPTIX_PTXPARSE_GENERATED_DIR) \
+  $(LW_OPTIX)/src/FrontEnd/PTX/PTXStitch/ptxparse \
+  $(LW_OPTIX)/src/FrontEnd/PTX/PTXStitch/gpuInfo
+
+Intrinsics_SOURCES += $(addprefix $(LW_OPTIX)/src/FrontEnd/PTX/Intrinsics/, \
+  D2IRIntrinsicBuilder.cpp \
+  InlinePtxParser.cpp \
+  IntrinsicHelpers.cpp \
+  PTXToLLVMHelpers.cpp \
+)
+
+$(call optix_module,Intrinsics)
+
+# Make sure the ptxparser files are generated before building files that could include them
+$(Intrinsics_ALL_OBJECTS): | optix-ptxparser

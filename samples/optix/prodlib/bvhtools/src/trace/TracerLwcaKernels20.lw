@@ -1,0 +1,422 @@
+/*
+ *  Copyright (c) 2012, LWPU Corporation
+ *  All rights reserved.
+ *
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions are met:
+ *      * Redistributions of source code must retain the above copyright
+ *        notice, this list of conditions and the following disclaimer.
+ *      * Redistributions in binary form must reproduce the above copyright
+ *        notice, this list of conditions and the following disclaimer in the
+ *        documentation and/or other materials provided with the distribution.
+ *      * Neither the name of LWPU Corporation nor the
+ *        names of its contributors may be used to endorse or promote products
+ *        derived from this software without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ *  ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ *  DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+ *  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ *  (INCLUDING, BUT NOT LIMITED TO, PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ *  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ *  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ *  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+//------------------------------------------------------------------------
+//  GF100-optimized variant of the "Spelwlative while-while"
+//  kernel used in:
+//
+//  "Understanding the Efficiency of Ray Traversal on GPUs",
+//  Timo Aila and Samuli Laine,
+//  Proc. High-Performance Graphics 2009
+//------------------------------------------------------------------------
+
+#include "TracerLwdaKernels.hpp"
+#include <prodlib/bvhtools/src/common/SharedKernelFunctions.hpp>
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+#define STACK_SIZE          64          // Size of the traversal stack in local memory.
+
+static texture<float4, 1> t_nodes;      // Linear textures wrapping the corresponding parameter arrays.
+static texture<float4, 1> t_triangles;
+static texture<int, 1>    t_remap;
+
+//------------------------------------------------------------------------
+// Experimentally determined best mix of float/int/video minmax instructions for Fermi.
+
+static __device__ __forceinline__ float fmin_fmax(float a, float b, float c)
+{
+    int v;
+    asm("vmin.s32.s32.s32.max %0, %1, %2, %3;" : "=r"(v) : "r"(__float_as_int(a)), "r"(__float_as_int(b)), "r"(__float_as_int(c)));
+    return __int_as_float(v);
+}
+
+static __device__ __forceinline__ float fmax_fmin(float a, float b, float c)
+{
+    int v;
+    asm("vmax.s32.s32.s32.min %0, %1, %2, %3;" : "=r"(v) : "r"(__float_as_int(a)), "r"(__float_as_int(b)), "r"(__float_as_int(c)));
+    return __int_as_float(v);
+}
+
+static __device__ __forceinline__ float spanBegin(float a0, float a1, float b0, float b1, float c0, float c1, float d)
+{
+    float t1 = fmin_fmax(a0, a1, d);
+    float t2 = fmin_fmax(b0, b1, t1);
+    float t3 = fmin_fmax(c0, c1, t2);
+    return t3;
+}
+
+static __device__ __forceinline__ float spanEnd(float a0, float a1, float b0, float b1, float c0, float c1, float d)
+{
+    float t1 = fmax_fmin(a0, a1, d);
+    float t2 = fmax_fmin(b0, b1, t1);
+    float t3 = fmax_fmin(c0, c1, t2);
+    return t3;
+}
+
+//------------------------------------------------------------------------
+
+#define INCLUDE_TEXTURES
+#define INCLUDE_AABB_TESTS
+#include "TracerLwdaKernels.inl"
+
+//------------------------------------------------------------------------
+
+template <class C> static __global__ __launch_bounds__(4 * 32, 8)
+void trace(TracerLwdaParams p)
+{
+    // Traversal stack in LWCA thread-local memory.
+
+    int traversalStack[STACK_SIZE];
+
+    // Live state during traversal, stored in registers.
+
+    int     rayIdx;                 // Ray index.
+
+    typename C::RayType ray;
+
+    char*   stackPtr;              // Current position in traversal stack.
+    int     leafIdx;               // First postponed leaf, non-negative if none.
+    int     nodeIdx;               // Non-negative: current internal node, negative: second postponed leaf.
+    int     hitTriIdx;                // Triangle index of the closest intersection, -1 if none.
+    float   hitT;                  // t-value of the closest intersection.
+
+    const TracerParamsMesh& tpm = p.meshes[0];
+
+    // Initialize.
+    {
+        // Pick ray index.
+
+        rayIdx = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * (blockIdx.x + gridDim.x * blockIdx.y));
+        if (rayIdx >= p.numRays)
+            return;
+
+        // Fetch ray.
+
+        C::fetchRay( p.rays, rayIdx, p.rayFormat, ray );
+
+        hitTriIdx = -1;                          // No triangle intersected so far.
+        hitT     = ray.tmax;                      
+        
+        // Setup traversal.
+
+        traversalStack[0] = EntrypointSentinel; // Bottom-most entry.
+        stackPtr = (char*)&traversalStack[0];
+        leafIdx = 0;                           // No postponed leaf.
+        nodeIdx = tpm.rootNode;                    // Start from the root.
+            
+        // Check for NULL ray and short circuit traversal if found
+        if( ray.tmax < 0.0f || tpm.numRemaps==0 )
+          nodeIdx = EntrypointSentinel;
+    }
+
+    // Traversal loop.
+
+    while (nodeIdx != EntrypointSentinel)
+    {
+        // Traverse internal nodes until all SIMD lanes have found a leaf.
+
+        bool searchingLeaf = true;
+        while (nodeIdx >= 0 && nodeIdx != EntrypointSentinel)
+        {
+            // Fetch node.
+            Node child0, child1;
+            fetchChildNodes<C>( tpm.nodes, nodeIdx, child0, child1 );
+
+            float hitT0, hitT1; // nearest hit point on child AABBs
+            bool traverseChild0 = C::intersectAabb(ray, child0.bbox, ray.tmin, hitT, hitT0 );
+            bool traverseChild1 = C::intersectAabb(ray, child1.bbox, ray.tmin, hitT, hitT1 );
+            if (!traverseChild0 && !traverseChild1)   // Neither child was intersected => pop stack.
+            {                    
+                nodeIdx = pop( stackPtr );
+            }
+            else                                      // Otherwise => fetch child pointers.
+            {                    
+                nodeIdx = (traverseChild0) ? child0.addr : child1.addr;      
+
+                if (traverseChild0 && traverseChild1)   // Both children were intersected => push the farther one.
+                {
+                    if (hitT1 < hitT0)
+                        swap( nodeIdx, child1.addr );                        
+                    push( stackPtr, child1.addr );
+                }
+            }
+
+            // First leaf => postpone and continue traversal.
+
+            if (nodeIdx < 0 && leafIdx >= 0)
+            {
+                searchingLeaf = false;
+                leafIdx = nodeIdx;
+                nodeIdx = pop( stackPtr );
+            }
+
+            // All SIMD lanes have found a leaf => process them.
+
+            if (!__any(searchingLeaf))
+                break;
+        }
+
+        // Process postponed leaf nodes.
+        int hitInstIdx = 0;
+        C::intersectTriangles(ray, tpm, 0, leafIdx, hitT, hitTriIdx, hitInstIdx, nodeIdx, &stackPtr, p.anyhit);
+
+    } // traversal
+
+    // Remap intersected triangle index and callwlate barys.
+    float hitU = 0.0f;
+    float hitV = 0.0f;
+    int outHitTriIdx = hitTriIdx;
+    int outHitInstIdx = -1;
+    if (hitTriIdx != -1)
+    {
+        outHitTriIdx = C::remap(tpm.remap, hitTriIdx);
+        outHitInstIdx = 0;
+
+        if( p.hitFormat > HIT_T_TRIID)
+          C::computeUV(tpm, hitTriIdx, ray.orig, ray.dir, hitT, hitU, hitV); 
+    }
+    else
+        hitT = -1;
+
+    storeHit(p.hits, rayIdx, p.hitFormat, outHitTriIdx, outHitInstIdx, hitT, hitU, hitV);
+}
+
+//------------------------------------------------------------------------
+
+template <class C> static __global__ __launch_bounds__(4 * 32, 8)
+void trace2(TracerLwdaParams p)
+{
+    // Traversal stack in LWCA thread-local memory.
+
+    int traversalStack[STACK_SIZE];
+
+    // Live state during traversal, stored in registers.
+
+    int     rayIdx;                 // Ray index.
+
+    typename C::RayType ray;
+
+    char*   stackPtr;               // Current position in traversal stack.
+    int     nodeIdx;               // Non-negative: current internal node, negative: second postponed leaf.
+    int     hitTriIdx;            // Triangle index of the closest intersection, -1 if none.
+    int     hitInstIdx;           // Instance index of the closest intersection, -1 if none
+    float   hitT;                   // t-value of the closest intersection.
+
+    float4* nodes;
+    int     state;
+    int     instIdx;
+
+    // Initialize.
+    {
+        // Pick ray index.
+
+        rayIdx = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * (blockIdx.x + gridDim.x * blockIdx.y));
+        if (rayIdx >= p.numRays)
+            return;
+
+        // Fetch ray.
+
+        C::fetchRay( p.rays, rayIdx, p.rayFormat, ray );
+
+        hitTriIdx  = -1;                          // No triangle intersected so far.
+        hitInstIdx = -1;
+        hitT         = ray.tmax;                      
+        
+        instIdx = -1;
+
+        // Setup traversal.
+
+        traversalStack[0] = EntrypointSentinel; // Bottom-most entry.
+        stackPtr = (char*)&traversalStack[0];
+        nodeIdx = p.group->rootNode;           // Start from the root.
+        state    = 0;
+        nodes    = (float4*)p.group->nodes;
+
+        // Check for NULL ray and short circuit traversal if found
+        if( ray.tmax < 0.0f || p.group->numEntities==0 )
+          nodeIdx = EntrypointSentinel;
+    }
+
+    // outer traversal loop
+    do
+    {
+        // traverse internal nodes until found a leaf
+        while((unsigned int)nodeIdx < (unsigned int)EntrypointSentinel)   // functionally equivalent to but faster than: while (nodeIdx >= 0 && nodeIdx != EntrypointSentinel)
+        {        
+            Node child0, child1;
+            fetchChildNodes<C>( nodes, nodeIdx, child0, child1 );
+
+            float hitT0, hitT1; // nearest hit point on child AABBs
+            bool traverseChild0 = C::intersectAabb(ray, child0.bbox, ray.tmin, hitT, hitT0 );
+            bool traverseChild1 = C::intersectAabb(ray, child1.bbox, ray.tmin, hitT, hitT1 );
+            if (!traverseChild0 && !traverseChild1)   // Neither child was intersected => pop stack.
+            {                    
+              nodeIdx = pop( stackPtr );
+            }
+            else                                      // Otherwise => fetch child pointers.
+            {                    
+              nodeIdx = (traverseChild0) ? child0.addr : child1.addr;      
+
+              if (traverseChild0 && traverseChild1)   // Both children were intersected => push the farther one.
+              {
+                if (hitT1 < hitT0)
+                  swap( nodeIdx, child1.addr );
+                push( stackPtr, child1.addr );
+              }
+            }
+        }
+
+        if(state==0 && nodeIdx<0) // transform ray and go back to traverse
+        {
+            int   instAddr = ~(nodeIdx);
+                
+            instIdx = p.group->remap[instAddr] & RLLEPACK_INDEX_MASK;
+                
+            int    modelId = p.group->modelId[instIdx];
+
+            const float4* ilwTransform = getTransformPtr( p.group->ilwMatrices, instIdx, p.group->matrixStride );
+
+            // transform ray
+            C::transformRay( ray, ilwTransform );
+
+            push( stackPtr, EntrypointSentinel ); // set an end mark for the geometry traversal
+
+            nodeIdx      = p.meshes[modelId].rootNode;
+            nodes         = (float4*)p.meshes[modelId].nodes;
+
+            state++;
+
+            if( p.meshes[modelId].numRemaps==0 )
+              nodeIdx = EntrypointSentinel;
+        } 
+        else if(state==1 && nodeIdx<0) // intersect triangles
+        {
+          int modelId = p.group->modelId[instIdx];
+          C::intersectTriangles(ray, p.meshes[modelId], instIdx, hitT, hitTriIdx, hitInstIdx, nodeIdx, p.anyhit);            
+
+          nodeIdx = pop( stackPtr );
+        }
+        else if(state==1 && nodeIdx==EntrypointSentinel) // after isec, proceed with top level traversal
+        {
+          state       = 0;
+          nodeIdx    = pop( stackPtr );
+              
+          if(nodeIdx!=EntrypointSentinel)
+          {
+            C::fetchRay( p.rays, rayIdx, p.rayFormat, ray );
+
+            nodes       = (float4*)p.group->nodes + p.group->rootNode;              
+          }
+        }
+    }
+    while(!((nodeIdx==EntrypointSentinel) && (state==0))); // traversal
+
+    // Remap intersected triangle index and callwlate barys.
+    float hitU = 0.0f;
+    float hitV = 0.0f;
+    int outHitTriIdx = hitTriIdx;
+  
+    if(hitTriIdx != -1 && hitInstIdx != -1) // in theory it is not possible that only one is -1
+    {
+        int model = p.group->modelId[hitInstIdx];
+
+        const TracerParamsMesh& hitTpm = p.meshes[model];                
+
+        const int* remap = hitTpm.remap;
+
+        outHitTriIdx = C::remap(remap, hitTriIdx);
+
+        const float4* ilwTransform = getTransformPtr( p.group->ilwMatrices, hitInstIdx, p.group->matrixStride );
+
+        C::fetchAndTransformRay( p.rays, rayIdx, p.rayFormat, ray, ilwTransform );
+
+        if( p.hitFormat > HIT_T_TRIID)
+          C::computeUV(hitTpm, hitTriIdx, ray.orig, ray.dir, hitT, hitU, hitV);
+    }
+    else
+        hitT = -1;
+
+    storeHit(p.hits, rayIdx, p.hitFormat, outHitTriIdx, hitInstIdx, hitT, hitU, hitV);
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchTrace20(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const TracerLwdaParams& p, const TracerLwdaConfig& c)
+{
+    void (*kernel)(TracerLwdaParams p) = NULL;
+
+    // BL: We have got to prune these!
+
+    if (!c.twoLevel &&  c.useTex &&  c.useWoop &&         1        && !c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadTexNodes, WoopTriangles< LoadTexWoopTris, LoadTexRemap > > >;
+    if (!c.twoLevel &&  c.useTex && !c.useWoop && !c.useWatertight && !c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadTexNodes, MeshTriangles< TriIndexer::Branch<int3>, float3, int3, false > > >;
+    if (!c.twoLevel &&  c.useTex && !c.useWoop && !c.useWatertight && !c.useMasking &&  c.useFloat4)    kernel = trace< Combine< LoadTexNodes, MeshTriangles< TriIndexer::Branch<int3>, float4, int3, false > > >;
+    if (!c.twoLevel &&  c.useTex && !c.useWoop && !c.useWatertight &&  c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadTexNodes, MeshTriangles< TriIndexer::Indexed<int4>, float3, int4, true > > >;
+    if (!c.twoLevel &&  c.useTex && !c.useWoop && !c.useWatertight &&  c.useMasking &&  c.useFloat4)    kernel = trace< Combine< LoadTexNodes, MeshTriangles< TriIndexer::Indexed<int4>, float4, int4, true > > >;
+    if (!c.twoLevel &&  c.useTex && !c.useWoop &&  c.useWatertight && !c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadTexNodes, WatertightMeshTriangles< TriIndexer::Branch<int3>, float3, int3, false, true > > >;
+    if (!c.twoLevel &&  c.useTex && !c.useWoop &&  c.useWatertight && !c.useMasking &&  c.useFloat4)    kernel = trace< Combine< LoadTexNodes, WatertightMeshTriangles< TriIndexer::Branch<int3>, float4, int3, false, true > > >;
+    if (!c.twoLevel &&  c.useTex && !c.useWoop &&  c.useWatertight &&  c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadTexNodes, WatertightMeshTriangles< TriIndexer::Indexed<int4>, float3, int4, true, true > > >;
+    if (!c.twoLevel &&  c.useTex && !c.useWoop &&  c.useWatertight &&  c.useMasking &&  c.useFloat4)    kernel = trace< Combine< LoadTexNodes, WatertightMeshTriangles< TriIndexer::Indexed<int4>, float4, int4, true, true > > >;
+
+    if (!c.twoLevel && !c.useTex &&  c.useWoop &&         1        && !c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadGlobal<float4>, WoopTriangles< LoadGlobal<float4>, LoadGlobal<int> > > >;
+    if (!c.twoLevel && !c.useTex && !c.useWoop && !c.useWatertight && !c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadGlobal<float4>, MeshTriangles< TriIndexer::Branch<int3>, float3, int3, false > > >;
+    if (!c.twoLevel && !c.useTex && !c.useWoop && !c.useWatertight && !c.useMasking &&  c.useFloat4)    kernel = trace< Combine< LoadGlobal<float4>, MeshTriangles< TriIndexer::Branch<int3>, float4, int3, false > > >;
+    if (!c.twoLevel && !c.useTex && !c.useWoop && !c.useWatertight &&  c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadGlobal<float4>, MeshTriangles< TriIndexer::Indexed<int4>, float3, int4, true > > >;
+    if (!c.twoLevel && !c.useTex && !c.useWoop && !c.useWatertight &&  c.useMasking &&  c.useFloat4)    kernel = trace< Combine< LoadGlobal<float4>, MeshTriangles< TriIndexer::Indexed<int4>, float4, int4, true > > >;
+    if (!c.twoLevel && !c.useTex && !c.useWoop &&  c.useWatertight && !c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadGlobal<float4>, WatertightMeshTriangles< TriIndexer::Branch<int3>, float3, int3, false, true > > >;
+    if (!c.twoLevel && !c.useTex && !c.useWoop &&  c.useWatertight && !c.useMasking &&  c.useFloat4)    kernel = trace< Combine< LoadGlobal<float4>, WatertightMeshTriangles< TriIndexer::Branch<int3>, float4, int3, false, true > > >;
+    if (!c.twoLevel && !c.useTex && !c.useWoop &&  c.useWatertight &&  c.useMasking && !c.useFloat4)    kernel = trace< Combine< LoadGlobal<float4>, WatertightMeshTriangles< TriIndexer::Indexed<int4>, float3, int4, true, true > > >;
+    if (!c.twoLevel && !c.useTex && !c.useWoop &&  c.useWatertight &&  c.useMasking &&  c.useFloat4)    kernel = trace< Combine< LoadGlobal<float4>, WatertightMeshTriangles< TriIndexer::Indexed<int4>, float4, int4, true, true > > >;
+ 
+    if ( c.twoLevel && !c.useTex &&  c.useWoop &&         1        && !c.useMasking && !c.useFloat4)    kernel = trace2< Combine< LoadGlobal<float4>, WoopTrianglesNST< LoadGlobal<float4>, LoadGlobal<int> > > >;
+    if ( c.twoLevel && !c.useTex && !c.useWoop && !c.useWatertight && !c.useMasking && !c.useFloat4)    kernel = trace2< Combine< LoadGlobal<float4>, MeshTrianglesNST< TriIndexer::Branch<int3>, float3, int3, false > > >;
+    if ( c.twoLevel && !c.useTex && !c.useWoop && !c.useWatertight && !c.useMasking &&  c.useFloat4)    kernel = trace2< Combine< LoadGlobal<float4>, MeshTrianglesNST< TriIndexer::Branch<int3>, float4, int3, false > > >;
+    if ( c.twoLevel && !c.useTex && !c.useWoop && !c.useWatertight &&  c.useMasking && !c.useFloat4)    kernel = trace2< Combine< LoadGlobal<float4>, MeshTrianglesNST< TriIndexer::Indexed<int4>, float3, int4, true > > >;
+    if ( c.twoLevel && !c.useTex && !c.useWoop && !c.useWatertight &&  c.useMasking &&  c.useFloat4)    kernel = trace2< Combine< LoadGlobal<float4>, MeshTrianglesNST< TriIndexer::Indexed<int4>, float4, int4, true > > >;
+    if ( c.twoLevel && !c.useTex && !c.useWoop &&  c.useWatertight && !c.useMasking && !c.useFloat4)    kernel = trace2< Combine< LoadGlobal<float4>, WatertightMeshTrianglesNST< TriIndexer::Branch<int3>, float3, int3, false, true > > >;
+    if ( c.twoLevel && !c.useTex && !c.useWoop &&  c.useWatertight && !c.useMasking &&  c.useFloat4)    kernel = trace2< Combine< LoadGlobal<float4>, WatertightMeshTrianglesNST< TriIndexer::Branch<int3>, float4, int3, false, true > > >;
+    if ( c.twoLevel && !c.useTex && !c.useWoop &&  c.useWatertight &&  c.useMasking && !c.useFloat4)    kernel = trace2< Combine< LoadGlobal<float4>, WatertightMeshTrianglesNST< TriIndexer::Indexed<int4>, float3, int4, true, true > > >;
+    if ( c.twoLevel && !c.useTex && !c.useWoop &&  c.useWatertight &&  c.useMasking &&  c.useFloat4)    kernel = trace2< Combine< LoadGlobal<float4>, WatertightMeshTrianglesNST< TriIndexer::Indexed<int4>, float4, int4, true, true > > >;
+
+    if (!kernel) return false;
+
+    if (c.useTex)
+    {
+        const TracerParamsMesh& m = p.firstMesh;
+        if (m.nodes && lwdaBindTexture(NULL, &t_nodes, m.nodes, &t_nodes.channelDesc, m.numNodes * sizeof(BvhNode)) != lwdaSuccess) return false;
+        if (m.triangles && lwdaBindTexture(NULL, &t_triangles, m.triangles, &t_triangles.channelDesc, m.numRemaps * sizeof(WoopTriangle)) != lwdaSuccess) return false;
+        if (m.remap && lwdaBindTexture(NULL, &t_remap, m.remap, &t_remap.channelDesc, m.numRemaps * sizeof(int)) != lwdaSuccess) return false;
+    }
+
+    if (lwdaFuncSetCacheConfig(kernel, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    kernel<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

@@ -1,0 +1,73 @@
+Name:           libnccl
+Version:        ${lwcl:Major}.${lwcl:Minor}.${lwcl:Patch}${lwcl:Suffix}
+Release:        ${pkg:Revision}+lwca${lwca:Major}.${lwca:Minor}
+Summary:        LWPU Collectives Communication Library (LWCL) Runtime
+
+Group:          Development/Libraries
+License:        BSD
+URL:            http://developer.lwpu.com/lwcl
+Source0:        nccl_${lwcl:Major}.${lwcl:Minor}.${lwcl:Patch}${lwcl:Suffix}-${pkg:Revision}+lwca${lwca:Major}.${lwca:Minor}_${pkg:Arch}.txz
+
+%description
+LWCL (pronounced "Nickel") is a stand-alone library of standard collective
+communication routines for GPUs, implementing all-reduce, all-gather, reduce,
+broadcast, and reduce-scatter.
+It has been optimized to achieve high bandwidth on any platform using PCIe,
+LWLink, LWswitch, as well as networking using InfiniBand Verbs or TCP/IP
+sockets.
+
+%package devel
+Summary:        LWPU Collectives Communication Library (LWCL) Runtime
+Group:          Development/Libraries
+%description devel
+LWCL development files
+
+%package static
+Summary:        LWPU Collectives Communication Library (LWCL) Runtime
+Group:          Development/Libraries
+%description static
+LWCL static library
+
+%define debug_package %{nil}
+
+%prep
+%setup -n nccl_${lwcl:Major}.${lwcl:Minor}.${lwcl:Patch}${lwcl:Suffix}-${pkg:Revision}+lwca${lwca:Major}.${lwca:Minor}_${pkg:Arch} -q
+
+%build
+
+%install
+rm -rf $RPM_BUILD_ROOT
+install -m 755 -d $RPM_BUILD_ROOT
+install -m 755 -d $RPM_BUILD_ROOT/%{_libdir}
+install -m 755 lib/libnccl.so.${lwcl:Major}.${lwcl:Minor}.${lwcl:Patch} $RPM_BUILD_ROOT/%{_libdir}
+ln -s libnccl.so.${lwcl:Major}.${lwcl:Minor}.${lwcl:Patch} $RPM_BUILD_ROOT/%{_libdir}/libnccl.so.${lwcl:Major}
+
+# devel
+install -m 755 -d $RPM_BUILD_ROOT/%{_includedir}
+install -m 644 include/lwcl.h $RPM_BUILD_ROOT/%{_includedir}
+ln -s libnccl.so.${lwcl:Major} $RPM_BUILD_ROOT/%{_libdir}/libnccl.so
+
+# static
+install -m 644 lib/libnccl_static.a $RPM_BUILD_ROOT/%{_libdir}
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files devel
+%doc LICENSE.txt
+%defattr(-,root,root,-)
+%{_includedir}/lwcl.h
+%{_libdir}/libnccl.so
+
+%files static
+%doc LICENSE.txt
+%defattr(-,root,root,-)
+%{_libdir}/libnccl_static.a
+
+%files
+%doc LICENSE.txt
+%defattr(-,root,root,-)
+%{_libdir}/libnccl.so.${lwcl:Major}
+%{_libdir}/libnccl.so.${lwcl:Major}.${lwcl:Minor}.${lwcl:Patch}
+
+%changelog

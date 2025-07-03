@@ -1,0 +1,31 @@
+#include "THCTensorMathReduce.lwh"
+
+THC_API int
+THLwdaByteTensor_logicalall(THCState *state, THLwdaByteTensor *self) {
+  THCAssertSameGPU(THLwdaByteTensor_checkGPU(state, 1, self));
+  unsigned char result;
+  if (!THC_reduceAll(state, self,
+                     thrust::identity<unsigned char>(),
+                     LogicalAll(),
+                     LogicalAll(),
+                     (unsigned char) 1, &result, 0)) {
+    THArgCheck(false, 1, LWTORCH_DIM_WARNING);
+  }
+
+  return (int) result;
+}
+
+THC_API int
+THLwdaByteTensor_logicalany(THCState *state, THLwdaByteTensor *self) {
+  THCAssertSameGPU(THLwdaByteTensor_checkGPU(state, 1, self));
+  unsigned char result;
+  if (!THC_reduceAll(state, self,
+                     thrust::identity<unsigned char>(),
+                     LogicalAny(),
+                     LogicalAny(),
+                     (unsigned char) 0, &result, 0)) {
+    THArgCheck(false, 1, LWTORCH_DIM_WARNING);
+  }
+
+  return (int) result;
+}

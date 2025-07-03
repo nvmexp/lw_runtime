@@ -1,0 +1,12 @@
+ps_1_4
+texld r0, t0
+texld r1, t1
+texld r2, t2
+texld r3, t3
+texld r4, t4
+dp3_sat r3.rgb, r3_bx2, r4_bx2
+mul r3.rgb, r3, r3
+mul r3.rgb, r3, r1
+mul r3.rgb, r3, r2
+mad r3.rgb, r3, v0, v1
+mul_x2 r0.rgb, r3, r0

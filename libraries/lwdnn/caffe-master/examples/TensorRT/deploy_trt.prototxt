@@ -1,0 +1,1981 @@
+name: "Resnet50-fp16"
+
+#default_forward_type:  FLOAT16
+#default_backward_type: FLOAT16
+#default_forward_math:  FLOAT16
+#default_backward_math: FLOAT16
+#global_grad_scale: 1
+#global_grad_scale_adaptive: true
+#reduce_buckets: 3
+
+layer {
+  name: "data"
+  type: "Input"
+  top: "data"
+  input_param { shape: { dim: 1 dim: 3 dim: 224 dim: 224 } }
+}
+
+layer {
+  name: "colw1"
+  type: "Colwolution"
+  bottom: "data"
+  top: "colw1"
+  colwolution_param {
+    num_output: 64
+    kernel_size: 7
+    pad: 3
+    stride: 2
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "colw1"
+  top: "colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "colw1/relu"
+  type: "ReLU"
+  bottom: "colw1/bn"
+  top: "colw1/bn"
+}
+layer {
+  name: "pool1"
+  type: "Pooling"
+  bottom: "colw1/bn"
+  top: "pool1"
+  pooling_param {
+    pool: MAX
+    kernel_size: 3
+    stride: 2
+  }
+}
+#
+# res2
+#
+layer {
+  name: "res2.1.colw1"
+  type: "Colwolution"
+  bottom: "pool1"
+  top: "res2.1.colw1"
+  colwolution_param {
+    num_output: 64
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res2.1.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res2.1.colw1"
+  top: "res2.1.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res2.1.colw1/relu"
+  type: "ReLU"
+  bottom: "res2.1.colw1/bn"
+  top: "res2.1.colw1/bn"
+}
+layer {
+  name: "res2.1.colw2"
+  type: "Colwolution"
+  bottom: "res2.1.colw1/bn"
+  top: "res2.1.colw2"
+  colwolution_param {
+    num_output: 64
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res2.1.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res2.1.colw2"
+  top: "res2.1.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res2.1.colw2/relu"
+  type: "ReLU"
+  bottom: "res2.1.colw2/bn"
+  top: "res2.1.colw2/bn"
+}
+layer {
+  name: "res2.1.colw3"
+  type: "Colwolution"
+  bottom: "res2.1.colw2/bn"
+  top: "res2.1.colw3"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res2.1.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res2.1.colw3"
+  top: "res2.1.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res2.1.skipColw"
+  type: "Colwolution"
+  bottom: "pool1"
+  top: "res2.1.skipColw"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res2.1.skipColw/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res2.1.skipColw"
+  top: "res2.1.skipColw/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res2.1.sum"
+  type: "Eltwise"
+  bottom: "res2.1.colw3/bn"
+  bottom: "res2.1.skipColw/bn"
+  top: "res2.1.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res2.1.relu"
+  type: "ReLU"
+  bottom: "res2.1.sum"
+  top: "res2.1.sum"
+}
+layer {
+  name: "res2.2.colw1"
+  type: "Colwolution"
+  bottom: "res2.1.sum"
+  top: "res2.2.colw1"
+  colwolution_param {
+    num_output: 64
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res2.2.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res2.2.colw1"
+  top: "res2.2.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res2.2.colw1/relu"
+  type: "ReLU"
+  bottom: "res2.2.colw1/bn"
+  top: "res2.2.colw1/bn"
+}
+layer {
+  name: "res2.2.colw2"
+  type: "Colwolution"
+  bottom: "res2.2.colw1/bn"
+  top: "res2.2.colw2"
+  colwolution_param {
+    num_output: 64
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res2.2.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res2.2.colw2"
+  top: "res2.2.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res2.2.colw2/relu"
+  type: "ReLU"
+  bottom: "res2.2.colw2/bn"
+  top: "res2.2.colw2/bn"
+}
+layer {
+  name: "res2.2.colw3"
+  type: "Colwolution"
+  bottom: "res2.2.colw2/bn"
+  top: "res2.2.colw3"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res2.2.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res2.2.colw3"
+  top: "res2.2.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res2.2.sum"
+  type: "Eltwise"
+  bottom: "res2.2.colw3/bn"
+  bottom: "res2.1.sum"
+  top: "res2.2.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res2.2.relu"
+  type: "ReLU"
+  bottom: "res2.2.sum"
+  top: "res2.2.sum"
+}
+layer {
+  name: "res2.3.colw1"
+  type: "Colwolution"
+  bottom: "res2.2.sum"
+  top: "res2.3.colw1"
+  colwolution_param {
+    num_output: 64
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res2.3.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res2.3.colw1"
+  top: "res2.3.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res2.3.colw1/relu"
+  type: "ReLU"
+  bottom: "res2.3.colw1/bn"
+  top: "res2.3.colw1/bn"
+}
+layer {
+  name: "res2.3.colw2"
+  type: "Colwolution"
+  bottom: "res2.3.colw1/bn"
+  top: "res2.3.colw2"
+  colwolution_param {
+    num_output: 64
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res2.3.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res2.3.colw2"
+  top: "res2.3.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res2.3.colw2/relu"
+  type: "ReLU"
+  bottom: "res2.3.colw2/bn"
+  top: "res2.3.colw2/bn"
+}
+layer {
+  name: "res2.3.colw3"
+  type: "Colwolution"
+  bottom: "res2.3.colw2/bn"
+  top: "res2.3.colw3"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res2.3.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res2.3.colw3"
+  top: "res2.3.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res2.3.sum"
+  type: "Eltwise"
+  bottom: "res2.3.colw3/bn"
+  bottom: "res2.2.sum"
+  top: "res2.3.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res2.3.relu"
+  type: "ReLU"
+  bottom: "res2.3.sum"
+  top: "res2.3.sum"
+}
+#
+# res3
+#
+layer {
+  name: "res3.1.colw1"
+  type: "Colwolution"
+  bottom: "res2.3.sum"
+  top: "res3.1.colw1"
+  colwolution_param {
+    num_output: 128
+    kernel_size: 1
+    stride: 2
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.1.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.1.colw1"
+  top: "res3.1.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.1.colw1/relu"
+  type: "ReLU"
+  bottom: "res3.1.colw1/bn"
+  top: "res3.1.colw1/bn"
+}
+layer {
+  name: "res3.1.colw2"
+  type: "Colwolution"
+  bottom: "res3.1.colw1/bn"
+  top: "res3.1.colw2"
+  colwolution_param {
+    num_output: 128
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.1.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.1.colw2"
+  top: "res3.1.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.1.colw2/relu"
+  type: "ReLU"
+  bottom: "res3.1.colw2/bn"
+  top: "res3.1.colw2/bn"
+}
+layer {
+  name: "res3.1.colw3"
+  type: "Colwolution"
+  bottom: "res3.1.colw2/bn"
+  top: "res3.1.colw3"
+  colwolution_param {
+    num_output: 512
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.1.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.1.colw3"
+  top: "res3.1.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.1.skipColw"
+  type: "Colwolution"
+  bottom: "res2.3.sum"
+  top: "res3.1.skipColw"
+  colwolution_param {
+    num_output: 512
+    kernel_size: 1
+    stride: 2
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.1.skipColw/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.1.skipColw"
+  top: "res3.1.skipColw/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.1.sum"
+  type: "Eltwise"
+  bottom: "res3.1.colw3/bn"
+  bottom: "res3.1.skipColw/bn"
+  top: "res3.1.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res3.1.relu"
+  type: "ReLU"
+  bottom: "res3.1.sum"
+  top: "res3.1.sum"
+}
+layer {
+  name: "res3.2.colw1"
+  type: "Colwolution"
+  bottom: "res3.1.sum"
+  top: "res3.2.colw1"
+  colwolution_param {
+    num_output: 128
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.2.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.2.colw1"
+  top: "res3.2.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.2.colw1/relu"
+  type: "ReLU"
+  bottom: "res3.2.colw1/bn"
+  top: "res3.2.colw1/bn"
+}
+layer {
+  name: "res3.2.colw2"
+  type: "Colwolution"
+  bottom: "res3.2.colw1/bn"
+  top: "res3.2.colw2"
+  colwolution_param {
+    num_output: 128
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.2.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.2.colw2"
+  top: "res3.2.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.2.colw2/relu"
+  type: "ReLU"
+  bottom: "res3.2.colw2/bn"
+  top: "res3.2.colw2/bn"
+}
+layer {
+  name: "res3.2.colw3"
+  type: "Colwolution"
+  bottom: "res3.2.colw2/bn"
+  top: "res3.2.colw3"
+  colwolution_param {
+    num_output: 512
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.2.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.2.colw3"
+  top: "res3.2.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.2.sum"
+  type: "Eltwise"
+  bottom: "res3.2.colw3/bn"
+  bottom: "res3.1.sum"
+  top: "res3.2.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res3.2.relu"
+  type: "ReLU"
+  bottom: "res3.2.sum"
+  top: "res3.2.sum"
+}
+layer {
+  name: "res3.3.colw1"
+  type: "Colwolution"
+  bottom: "res3.2.sum"
+  top: "res3.3.colw1"
+  colwolution_param {
+    num_output: 128
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.3.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.3.colw1"
+  top: "res3.3.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.3.colw1/relu"
+  type: "ReLU"
+  bottom: "res3.3.colw1/bn"
+  top: "res3.3.colw1/bn"
+}
+layer {
+  name: "res3.3.colw2"
+  type: "Colwolution"
+  bottom: "res3.3.colw1/bn"
+  top: "res3.3.colw2"
+  colwolution_param {
+    num_output: 128
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.3.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.3.colw2"
+  top: "res3.3.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.3.colw2/relu"
+  type: "ReLU"
+  bottom: "res3.3.colw2/bn"
+  top: "res3.3.colw2/bn"
+}
+layer {
+  name: "res3.3.colw3"
+  type: "Colwolution"
+  bottom: "res3.3.colw2/bn"
+  top: "res3.3.colw3"
+  colwolution_param {
+    num_output: 512
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.3.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.3.colw3"
+  top: "res3.3.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.3.sum"
+  type: "Eltwise"
+  bottom: "res3.3.colw3/bn"
+  bottom: "res3.2.sum"
+  top: "res3.3.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res3.3.relu"
+  type: "ReLU"
+  bottom: "res3.3.sum"
+  top: "res3.3.sum"
+}
+layer {
+  name: "res3.4.colw1"
+  type: "Colwolution"
+  bottom: "res3.3.sum"
+  top: "res3.4.colw1"
+  colwolution_param {
+    num_output: 128
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.4.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.4.colw1"
+  top: "res3.4.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.4.colw1/relu"
+  type: "ReLU"
+  bottom: "res3.4.colw1/bn"
+  top: "res3.4.colw1/bn"
+}
+layer {
+  name: "res3.4.colw2"
+  type: "Colwolution"
+  bottom: "res3.4.colw1/bn"
+  top: "res3.4.colw2"
+  colwolution_param {
+    num_output: 128
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.4.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.4.colw2"
+  top: "res3.4.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.4.colw2/relu"
+  type: "ReLU"
+  bottom: "res3.4.colw2/bn"
+  top: "res3.4.colw2/bn"
+}
+layer {
+  name: "res3.4.colw3"
+  type: "Colwolution"
+  bottom: "res3.4.colw2/bn"
+  top: "res3.4.colw3"
+  colwolution_param {
+    num_output: 512
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res3.4.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res3.4.colw3"
+  top: "res3.4.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res3.4.sum"
+  type: "Eltwise"
+  bottom: "res3.4.colw3/bn"
+  bottom: "res3.3.sum"
+  top: "res3.4.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res3.4.relu"
+  type: "ReLU"
+  bottom: "res3.4.sum"
+  top: "res3.4.sum"
+}
+#
+# res4
+#
+layer {
+  name: "res4.1.colw1"
+  type: "Colwolution"
+  bottom: "res3.4.sum"
+  top: "res4.1.colw1"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 1
+    stride: 2
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.1.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.1.colw1"
+  top: "res4.1.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.1.colw1/relu"
+  type: "ReLU"
+  bottom: "res4.1.colw1/bn"
+  top: "res4.1.colw1/bn"
+}
+layer {
+  name: "res4.1.colw2"
+  type: "Colwolution"
+  bottom: "res4.1.colw1/bn"
+  top: "res4.1.colw2"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.1.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.1.colw2"
+  top: "res4.1.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.1.colw2/relu"
+  type: "ReLU"
+  bottom: "res4.1.colw2/bn"
+  top: "res4.1.colw2/bn"
+}
+layer {
+  name: "res4.1.colw3"
+  type: "Colwolution"
+  bottom: "res4.1.colw2/bn"
+  top: "res4.1.colw3"
+  colwolution_param {
+    num_output: 1024
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.1.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.1.colw3"
+  top: "res4.1.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.1.skipColw"
+  type: "Colwolution"
+  bottom: "res3.4.sum"
+  top: "res4.1.skipColw"
+  colwolution_param {
+    num_output: 1024
+    kernel_size: 1
+    stride: 2
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.1.skipColw/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.1.skipColw"
+  top: "res4.1.skipColw/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.1.sum"
+  type: "Eltwise"
+  bottom: "res4.1.colw3/bn"
+  bottom: "res4.1.skipColw/bn"
+  top: "res4.1.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res4.1.relu"
+  type: "ReLU"
+  bottom: "res4.1.sum"
+  top: "res4.1.sum"
+}
+layer {
+  name: "res4.2.colw1"
+  type: "Colwolution"
+  bottom: "res4.1.sum"
+  top: "res4.2.colw1"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.2.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.2.colw1"
+  top: "res4.2.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.2.colw1/relu"
+  type: "ReLU"
+  bottom: "res4.2.colw1/bn"
+  top: "res4.2.colw1/bn"
+}
+layer {
+  name: "res4.2.colw2"
+  type: "Colwolution"
+  bottom: "res4.2.colw1/bn"
+  top: "res4.2.colw2"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.2.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.2.colw2"
+  top: "res4.2.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.2.colw2/relu"
+  type: "ReLU"
+  bottom: "res4.2.colw2/bn"
+  top: "res4.2.colw2/bn"
+}
+layer {
+  name: "res4.2.colw3"
+  type: "Colwolution"
+  bottom: "res4.2.colw2/bn"
+  top: "res4.2.colw3"
+  colwolution_param {
+    num_output: 1024
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.2.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.2.colw3"
+  top: "res4.2.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.2.sum"
+  type: "Eltwise"
+  bottom: "res4.2.colw3/bn"
+  bottom: "res4.1.sum"
+  top: "res4.2.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res4.2.relu"
+  type: "ReLU"
+  bottom: "res4.2.sum"
+  top: "res4.2.sum"
+}
+layer {
+  name: "res4.3.colw1"
+  type: "Colwolution"
+  bottom: "res4.2.sum"
+  top: "res4.3.colw1"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.3.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.3.colw1"
+  top: "res4.3.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.3.colw1/relu"
+  type: "ReLU"
+  bottom: "res4.3.colw1/bn"
+  top: "res4.3.colw1/bn"
+}
+layer {
+  name: "res4.3.colw2"
+  type: "Colwolution"
+  bottom: "res4.3.colw1/bn"
+  top: "res4.3.colw2"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.3.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.3.colw2"
+  top: "res4.3.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.3.colw2/relu"
+  type: "ReLU"
+  bottom: "res4.3.colw2/bn"
+  top: "res4.3.colw2/bn"
+}
+layer {
+  name: "res4.3.colw3"
+  type: "Colwolution"
+  bottom: "res4.3.colw2/bn"
+  top: "res4.3.colw3"
+  colwolution_param {
+    num_output: 1024
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.3.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.3.colw3"
+  top: "res4.3.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.3.sum"
+  type: "Eltwise"
+  bottom: "res4.3.colw3/bn"
+  bottom: "res4.2.sum"
+  top: "res4.3.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res4.3.relu"
+  type: "ReLU"
+  bottom: "res4.3.sum"
+  top: "res4.3.sum"
+}
+layer {
+  name: "res4.4.colw1"
+  type: "Colwolution"
+  bottom: "res4.3.sum"
+  top: "res4.4.colw1"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.4.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.4.colw1"
+  top: "res4.4.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.4.colw1/relu"
+  type: "ReLU"
+  bottom: "res4.4.colw1/bn"
+  top: "res4.4.colw1/bn"
+}
+layer {
+  name: "res4.4.colw2"
+  type: "Colwolution"
+  bottom: "res4.4.colw1/bn"
+  top: "res4.4.colw2"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.4.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.4.colw2"
+  top: "res4.4.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.4.colw2/relu"
+  type: "ReLU"
+  bottom: "res4.4.colw2/bn"
+  top: "res4.4.colw2/bn"
+}
+layer {
+  name: "res4.4.colw3"
+  type: "Colwolution"
+  bottom: "res4.4.colw2/bn"
+  top: "res4.4.colw3"
+  colwolution_param {
+    num_output: 1024
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.4.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.4.colw3"
+  top: "res4.4.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.4.sum"
+  type: "Eltwise"
+  bottom: "res4.4.colw3/bn"
+  bottom: "res4.3.sum"
+  top: "res4.4.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res4.4.relu"
+  type: "ReLU"
+  bottom: "res4.4.sum"
+  top: "res4.4.sum"
+}
+layer {
+  name: "res4.5.colw1"
+  type: "Colwolution"
+  bottom: "res4.4.sum"
+  top: "res4.5.colw1"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.5.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.5.colw1"
+  top: "res4.5.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.5.colw1/relu"
+  type: "ReLU"
+  bottom: "res4.5.colw1/bn"
+  top: "res4.5.colw1/bn"
+}
+layer {
+  name: "res4.5.colw2"
+  type: "Colwolution"
+  bottom: "res4.5.colw1/bn"
+  top: "res4.5.colw2"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.5.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.5.colw2"
+  top: "res4.5.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.5.colw2/relu"
+  type: "ReLU"
+  bottom: "res4.5.colw2/bn"
+  top: "res4.5.colw2/bn"
+}
+layer {
+  name: "res4.5.colw3"
+  type: "Colwolution"
+  bottom: "res4.5.colw2/bn"
+  top: "res4.5.colw3"
+  colwolution_param {
+    num_output: 1024
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.5.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.5.colw3"
+  top: "res4.5.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.5.sum"
+  type: "Eltwise"
+  bottom: "res4.5.colw3/bn"
+  bottom: "res4.4.sum"
+  top: "res4.5.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res4.5.relu"
+  type: "ReLU"
+  bottom: "res4.5.sum"
+  top: "res4.5.sum"
+}
+layer {
+  name: "res4.6.colw1"
+  type: "Colwolution"
+  bottom: "res4.5.sum"
+  top: "res4.6.colw1"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.6.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.6.colw1"
+  top: "res4.6.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.6.colw1/relu"
+  type: "ReLU"
+  bottom: "res4.6.colw1/bn"
+  top: "res4.6.colw1/bn"
+}
+layer {
+  name: "res4.6.colw2"
+  type: "Colwolution"
+  bottom: "res4.6.colw1/bn"
+  top: "res4.6.colw2"
+  colwolution_param {
+    num_output: 256
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.6.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.6.colw2"
+  top: "res4.6.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.6.colw2/relu"
+  type: "ReLU"
+  bottom: "res4.6.colw2/bn"
+  top: "res4.6.colw2/bn"
+}
+layer {
+  name: "res4.6.colw3"
+  type: "Colwolution"
+  bottom: "res4.6.colw2/bn"
+  top: "res4.6.colw3"
+  colwolution_param {
+    num_output: 1024
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res4.6.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res4.6.colw3"
+  top: "res4.6.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res4.6.sum"
+  type: "Eltwise"
+  bottom: "res4.6.colw3/bn"
+  bottom: "res4.5.sum"
+  top: "res4.6.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res4.6.relu"
+  type: "ReLU"
+  bottom: "res4.6.sum"
+  top: "res4.6.sum"
+}
+#
+# res5
+#
+layer {
+  name: "res5.1.colw1"
+  type: "Colwolution"
+  bottom: "res4.6.sum"
+  top: "res5.1.colw1"
+  colwolution_param {
+    num_output: 512
+    kernel_size: 1
+    stride: 2
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res5.1.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res5.1.colw1"
+  top: "res5.1.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res5.1.colw1/relu"
+  type: "ReLU"
+  bottom: "res5.1.colw1/bn"
+  top: "res5.1.colw1/bn"
+}
+layer {
+  name: "res5.1.colw2"
+  type: "Colwolution"
+  bottom: "res5.1.colw1/bn"
+  top: "res5.1.colw2"
+  colwolution_param {
+    num_output: 512
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res5.1.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res5.1.colw2"
+  top: "res5.1.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res5.1.colw2/relu"
+  type: "ReLU"
+  bottom: "res5.1.colw2/bn"
+  top: "res5.1.colw2/bn"
+}
+layer {
+  name: "res5.1.colw3"
+  type: "Colwolution"
+  bottom: "res5.1.colw2/bn"
+  top: "res5.1.colw3"
+  colwolution_param {
+    num_output: 2048
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res5.1.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res5.1.colw3"
+  top: "res5.1.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res5.1.skipColw"
+  type: "Colwolution"
+  bottom: "res4.6.sum"
+  top: "res5.1.skipColw"
+  colwolution_param {
+    num_output: 2048
+    kernel_size: 1
+    stride: 2
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res5.1.skipColw/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res5.1.skipColw"
+  top: "res5.1.skipColw/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res5.1.sum"
+  type: "Eltwise"
+  bottom: "res5.1.colw3/bn"
+  bottom: "res5.1.skipColw/bn"
+  top: "res5.1.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res5.1.relu"
+  type: "ReLU"
+  bottom: "res5.1.sum"
+  top: "res5.1.sum"
+}
+layer {
+  name: "res5.2.colw1"
+  type: "Colwolution"
+  bottom: "res5.1.sum"
+  top: "res5.2.colw1"
+  colwolution_param {
+    num_output: 512
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res5.2.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res5.2.colw1"
+  top: "res5.2.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res5.2.colw1/relu"
+  type: "ReLU"
+  bottom: "res5.2.colw1/bn"
+  top: "res5.2.colw1/bn"
+}
+layer {
+  name: "res5.2.colw2"
+  type: "Colwolution"
+  bottom: "res5.2.colw1/bn"
+  top: "res5.2.colw2"
+  colwolution_param {
+    num_output: 512
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res5.2.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res5.2.colw2"
+  top: "res5.2.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res5.2.colw2/relu"
+  type: "ReLU"
+  bottom: "res5.2.colw2/bn"
+  top: "res5.2.colw2/bn"
+}
+layer {
+  name: "res5.2.colw3"
+  type: "Colwolution"
+  bottom: "res5.2.colw2/bn"
+  top: "res5.2.colw3"
+  colwolution_param {
+    num_output: 2048
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res5.2.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res5.2.colw3"
+  top: "res5.2.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res5.2.sum"
+  type: "Eltwise"
+  bottom: "res5.2.colw3/bn"
+  bottom: "res5.1.sum"
+  top: "res5.2.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res5.2.relu"
+  type: "ReLU"
+  bottom: "res5.2.sum"
+  top: "res5.2.sum"
+}
+layer {
+  name: "res5.3.colw1"
+  type: "Colwolution"
+  bottom: "res5.2.sum"
+  top: "res5.3.colw1"
+  colwolution_param {
+    num_output: 512
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res5.3.colw1/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res5.3.colw1"
+  top: "res5.3.colw1/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res5.3.colw1/relu"
+  type: "ReLU"
+  bottom: "res5.3.colw1/bn"
+  top: "res5.3.colw1/bn"
+}
+layer {
+  name: "res5.3.colw2"
+  type: "Colwolution"
+  bottom: "res5.3.colw1/bn"
+  top: "res5.3.colw2"
+  colwolution_param {
+    num_output: 512
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res5.3.colw2/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res5.3.colw2"
+  top: "res5.3.colw2/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res5.3.colw2/relu"
+  type: "ReLU"
+  bottom: "res5.3.colw2/bn"
+  top: "res5.3.colw2/bn"
+}
+layer {
+  name: "res5.3.colw3"
+  type: "Colwolution"
+  bottom: "res5.3.colw2/bn"
+  top: "res5.3.colw3"
+  colwolution_param {
+    num_output: 2048
+    kernel_size: 1
+    weight_filler {
+      type: "msra"
+    }
+    bias_term: false
+  }
+}
+layer {
+  name: "res5.3.colw3/bn"
+  type: "BatchNorm"
+ 
+  bottom: "res5.3.colw3"
+  top: "res5.3.colw3/bn"
+  batch_norm_param {
+ 
+    moving_average_fraction: 0.9
+    eps: 0.0001
+    scale_bias: true
+  }
+}
+layer {
+  name: "res5.3.sum"
+  type: "Eltwise"
+  bottom: "res5.3.colw3/bn"
+  bottom: "res5.2.sum"
+  top: "res5.3.sum"
+  eltwise_param {
+    operation: SUM
+  }
+}
+layer {
+  name: "res5.3.relu"
+  type: "ReLU"
+  bottom: "res5.3.sum"
+  top: "res5.3.sum"
+}
+layer {
+  name: "pool2"
+  type: "Pooling"
+  bottom: "res5.3.sum"
+  top: "pool2"
+  pooling_param {
+    pool: AVE
+    kernel_size: 7
+  }
+}
+layer {
+  name: "fc"
+  type: "InnerProduct"
+  bottom: "pool2"
+  top: "fc"
+  inner_product_param {
+    num_output: 1000
+    weight_filler {
+      type: "msra"
+    }
+    bias_filler {
+      type: "constant"
+      value: 0
+    }
+  }
+}
+layer {
+  name: "prob"
+  type: "Softmax"
+  bottom: "fc"
+  top: "prob"
+}

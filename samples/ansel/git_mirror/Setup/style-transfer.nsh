@@ -1,0 +1,1 @@
+!define LIBRESTYLE_VERSION "1.3"

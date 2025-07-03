@@ -1,0 +1,881 @@
+/*
+ * Copyright 1993-2020 LWPU Corporation.  All rights reserved.
+ *
+ * NOTICE TO LICENSEE:
+ *
+ * This source code and/or documentation ("Licensed Deliverables") are
+ * subject to LWPU intellectual property rights under U.S. and
+ * international Copyright laws.
+ *
+ * These Licensed Deliverables contained herein is PROPRIETARY and
+ * CONFIDENTIAL to LWPU and is being provided under the terms and
+ * conditions of a form of LWPU software license agreement by and
+ * between LWPU and Licensee ("License Agreement") or electronically
+ * accepted by Licensee.  Notwithstanding any terms or conditions to
+ * the contrary in the License Agreement, reproduction or disclosure
+ * of the Licensed Deliverables to any third party without the express
+ * written consent of LWPU is prohibited.
+ *
+ * NOTWITHSTANDING ANY TERMS OR CONDITIONS TO THE CONTRARY IN THE
+ * LICENSE AGREEMENT, LWPU MAKES NO REPRESENTATION ABOUT THE
+ * SUITABILITY OF THESE LICENSED DELIVERABLES FOR ANY PURPOSE.  IT IS
+ * PROVIDED "AS IS" WITHOUT EXPRESS OR IMPLIED WARRANTY OF ANY KIND.
+ * LWPU DISCLAIMS ALL WARRANTIES WITH REGARD TO THESE LICENSED
+ * DELIVERABLES, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY,
+ * NONINFRINGEMENT, AND FITNESS FOR A PARTICULAR PURPOSE.
+ * NOTWITHSTANDING ANY TERMS OR CONDITIONS TO THE CONTRARY IN THE
+ * LICENSE AGREEMENT, IN NO EVENT SHALL LWPU BE LIABLE FOR ANY
+ * SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, OR ANY
+ * DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+ * WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS
+ * ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
+ * OF THESE LICENSED DELIVERABLES.
+ *
+ * U.S. Government End Users.  These Licensed Deliverables are a
+ * "commercial item" as that term is defined at 48 C.F.R. 2.101 (OCT
+ * 1995), consisting of "commercial computer software" and "commercial
+ * computer software documentation" as such terms are used in 48
+ * C.F.R. 12.212 (SEPT 1995) and is provided to the U.S. Government
+ * only as a commercial end item.  Consistent with 48 C.F.R.12.212 and
+ * 48 C.F.R. 227.7202-1 through 227.7202-4 (JUNE 1995), all
+ * U.S. Government End Users acquire the Licensed Deliverables with
+ * only those rights set forth herein.
+ *
+ * Any use of the Licensed Deliverables in individual and commercial
+ * software must include, in the user documentation and internal
+ * comments to the code, the above Disclaimer and U.S. Government End
+ * Users Notice.
+ */
+
+#include "general.hpp"
+#include "lwca.hpp"
+#include "oran_structs.hpp"
+
+//#define PT_KERNEL_OCLWPANCY 1
+#define ORDER_KERNEL_RECV_TIMEOUT_MS 4
+#define ORDER_KERNEL_WAIT_TIMEOUT_MS (ORDER_KERNEL_RECV_TIMEOUT_MS * 2)
+#define CHECKSUM_THREADS 512
+#define CRC_THREADS 512
+
+__global__ void kernel_write(uint32_t * addr, uint32_t value)
+{   
+    *addr = value;
+    __threadfence_system();
+}
+
+extern "C"
+void pt_launch_kernel_write(uint32_t * addr, uint32_t value, lwdaStream_t stream)
+{
+    lwdaError_t result=lwdaSuccess;
+
+    if(!addr)
+    {
+        pt_err("addr is NULL\n");
+        return;
+    }
+
+    result = lwdaGetLastError();
+    if (lwdaSuccess != result) {
+        pt_err("[%s:%d] lwca failed with %s \n",__FILE__, __LINE__,lwdaGetErrorString(result));
+    }
+
+    kernel_write<<<1, 1, 0, stream>>>(addr, value);
+
+    result = lwdaGetLastError();
+    if (lwdaSuccess != result) {
+        pt_err("[%s:%d] lwca failed with %s \n",__FILE__, __LINE__,lwdaGetErrorString(result));
+    }
+}
+
+__global__ void kernel_check_crc(const uint32_t * i_buf, size_t i_elems, uint32_t * out)
+{
+    __shared__ uint32_t out_sh[1];
+    if(threadIdx.x == 0)
+        out_sh[0]=0;
+    __syncthreads();
+    for (int i = threadIdx.x; i < (int)i_elems; i += CRC_THREADS)
+    {
+        if(i_buf[i] != 0)
+            atomicAdd(out_sh, 1);
+    }
+    __syncthreads();
+    __threadfence_block();
+    if(threadIdx.x == 0)
+    {
+        *out = out_sh[0];
+        __threadfence_system();
+    }
+}
+
+extern "C"
+void pt_launch_check_crc(const uint32_t * i_buf, size_t i_elems, uint32_t * out, lwdaStream_t stream)
+{
+    lwdaError_t result=lwdaSuccess;
+    result = lwdaGetLastError();
+
+    if (lwdaSuccess != result)
+        pt_err("[%s:%d] lwca failed with %s \n",__FILE__, __LINE__,lwdaGetErrorString(result));
+    
+    kernel_check_crc<<<1, CRC_THREADS, sizeof(uint32_t)*1, stream>>>(i_buf, i_elems, out);
+    
+    result = lwdaGetLastError();
+    if (lwdaSuccess != result)
+        pt_err("[%s:%d] lwca failed with %s \n",__FILE__, __LINE__,lwdaGetErrorString(result));
+}
+
+__global__ void kernel_adler32(uint8_t * i_buf, size_t i_elems, uint32_t * out)
+{
+    int idx = threadIdx.x;
+    int sumA = 0, sumB = 0;
+    __shared__ uint32_t A[CHECKSUM_THREADS];
+    __shared__ uint32_t B[CHECKSUM_THREADS];
+
+    for (int i = idx; i < (int)i_elems; i += CHECKSUM_THREADS)
+    {
+        sumA += i_buf[i];
+        sumB = (sumB + ( (((int)i_elems)-i) * ((int)i_buf[i])) % MOD_CHECKSUM_ADLER32);
+    }
+
+    A[idx] = sumA;
+    B[idx] = sumB;
+    __syncthreads();
+
+    for (int j = CHECKSUM_THREADS/2; j>0; j/=2)
+    {
+        if (idx<j)
+        {
+            A[idx] += A[idx+j];
+            B[idx] += (B[idx+j] % MOD_CHECKSUM_ADLER32);
+        }
+        __syncthreads();
+    }
+
+    if (idx == 0)
+    {
+        A[0] += 1;
+        A[0] = A[0]%MOD_CHECKSUM_ADLER32;
+        B[0] += ( ((int)i_elems) );
+        B[0] = ( B[0] % MOD_CHECKSUM_ADLER32 );
+        *out = (B[0] << 16) | A[0];
+    }
+}
+
+extern "C"
+void pt_launch_checksum(uint8_t * i_buf, size_t i_elems, uint32_t * out, lwdaStream_t stream)
+{
+    lwdaError_t result=lwdaSuccess;
+
+    result = lwdaGetLastError();
+    if (lwdaSuccess != result)
+        pt_err("[%s:%d] lwca failed with %s \n",__FILE__, __LINE__,lwdaGetErrorString(result));
+
+    kernel_adler32<<<1, CHECKSUM_THREADS, CHECKSUM_THREADS * sizeof(uint32_t) * 2, stream>>>(i_buf, i_elems, out);
+
+    result = lwdaGetLastError();
+    if (lwdaSuccess != result)
+        pt_err("[%s:%d] lwca failed with %s \n",__FILE__, __LINE__,lwdaGetErrorString(result));
+}
+
+__device__ __forceinline__ unsigned long long __globaltimer()
+{   
+    unsigned long long globaltimer;
+    // 64-bit GPU global nanosecond timer
+    asm volatile("mov.u64 %0, %globaltimer;" : "=l"(globaltimer));
+    return globaltimer;
+}
+
+__device__ int global_index_mbatch=0;
+__device__ int barrier_flag=0;
+__device__ int block_flag=0;
+__device__ int last_mbatch_index=0;
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//// Persistent (per slot) kernel mode
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#if 0
+__global__ void kernel_order_prbs(
+                        uint32_t * cache_count_prbs, int tot_prbs, int prbs_per_symbol,
+                        struct mbufs_batch * mbatch,
+                        uint32_t * mbufs_batch_ready_flags_d,
+                        uintptr_t * gbuf_table_cache_ptr,
+                        // uintptr_t table_slot_ptr, 
+                        int tot_pkts_x_batch, int tot_pkts_x_block, int gbuf_index_pipeline, 
+                        int timer_mode, uint32_t * start_flag, uint32_t * order_flag,
+                        uint16_t *map_slot_to_last_mbatch
+                    )
+{
+    int local_index_mbatch=0, ready_local=PT_MBATCH_FREE, index_mbuf=0, buf_copy_index=0;
+    // int gTindex = (threadIdx.x+blockIdx.x*blockDim.x);
+    int blockNumber=0;
+    int barrier_idx=1, barrier_signal = gridDim.x; //, tot_pkts_x_block=tot_pkts_x_batch/gridDim.x;
+    uint16_t flow_index;
+    uint8_t first_loop=0, *pkt_pld, *gbuf_start_offset; //int4
+    // unsigned short int old_val;
+    // uint8_t * table_slot_ptr_local = (uint8_t*)table_slot_ptr;
+    // uint8_t slot_num;
+
+    __shared__ int ready_shared[1];
+    //Warning: PK_LWDA_BLOCKS must be changed!
+    /* extern */ __shared__ uint32_t mbuf_size[PK_LWDA_BLOCKS];
+    /* extern */ __shared__ uintptr_t mbuf_ptr[PK_LWDA_BLOCKS];
+    /* extern */ __shared__ uint8_t gbuf_index_target[PK_LWDA_BLOCKS];
+    /* extern */ __shared__ uint32_t gbuf_offset[PK_LWDA_BLOCKS];
+
+    local_index_mbatch = last_mbatch_index;
+
+    if(threadIdx.x == 0)
+    {
+        blockNumber = atomicAdd((int*)&(block_flag), 1);
+        ready_shared[0] = PT_MBATCH_FREE;
+        if(blockNumber == 0)
+            atomicExch((int*)&(barrier_flag), 0);
+        __threadfence();
+    }
+    __syncthreads();
+
+
+    while(1)
+    {
+        if(threadIdx.x == 0)
+        {
+            #ifdef ORDER_KERNEL_TIMERS
+                if(threadIdx.x == 0 && blockNumber == 0)
+                    mbatch[local_index_mbatch].timers[TIMER_START_WAIT] = clock64();
+            #endif
+
+            while(1) //exit_local != 1)
+            {
+                ready_local = PT_ACCESS_ONCE(mbufs_batch_ready_flags_d[local_index_mbatch]);
+                if(ready_local > PT_MBATCH_FREE)
+                {
+                    //Do I really need this without timers?
+                    if(blockNumber == 0 && first_loop == 0) // && timer_mode)
+                    {
+                        start_flag[0] = PT_SLOT_START;
+                        __threadfence_system();
+                        first_loop = 1;
+                    }
+
+                    ready_shared[0] = ready_local;
+                    __threadfence_block();
+
+                    #ifdef ORDER_KERNEL_TIMERS
+                        if(threadIdx.x == 0 && blockNumber == 0) mbatch[local_index_mbatch].timers[TIMER_START_PREPARE] = clock64();
+                    #endif
+
+                    break;
+                }
+            }
+        }
+        __threadfence();
+        __syncthreads();
+
+        //Exit condition from host
+        if(ready_shared[0] != PT_MBATCH_READY)
+            goto exit;
+
+        #ifdef ORDER_KERNEL_TIMERS
+            if(threadIdx.x == 0 && blockNumber == 0) mbatch[local_index_mbatch].timers[TIMER_START_COPY] = clock64();
+        #endif
+
+        //From host memory to shared memory
+        if(threadIdx.x < tot_pkts_x_block)
+        {
+            // printf("Block %d thread %d tot_pkts_x_block %d batch %d size at %d\n", 
+            //     blockIdx.x, threadIdx.x, tot_pkts_x_block, local_index_mbatch, threadIdx.x + (blockIdx.x * tot_pkts_x_block));
+            mbuf_size[threadIdx.x] = (uint32_t)(mbatch[local_index_mbatch].mbufs_size[threadIdx.x + (blockIdx.x * tot_pkts_x_block)]);
+            if(mbuf_size[threadIdx.x] != 0)
+            {
+                mbuf_ptr[threadIdx.x]           = (uintptr_t)PT_ACCESS_ONCE(mbatch[local_index_mbatch].mbufs_payload_src[threadIdx.x + (blockIdx.x * tot_pkts_x_block)]);
+                flow_index = (uint16_t)(mbatch[local_index_mbatch].mbufs_flow[threadIdx.x + (blockIdx.x * tot_pkts_x_block)]);
+                // gbuf_index_target[threadIdx.x]  = gbuf_index_pipeline;
+                gbuf_index_target[threadIdx.x]  = oran_get_slot_from_hdr((uint8_t*)mbuf_ptr[threadIdx.x]) % PT_MAX_SLOT_ID;
+                gbuf_offset[threadIdx.x]        = oran_get_offset_from_hdr((uint8_t*)mbuf_ptr[threadIdx.x], flow_index, SLOT_NUM_SYMS, prbs_per_symbol, PRB_SIZE_16F);
+
+                // printf("flow %d symbol %d index prb %d GPU offset %d\n",
+                //     flow_index, oran_umsg_get_symbol_id((uint8_t*)mbuf_ptr[threadIdx.x]),
+                //     oran_umsg_get_start_prb((uint8_t*)mbuf_ptr[threadIdx.x]), gbuf_offset[threadIdx.x]);
+
+                // printf("Block %d Thread %d Symbol %d start PRB %d tot PRB %d prbs_per_symbol %d PRB_SIZE_16F %d\n", 
+                //                                                         blockIdx.x, threadIdx.x, oran_umsg_get_symbol_id((uint8_t*)mbuf_ptr[threadIdx.x]),
+                //                                                         oran_umsg_get_start_prb((uint8_t*)mbuf_ptr[threadIdx.x]), oran_umsg_get_num_prb((uint8_t*)mbuf_ptr[threadIdx.x]),
+                //                                                         prbs_per_symbol, PRB_SIZE_16F
+                //                                                     );
+            }
+            else
+                mbuf_ptr[threadIdx.x] = 0;
+        }
+        __threadfence_block();
+        __syncthreads();
+
+        //Each LWCA block copies one buffer at a time
+        // for(index_mbuf=blockIdx.x; index_mbuf < tot_pkts_x_batch; index_mbuf += gridDim.x)
+        for(index_mbuf=0; index_mbuf < tot_pkts_x_block; index_mbuf++)
+        {
+            #if 0
+                if(threadIdx.x == 0)
+                {
+                    mbuf_size[0] = (uint32_t)mbatch[local_index_mbatch].mbufs_size[index_mbuf];
+                    if(mbuf_size[0] != 0)
+                    {
+                        mbuf_size[0] = mbuf_size[0]-ORAN_IQ_HDR_SZ;
+                        mbuf_ptr[0] = (uintptr_t)(mbatch[local_index_mbatch].mbufs_payload_src[index_mbuf]);
+                        gbuf_offset[0] = ( ( oran_umsg_get_symbol_id((uint8_t*)mbuf_ptr[0]) * prbs_per_symbol * PRB_SIZE_16F) + 
+                                                                                                oran_umsg_get_start_prb((uint8_t*)mbuf_ptr[0]) * PRB_SIZE_16F);
+                        slot_num = get_slot_number_from_packet(
+                            oran_umsg_get_frame_id((uint8_t*)mbuf_ptr[0]),
+                            oran_umsg_get_subframe_id((uint8_t*)mbuf_ptr[0]),
+                            oran_umsg_get_slot_id((uint8_t*)mbuf_ptr[0])
+                        );
+
+                        /*
+                         * Input slot ID represents the slot that must be completed but, due to the batching timer,
+                         * there may be packets in the same batch belonging to different slots
+                         */
+                        #ifdef ORDER_GENERIC_BUFFER
+                            //You can do this only one time with an internal cache
+                            for(index_slot = 0; index_slot < PT_MAX_SLOT_ID; index_slot++)
+                            {   
+                                old_val = atomicCAS(
+                                    (unsigned short int *)&slot_status[(gbuf_index_pipeline+index_slot)%PT_MAX_SLOT_ID], 
+                                    (unsigned short int) PT_SLOT_STATUS_FREE, 
+                                    (unsigned short int) (PT_SLOT_STATUS_BUSY | slot_num)
+                                );
+
+                                //If old != PT_SLOT_STATUS_FREE it may be oclwpied by another slot
+                                if(old_val == PT_SLOT_STATUS_FREE || old_val == (PT_SLOT_STATUS_BUSY | slot_num))
+                                {
+                                    PT_ACCESS_ONCE(gbuf_index_target[0]) = (gbuf_index_pipeline+index_slot)%PT_MAX_SLOT_ID;
+                                    break;
+                                }
+                                //else loop to the next one!
+                            }
+                        #else
+                            PT_ACCESS_ONCE(gbuf_index_target[0]) = slot_num;
+                            ////Should we handle this error here? Should we assume this doesn't happen?
+                            // if(slot_num == gbuf_index_pipeline || slot_num == (gbuf_index_pipeline+1)%PT_MAX_SLOT_ID)
+                            //     PT_ACCESS_ONCE(gbuf_index_target[0]) = slot_num;
+                            // else
+                            //     printf("ERROR! slot_num=%d, gbuf_index_pipeline=%d\n", slot_num, gbuf_index_pipeline);
+                        #endif
+                    }
+                }
+                __threadfence_block();
+                __syncthreads();
+
+                //Let's move to the next batch
+                if(mbuf_size[0] == 0) break;
+            #endif
+
+
+            if(mbuf_ptr[index_mbuf] == 0)
+                break;                
+
+            pkt_pld = ((uint8_t*)mbuf_ptr[index_mbuf])+ORAN_IQ_HDR_SZ;
+            gbuf_start_offset = ((uint8_t*)(gbuf_table_cache_ptr[gbuf_index_target[index_mbuf]]) + gbuf_offset[index_mbuf]);
+            // gbuf_start_offset = (uint8_t*)(table_slot_ptr_local + gbuf_offset[index_mbuf]);
+
+            //Each LWCA block takes care of a different element in the packet payload
+            for(buf_copy_index = threadIdx.x; buf_copy_index < mbuf_size[index_mbuf]-ORAN_IQ_HDR_SZ; buf_copy_index += blockDim.x)
+                gbuf_start_offset[buf_copy_index] = pkt_pld[buf_copy_index];
+
+            //Each block increases the number of tot PRBs
+            if(threadIdx.x == 0)
+                atomicAdd((int*)&(cache_count_prbs[gbuf_index_target[index_mbuf]]), oran_umsg_get_num_prb((uint8_t*)mbuf_ptr[index_mbuf]));
+        }
+        __threadfence();
+        __syncthreads();
+
+        #ifdef ORDER_KERNEL_TIMERS
+            if(threadIdx.x == 0 && blockNumber == 0) mbatch[local_index_mbatch].timers[TIMER_START_DONE] = clock64();
+        #endif
+
+        if(threadIdx.x == 0)
+        {
+            ///////////////////////////////////////////////////////////
+            // Inter-block barrier
+            ///////////////////////////////////////////////////////////
+            atomicAdd((int*)&(barrier_flag), 1);
+            while(atomicAdd((int *)&barrier_flag, 0) < (barrier_signal*barrier_idx));
+            barrier_idx++;
+            ///////////////////////////////////////////////////////////
+
+            // printf("Thread 0 block %d after barrier, slot %d batch %d PRBs %d tot_prbs %d\n", 
+            //     blockIdx.x, gbuf_index_pipeline, local_index_mbatch, value, tot_prbs);
+            //Exit condition: when slot ID is full (should I use a timer?)
+            //Exit only when the current slot has been completed
+            if(atomicAdd((int*)&(cache_count_prbs[gbuf_index_pipeline]), 0) >= tot_prbs)
+            {
+                ///////////////////////////////////////////////////////////
+                // Inter-block barrier
+                ///////////////////////////////////////////////////////////
+                atomicAdd((int*)&(barrier_flag), 1);
+                while(atomicAdd((int *)&barrier_flag, 0) < (barrier_signal*barrier_idx));
+                barrier_idx++;
+                ///////////////////////////////////////////////////////////
+                ready_shared[0] = PT_MBATCH_EXIT;
+            }
+        }
+        __threadfence_block();
+        __syncthreads();
+
+        local_index_mbatch = (local_index_mbatch+1)%PT_MBUFS_BATCH_TOT;
+
+        if(ready_shared[0] == PT_MBATCH_EXIT)
+            goto exit;
+    }
+
+exit:
+    //First thread, last block
+    if(threadIdx.x == 0 && blockNumber == (gridDim.x-1))
+    {
+        // printf("Slot %d tot PRBs %d exit\n", gbuf_index_pipeline, cache_count_prbs[gbuf_index_pipeline]);
+        PT_ACCESS_ONCE(cache_count_prbs[gbuf_index_pipeline]) = 0;
+        PT_ACCESS_ONCE(last_mbatch_index) = local_index_mbatch;
+        *map_slot_to_last_mbatch = local_index_mbatch;
+        atomicExch((int*)&(block_flag), 0);
+        PT_ACCESS_ONCE(order_flag[0]) = PT_SLOT_ORDERED;
+        __threadfence_system();
+    }
+
+    return;
+}
+
+#else
+
+__global__ void kernel_order_prbs_single_cblock(
+    uint32_t * cache_count_prbs, int tot_prbs, int prbs_per_symbol,
+    struct mbufs_batch * mbatch,
+    uint32_t * mbufs_batch_ready_flags_d,
+    uintptr_t * gbuf_table_cache_ptr,
+    int tot_pkts_x_batch, int tot_pkts_x_block, int gbuf_index_pipeline,
+    int timer_mode, uint32_t * start_flag, uint32_t * order_flag,
+    uint16_t *map_slot_to_last_mbatch,
+    uint8_t prev_frameId, uint8_t prev_subFrameId, uint8_t prev_slotId
+)
+{
+    int local_index_mbatch=0, ready_local=PT_MBATCH_FREE, index_mbuf=0, buf_copy_index=0, oran_slot=0;
+    uint16_t flow_index;
+    uint8_t first_loop=0, *pkt_pld, *gbuf_start_offset; //int4
+    unsigned long long start=0;
+    unsigned long long kernel_start=__globaltimer();
+    unsigned long long lwrrent_time=0;
+    __shared__ int ready_shared[1];
+    //Warning: PK_LWDA_BLOCKS must be changed!
+    /* extern */ __shared__ uint32_t mbuf_size[PT_ORDER_PKTS_BUFFERING];
+    /* extern */ __shared__ uintptr_t mbuf_ptr[PT_ORDER_PKTS_BUFFERING];
+    /* extern */ __shared__ uint8_t gbuf_index_target[PT_ORDER_PKTS_BUFFERING];
+    /* extern */ __shared__ uint32_t gbuf_offset[PT_ORDER_PKTS_BUFFERING];
+
+    local_index_mbatch = last_mbatch_index;
+
+    if(threadIdx.x == 0)
+    {
+        ready_shared[0] = PT_MBATCH_FREE;
+        __threadfence();
+    }
+    __syncthreads();
+
+    while(1)
+    {
+        if(threadIdx.x == 0)
+        {
+            while(1) //exit_local != 1)
+            {
+                //Should we add a global timer despite of the first packet? Assuming LSU always sends them
+                lwrrent_time = __globaltimer();
+                if((first_loop == 1 && ((__globaltimer() - start) > ORDER_KERNEL_RECV_TIMEOUT_MS * NS_X_MS)) || //4ms max timeout for receiving packets
+                    (first_loop == 0 && ((lwrrent_time - kernel_start) > ORDER_KERNEL_WAIT_TIMEOUT_MS * NS_X_MS))) //8ms max timeout for kernel to wait for packets
+                {
+#ifndef NO_PRINTS
+                    if(first_loop == 1) {
+                        printf("Packets arrived but took too long: Timeout slot %d after %lu ns last mbatch %d totPRBs %d\n",
+                            gbuf_index_pipeline,
+                            (lwrrent_time - start),
+                            local_index_mbatch,
+                            atomicAdd((int*)&(cache_count_prbs[gbuf_index_pipeline]), 0));
+                    }
+                    if(first_loop == 0) {
+                        printf("Packets never arrived: Timeout slot %d after %lu ns last mbatch %d totPRBs %d\n",
+                            gbuf_index_pipeline,
+                            (lwrrent_time - kernel_start),
+                            local_index_mbatch,
+                            atomicAdd((int*)&(cache_count_prbs[gbuf_index_pipeline]), 0));
+                    }
+#endif
+                    ready_shared[0] = PT_MBATCH_EXIT;
+                    __threadfence_block();
+                    break;
+                }
+                ready_local = PT_ACCESS_ONCE(mbufs_batch_ready_flags_d[local_index_mbatch]);
+                if(ready_local > PT_MBATCH_FREE)
+                {
+                    if(first_loop == 0)
+                    {
+                        start_flag[0] = PT_SLOT_START;
+                        __threadfence_system();
+                        first_loop = 1;
+                        start = __globaltimer();
+                        __threadfence();
+                    }
+
+                    ready_shared[0] = ready_local;
+                    __threadfence_block();
+
+                    break;
+                }
+            }
+        }
+        __threadfence_block();
+        __syncthreads();
+
+        //Exit condition from host
+        if(ready_shared[0] != PT_MBATCH_READY)
+            goto exit;
+
+        //From host memory to shared memory
+        if(threadIdx.x < PT_ORDER_PKTS_BUFFERING)
+        {
+            // printf("Block %d thread %d tot_pkts_x_block %d batch %d size at %d\n", blockIdx.x, threadIdx.x, tot_pkts_x_block, local_index_mbatch, threadIdx.x + (blockIdx.x * tot_pkts_x_block));
+            mbuf_size[threadIdx.x] = (uint32_t)(mbatch[local_index_mbatch].mbufs_size[threadIdx.x + (blockIdx.x * tot_pkts_x_block)]);
+            if(mbuf_size[threadIdx.x] != 0)
+            {
+                mbuf_ptr[threadIdx.x]           = (uintptr_t)PT_ACCESS_ONCE(mbatch[local_index_mbatch].mbufs_payload_src[threadIdx.x + (blockIdx.x * tot_pkts_x_block)]);
+                //Discard previous slot PRBs coming too late
+                if(
+                    prev_frameId == oran_umsg_get_frame_id((uint8_t*)mbuf_ptr[threadIdx.x])         &&
+                    prev_subFrameId == oran_umsg_get_subframe_id((uint8_t*)mbuf_ptr[threadIdx.x])   &&
+                    prev_slotId == oran_umsg_get_slot_id((uint8_t*)mbuf_ptr[threadIdx.x])
+                ) {
+                    mbuf_ptr[threadIdx.x] = 0;
+                } else {
+                    oran_slot = oran_get_slot_from_hdr((uint8_t*)mbuf_ptr[threadIdx.x]) % PT_MAX_SLOT_ID; // oran_slot = gbuf_index_pipeline;
+                    // if(oran_slot != gbuf_index_pipeline) mbuf_ptr[threadIdx.x] = 0;
+                    flow_index                      = (uint16_t)(mbatch[local_index_mbatch].mbufs_flow[threadIdx.x + (blockIdx.x * tot_pkts_x_block)]);
+                    gbuf_index_target[threadIdx.x]  = oran_slot;
+                    gbuf_offset[threadIdx.x]        = oran_get_offset_from_hdr((uint8_t*)mbuf_ptr[threadIdx.x], flow_index, SLOT_NUM_SYMS, prbs_per_symbol, PRB_SIZE_16F);
+                }
+            }
+            else
+                mbuf_ptr[threadIdx.x] = 0;
+        }
+   
+        __threadfence_block();
+        __syncthreads();
+
+        //Each LWCA block copies one buffer at a time
+        for(index_mbuf=0; index_mbuf < PT_ORDER_PKTS_BUFFERING; index_mbuf++)
+        {
+            if(mbuf_ptr[index_mbuf] == 0)
+                continue;
+
+            pkt_pld = ((uint8_t*)mbuf_ptr[index_mbuf])+ORAN_IQ_HDR_SZ;
+            gbuf_start_offset = ((uint8_t*)(gbuf_table_cache_ptr[gbuf_index_target[index_mbuf]]) + gbuf_offset[index_mbuf]);
+
+            //Each LWCA block takes care of a different element in the packet payload
+            for(buf_copy_index = threadIdx.x; buf_copy_index < mbuf_size[index_mbuf]-ORAN_IQ_HDR_SZ; buf_copy_index += blockDim.x)
+                gbuf_start_offset[buf_copy_index] = pkt_pld[buf_copy_index];
+
+            //Each block increases the number of tot PRBs
+            if(threadIdx.x == 0)
+            {
+                PT_ACCESS_ONCE(cache_count_prbs[gbuf_index_target[index_mbuf]]) = PT_ACCESS_ONCE(cache_count_prbs[gbuf_index_target[index_mbuf]]) + oran_umsg_get_num_prb((uint8_t*)mbuf_ptr[index_mbuf]);
+                __threadfence();
+            }
+        }
+        __threadfence();
+        __syncthreads();
+
+        if(threadIdx.x == 0)
+        {
+            //Exit when the current slot has been completed
+            // if(atomicAdd((int*)&(cache_count_prbs[gbuf_index_pipeline]), 0) >= tot_prbs)
+            if(PT_ACCESS_ONCE(cache_count_prbs[gbuf_index_pipeline]) >= tot_prbs)
+                ready_shared[0] = PT_MBATCH_EXIT;
+        }
+        __threadfence_block();
+        __syncthreads();
+
+        local_index_mbatch = (local_index_mbatch+1)%PT_MBUFS_BATCH_TOT;
+
+        if(ready_shared[0] == PT_MBATCH_EXIT)
+            goto exit;
+    }
+
+exit:
+    if(threadIdx.x == 0)
+    {
+        //printf("Kernel Exit Slot: %d, NumPrbs: %d Last batch %d\n", gbuf_index_pipeline, cache_count_prbs[gbuf_index_pipeline], local_index_mbatch);
+        PT_ACCESS_ONCE(cache_count_prbs[gbuf_index_pipeline]) = 0;
+        PT_ACCESS_ONCE(last_mbatch_index) = local_index_mbatch;
+        __threadfence();
+        *map_slot_to_last_mbatch = local_index_mbatch;
+        PT_ACCESS_ONCE(order_flag[0]) = PT_SLOT_ORDERED;
+        __threadfence_system();
+    }
+    __syncthreads();
+
+    return;
+}
+#endif
+
+#ifdef PT_KERNEL_OCLWPANCY
+    static int print_sm=0;
+#endif
+
+extern "C"
+void pt_launch_pk_order(uint32_t * cache_count_prbs,  int tot_prbs, int prbs_per_symbol,
+                        struct mbufs_batch * mbatch, uint32_t * mbufs_batch_ready_flags_d, 
+                        uintptr_t * gbuf_table_cache_ptr, int tot_pkts_x_batch, int gbuf_index_pipeline,
+                        int timer_mode, uint32_t * start_flag, uint32_t * order_flag,
+                        uint16_t *map_slot_to_last_mbatch,
+                        uint8_t prev_frameId, uint8_t prev_subFrameId, uint8_t prev_slotId,
+                        int lwda_blocks, int lwda_threads, lwdaStream_t stream)
+{
+    lwdaError_t result=lwdaSuccess;
+
+    if(!mbatch || lwda_blocks <= 0 || lwda_threads <= 0 || !mbufs_batch_ready_flags_d)
+    {
+        pt_err("mbatch=%p cache_count_prbs=%p\n", mbatch, cache_count_prbs);
+        return;
+    }
+
+    result = lwdaGetLastError();
+    if (lwdaSuccess != result) {
+        pt_err("[%s:%d] lwca failed with %s \n",__FILE__, __LINE__,lwdaGetErrorString(result));
+    }
+
+    #ifdef PT_KERNEL_OCLWPANCY
+        int maxBlocks=0;
+        if(!print_sm)
+        {
+            result = lwdaOclwpancyMaxActiveBlocksPerMultiprocessor(&maxBlocks,
+                                                                 kernel_order_prbs,
+                                                                 lwda_threads,
+                                                                 (tot_pkts_x_batch/lwda_blocks)*sizeof(uintptr_t) + sizeof(int));
+            if (lwdaSuccess != result) {
+                pt_err("[%s:%d] lwca failed with %s \n",__FILE__, __LINE__,lwdaGetErrorString(result));
+            }
+
+            pt_info("Order kernel, %d LWCA Blocks, %d LWCA Threads, %zd Shared Memory, maxBlocks=%d\n",
+                lwda_blocks, lwda_threads, (tot_pkts_x_batch/lwda_blocks)*sizeof(uintptr_t) + sizeof(int), maxBlocks
+            );
+
+            print_sm = 1;
+        }
+    #endif
+    
+    // kernel_order_prbs<<<lwda_blocks, lwda_threads,
+    kernel_order_prbs_single_cblock<<<1, lwda_threads,
+                                    PT_ORDER_PKTS_BUFFERING*sizeof(uint32_t)+ //tot_pkts_x_batch/PK_LWDA_BLOCKS*sizeof(uint32_t) +  //lwda_blocks
+                                    PT_ORDER_PKTS_BUFFERING*sizeof(uintptr_t)+//tot_pkts_x_batch/PK_LWDA_BLOCKS*sizeof(uintptr_t) +  //lwda_blocks
+                                    PT_ORDER_PKTS_BUFFERING*sizeof(uint8_t)+//tot_pkts_x_batch/PK_LWDA_BLOCKS*sizeof(uint8_t) +  //lwda_blocks
+                                    PT_ORDER_PKTS_BUFFERING*sizeof(uint32_t)+//tot_pkts_x_batch/PK_LWDA_BLOCKS*sizeof(uint32_t) + //lwda_blocks
+                                    sizeof(int), stream>>> (
+                                cache_count_prbs, tot_prbs, prbs_per_symbol,
+                                mbatch, mbufs_batch_ready_flags_d,
+                                gbuf_table_cache_ptr, tot_pkts_x_batch, tot_pkts_x_batch/lwda_blocks,
+                                gbuf_index_pipeline, timer_mode, start_flag, order_flag,
+                                map_slot_to_last_mbatch, prev_frameId, prev_subFrameId, prev_slotId);
+
+    result = lwdaGetLastError();
+    if (lwdaSuccess != result) {
+        pt_err("[%s:%d] lwca failed with %s \n",__FILE__, __LINE__,lwdaGetErrorString(result));
+    }
+}
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//// Persistent (per slot) kernel mode -- HDS
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+__global__ void kernel_copy_prbs_hds(
+                        struct mbufs_batch * mbatch,
+                        uint32_t * mbufs_batch_ready_flags_d,
+                        int tot_pkts_x_block, int timer_mode,
+                        uint32_t * start_flag, uint32_t * order_flag
+                    )
+{
+    int local_index_mbatch=0, ready_local=PT_MBATCH_FREE, index_mbuf=0, buf_copy_index=0;
+    // int gTindex = (threadIdx.x+blockIdx.x*blockDim.x);
+    int blockNumber=0;
+    int barrier_idx=1, barrier_signal = gridDim.x; //, tot_pkts_x_block=tot_pkts_x_batch/gridDim.x;
+    uint8_t first_loop=0, *pkt_pld, *gbuf_start_offset; //int4
+
+    __shared__ int ready_shared[1];
+    //Warning: PK_LWDA_BLOCKS must be changed!
+    /* extern */ __shared__ uint32_t mbuf_size[PK_LWDA_BLOCKS];
+    /* extern */ __shared__ uintptr_t mbuf_ptr_src[PK_LWDA_BLOCKS];
+    /* extern */ __shared__ uintptr_t mbuf_ptr_dst[PK_LWDA_BLOCKS];
+
+    local_index_mbatch = last_mbatch_index;
+
+    if(threadIdx.x == 0)
+    {
+        blockNumber = atomicAdd((int*)&(block_flag), 1);
+        ready_shared[0] = PT_MBATCH_FREE;
+        if(blockNumber == 0)
+            atomicExch((int*)&(barrier_flag), 0);
+        __threadfence();
+    }
+    __syncthreads();
+
+    while(1)
+    {
+        if(threadIdx.x == 0)
+        {
+            #ifdef ORDER_KERNEL_TIMERS
+                if(threadIdx.x == 0 && blockNumber == 0) mbatch[local_index_mbatch].timers[TIMER_START_WAIT] = clock64();
+            #endif
+
+            while(1) //exit_local != 1)
+            {
+                ready_local = PT_ACCESS_ONCE(mbufs_batch_ready_flags_d[local_index_mbatch]);
+                if(ready_local > PT_MBATCH_FREE)
+                {
+                    //Do I really need this without timers?
+                    if(blockNumber == 0 && first_loop == 0) // && timer_mode)
+                    {
+                        start_flag[0] = PT_SLOT_START;
+                        __threadfence_system();
+                        first_loop = 1;
+                    }
+
+                    ready_shared[0] = ready_local;
+                    __threadfence_block();
+
+                    #ifdef ORDER_KERNEL_TIMERS
+                        if(threadIdx.x == 0 && blockNumber == 0) mbatch[local_index_mbatch].timers[TIMER_START_PREPARE] = clock64();
+                    #endif
+                    break;
+                }
+            }
+        }
+        __threadfence();
+        __syncthreads();
+
+        //Exit condition from host
+        if(ready_shared[0] != PT_MBATCH_READY && ready_shared[0] != PT_MBATCH_LAST)
+            goto exit;
+
+        #ifdef ORDER_KERNEL_TIMERS
+            if(threadIdx.x == 0 && blockNumber == 0) mbatch[local_index_mbatch].timers[TIMER_START_COPY] = clock64();
+        #endif
+
+        //From host memory to shared memory
+        if(threadIdx.x < tot_pkts_x_block)
+        {
+            mbuf_size[threadIdx.x] = (uint32_t)(mbatch[local_index_mbatch].mbufs_size[threadIdx.x + (blockIdx.x * tot_pkts_x_block)]);
+            if(mbuf_size[threadIdx.x] != 0)
+            {
+                mbuf_ptr_src[threadIdx.x] = (uintptr_t)(mbatch[local_index_mbatch].mbufs_payload_src[threadIdx.x + (blockIdx.x * tot_pkts_x_block)]);
+                mbuf_ptr_dst[threadIdx.x] = (uintptr_t)(mbatch[local_index_mbatch].mbufs_payload_dst[threadIdx.x + (blockIdx.x * tot_pkts_x_block)]);
+            }
+        }
+        __threadfence_block();
+        __syncthreads();
+
+        //Each LWCA block copies one buffer at a time
+        for(index_mbuf=0; index_mbuf < tot_pkts_x_block; index_mbuf++)
+        {
+            if(mbuf_size[index_mbuf] == 0)
+                break;
+
+            pkt_pld             = ((uint8_t*) mbuf_ptr_src[index_mbuf]);
+            gbuf_start_offset   = ((uint8_t*) mbuf_ptr_dst[index_mbuf]);
+
+            //Each LWCA block takes care of a different element in the packet payload
+            for(buf_copy_index = threadIdx.x; buf_copy_index < mbuf_size[index_mbuf]; buf_copy_index += blockDim.x)
+                gbuf_start_offset[buf_copy_index] = pkt_pld[buf_copy_index];
+        }
+        __threadfence();
+        __syncthreads();
+
+        #ifdef ORDER_KERNEL_TIMERS
+            if(threadIdx.x == 0 && blockNumber == 0) mbatch[local_index_mbatch].timers[TIMER_START_DONE] = clock64();
+        #endif
+
+        local_index_mbatch = (local_index_mbatch+1)%PT_MBUFS_BATCH_TOT;
+
+        if(ready_shared[0] == PT_MBATCH_LAST)
+            goto exit;
+    }
+
+exit:
+    if(threadIdx.x == 0)
+    {
+        ///////////////////////////////////////////////////////////
+        // Inter-block barrier
+        ///////////////////////////////////////////////////////////
+        atomicAdd((int*)&(barrier_flag), 1);
+        while(atomicAdd((int *)&barrier_flag, 0) < (barrier_signal*barrier_idx));
+        if(blockNumber == (gridDim.x-1))
+        {
+            PT_ACCESS_ONCE(last_mbatch_index) = local_index_mbatch;
+            atomicExch((int*)&(block_flag), 0);
+            PT_ACCESS_ONCE(order_flag[0]) = PT_SLOT_ORDERED;
+            __threadfence_system();
+        }
+    }
+    __syncthreads();
+
+    return;
+}
+
+extern "C"
+void pt_launch_pk_copy(struct mbufs_batch * mbatch, uint32_t * mbufs_batch_ready_flags_d, 
+                        int tot_pkts_x_batch,
+                        int timer_mode, 
+                        uint32_t * start_flag, uint32_t * order_flag,
+                        int lwda_blocks, int lwda_threads, lwdaStream_t stream)
+{
+    lwdaError_t result=lwdaSuccess;
+
+    if(!mbatch || lwda_blocks <= 0 || lwda_threads <= 0 || !mbufs_batch_ready_flags_d)
+    {
+        pt_err("pt_launch_pk_copy input params\n");
+        return;
+    }
+
+    result = lwdaGetLastError();
+    if (lwdaSuccess != result) {
+        pt_err("[%s:%d] lwca failed with %s \n",__FILE__, __LINE__,lwdaGetErrorString(result));
+    }
+
+    #ifdef PT_KERNEL_OCLWPANCY
+        int maxBlocks=0;
+        if(!print_sm)
+        {
+            result = lwdaOclwpancyMaxActiveBlocksPerMultiprocessor(&maxBlocks,
+                                                                 kernel_order_prbs,
+                                                                 lwda_threads,
+                                                                 (tot_pkts_x_batch/lwda_blocks)*sizeof(uintptr_t) + sizeof(int));
+            if (lwdaSuccess != result) {
+                pt_err("[%s:%d] lwca failed with %s \n",__FILE__, __LINE__,lwdaGetErrorString(result));
+            }
+
+            pt_info("Order kernel, %d LWCA Blocks, %d LWCA Threads, %zd Shared Memory, maxBlocks=%d\n",
+                lwda_blocks, lwda_threads, (tot_pkts_x_batch/lwda_blocks)*sizeof(uintptr_t) + sizeof(int), maxBlocks
+            );
+
+            print_sm = 1;
+        }
+    #endif
+
+    kernel_copy_prbs_hds<<<lwda_blocks, lwda_threads, 
+                                    tot_pkts_x_batch/PK_LWDA_BLOCKS*sizeof(uint32_t) + 
+                                    tot_pkts_x_batch/PK_LWDA_BLOCKS*sizeof(uintptr_t) + 
+                                    tot_pkts_x_batch/PK_LWDA_BLOCKS*sizeof(uintptr_t) +
+                                    sizeof(int), stream>>>(
+                                                            mbatch, mbufs_batch_ready_flags_d, 
+                                                            tot_pkts_x_batch/lwda_blocks,
+                                                            timer_mode, start_flag, order_flag);
+
+    result = lwdaGetLastError();
+    if (lwdaSuccess != result) {
+        pt_err("[%s:%d] lwca failed with %s \n",__FILE__, __LINE__,lwdaGetErrorString(result));
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

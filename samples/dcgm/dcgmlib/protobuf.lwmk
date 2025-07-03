@@ -1,0 +1,114 @@
+##############################################################################
+# define LOCAL_SOURCES
+##############################################################################
+
+LW_CXX_EXCEPTIONS := 0
+LW_CXX_RTTI := 0
+
+LWRRENT_DIR := $(LW_SOURCE)/apps/dcgm/dcgmlib
+
+###############################################################################
+# Google Protobuf
+###############################################################################
+LWCM_PROTO_DIR :=  $(LW_SOURCE)/apps/dcgm/common/protobuf
+LWCM_PROTOBUF_OUTPUTDIR = $(OUTPUTDIR)
+
+BUILD_PROTOC_H_LIST = $(addprefix $(OUTPUTDIR)/,$(notdir $(addsuffix .pb.h,$(basename $(1)))))
+BUILD_PROTOC_C_LIST = $(addprefix $(OUTPUTDIR)/,$(notdir $(addsuffix .pb.cc,$(basename $(1)))))
+
+# VPATH has to be defined for the build to happen properly in the LWCM directory
+VPATH :=
+VPATH += $(LWCM_PROTO_DIR)
+
+PROTOC = $(LW_TOOLS)/unix/hosts/Linux-x86/unix-build/bin/protoc_2.6.0
+PROTOC_INCLUDES += -I$(OUTPUTDIR)
+PROTOC_INCLUDES += -I$(LWCM_PROTO_DIR)
+PROTOC_OPTIONS += --cpp_out=$(OUTPUTDIR) --python_out=$(OUTPUTDIR)
+PROTOC_SOURCES := lwcm.proto
+
+ifdef DCGM_BUILD_LWSWITCH_MODULE
+    
+    PROTOC_SOURCES += $(OUTPUTDIR)/topology.proto
+    PROTOC_SOURCES += $(OUTPUTDIR)/fabricmanager.proto
+    PROTOC_SOURCES += fabricmanagerHA.proto
+
+ifeq ($(LWCFG_GLOBAL_LWSWITCH_IMPL_LR10),1)
+
+$(OUTPUTDIR)/topology.proto: $(LWCM_PROTO_DIR)/topology.proto.precomp
+	$(CPP) -P -DBUILD_LR_TOPOLOGY $(LWCM_PROTO_DIR)/topology.proto.precomp  -o $(OUTPUTDIR)/topology.proto
+	
+$(OUTPUTDIR)/fabricmanager.proto: $(LWCM_PROTO_DIR)/fabricmanager.proto.precomp $(OUTPUTDIR)/topology.proto
+	$(CPP) -P -DBUILD_LR_TOPOLOGY $(LWCM_PROTO_DIR)/fabricmanager.proto.precomp  -o $(OUTPUTDIR)/fabricmanager.proto
+	
+else
+
+$(OUTPUTDIR)/topology.proto: $(LWCM_PROTO_DIR)/topology.proto.precomp 
+	$(CPP) -P $(LWCM_PROTO_DIR)/topology.proto.precomp  -o $(OUTPUTDIR)/topology.proto
+
+$(OUTPUTDIR)/fabricmanager.proto: $(LWCM_PROTO_DIR)/fabricmanager.proto.precomp $(OUTPUTDIR)/topology.proto
+	$(CPP) -P $(LWCM_PROTO_DIR)/fabricmanager.proto.precomp  -o $(OUTPUTDIR)/fabricmanager.proto
+	
+endif
+
+endif
+
+# Create source, header, and object macros based on list of proto files
+ALL_PB_CFILES := $(call BUILD_PROTOC_C_LIST, $(PROTOC_SOURCES))
+ALL_PB_HFILES := $(call BUILD_PROTOC_H_LIST, $(PROTOC_SOURCES))
+PROTOC_OBJECTS := $(call BUILD_OBJECT_LIST, $(ALL_PB_CFILES))
+
+LOCAL_SOURCES += $(ALL_PB_CFILES)
+
+FORCE_PB_HFILE_GENERATION_LWMK := $(OUTPUTDIR)/force_pb_hfile_generation.lwmk
+
+# declare ALL_PB_HFILES as a prerequisite of FORCE_PB_HFILE_GENERATION
+$(FORCE_PB_HFILE_GENERATION_LWMK): $(ALL_PB_HFILES)
+	$(TOUCH) $@
+
+# Force this lwmk fragment to be included; this should trigger
+# ALL_PB_HFILES and ALL_PB_CFILES generation.
+-include $(FORCE_PB_HFILE_GENERATION_LWMK)
+
+###############################################################################
+# End Google Protobuf
+###############################################################################
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+LOCAL_INCLUDES += $(DCGM_DIR)/common/protobuf
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/protobuf-2.6.0/include/
+
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+LOCAL_CFLAGS += -fPIC -Wno-sign-compare
+endif
+
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), unix)
+    LWCMPROTO_SHARED_LIBRARY_NAME:=liblwcmproto.a
+endif
+ifeq ($(LW_HOST_OS_FAMILY_LOWER_CASE), windows)
+    LWCMPROTO_SHARED_LIBRARY_NAME:=lwcmproto.dll
+endif
+
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+
+LOCAL_LDFLAGS += -L $(OUTPUTDIR) -rdynamic
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS) -lprotobuf
+
+
+lwcmproto_TARGET  := $(OUTPUTDIR)/$(LWCMPROTO_SHARED_LIBRARY_NAME)
+lwcmproto_OBJECTS := $(LOCAL_OBJECTS)
+lwcmproto_CFLAGS  := $(LOCAL_CFLAGS)
+lwcmproto_LDFLAGS := $(LOCAL_LDFLAGS)
+lwcmproto_DEPENDS ?= $(libprotobuf_TARGET) 
+
+build: $(lwcmproto_TARGET)
+$(eval $(call MAKE_STATIC_LIBRARY,lwcmproto))
+build: $(lwcmproto_TARGET).guardwords
+
+#################################################################################
+# Finish
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

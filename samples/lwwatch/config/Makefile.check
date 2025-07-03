@@ -1,0 +1,92 @@
+# apps/lwwatch/config/Makefile
+#
+# Misc helper targets for LWWATCH-CONFIG
+#
+# Don't run targets in this Makefile in parallel since chip-config
+# always writes to lwwatch-config.h, lwwatch-config.mk
+.NOTPARALLEL:;
+
+LW_ROOT = ../../..
+CHIPCONFIG = $(LW_ROOT)/drivers/common/chip-config/chip-config.pl
+
+# default chip-config opts for these tests
+lwwatchcfgOpts := 
+lwwatchcfgOpts += --mode lwwatch-config
+lwwatchcfgOpts += --config lwwatch-config.cfg
+lwwatchcfgOpts += $(if $(DEBUG),--debug,--verbose)
+lwwatchcfgOpts += --resman-root $(LW_ROOT)/drivers/resman
+lwwatchcfgOpts += --source-root $(LW_ROOT)/apps/lwwatch
+lwwatchcfgOpts += $(LWWATCHCFG_OPTIONS)
+
+# for check-lwwatch-config target
+CHECK_LWWATCHCFG_OUTDIR = chk-rm-tmp
+lwwatchcfgCheckOpts := $(lwwatchcfgOpts)
+lwwatchcfgCheckOpts += --output-dir $(CHECK_LWWATCHCFG_OUTDIR)
+
+default: usage
+
+usage: FORCE
+	@echo ""
+	@echo "   check-lwwatch-config  - a quick test"
+	@echo ""
+	@echo "   test                - All tests"
+	@echo ""
+	@echo "   halinfo             - dump halinfo in english"
+	@echo "   halchk              - run halinfo consistency checks"
+	@echo "   logs                - halchk and halinfo .log files"
+	@echo ""
+
+
+all: test
+
+test: clean
+	@echo; echo "*** Make sure we can regenerate lwwatch-config.h and lwwatch-config.mk"; echo
+	./lwwatch-config
+	@echo; echo LWWATCH-CONFIG tests succeeded!; echo
+
+check-lwwatch-config:
+	mkdir -p $(CHECK_LWWATCHCFG_OUTDIR)
+
+	@echo; echo "*** Run halchk"; echo
+	$(CHIPCONFIG) $(lwwatchcfgCheckOpts) --dryrun --verbose --halchk --halchk > $(CHECK_LWWATCHCFG_OUTDIR)/halchk.log
+
+	@echo; echo "*** Run dumphalinfo"; echo
+	$(CHIPCONFIG) $(lwwatchcfgCheckOpts) --dryrun --verbose --dumphalinfo > $(CHECK_LWWATCHCFG_OUTDIR)/halinfo.log
+
+	@echo; echo "*** Make sure we can regenerate lwwatch-config.h and lwwatch-config.mk"; echo
+	$(CHIPCONFIG) $(lwwatchcfgCheckOpts) --quiet
+
+	@echo; echo "*** LWWATCH-CONFIG 'check-lwwatch-config' completed successfully!"; echo
+
+clean:
+	$(RM) -rf $(CHECK_LWWATCHCFG_OUTDIR)
+	$(RM) lwwatch-config.h lwwatch-config.mk
+	$(RM) halchk.log halinfo.log
+	$(RM) g_*.[ch]
+	$(RM) g_*.mk
+	$(RM) *.o
+	$(RM) TAGS tags
+	$(RM) prof.out
+
+# look for problems in halinfo
+halchk: FORCE
+	$(CHIPCONFIG) $(lwwatchcfgOpts) --dryrun --halchk --halchk
+
+halchk.log: FORCE
+	$(CHIPCONFIG) $(lwwatchcfgOpts) --dryrun --halchk --halchk >$@ 2>&1
+
+# do full dump of hal info
+halinfo: FORCE
+	$(CHIPCONFIG) $(lwwatchcfgOpts) --dryrun --dumphalinfo
+
+halinfo.log: FORCE
+	$(CHIPCONFIG) $(lwwatchcfgOpts) --dryrun --dumphalinfo >$@ 2>&1
+
+
+logs: halinfo.log halchk.log
+
+tags: FORCE
+	etags --lang perl *.pl *.pm haldefs/*.def
+
+FORCE:;
+

@@ -1,0 +1,76 @@
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+	float4 tileUV;
+	bool depthAvailable;
+}
+
+cbuffer controlBuf
+{
+	float g_maskID;
+	float g_sldHue;
+	float g_sldDIST;
+	bool g_sldILW;
+}
+
+Texture2D texColor;
+Texture2D texDepth;
+Texture2D texOv01;
+Texture2D texOv02;
+SamplerState samLinear;
+SamplerState samLinearWrap;
+
+#ifndef LW_COMMON
+#define LW_COMMON
+
+#define CAPTURE_STATE_NOT_STARTED		0
+#define CAPTURE_STATE_REGULAR			1
+#define CAPTURE_STATE_REGULARSTEREO		2
+#define CAPTURE_STATE_HIGHRES			3
+#define CAPTURE_STATE_360				4
+#define CAPTURE_STATE_360STEREO			5
+
+#endif 
+
+float Get1DDepth(float2 uv)
+{
+	return texDepth.SampleLevel(samLinear, uv, 0).x;
+}
+
+float GetLinearDepth(float depth, bool ilw)
+{
+	#define DepthParameters         float4(1.0,1000.0,-999.0f,0.0) //whatever works best
+	depth = ilw ? depth : 1.0 - depth; //most games use ilwerted depth, keep that as default
+	depth *= rcp(DepthParameters.y + depth * DepthParameters.z);
+	return saturate(depth);
+}
+
+void PSMain(in float4 vpos : SV_Position, in float2 uv : TexCoord, out float4 color : SV_Target)
+{
+	color = texColor.Sample(samLinear, uv);
+	if (!depthAvailable) return;
+	
+	float depth = Get1DDepth(uv);
+	
+	if(captureState == CAPTURE_STATE_NOT_STARTED || captureState == CAPTURE_STATE_REGULAR || captureState == CAPTURE_STATE_HIGHRES)
+	{
+
+	
+	float2 greenScreenUV = (tileUV.zw - tileUV.xy) * uv + tileUV.xy;
+	
+	float maskID = floor(g_maskID); //background color
+	float hue = frac(g_sldHue + 0.3333);
+
+	float4 mask = maskID == 0 ? saturate(float4(abs(hue * 6.0 - 3.0) - 1.0,2.0 - abs(hue * 6.0 - 2.0), 2.0 - abs(hue * 6.0 - 4.0), 1))
+				: maskID == 1 ? texOv01.Sample(samLinear, greenScreenUV)
+				: maskID == 2 ? texOv02.Sample(samLinear, greenScreenUV)	
+				: 0;			
+
+	float linear_depth = GetLinearDepth(depth, g_sldILW);
+	float depth_mask = linear_depth > g_sldDIST * g_sldDIST * g_sldDIST;
+	color.rgb = lerp(color.rgb, mask.rgb, mask.a * depth_mask);
+
+	}
+}

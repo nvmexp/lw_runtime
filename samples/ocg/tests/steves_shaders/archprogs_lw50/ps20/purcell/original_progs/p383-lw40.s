@@ -1,0 +1,13 @@
+ps_2_0
+dcl_pp t0.rg
+dcl v0.rgb
+dcl_2d s0
+texld_pp r0, t0, s0
+mul_pp r1.rgb, v0, c1
+mul_pp r1.rgb, r0, r1
+mul_pp r1.rgb, r1, c4
+add_pp r1.rgb, r1, r1
+mad_pp r0.rgb, c5, r0, -r1
+mad_pp r0.rgb, r0.a, r0, r1
+mov_pp r0.a, c1.a
+mov_pp oC0, r0

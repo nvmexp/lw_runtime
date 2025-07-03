@@ -1,0 +1,140 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+# WindowsUnitTest.lwmk - Variable definitions specific to compiling and linking Windows unit tests
+
+SRC_TESTS_LIBS = \
+  $(OUTPUTDIR)/srcTests.lib \
+  $(OUTPUTDIR)/optix_static.lib \
+  $(OUTPUTDIR)/Corelib.lib \
+  $(OUTPUTDIR)/gmock.lib
+
+SRC_TESTS_LFLAGS = \
+  /ignore:4099 \
+  -nologo \
+  -subsystem:console \
+  $(OPTIX_LWDA_LFLAGS) \
+  $(SRC_TESTS_LIBS) \
+  ws2_32.lib \
+  Ole32.lib \
+  Rpcrt4.lib
+
+SRC_TESTS_LIBS_BLACKBOX = \
+  $(OUTPUTDIR)/srcTests.lib \
+  $(OUTPUTDIR)/$(LWOPTIX_FILENAME:.dll=.lib) \
+  $(OUTPUTDIR)/gmock.lib \
+  $(OUTPUTDIR)/exptest.lib \
+  $(OUTPUTDIR)/Corelib.lib 
+
+SRC_TESTS_LFLAGS_BLACKBOX = \
+  /ignore:4099 \
+  -nologo \
+  -subsystem:console \
+  $(OPTIX_LWDA_LFLAGS) \
+  $(SRC_TESTS_LIBS_BLACKBOX) \
+  ws2_32.lib \
+  Ole32.lib \
+  Rpcrt4.lib
+
+# Additional object dependencies to support embedded binary data
+BINARY_DATA_OBJECTS = \
+  $(UtilStatic_OBJECTS) \
+  $(OUTPUTDIR)/Prodlib_AssertionFailure$(OBJSUFFIX) \
+  $(OUTPUTDIR)/Prodlib_Exception$(OBJSUFFIX) \
+  $(OUTPUTDIR)/Prodlib_BasicException$(OBJSUFFIX) \
+  $(OUTPUTDIR)/Prodlib_Backtrace$(OBJSUFFIX)
+
+# create_unit_test_exelwtable / create_blackbox_unit_test_exelwtable
+#
+# Create unit test exelwtable for test $(1) from objects $(2).
+#
+# Input variables:
+# $(1)
+#   The name of the test exelwtable, without any platform specific suffix.  Use a prefix of
+#   "test_" for test names.  This keeps the make variables distinct from each other and
+#   reduces the likelihood that they will collide.
+#
+# $(2)
+#   List of object files to link together to form the exelwtable.
+#
+# Example: for Windows test_Foo.exe,
+#   $(call create_unit_test_exelwtable,test_Foo,$(test_Foo_OBJECTS))
+#
+# the blackbox version links against the shared optix library
+define create_unit_test_exelwtable
+  ifeq ($(OPTIX_ENABLE_STACK_TRACE),1)
+    # On Windows, we need dbghelp functions to get symbol names for the backtrace
+    $(1)_LFLAGS += dbghelp.lib
+  endif
+
+  # Link test case exelwtable from built objects and necessary libraries.
+  $$($(1)_EXE): $$(SRC_TESTS_LIBS) $(2) $$$$(OPTIX_RESOURCES) $$$$($(1)_RESOURCES) $$$$(BINARY_DATA_OBJECTS)
+	@$$(ECHO) Building Exelwtable $$@
+	$$(file >$$(OUTPUTDIR)/$(1)_linkParameters.txt,\
+          $$(strip \
+            $$(LFLAGS) \
+            $$(SRC_TESTS_LFLAGS) \
+            $$(OPTIX_LFLAGS) \
+            $$($(1)_LFLAGS) \
+            -out:$$@ \
+            $$(LWVM_LIBRARIES) \
+            $$(OPTIX_RESOURCES) \
+            $$($(1)_RESOURCES) \
+            $(2) \
+            $$(BINARY_DATA_OBJECTS)))
+	$$(call call_linker_print_params_on_verbose,$$(OUTPUTDIR)/$(1)_linkParameters.txt)
+	$$(LINK) @$$(OUTPUTDIR)/$(1)_linkParameters.txt
+endef
+
+# Link test case exelwtable from build objects and necessary libraries.
+define create_blackbox_unit_test_exelwtable
+  ifeq ($(OPTIX_ENABLE_STACK_TRACE),1)
+    # On Windows, we need dbghelp functions to get symbol names for the backtrace
+    $(1)_LFLAGS += dbghelp.lib
+  endif
+
+  # Link test case exelwtable from built objects and necessary libraries.
+  $$($(1)_EXE): $$(SRC_TESTS_LIBS_BLACKBOX) $(2) $$$$($(1)_RESOURCES) $$$$(BINARY_DATA_OBJECTS)
+	@$$(ECHO) Building Exelwtable $$@
+	$$(file >$$(OUTPUTDIR)/$(1)_linkParameters.txt,\
+          $$(strip \
+            $$(LFLAGS) \
+            $$(SRC_TESTS_LFLAGS_BLACKBOX) \
+            $$(OPTIX_LFLAGS) \
+            $$($(1)_LFLAGS) \
+            -out:$$@ \
+            $$($(1)_RESOURCES) \
+            $(2) \
+            $$(BINARY_DATA_OBJECTS)))
+	$$(call call_linker_print_params_on_verbose,$$(OUTPUTDIR)/$(1)_linkParameters.txt)
+	$$(LINK) @$$(OUTPUTDIR)/$(1)_linkParameters.txt
+endef
+
+# run_unit_test
+#
+# Generate a command-line for running a unit test exelwtable.
+#
+# Input variables:
+# $(1)
+#   The name of the test case
+#
+define run_unit_test
+  $$($(1)_EXE)
+endef

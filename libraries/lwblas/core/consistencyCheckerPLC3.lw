@@ -1,0 +1,251 @@
+/* Using certificated STL. */
+#include <cstdio>
+#include <cfloat>
+#include <cmath>
+#include <cassert>
+#include <limits>
+/* LWCA-10.2 Safety Toolkit compliance. */
+#include <lwda_runtime.h>
+/* Only include PLC3 headers. */
+#include <lwtensor/internal/typesPLC3.h>
+#include <lwtensor/internal/utilPLC3.h>
+#include <lwtensor/internal/elementwisePrototypePLC3.h>
+#include <lwtensor/internal/elementwiseInstancePLC3.h>
+#include <lwtensor/internal/defines.h>
+
+namespace LWTENSOR_NAMESPACE
+{
+    /**
+     * This function performs validation checks on the provided inputs.
+     *
+     * This function ensures that a corresponding call to the execute() function actually
+     * succeds and that all provided inputs are valid.
+     *
+     * \param[in] alpha same as for lwtensorElementwiseTrinaryExelwte()
+     * \param[in] Memory address of A; this address is allowed to be a relative address
+     * along as the base address is the same for A, B, C, and D. A is expected to match
+     * the A parameter of lwtensorElementwiseTrinaryExelwte().
+     * \param[in] validRangeA Valid memory range (in elements) relative to A.
+     * \param[in] beta same as for lwtensorElementwiseTrinaryExelwte()
+     * \param[in] Memory address of B; this address is allowed to be a relative address
+     * along as the base address is the same for A, B, C, and D. B is expected to match
+     * the B parameter of lwtensorElementwiseTrinaryExelwte().
+     * \param[in] validRangeB Valid memory range (in elements) relative to B.
+     * \param[in] gamma same as for lwtensorElementwiseTrinaryExelwte()
+     * \param[in] Memory address of C; this address is allowed to be a relative address
+     * along as the base address is the same for A, B, C, and D. C is expected to match
+     * the C parameter of lwtensorElementwiseTrinaryExelwte().
+     * \param[in] validRangeC Valid memory range (in elements) relative to C.
+     * \param[in] Memory address of D; this address is allowed to be a relative address
+     * along as the base address is the same for A, B, C, and D. D is expected to match
+     * the D parameter of lwtensorElementwiseTrinaryExelwte().
+     * \param[in] validRangeD Valid memory range (in elements) relative to D.
+     * \param[in] plan same as for lwtensorElementwiseTrinaryExelwte()
+     * \param[in] numInputTensors number of expected input tensors (used to distinguish
+     * between lwtensorPermutationExelwte(), lwtensorElementwiseBinaryExelwte(), and lwtensorElementwiseTrinaryExelwte())
+     * \returns lwtensorStatus_t::LWTENSOR_STATUS_SUCCESS if all inputs are valid, lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE otherwise.
+     * \changes_elw None.
+     * \behavior blocking, reentrant, thread safe
+     * \designid LWTENSOR_CHECKER_DES_001
+     */
+    lwtensorStatus_t consistencyCheckerPLC3(
+            void const * const alpha, int32_t const regionIdA, int64_t const A, int64_t const validRangeA,
+            void const * const  beta, int32_t const regionIdB, int64_t const B, int64_t const validRangeB,
+            void const * const gamma, int32_t const regionIdC, int64_t const C, int64_t const validRangeC,
+                                      int32_t const regionIdD, int64_t const D, int64_t const validRangeD,
+            ElementwisePlan const & plan, uint32_t const numInputTensors) noexcept
+    {
+        /* 
+         * We create a dummy stream without initialize it. Notice that lwdaStreamCreateWithFlags() is dolwemented
+         * as supported on host only durning initialization. However it is not clear when the consistency checker
+         * will be called. As a result, we create this dummay stream without calling lwdaStreamCreateWithFlags()
+         * to avoid using 0 stream in elementwiseInstancePLC3().
+         */
+        lwdaStream_t dummyStream;
+        lwtensorStatus_t status;
+        ElementwiseParameters const & params {plan.params_};
+        ElementwiseParameters::ElementwiseLayout const & layoutA {params.layoutA};
+        ElementwiseParameters::ElementwiseLayout const & layoutB {params.layoutB};
+        ElementwiseParameters::ElementwiseLayout const & layoutC {params.layoutC};
+        /* Tensor A and its scalar alpha must always be available. */
+        if ((alpha == nullptr) || !plan.useA_)
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+        }
+        /* If tensor B is used, scalar beta must be available. */
+        if (plan.useB_ && (beta == nullptr))
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+        }
+        /* If tensor C is used, scalar gamma must be available. */
+        if (plan.useC_ && (gamma == nullptr))
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+        }
+        constexpr int64_t MAX_INT64_T {std::numeric_limits<int64_t>::max()};
+
+        /* Check if the type-combination is supported? */
+        constexpr bool checkInstanceAvailability {true}; 
+        status = elementwiseInstancePLC3(
+                checkInstanceAvailability,
+                plan.params_,
+                {plan.unaryOpA_, plan.unaryOpB_, plan.unaryOpC_, plan.binaryOp1_, plan.unaryOp1_, plan.binaryOp2_},
+                alpha, nullptr, plan.typeA_,
+                beta,  nullptr, plan.typeB_,
+                gamma, nullptr, plan.typeC_,
+                       nullptr, plan.typeCompute_, dummyStream);
+        if (status != lwtensorStatus_t::LWTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+
+        status = validateElementwiseLayout(params.nmodeC, layoutA);
+        if (status != lwtensorStatus_t::LWTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        status = validateElementwiseLayout(params.nmodeC, layoutB);
+        if (status != lwtensorStatus_t::LWTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        status = validateElementwiseLayout(params.nmodeC, layoutC);
+        if (status != lwtensorStatus_t::LWTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+
+        status = validatePaddingSize(params.nmodeC, params.extent, layoutC, params.padding_size);
+        if (status != lwtensorStatus_t::LWTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        /* Check if maximal offset falls into valid range */
+        int64_t const maximalRelativeOffsetA {
+            getMaximalOffset(params.nmodeC, params.extent, layoutA, 0)};
+        int64_t const maximalRelativeOffsetB {
+            getMaximalOffset(params.nmodeC, params.extent, layoutB, 0)};
+        int64_t const maximalRelativeOffsetC {
+            getMaximalOffset(params.nmodeC, params.extent, layoutC, params.padding_size)};
+        /* C and D share the same descriptor (i.e., they'll have an identical range) */
+        int64_t const maximalRelativeOffsetD {maximalRelativeOffsetC};
+        /* Check if maximal offset falls into valid range */
+        if (plan.useA_ && (maximalRelativeOffsetA > validRangeA))
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+        }
+        if (plan.useB_ && (maximalRelativeOffsetB > validRangeB))
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+        }
+        if (plan.useC_ && (maximalRelativeOffsetC > validRangeC))
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+        }
+        if (maximalRelativeOffsetD > validRangeD)
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+        }
+        /* Test for race conditions (due to overlapping output elements) */
+        int64_t totalExtent {1};
+        for (uint32_t i {0U}; i < params.nmodeC; ++i)
+        {
+            totalExtent *= static_cast<int64_t>(params.extent[i]);
+        }
+        if ((maximalRelativeOffsetC < MAX_INT64_T) && ((maximalRelativeOffsetC + 1L) < totalExtent))
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+        }
+        /* Now we check if input tensors are overlapped with the output tensor. */
+        uint64_t const minimalOffsetA {static_cast<uint64_t>(A)};
+        uint64_t const minimalOffsetB {static_cast<uint64_t>(B)};
+        uint64_t const minimalOffsetC {static_cast<uint64_t>(C)};
+        uint64_t const minimalOffsetD {static_cast<uint64_t>(D)};
+        uint64_t const maximalOffsetA {minimalOffsetA + static_cast<uint64_t>(maximalRelativeOffsetA)};
+        uint64_t const maximalOffsetB {minimalOffsetB + static_cast<uint64_t>(maximalRelativeOffsetB)};
+        uint64_t const maximalOffsetC {minimalOffsetC + static_cast<uint64_t>(maximalRelativeOffsetC)};
+        uint64_t const maximalOffsetD {minimalOffsetD + static_cast<uint64_t>(maximalRelativeOffsetD)};
+        /* Check if A and D are overlapped */
+        if (plan.useA_ && (regionIdA == regionIdD))
+        {
+            if (isRangeOverlapping(minimalOffsetA, maximalOffsetA, minimalOffsetD, maximalOffsetD))
+            {
+                return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+            }
+        }
+        /* Check if B and D are overlapped */
+        if (plan.useB_ && (regionIdB == regionIdD))
+        {
+            if (isRangeOverlapping(minimalOffsetB, maximalOffsetB, minimalOffsetD, maximalOffsetD))
+            {
+                return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+            }
+        }
+        /* Check if C and D are overlapped */
+        if (plan.useC_ && (regionIdC == regionIdD)) 
+        {
+            /* 
+             * C and D are allowed to overlap---if they have the same start address---since 
+             * they share the same descriptor.
+             */
+            if ((C != D) && isRangeOverlapping(minimalOffsetC, maximalOffsetC, minimalOffsetD, maximalOffsetD))
+            {
+                return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+            }
+        }
+        /* The plan has been validated. Return without any error. */
+        return lwtensorStatus_t::LWTENSOR_STATUS_SUCCESS;
+    }
+
+    lwtensorStatus_t consistencyCheckerTrinaryPLC3(
+            void const * const alpha, int32_t const regionIdA, int64_t const A, int64_t const validRangeA,
+            void const * const  beta, int32_t const regionIdB, int64_t const B, int64_t const validRangeB,
+            void const * const gamma, int32_t const regionIdC, int64_t const C, int64_t const validRangeC,
+                                      int32_t const regionIdD, int64_t const D, int64_t const validRangeD,
+            ElementwisePlan const & plan) noexcept
+    {
+        return consistencyCheckerPLC3(
+            alpha, regionIdA, A, validRangeA,
+             beta, regionIdB, B, validRangeB,
+            gamma, regionIdC, C, validRangeC,
+                   regionIdD, D, validRangeD,
+            plan, 3U);
+    }
+
+    lwtensorStatus_t consistencyCheckerBinaryPLC3(
+            void const * const alpha, int32_t const regionIdA, int64_t const A, int64_t const validRangeA,
+            void const * const gamma, int32_t const regionIdC, int64_t const C, int64_t const validRangeC,
+                                      int32_t const regionIdD, int64_t const D, int64_t const validRangeD,
+            ElementwisePlan const & plan) noexcept
+    {
+        /* B must not be used in the binary case. */
+        if (plan.useB_)
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+        }
+        return consistencyCheckerPLC3(
+            alpha, regionIdA, A, validRangeA,
+             nullptr, -1, 0L, 0L,
+            gamma, regionIdC, C, validRangeC,
+                   regionIdD, D, validRangeD,
+            plan, 2U);
+    }
+
+    lwtensorStatus_t consistencyCheckerPermutationPLC3(
+            void const * const alpha, int32_t const regionIdA, int64_t const A, int64_t const validRangeA,
+                                      int32_t const regionIdD, int64_t const D, int64_t const validRangeD,
+            ElementwisePlan const & plan) noexcept
+    {
+        /* B and C must not be used in the unary case. */
+        if (plan.useB_ || plan.useC_)
+        {
+            return lwtensorStatus_t::LWTENSOR_STATUS_ILWALID_VALUE;
+        }
+        return consistencyCheckerPLC3(
+                alpha, regionIdA, A, validRangeA,
+                nullptr, -1, 0L, 0L,
+                nullptr, -1, 0L, 0L,
+                       regionIdD, D, validRangeD,
+                plan, 1U);
+    }
+} /* end namespace LWTENSOR_NAMESPACE */

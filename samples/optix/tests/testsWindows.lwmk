@@ -1,0 +1,99 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+SCRIPT_SUFFIX = .bat
+
+# Make $(1) exelwtable by user; don't need to do anything on Windows.
+OPTIX_MAKE_SCRIPT_EXELWTABLE =
+
+# Script preamble: setup environment variables to default values if empty.
+ROBOT_PREAMBLE :=
+define ROBOT_PREAMBLE
+@setlocal
+@set OPTIX_PROPS_PATH=%CD%
+@if EXIST farm_elws.bat ( call farm_elws.bat )
+
+@if NOT DEFINED %TESTROOTDIR (
+ set TESTROOTDIR=$(subst /,\,$(ROBOT_TESTROOTDIR))
+)
+
+@if NOT DEFINED %TESTROOTBINDIR (
+ set TESTROOTBINDIR=$(subst /,\,$(ROBOT_TESTROOTBINDIR))
+)
+
+@if NOT DEFINED %OPTIXLIBDIR (
+ set OPTIXLIBDIR=$(subst /,\,$(ROBOT_OPTIXLIBDIR))
+)
+
+@if NOT DEFINED %OPTIXBINDIR (
+ set OPTIXBINDIR=$(subst /,\,$(ROBOT_OPTIXBINDIR))
+)
+
+@if NOT DEFINED %ROBOTREPORTDIR (
+ set ROBOTREPORTDIR=$(subst /,\,$(ROBOT_REPORTDIR))
+)
+endef
+
+ROBOT_POSTAMBLE :=
+define ROBOT_POSTAMBLE
+@endlocal
+endef
+
+ROBOT_PATH_ARGS := -v TESTROOTDIR:%TESTROOTDIR% -v TESTROOTBINDIR:%TESTROOTBINDIR% -v OPTIXLIBDIR:%OPTIXLIBDIR% -v OPTIXBINDIR:%OPTIXBINDIR%
+ROBOT_CMD := python %TESTROOTDIR%\robot\run.py --name OptiX --outputdir "%ROBOTREPORTDIR%" --reportbackground lightgray:lightgray $(ROBOT_PATH_ARGS)
+
+ROBOT_test_all_CMD :=
+define ROBOT_test_all_CMD
+$(ROBOT_CMD) $(ROBOT_SUITES) %* %TESTROOTDIR%\testlists
+endef
+
+ROBOT_test_smoke_CMD :=
+define ROBOT_test_smoke_CMD
+$(ROBOT_CMD) $(ROBOT_SUITES) --include smoke %* %TESTROOTDIR%\testlists
+endef
+
+ROBOT_test_regression_CMD :=
+define ROBOT_test_regression_CMD
+$(ROBOT_CMD) $(ROBOT_SUITES) --include regression %* %TESTROOTDIR%\testlists
+endef
+
+ROBOT_test_single_CMD :=
+define ROBOT_test_single_CMD
+$(ROBOT_CMD) --test %* %TESTROOTDIR%\testlists
+endef
+
+ROBOT_test_suite_CMD :=
+define ROBOT_test_suite_CMD
+$(ROBOT_CMD) --suite %* %TESTROOTDIR%\testlists
+endef
+
+ROBOT_test_tag_CMD :=
+define ROBOT_test_tag_CMD
+$(ROBOT_CMD) --include %* %TESTROOTDIR%\testlists
+endef
+
+# On Windows, just write the script contents directly.
+# $(1)    Output path
+# $(2)    Variable name containing the script contents
+OPTIX_WRITE_ROBOT_SCRIPT = $(file >$(1),$($(2)))

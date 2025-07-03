@@ -1,0 +1,118 @@
+##############################################################################
+# Copyright (c) 2020-2022, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+##############################################################################
+
+##############################################################################
+# test_lwscistream_producer makefile
+##############################################################################
+
+
+##############################################################################
+# Include the common lwmake file
+##############################################################################
+
+include $(LW_SOURCE)/drivers/lwsci/tests/lwscistream/unit_tests/common.lwmk
+
+##############################################################################
+# Identify this module to lwCommon.lwmk so it can decide the build type
+##############################################################################
+
+LW_MODULE_LOGGING_NAME = "test_lwscistream_limiter"
+
+##############################################################################
+# path shorthands
+##############################################################################
+
+LWSCISTREAM_TEST_PATH    := $(LWSCI_TESTS_PATH)/lwscistream/unit_tests/limiter
+
+##############################################################################
+# define TEST SOURCES
+##############################################################################
+
+LWSCISTREAM_TEST_SOURCES := test_limiter.cpp
+
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/test_files/,$(LWSCISTREAM_TEST_SOURCES))
+
+##############################################################################
+# define INCLUDES
+##############################################################################
+
+LW_INCLUDES += $(LWSCISTREAM_TEST_PATH)/stub_files
+LW_INCLUDES += $(LWSCISTREAM_TEST_PATH)/driver_files
+LW_INCLUDES += $(LWSCI_TESTS_PATH)/lwscistream/unit_tests
+
+##############################################################################
+# define  SOURCES
+##############################################################################
+
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,common_stub.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,sciwrap.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,block.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,packet.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,pool.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,lwscistream.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,queue.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,multicast.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,ipcsrc.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,ipcdst.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,consumer.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,ipcsrc_send.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,ipcsrc_recv.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,ipcdst_send.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,ipcdst_recv.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,producer.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,common_stub_v2.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,glob_test_vars.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,branch.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,elements.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,endinfo.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,ipcbuffer.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,ipcbuffer_sciwrap.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,lwscistream_safe.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,presentsync.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,returnsync.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,safety_panic.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,syncsignal.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,syncwait.cpp)
+SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/driver_files/,limiter.cpp)
+
+# OS specific variants
+ifeq ($(LW_TARGET_OS),QNX)
+ SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/qnx/,ipccomm.cpp)
+ LW_INCLUDES += $(LWSCISTREAM_TEST_PATH)/stub_files/qnx
+else
+ SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/,fdutils.cpp)
+ SOURCES += $(addprefix $(LWSCISTREAM_TEST_PATH)/stub_files/linux/,ipccomm.cpp)
+ LW_INCLUDES += $(LWSCISTREAM_TEST_PATH)/stub_files/linux
+endif
+
+##############################################################################
+# link the binary
+##############################################################################
+
+TESTAPP_BIN := test_lwscistream_limiter
+TESTAPP := $(OUTPUTDIR)/$(TESTAPP_BIN)
+
+TESTAPP_LD_TARGET = $(TESTAPP).unstripped
+TESTAPP_DEBUG_INFO = $(TESTAPP).debug
+$(eval $(call LW_DEBUG_INFO_CMD, \
+  $(TESTAPP_LD_TARGET), \
+  $(TESTAPP), \
+  $(TESTAPP_DEBUG_INFO)))
+
+build: $(TESTAPP)
+
+$(TESTAPP_LD_TARGET): $(OBJECTS)
+	$(call quiet_cmd,LINK) $(OBJECTS) -o $(TESTAPP_LD_TARGET) $(LDFLAGS)
+
+##############################################################################
+# include definitions of tools and build rules
+##############################################################################
+
+include $(LW_COMMON)/build/lwCommonRules.lwmk

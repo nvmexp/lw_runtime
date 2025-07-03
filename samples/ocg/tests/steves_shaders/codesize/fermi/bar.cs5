@@ -1,0 +1,61 @@
+        cs_4_0
+        dcl_globalflags refactoringAllowed
+        dcl_resource_structured t0, 8
+        dcl_uav_structured u0, 8
+        dcl_input vThreadIDInGroupFlattened
+        dcl_input vThreadID.x
+        dcl_temps 5 
+        dcl_tgsm_structured g0, 16, 128
+        dcl_thread_group 128, 1, 1 
+        ld_structured r0.x, vThreadID.x, l(0), t0.xxxx
+        ld_structured r0.y, vThreadID.x, l(0x4), t0.xxxx
+        store_structured g0.xy, vThreadIDInGroupFlattened.x, l(0), r0.xyxx
+        sync_g_t 
+        and r2.xyz, vThreadIDInGroupFlattened.xxxx, l(0x1f, 0x3f, 0x7f, 0)
+        ieq r2.xyz, r2.xyzx, l(0x1f, 0x3f, 0x7f, 0)
+        if_nz r2.y
+          iadd r0.z, vThreadIDInGroupFlattened.x, l(0xffffffe0)
+          ld_structured r3.xy, r0.z, l(0), g0.xyxx
+          ld_structured r4.xy, vThreadIDInGroupFlattened.x, l(0), g0.xyxx
+          iadd r0.zw, r4.xxxy, r3.xxxy
+          store_structured g0.xy, vThreadIDInGroupFlattened.x, l(0), r0.zwzz
+        endif 
+        sync_g_t 
+        if_nz r2.z
+          iadd r0.z, vThreadIDInGroupFlattened.x, l(0xffffffc0)
+          ld_structured r3.xy, r0.z, l(0), g0.xyxx
+          ld_structured r4.xy, vThreadIDInGroupFlattened.x, l(0), g0.xyxx
+          iadd r0.zw, r3.xxxy, r4.xxxy
+          store_structured g0.xy, vThreadIDInGroupFlattened.x, l(0x8), r0.zwzz
+        else 
+          if_nz r2.y
+            iadd r0.z, vThreadIDInGroupFlattened.x, l(0x40)
+            ld_structured r3.xy, r0.z, l(0), g0.xyxx
+            store_structured g0.xy, vThreadIDInGroupFlattened.x, l(0x8), r3.xyxx
+          else 
+            ld_structured r3.xy, vThreadIDInGroupFlattened.x, l(0), g0.xyxx
+            store_structured g0.xy, vThreadIDInGroupFlattened.x, l(0x8), r3.xyxx
+          endif 
+        endif 
+        sync_g_t 
+        if_nz r2.y
+          iadd r0.z, vThreadIDInGroupFlattened.x, l(0xffffffe0)
+          ld_structured r3.xy, r0.z, l(0x8), g0.xyxx
+          ld_structured r4.xy, vThreadIDInGroupFlattened.x, l(0x8), g0.xyxx
+          iadd r0.zw, r3.xxxy, r4.xxxy
+          store_structured g0.xy, vThreadIDInGroupFlattened.x, l(0), r0.zwzz
+        else 
+          if_nz r2.x
+            iadd r0.z, vThreadIDInGroupFlattened.x, l(0x20)
+            ld_structured r3.xy, r0.z, l(0x8), g0.xyxx
+            store_structured g0.xy, vThreadIDInGroupFlattened.x, l(0), r3.xyxx
+          else 
+            ld_structured r3.xy, vThreadIDInGroupFlattened.x, l(0x8), g0.xyxx
+            store_structured g0.xy, vThreadIDInGroupFlattened.x, l(0), r3.xyxx
+          endif 
+        endif 
+        ld_structured r1.xy, vThreadIDInGroupFlattened.x, l(0x8), g0.xyxx
+        iadd r0.xy, r1.xyxx, r0.xyxx
+        store_structured u0.xy, vThreadID.x, l(0), r0.xyxx
+        ret 
+

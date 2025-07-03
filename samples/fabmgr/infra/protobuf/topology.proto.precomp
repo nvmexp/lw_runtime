@@ -1,0 +1,423 @@
+
+//
+//Definitions for the protobufs that define the topology of a
+//LWLink switch network
+//
+
+// Represents type of the port.  
+
+enum PortType 
+{
+    ACCESS_PORT_GPU     = 1;
+    ACCESS_PORT_CPU     = 2;
+    TRUNK_PORT_SWITCH   = 3;   
+    ACCESS_PORT_SWITCH  = 4; 
+};
+
+enum PhyMode
+{
+    DC_COUPLED          = 1;
+    AC_COUPLED          = 2;
+};
+
+// Indicates what the access port is connected to 
+enum accessConnect
+{
+    ACCESS_NO_CONNECT  = 1;
+    ACCESS_GPU_CONNECT = 2;
+    ACCESS_CPU_CONNECT = 3;
+};
+
+// Indicates what the trunk port is connected to 
+enum trunkConnect
+{
+    TRUNK_NO_CONNECT      = 1;
+    TRUNK_SWITCH_CONNECT  = 2;   
+};
+
+// Message to specify ingress request table entries */
+
+message ingressRequestTable
+{
+    required int32  version             = 1;
+    optional int32  index               = 2;
+    optional int64  address             = 3;
+    optional int32  routePolicy         = 4;
+    optional int32  vcModeValid7_0      = 5;
+    optional int32  vcModeValid15_8     = 6;
+    optional int32  vcModeValid17_16    = 7;
+    optional int32  entryValid          = 8;
+    optional int32  ecc                 = 9;
+};
+
+// Message to specify ingress response table entries */
+
+message ingressResponseTable
+{
+    required int32  version             = 1;
+    optional int32  index               = 2;
+    optional int32  routePolicy         = 3;
+    optional int32  vcModeValid7_0      = 4;
+    optional int32  vcModeValid15_8     = 5;
+    optional int32  vcModeValid17_16    = 6;
+    optional int32  entryValid          = 7;
+    optional int32  ecc                 = 8;
+};
+
+// Message to specify ganged link table entries */
+
+// Message to specify ganged link table entries */
+// This table has gotten much larger as now it has 6-bit fields and it has 16 rows
+// of 256 entries per row. Not all rows need to be populated in most topologies. 
+// The new scheme is to define a row with gandSize (row index) and 256 repeated ints.
+
+message gangedLinkRow
+{
+    required int32   version            = 1;
+    optional uint32  gangSize           = 2;    
+    repeated uint32  data               = 3; 
+};
+
+message gangedLinkTable
+{
+    required int32  version             = 1;
+    repeated int32  data                = 2; // 256 entries of int32
+    repeated gangedLinkRow row          = 3;
+};
+
+// remap table entry flags
+enum remapFlags
+{
+	REMAP_FLAGS_REMAP_ADDR              = 0x0001;
+	REMAP_FLAGS_REQCTXT_CHECK           = 0x0002;
+	REMAP_FLAGS_REQCTXT_REPLACE         = 0x0004;
+	REMAP_FLAGS_ADR_BASE                = 0x0008;
+	REMAP_FLAGS_ADR_OFFSET              = 0x0010;
+	REMAP_FLAGS_REFLECTIVE              = 0x0020;
+	REMAP_FLAGS_ADDR_TYPE               = 0x0040;
+};
+
+// Remap reqctx bits
+enum remapReqCtxBits
+{
+    REMAP_REQCTX_AAS_BIT      = 0x4000;  // bit 14
+    REMAP_REQCTX_FLA_BIT      = 0x8000;  // bit 15
+};
+
+enum lwswitchMaxTargetId
+{
+    MAX_512_TARGET_ID      = 0;  // maximum of 512 endpoints
+    MAX_1024_TARGET_ID     = 1;  // maximum of 1k endpoints
+    MAX_2048_TARGET_ID     = 2;  // maximum of 2k endpoints
+};
+
+enum RemapTable
+{
+	NORMAL_RANGE           = 1;  // normal range table
+#ifdef BUILD_LS_TOPOLOGY
+	EXTENDED_RANGE_A       = 2;  // extended range A table
+	EXTENDED_RANGE_B       = 3;  // extended range B table
+	MULTICAST_RANGE        = 4;  // multicast table
+#endif
+}
+
+enum FabricAddrType
+{
+	FLA_ADDR_TYPE          = 1;
+	GPA_ADDR_TYPE          = 2;
+#ifdef BUILD_LS_TOPOLOGY
+	GPA_EGM_ADDR_TYPE      = 3;
+	SPA_ADDR_TYPE          = 4;
+#endif
+}
+
+// Message to specify Limerock RMAP table entries
+
+message rmapPolicyEntry
+{
+    required int32   version             = 1;
+    optional uint32  index               = 2;
+    optional uint32  entryValid          = 3;
+    optional uint64  address             = 4;
+    optional uint32  reqContextChk       = 5;
+    optional uint32  reqContextMask      = 6;
+    optional uint32  reqContextRep       = 7;
+    optional uint32  addressOffset       = 8;
+    optional uint32  addressBase         = 9;
+    optional uint32  addressLimit        = 10;
+    optional uint32  targetId            = 11;
+    optional uint32  remapFlags          = 12;
+    optional uint32  irlSelect           = 13;
+    optional uint32  p2rSwizEnable       = 14;
+    optional uint32  mult2               = 15;
+    optional uint32  planeSelect         = 16;
+};
+
+// Messages to specify Limerock RID table entries
+
+message routePortList
+{
+    optional uint32  vcMap               = 1;
+    optional uint32  portIndex           = 2;
+};
+
+message ridRouteEntry
+{
+    required int32            version             = 1;
+    optional uint32           index               = 2;
+    optional uint32           valid               = 3;
+    optional uint32           rMod                = 4;
+    repeated routePortList    portList            = 5;
+};
+
+// Messages to specify Limerock RLAN table entries
+
+message rlanGroupSel
+{   
+    optional int32  groupSelect     = 1;
+    optional int32  groupSize       = 2;
+};
+
+message rlanRouteEntry
+{
+    required int32            version             = 1;
+    optional uint32           index               = 2;
+    optional uint32           valid               = 3;
+    repeated rlanGroupSel     groupList           = 4;
+};
+
+message cmdRouteTable
+{
+    required int32  version          = 1;
+    repeated uint32 rFun             = 2;
+};
+
+//
+// per-port configuration registers
+// this message is not complete, pending complete IAS
+//
+message switchPortConfig
+{
+    required int32    version               = 1;
+    optional PortType type                  = 2;
+    optional uint32   RequesterLinkID       = 3;
+    repeated int32    atsdCam               = 4;
+    optional int32    egressBDFRemap        = 5;
+    repeated ingressResponseTable camMap    = 6;    // note these three elements 
+    optional ingressResponseTable atrVal    = 7;    // share format with Response Table
+    optional ingressResponseTable cpuVirt   = 8;    // entries in Willow
+    optional PhyMode  phyMode               = 9; 
+    optional int32    enableVCSet1          = 10;   // needed for VC set flipping
+
+    optional lwswitchMaxTargetId maxTargetID = 11; 
+    optional uint32   RlanID                 = 12;
+};
+
+//
+// trunk mode port description
+//
+message trunkPort
+{
+    required int32  version                 = 1;
+    optional trunkConnect  connectType      = 2;
+    optional uint32  localPortNum           = 3;
+    optional uint32  farNodeID              = 4;
+    optional uint32  farSwitchID            = 5;
+    optional uint32  farPortNum             = 6;
+    optional switchPortConfig config        = 7;
+    repeated ingressRequestTable reqRte     = 8;
+    repeated ingressResponseTable rspRte    = 9;
+    optional gangedLinkTable gangedLinkTbl  = 10;
+    repeated ridRouteEntry   ridRouteTable  = 11;
+    repeated rlanRouteEntry  rlanRouteTable = 12;
+};
+
+//
+// access mode port description
+//
+message accessPort
+{
+    required int32  version                 = 1;
+    optional accessConnect  connectType     = 2;
+    optional uint32  localPortNum           = 3;
+    optional uint32  farNodeID              = 4;
+    optional uint32  farPeerID              = 5;
+    optional uint32  farPortNum             = 6;
+    optional switchPortConfig config        = 7;
+    repeated ingressRequestTable reqRte     = 8;
+    repeated ingressResponseTable rspRte    = 9;
+    optional gangedLinkTable gangedLinkTbl  = 10;
+    repeated rmapPolicyEntry  rmapPolicyTable   = 11;
+    repeated ridRouteEntry    ridRouteTable     = 12;
+    repeated rlanRouteEntry   rlanRouteTable    = 13;
+ #ifdef BUILD_LS_TOPOLOGY
+    repeated rmapPolicyEntry  extARmapPolicyTable = 14;
+    repeated rmapPolicyEntry  extBRmapPolicyTable = 15;
+    repeated rmapPolicyEntry  mcRmapPolicyTable   = 16;
+#endif
+};
+
+// 
+// global (switch-wide) configuration registers
+// this message is not complete, pending complete IAS
+//
+message switchConfig
+{
+    required int32 version                  = 1;
+    optional int32 someRegName              = 2;
+    optional int32 anotherRegName           = 3;
+};
+
+//
+// GPU peer ID mapping to port numbers
+// if bit M of portMap is set for peerID N, 
+// then port M is a possible output for peerID N
+//
+message peerIDPortMap
+{
+    required int32  version                 = 1;
+    optional uint32 peerID                  = 2;
+    repeated uint32 portMap                 = 3;
+};
+
+// define the LWswitch arch
+enum lwSwitchArchType
+{
+    LWSWITCH_ARCH_TYPE_ILWALID = 0x0;
+    LWSWITCH_ARCH_TYPE_SV10    = 0x01;
+    LWSWITCH_ARCH_TYPE_LR10    = 0x02;
+
+#ifdef BUILD_LS_TOPOLOGY
+    LWSWITCH_ARCH_TYPE_LS10    = 0x03;
+#endif
+    LWSWITCH_ARCH_TYPE_MAX     = 0x04;
+};
+
+//
+// descriptor for a LWLink switch
+//
+message lwSwitch
+{
+    required int32 version                  = 1;
+    optional bytes ECID                     = 2;
+    optional switchConfig config            = 3;
+    repeated accessPort access              = 4;
+    repeated trunkPort trunk                = 5;
+    optional uint32 physicalId              = 6;
+    optional lwSwitchArchType arch          = 7;
+    optional uint32 slotId                  = 8;
+};
+
+//
+// descriptor for a GPU
+//
+message GPU
+{
+    required int32 version                  = 1;
+    optional bytes ECID                     = 2;
+    optional uint64 fabricAddrBase          = 3;
+    optional uint64 fabricAddrRange         = 4;
+    repeated peerIDPortMap peerToPort       = 5;
+    optional int32 logicalToPhyPortMap      = 6;
+    optional uint32 physicalId              = 7;
+
+    optional int64 GPABase                  = 8;
+    optional int64 GPARange                 = 9;
+    optional int64 FLABase                  = 10;
+    optional int64 FLARange                 = 11;
+    optional uint32 targetId                = 12;
+    
+ #ifdef BUILD_LS_TOPOLOGY
+    optional int64 GPAEGMBase               = 13;
+    optional int64 GPAEGMRange              = 14;
+ #endif
+};
+
+//
+// system partition information for bare metal and virtual machine
+//
+message partitionMetaDataInfo
+{
+    optional uint32 gpuCount                   = 1;
+    optional uint32 switchCount                = 2;
+    optional uint32 lwLinkIntraTrunkConnCount  = 3;
+    optional uint32 lwLinkInterTrunkConnCount  = 4;
+};
+
+message bareMetalPartitionInfo
+{
+    optional partitionMetaDataInfo metaData = 1;
+    // no additional information required for bare metal partition now
+};
+
+message ptVMPartitionInfo
+{
+    optional partitionMetaDataInfo metaData = 1;
+    // no additional information required for full pass through partition now
+};
+
+message sharedLWSwitchPartitionGpuInfo
+{
+    optional uint32 physicalId       = 1;
+    optional uint32 numEnabledLinks  = 2;
+    optional uint64 enabledLinkMask  = 3;
+};
+
+// keeping switch partition info as seperate for any future 
+// switch specific values/attributes.
+message sharedLWSwitchPartitionSwitchInfo
+{
+    optional uint32 physicalId       = 1;
+    optional uint32 numEnabledLinks  = 2;
+    optional uint64 enabledLinkMask  = 3;
+};
+message sharedLWSwitchPartitionInfo
+{
+    optional uint32 partitionId                           = 1;
+    optional partitionMetaDataInfo metaData               = 2;
+    repeated sharedLWSwitchPartitionGpuInfo gpuInfo       = 3;
+    repeated sharedLWSwitchPartitionSwitchInfo switchInfo = 4;
+};
+
+message nodeSystemPartitionInfo
+{
+    repeated bareMetalPartitionInfo bareMetalInfo           = 1;
+    repeated ptVMPartitionInfo ptVirtualInfo                = 2;
+    repeated sharedLWSwitchPartitionInfo sharedLWSwitchInfo = 3;
+    optional int32 version                                  = 4;
+    optional string name                                    = 5;
+    optional string time                                    = 6;
+};
+
+//
+// node descriptor
+//
+message node
+{
+    required int32 version                          = 1;
+    optional bytes IPAddress                        = 2;
+    repeated GPU   gpu                              = 3;
+    repeated lwSwitch lwswitch                      = 5;
+    optional uint32 nodeId                          = 6;
+    optional nodeSystemPartitionInfo partitionInfo  = 7;
+};
+
+message lwlinkToOsfpPortMapping
+{
+    optional uint32 linkIndex          = 1;
+    optional uint32 externalPortNum    = 2;
+};
+
+//
+// fabric descriptor
+// This is the message that gets encoded and written to the configuration file
+//
+message fabric
+{
+    required int32 version                    = 1;
+    repeated node fabricNode                  = 2;
+    repeated lwlinkToOsfpPortMapping portMap  = 3;
+    optional string name                      = 4;
+    optional string time                      = 5;
+	optional lwSwitchArchType arch            = 6;
+};

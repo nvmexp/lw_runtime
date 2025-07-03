@@ -1,0 +1,88 @@
+#include <optix_world.h>
+
+
+rtBuffer<int> input;
+rtBuffer<int> output;
+rtBuffer<int> unusedBuffer;  // This is unused on purpose.
+
+rtDeclareVariable( int, texId, , );
+rtDeclareVariable( int, levels, , );
+rtDeclareVariable( int, width, , );
+rtBuffer<int> success;
+
+struct PerRayData
+{
+};
+
+rtDeclareVariable( rtObject, top_object, , );
+
+RT_PROGRAM void rg()
+{
+    output[0]      = input[0];
+    optix::Ray ray = optix::make_Ray( make_float3( 0, 0, 0 ), /* origin */
+                                      make_float3( 1, 0, 0 ), /* direction */
+                                      0,                      /* ray type */
+                                      0.001f,                 /* scene_epsilon */
+                                      RT_DEFAULT_MAX );
+    PerRayData prd;
+    rtTrace( top_object, ray, prd );
+}
+
+rtBuffer<int> giBuffer;
+
+RT_PROGRAM void ch()
+{
+    output[0] = giBuffer[0];
+}
+
+RT_PROGRAM void ch_simple()
+{
+}
+
+RT_PROGRAM void bounds()
+{
+}
+
+RT_PROGRAM void intersect()
+{
+}
+
+static __inline__ __device__ unsigned int computeAndPrintValue( float u, float v, float l )
+{
+    unsigned int res = optix::rtTex2DLod<unsigned int>( texId, u, v, l );
+    rtPrintf( "optix::rtTex2DLod<unsigned int>(texId=%d, %f, %f, level=%f) => %d\n", texId, u, v, l, res );
+    return res;
+}
+
+RT_PROGRAM void accessMipmapSquarredArray()
+{
+    if( success[0] )
+    {
+        success[0] = 0;
+        return;
+    }
+    int expectedValue = 0;
+    for( int level = 0; level < levels; ++level )
+    {
+        int   w    = width >> level;
+        float step = 1.f / w;
+        float u    = 0.f;
+        float v    = 0.f;
+        for( int vId = 0; vId < w; ++vId )
+        {
+            for( int uId = 0; uId < w; ++uId )
+            {
+                if( expectedValue++ != computeAndPrintValue( u, v, level ) )
+                {
+                    //rtPrintf("Failure!\n");
+                    success[0] = 0;
+                    return;
+                }
+                u += step;
+            }
+            u = 0.f;
+            v += step;
+        }
+    }
+    success[0] = 1;
+}

@@ -1,0 +1,421 @@
+/*
+ * Copyright (c) 2019, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU Corporation and its licensors retain all intellectual property and proprietary
+ * rights in and to this software, related documentation and any modifications thereto.
+ * Any use, reproduction, disclosure or distribution of this software and related
+ * documentation without an express license agreement from LWPU Corporation is strictly
+ * prohibited.
+ *
+ * TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+ * AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+ * SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+ * LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+ * BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+ * INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGES
+ */
+
+#include <optix_types.h>
+
+#include <corelib/math/MathUtil.h>
+#include <corelib/system/LwdaDriver.h>
+#include <rtcore/interface/types.h>
+
+#include <vector_functions.h>
+#include <vector_types.h>
+
+#include <exp/accel/ExtendedAccelHeader.h>
+#include <exp/context/ErrorHandling.h>
+#include <exp/builtinIS/BuiltinISHelpers.h>
+
+namespace optix_exp {
+
+
+static __device__ __forceinline__ size_t align16( size_t ptr )
+{
+    return ( size_t )( ( ptr + 15 ) & ( ~15 ) );
+}
+
+static __global__ void kernel_alignbuiltinISData( LWdeviceptr outputBuffer )
+{
+    ExtendedAccelHeader* header = (ExtendedAccelHeader*)( outputBuffer );
+    header->dataOffset          = align16( header->dataOffset );
+    header->dataCompactedOffset = align16( header->dataCompactedOffset );
+    header->dataOffset32        = ( header->dataOffset >> 4 );
+}
+
+static __global__ void kernel_copyLwrveVertices( unsigned int numVertices,
+                                                 unsigned int vertexStrideInBytes,
+                                                 char*        vertices,
+                                                 unsigned int widthStrideInBytes,
+                                                 char*        widths,
+                                                 LWdeviceptr  outputBuffer,
+                                                 size_t       vertexOffsetInBytes,
+                                                 unsigned int numMotionSteps,
+                                                 unsigned int motionStep )
+{
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( idx >= numVertices )
+        return;
+
+    ExtendedAccelHeader* header     = (ExtendedAccelHeader*)( outputBuffer );
+    LWdeviceptr          data       = outputBuffer + EXTENDED_ACCEL_HEADER_SIZE + header->dataOffset;
+    LWdeviceptr          vertexData = data + vertexOffsetInBytes;
+
+    float3 v = *reinterpret_cast<float3*>( vertices + (size_t)idx * vertexStrideInBytes );
+    float  w = *reinterpret_cast<float*>( widths + (size_t)idx * widthStrideInBytes );
+
+    reinterpret_cast<float4*>( vertexData )[idx * numMotionSteps + motionStep] = make_float4( v.x, v.y, v.z, w );
+}
+
+static __global__ void kernel_copyLwrveNormals( unsigned int numNormals,
+                                                unsigned int normalStrideInBytes,
+                                                char*        normals,
+                                                LWdeviceptr  outputBuffer,
+                                                size_t       normalOffsetInBytes,
+                                                unsigned int numMotionSteps,
+                                                unsigned int motionStep )
+{
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( idx >= numNormals )
+        return;
+
+    ExtendedAccelHeader* header     = (ExtendedAccelHeader*)( outputBuffer );
+    LWdeviceptr          data       = outputBuffer + EXTENDED_ACCEL_HEADER_SIZE + header->dataOffset;
+    LWdeviceptr          normalData = data + normalOffsetInBytes;
+
+    float3 n = *reinterpret_cast<float3*>( normals + (size_t)idx * normalStrideInBytes );
+
+    reinterpret_cast<float3*>( normalData )[idx * numMotionSteps + motionStep] = n;
+}
+
+static __global__ void kernel_copyLwrveIndices( unsigned int numPrimitives,
+                                                unsigned int indexStrideInBytes,
+                                                char*        indices,
+                                                LWdeviceptr  outputBuffer,
+                                                size_t       indexOffsetInBytes,
+                                                unsigned int vertexOffset )
+{
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( idx >= numPrimitives )
+        return;
+
+    ExtendedAccelHeader* header    = (ExtendedAccelHeader*)( outputBuffer );
+    LWdeviceptr          data      = outputBuffer + EXTENDED_ACCEL_HEADER_SIZE + header->dataOffset;
+    LWdeviceptr          indexData = data + indexOffsetInBytes;
+
+    const unsigned int c0_idx = *reinterpret_cast<unsigned int*>( indices + (size_t)idx * indexStrideInBytes );
+
+    reinterpret_cast<unsigned int*>( indexData )[idx] = c0_idx + vertexOffset;
+}
+
+static __global__ void kernel_storeAdaptiveLwrveSegmentData( unsigned int numSegments,
+                                                             LWdeviceptr  indexMap,
+                                                             LWdeviceptr  dataBuffer,
+                                                             LWdeviceptr  indexBuffer,
+                                                             unsigned int indexStrideInBytes,
+                                                             LWdeviceptr  segments,
+                                                             LWdeviceptr  inflectionPoints,
+                                                             unsigned int indexOffset,
+                                                             unsigned int vertexOffset,
+                                                             unsigned int numMotionSteps )
+{
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( idx >= numSegments )
+        return;
+
+    unsigned int temp_index = reinterpret_cast<unsigned int*>( segments )[idx];
+    unsigned int primIdx    = ( temp_index >> 4 );
+    unsigned int c0_idx = reinterpret_cast<unsigned int*>( indexBuffer + primIdx * indexStrideInBytes )[0] + vertexOffset;
+
+    // Get inflection point.
+    // These values are assumed to be the parameter of the first split of the lwrve segment.
+    // If not set by the inflection point computation (inflection point == 0) the value is replaced
+    // by 128, the quantized representation of 0.5, (128/256.f).
+    unsigned char inflectionPoint = ( reinterpret_cast<unsigned char*>( inflectionPoints ) )[primIdx];
+    if( inflectionPoint == 0 )
+        inflectionPoint = 128;
+    // Store floating point range.
+    unsigned int range_index = temp_index & 0xF;
+    float2       u_f         = decodeSegmentRangeWithInflection( range_index, inflectionPoint );
+
+    LwrveSegmentData* data = (LwrveSegmentData*)( dataBuffer );
+    data[idx].encodeSegmentData( u_f, c0_idx, numMotionSteps );
+
+    reinterpret_cast<unsigned int*>( indexMap )[idx] = primIdx;
+}
+
+static __global__ void kernel_storeLwrveSegmentData( unsigned int numPrimitives,
+                                                     LWdeviceptr  indexMap,
+                                                     LWdeviceptr  dataBuffer,
+                                                     LWdeviceptr  indexBuffer,
+                                                     unsigned int indexStrideInBytes,
+                                                     unsigned int indexOffset,
+                                                     unsigned int vertexOffset,
+                                                     unsigned int numSplits,
+                                                     unsigned int numMotionSteps )
+{
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( idx >= numPrimitives )
+        return;
+
+    unsigned int c0_idx = reinterpret_cast<unsigned int*>( indexBuffer + idx * indexStrideInBytes )[0] + vertexOffset;
+
+    LwrveSegmentData* data = (LwrveSegmentData*)( dataBuffer );
+    for( unsigned int i = 0; i < numSplits; ++i )
+    {
+        data[idx * numSplits + i].encodeUniformSegmentData( numSplits, i, c0_idx, numMotionSteps );
+        reinterpret_cast<unsigned int*>( indexMap )[idx * numSplits + i] = idx;
+    }
+}
+
+static __global__ void kernel_storeLwrveIndexData( unsigned int numPrimitives, LWdeviceptr indexMap )
+{
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( idx >= numPrimitives )
+        return;
+
+    reinterpret_cast<unsigned int*>( indexMap )[idx] = idx;
+}
+
+static __global__ void kernel_copybuiltinISIndexOffsets( unsigned int  numBuildInputs,
+                                                         unsigned int* indexOffsets,
+                                                         LWdeviceptr   outputBuffer,
+                                                         size_t        indexOffsetsOffsetInBytes )
+{
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( idx >= numBuildInputs )
+        return;
+
+    ExtendedAccelHeader* header                 = (ExtendedAccelHeader*)( outputBuffer );
+    LWdeviceptr          data                   = outputBuffer + EXTENDED_ACCEL_HEADER_SIZE + header->dataOffset;
+    LWdeviceptr          primIndexOffsetData    = data + indexOffsetsOffsetInBytes;
+    ( (unsigned int*)primIndexOffsetData )[idx] = indexOffsets[idx];
+}
+
+static __global__ void kernel_setbuiltinISCompactedBufferSize( size_t* compactedBufferSizePtr, ExtendedAccelHeader* header )
+{
+    // Store size of compacted BVH in header. It will be used as offset from the BVH header to the lwrve/sphere data.
+    const size_t size           = *compactedBufferSizePtr;
+    header->dataCompactedOffset = size;
+
+    // Increase the size of the content of compactedBufferSize, align to 16 byte, add the extended header size (128) and the lwrve/sphere data size.
+    *compactedBufferSizePtr = align16( size ) + EXTENDED_ACCEL_HEADER_SIZE + header->dataSize;
+}
+
+static __global__ void kernel_compactExtendedHeader( LWdeviceptr sourceBuffer, LWdeviceptr outputBuffer )
+{
+    ExtendedAccelHeader* sourceHeader = (ExtendedAccelHeader*)sourceBuffer;
+    ExtendedAccelHeader* outputHeader = (ExtendedAccelHeader*)outputBuffer;
+
+    // Just copy to be on the safe side and only patch the values that require tweaking
+    *outputHeader = *sourceHeader;
+
+    // The dataOffset in the output will be set to the compactedDataOffset.
+    outputHeader->dataOffset   = sourceHeader->dataCompactedOffset;
+    outputHeader->dataOffset32 = ( sourceHeader->dataCompactedOffset >> 4 );
+}
+
+#if 0
+// TODO: enable lwdaMemcpyAsync from the lwca device runtime
+
+static __global__ void kernel_copyExtendedData( LWstream stream, LWdeviceptr sourceBuffer, LWdeviceptr outputBuffer )
+{
+    ExtendedAccelHeader* header = (ExtendedAccelHeader*)sourceBuffer;
+
+    LWdeviceptr sourceBvh = sourceBuffer + EXTENDED_ACCEL_HEADER_SIZE;
+    LWdeviceptr outputBvh = outputBuffer + EXTENDED_ACCEL_HEADER_SIZE;
+  
+    // Alignment of the offsets was done in the builder.
+
+    lwdaMemcpyAsync(
+        (void*)(LWdeviceptr)(outputBvh + header->dataCompactedOffset),
+        (void*)(LWdeviceptr)(sourceBvh + header->dataOffset),
+        header->dataSize, lwdaMemcpyDeviceToDevice, stream );
+}
+#else
+
+// TODO: replace the kernel by the kernel above using lwdaMemcpyAsync
+static __global__ void kernel_copyExtendedData( LWdeviceptr sourceBuffer, LWdeviceptr outputBuffer )
+{
+    ExtendedAccelHeader* header = (ExtendedAccelHeader*)sourceBuffer;
+
+    const unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if( idx >= header->dataSize )
+        return;
+
+    LWdeviceptr sourceBvh = sourceBuffer + EXTENDED_ACCEL_HEADER_SIZE;
+    LWdeviceptr outputBvh = outputBuffer + EXTENDED_ACCEL_HEADER_SIZE;
+
+    ( (char*)( outputBvh + header->dataCompactedOffset ) )[idx] = ( (char*)( sourceBvh + header->dataOffset ) )[idx];
+}
+#endif
+
+
+void alignbuiltinISData( LWstream stream, LWdeviceptr outputBuffer )
+{
+    kernel_alignbuiltinISData<<<1, 1, 0, stream>>>( outputBuffer );
+}
+
+void copyLwrveVertices( LWstream stream, const OptixBuildInput& bi, LWdeviceptr outputBuffer, size_t vertexOffsetInBytes, unsigned int numMotionSteps )
+{
+    unsigned int vertexStrideInBytes = bi.lwrveArray.vertexStrideInBytes > 0 ? bi.lwrveArray.vertexStrideInBytes : sizeof( float3 );
+    unsigned int widthStrideInBytes = bi.lwrveArray.widthStrideInBytes > 0 ? bi.lwrveArray.widthStrideInBytes : sizeof( float );
+
+    for( unsigned int motionStep = 0; motionStep < numMotionSteps; motionStep++ )
+    {
+        if( bi.lwrveArray.numVertices )
+        {
+            kernel_copyLwrveVertices<<<( bi.lwrveArray.numVertices + 63 ) / 64, 64, 0, stream>>>(
+                bi.lwrveArray.numVertices, vertexStrideInBytes, reinterpret_cast<char*>( bi.lwrveArray.vertexBuffers[motionStep] ),
+                widthStrideInBytes, reinterpret_cast<char*>( bi.lwrveArray.widthBuffers[motionStep] ), outputBuffer,
+                vertexOffsetInBytes, numMotionSteps, motionStep );
+        }
+    }
+}
+
+void copyLwrveNormals( LWstream stream, const OptixBuildInput& bi, LWdeviceptr outputBuffer, size_t normalOffsetInBytes, unsigned int numMotionSteps )
+{
+    unsigned int normalStrideInBytes = bi.lwrveArray.normalStrideInBytes > 0 ? bi.lwrveArray.normalStrideInBytes : sizeof( float3 );
+
+    for( unsigned int motionStep = 0; motionStep < numMotionSteps; motionStep++ )
+    {
+        if( bi.lwrveArray.numVertices )
+        {
+            kernel_copyLwrveNormals<<<( bi.lwrveArray.numVertices + 63 ) / 64, 64, 0, stream>>>(
+                bi.lwrveArray.numVertices, normalStrideInBytes, reinterpret_cast<char*>( bi.lwrveArray.normalBuffers[motionStep] ),
+                outputBuffer, normalOffsetInBytes, numMotionSteps, motionStep );
+        }
+    }
+}
+
+void copyLwrveIndices( LWstream stream, const OptixBuildInput& bi, LWdeviceptr outputBuffer, size_t indexOffsetInBytes, unsigned int vertexOffset )
+{
+    unsigned int indexStrideInBytes =
+        bi.lwrveArray.indexStrideInBytes > 0 ? bi.lwrveArray.indexStrideInBytes : sizeof( unsigned int );
+
+    if( bi.lwrveArray.numPrimitives )
+    {
+        kernel_copyLwrveIndices<<<( bi.lwrveArray.numPrimitives + 63 ) / 64, 64, 0, stream>>>(
+            bi.lwrveArray.numPrimitives, indexStrideInBytes, reinterpret_cast<char*>( bi.lwrveArray.indexBuffer ),
+            outputBuffer, indexOffsetInBytes, vertexOffset );
+    }
+}
+
+void storeAdaptiveLwrveSegmentData( LWstream               stream,
+                                    const OptixBuildInput& bi,
+                                    LWdeviceptr            indexMap,
+                                    LWdeviceptr            dataBuffer,
+                                    LWdeviceptr            segments,
+                                    LWdeviceptr            inflectionPoints,
+                                    unsigned int           indexOffset,
+                                    unsigned int           vertexOffset,
+                                    unsigned int           numSegments,
+                                    unsigned int           numMotionSteps )
+{
+    unsigned int indexStrideInBytes =
+        bi.lwrveArray.indexStrideInBytes > 0 ? bi.lwrveArray.indexStrideInBytes : sizeof( unsigned int );
+
+    if( numSegments )
+    {
+        kernel_storeAdaptiveLwrveSegmentData<<<( numSegments + 63 ) / 64, 64, 0, stream>>>(
+            numSegments, indexMap, dataBuffer, bi.lwrveArray.indexBuffer, indexStrideInBytes, segments,
+            inflectionPoints, indexOffset, vertexOffset, numMotionSteps );
+    }
+}
+
+void storeLwrveSegmentData( LWstream               stream,
+                            const OptixBuildInput& bi,
+                            LWdeviceptr            indexMap,
+                            LWdeviceptr            dataBuffer,
+                            unsigned int           indexOffset,
+                            unsigned int           vertexOffset,
+                            unsigned int           numSplits,
+                            unsigned int           numMotionSteps )
+{
+    unsigned int indexStrideInBytes =
+        bi.lwrveArray.indexStrideInBytes > 0 ? bi.lwrveArray.indexStrideInBytes : sizeof( unsigned int );
+
+    if( bi.lwrveArray.numPrimitives )
+    {
+        kernel_storeLwrveSegmentData<<<( bi.lwrveArray.numPrimitives + 63 ) / 64, 64, 0, stream>>>(
+            bi.lwrveArray.numPrimitives, indexMap, dataBuffer, bi.lwrveArray.indexBuffer, indexStrideInBytes,
+            indexOffset, vertexOffset, numSplits, numMotionSteps );
+    }
+}
+
+void storeLwrveIndexData( LWstream stream, const OptixBuildInput& bi, LWdeviceptr indexMap )
+{
+    if( bi.lwrveArray.numPrimitives )
+    {
+        kernel_storeLwrveIndexData<<<( bi.lwrveArray.numPrimitives + 63 ) / 64, 64, 0, stream>>>( bi.lwrveArray.numPrimitives, indexMap );
+    }
+}
+
+OptixResult copybuiltinISIndexOffsets( LWstream             stream,
+                                       ExtendedAccelHeader* header,
+                                       LWdeviceptr          tempBuffer,
+                                       size_t               tempBufferSizeInBytes,
+                                       LWdeviceptr          outputBuffer,
+                                       unsigned int         numBuildInputs,
+                                       unsigned int*        indexOffsets,
+                                       ErrorDetails&        errDetails )
+{
+    LWresult result;
+    tempBufferSizeInBytes -= ( tempBufferSizeInBytes % OPTIX_AABB_BUFFER_BYTE_ALIGNMENT );
+    unsigned int indexOffsetsSize =
+        corelib::roundUp( numBuildInputs * sizeof( int ), static_cast<size_t>( OPTIX_AABB_BUFFER_BYTE_ALIGNMENT ) );
+    size_t       offset = tempBufferSizeInBytes - indexOffsetsSize;
+    unsigned int size   = numBuildInputs * sizeof( int );
+    if( result = corelib::lwdaDriver().LwMemcpyHtoDAsync( tempBuffer + offset, (void*)( indexOffsets ), size, stream ) )
+    {
+        return errDetails.logDetails( result, "Copying index offsets to temp buffer failed." );
+    }
+
+    if( numBuildInputs )
+    {
+        kernel_copybuiltinISIndexOffsets<<<( numBuildInputs + 63 ) / 64, 64, 0, stream>>>(
+            numBuildInputs, reinterpret_cast<unsigned int*>( tempBuffer + offset ), outputBuffer,
+            ( (size_t)header->primIndexOffset ) << 4 );
+    }
+
+    return OPTIX_SUCCESS;
+}
+
+OptixResult copyExtendedAccelHeader( LWstream stream, ExtendedAccelHeader* header, LWdeviceptr outputBuffer, ErrorDetails& errDetails )
+{
+    LWresult     result;
+    unsigned int offset = offsetof( ExtendedAccelHeader, dataSize );
+    unsigned int size   = sizeof( ExtendedAccelHeader ) - offset;
+    if( result = corelib::lwdaDriver().LwMemcpyHtoDAsync( outputBuffer + offset, (void*)( &header->dataSize ), size, stream ) )
+    {
+        return errDetails.logDetails( result, "Copying BVH header extension failed." );
+    }
+
+    return OPTIX_SUCCESS;
+}
+
+void setbuiltinISCompactedBufferSize( LWstream stream, size_t* compactedSizePtr, ExtendedAccelHeader* header )
+{
+    kernel_setbuiltinISCompactedBufferSize<<<1, 1, 0, stream>>>( compactedSizePtr, header );
+}
+
+void compactExtendedBuffer( LWstream stream, LWdeviceptr sourceBuffer, LWdeviceptr outputBuffer, size_t outputBufferSizeInBytes )
+{
+    kernel_compactExtendedHeader<<<1, 1, 0, stream>>>( sourceBuffer, outputBuffer );
+    if( outputBufferSizeInBytes )
+        kernel_copyExtendedData<<<( outputBufferSizeInBytes + 63 ) / 64, 64, 0, stream>>>( sourceBuffer, outputBuffer );
+}
+
+}  // namespace optix_exp

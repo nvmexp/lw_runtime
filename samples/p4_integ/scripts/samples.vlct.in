@@ -1,0 +1,130 @@
+# Testsuite configuration
+# By convention testsuite configuration files use a ".vlct" extension.
+{
+  # Descriptive name for the testsuite (required).
+  "name"      : "LWCA Samples Tests",
+  
+  # Testsuite description (optional).
+  "desc"      : "This testsuite builds and runs all LWCA Samples installed by samples.vlcc",
+  
+  # Testsuite owner's email (required).
+  "owner"     : "sw-lwca-samples@lwpu.com",
+  
+  # Define variables for this testsuite that are available as environment variables
+  # when running tests (optional). 
+  "elw"       : [
+                 { "filter" : { "os" : "Linux" }},
+                 "SAMPLES_TEST_BINDIR=${VULCAN_TESTSUITE_DIR}/LWIDIA_LWDA-test_Samples/bin/x86_64/linux/release",
+                 "DISPLAY=:0",
+                 { "filter" : { "os" : "Mac" }},
+                 "SAMPLES_TEST_BINDIR=${VULCAN_TESTSUITE_DIR}/LWIDIA_LWDA-test_Samples/bin/x86_64/darwin/release",
+                 { "filter" : { "os" : "Windows" }},
+                 "SAMPLES_TEST_BINDIR=${VULCAN_INSTALL_DIR}/lwca/samples/bin/win64/Release"
+                ],
+  
+# Define paths containing shared libraries required by the tests.
+  "dllpath"   : [ "${VULCAN_INSTALL_DIR}/lwca/${INSTALL_TARGET_DIR}/${SHAREDLIB_DIR}",
+                  "${VULCAN_INSTALL_DIR}/lwca/_internal/driver"
+                ],
+
+
+  # Timeout for entire testsuite, in seconds (optional). If no timeout is specified the
+  # default timeout value of 900 seconds will be used.
+  "timeout" : "12000",
+
+  # Default timeout for individual tests, in seconds (optional).
+  "testtimeout" : "9000",
+
+  # Default working directory for test runs (optional). The directory can be an absolute
+  # or relative path. A relative path is relative to this file's location. Variables can
+  # be used in the path using the ${var} syntax.
+  "cwd"       : "${SAMPLES_TEST_BINDIR}",
+
+
+  # The tests in the testsuite (required).
+  "tests" : [
+             { "name" : "Purge ${VULCAN_TESTSUITE_DIR}/LWIDIA_LWDA-test_Samples directory",
+               "exe" : "/bin/rm -rf ${VULCAN_TESTSUITE_DIR}/LWIDIA_LWDA-test_Samples",
+               "cwd" : "${VULCAN_TESTSUITE_DIR}",
+                "attributes" : [
+                  { "filter" : { "os" : "Windows" }},
+                  "result=skip"
+                  ]
+              },
+              { "exe" : "lwca-install-samples-test.sh ${VULCAN_TESTSUITE_DIR}",
+                 "cwd" : "${VULCAN_INSTALL_DIR}/lwca/bin",
+                "attributes" : [
+                  { "filter" : { "os" : "Windows" }},
+                  "result=waive"
+                  ]
+              },
+              {
+               "name" : "Make Clobber (Linux/Mac)",
+               "exe" : "${MAKE} clobber LWDA_PATH=${VULCAN_INSTALL_DIR}/lwca",
+                "cwd" : "${VULCAN_TESTSUITE_DIR}/LWIDIA_LWDA-test_Samples",
+                "attributes" : [
+                  { "filter" : { "os" : "Windows" }},
+                  "result=skip"
+                  ]
+              },
+              { "exe" : "${MAKE} -i -j8 LWDA_PATH=${VULCAN_INSTALL_DIR}/lwca",
+                "cwd" : "${VULCAN_TESTSUITE_DIR}/LWIDIA_LWDA-test_Samples",
+                "attributes" : [
+                  { "filter" : { "os" : "Linux", "compiler" : "clang-llvm-3.7.0, icc16" } },
+                  "result=skip",
+                  { "filter" : { "os" : "Windows"} },
+                  "result=skip"
+                  ]
+              },
+              { "exe" : "${MAKE} -i -j8 LWDA_PATH=${VULCAN_INSTALL_DIR}/lwca HOST_COMPILER=${VULCAN_INSTALL_DIR}/clang+llvm/clang+llvm-3.7.0-x86_64-linux-gnu/bin/clang++",
+                "cwd" : "${VULCAN_TESTSUITE_DIR}/LWIDIA_LWDA-test_Samples",
+                "attributes" : [
+                  { "filter" : { "os" : "Windows, Mac, Linux", "!compiler" : "clang-llvm-3.7.0" } },
+                  "result=skip"
+                  ]
+              },
+              { "exe" : "${MAKE} -i -j8 LWDA_PATH=${VULCAN_INSTALL_DIR}/lwca HOST_COMPILER=${VULCAN_INSTALL_DIR}/icc16/bin/intel64/icc FILTER_OUT=0_Simple/simpleMPI/Makefile",
+                "cwd" : "${VULCAN_TESTSUITE_DIR}/LWIDIA_LWDA-test_Samples",
+                "attributes" : [
+                  { "filter" : { "os" : "Windows, Mac, Linux", "!compiler" : "icc16" } },
+                  "result=skip"
+                  ]
+              },
+              { "exe" : "${PERL} ${VULCAN_TESTSUITE_DIR}/scripts/nightlies.pl --mode manual --action build --environment rel --os win32 --build release --arch x86_64 --skip-verification --debug --toolkit-rootdir ${VULCAN_INSTALL_DIR} --p4-toolkit-dir ${VULCAN_INSTALL_DIR}/lwca/_tests --p4-tools-dir ${VULCAN_INSTALL_DIR} --samples-rootdir ${VULCAN_INSTALL_DIR}/lwca/samples --vulcan-toolkit-dir ${VULCAN_INSTALL_DIR}/lwca --msvc-version ${VULCAN_COMPILER}",
+                "cwd" : "${VULCAN_TESTSUITE_DIR}",
+                "attributes" : [
+                  { "filter" : { "os" : "Windows" }},
+                  "result=multi",
+                  { "filter" : { "os" : "Mac, Linux" }},
+                  "result=waive"
+                  ]
+              },
+              { "init" : "${PYTHON} X_utils.py --start",
+                "cwd" : "${VULCAN_TESTSUITE_DIR}"
+              },
+<<RUN_TEST_CASE>>
+              { "fini" : "${PYTHON} X_utils.py --stop",
+                "cwd" : "${VULCAN_TESTSUITE_DIR}"
+              },
+              # Cleanup
+              {
+                "name": "Clean LWCA samples (Linux/Mac)",
+                "exe": "/bin/rm -rf ${VULCAN_TESTSUITE_DIR}/LWIDIA_LWDA-test_Samples",
+                "cwd" : "${VULCAN_TESTSUITE_DIR}",
+                "attributes": [
+                  { "filter": { "os": "Windows" }},
+                  "result=skip"
+                  ]
+              },
+              {
+                "name": "Clobber LWCA samples (Windows)",
+                "exe" : "${PERL} ${VULCAN_TESTSUITE_DIR}/scripts/nightlies.pl --mode manual --action clobber --environment rel --os win32 --build release --arch x86_64 --skip-verification --debug --toolkit-rootdir ${VULCAN_INSTALL_DIR} --p4-toolkit-dir ${VULCAN_INSTALL_DIR}/lwca/_tests --p4-tools-dir ${VULCAN_INSTALL_DIR} --samples-rootdir ${VULCAN_INSTALL_DIR}/lwca/samples --vulcan-toolkit-dir ${VULCAN_INSTALL_DIR}/lwca --msvc-version ${VULCAN_COMPILER}",
+                "cwd" : "${VULCAN_TESTSUITE_DIR}",
+                "attributes" : [
+                  { "filter" : { "os" : "Mac, Linux" }},
+                  "result=skip"
+                  ]
+              }
+  ]
+
+}

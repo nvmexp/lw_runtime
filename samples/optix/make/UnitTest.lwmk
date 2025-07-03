@@ -1,0 +1,418 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+# UnitTest.lwmk - Functions to generate rules and targets compile a "white box" source unit test for OptiX.
+
+# Target test builds all unit tests
+.PHONY: test
+
+# Target compile-test compiles, but does not link, all unit tests
+.PHONY: compile-test
+
+# BUILD_OPTIX_TEST_OBJECT_LIST
+#
+# Helper to build unit test objects in subdirs.
+#
+# $(1): Unit test name
+# $(2): Source List
+#
+# Object files are in $(OUTPUTDIR)/_$(1)
+BUILD_OPTIX_TEST_OBJECT_LIST = $(patsubst $(OUTPUTDIR)/%,$(OUTPUTDIR)/_$(1)/%,$(call BUILD_OBJECT_LIST,$(2)))
+
+# Relative paths for use in build rules
+SRC_TESTS_BINARY_DIR := $(OUTPUTDIR)/srcTests
+SRC_TESTS_PTX_DIR := $(SRC_TESTS_BINARY_DIR)/ptx
+SRC_TESTS_DATA_DIR := $(SRC_TESTS_BINARY_DIR)/data
+
+# Absolute paths for substituting into srcTestsConfig.h.in
+SRC_TESTS_DIR_ABSOLUTE = $(OUTPUTDIR_ABSOLUTE)/srcTests
+SRC_TESTS_PTX_DIR_ABSOLUTE = $(SRC_TESTS_DIR_ABSOLUTE)/ptx
+SRC_TESTS_DATA_DIR_ABSOLUTE = $(SRC_TESTS_DIR_ABSOLUTE)/data
+
+# A single ptx directory is shared among all tests
+LW_DIRS_TO_CREATE += $(SRC_TESTS_PTX_DIR)
+
+SRC_TESTS_INCLUDE_DIRS = \
+  $(addprefix $(LW_OPTIX)/, \
+    . \
+    include \
+    include/optixu \
+    src \
+    src/tests \
+    tests/Unit/googletest-v1.10/googlemock/include \
+    tests/Unit/googletest-v1.10/googletest/include \
+    tests/sanity/exptest/include \
+  ) \
+  $(SRC_TESTS_BINARY_DIR) \
+  $(LW_SOURCE)/drivers/rtcore \
+  $(OUTPUTDIR)/include \
+  $(OUTPUTDIR)/optix-include
+
+include $(LW_OPTIX)/make/UnitTest$(LW_HOST_OS_FAMILY).lwmk
+
+# optix_copy_test_data
+#
+# Generate rules to copy test data files from the source tree into $(SRC_TESTS_DATA_DIR)/$(1)
+#
+# Arguments:
+# $(1)
+#   The test case name, e.g. test_Accels
+#
+# $(2)
+#   A source directory that contains data files needed by test case $(1)
+#
+define optix_copy_test_data
+  # Each test case has it's own data subdirectory
+  LW_DIRS_TO_CREATE += $$(SRC_TESTS_DATA_DIR)/$$($(1)_DATA_RUNTIME_DIR)
+  $$(SRC_TESTS_DATA_DIR)/$$($(1)_DATA_RUNTIME_DIR)/%: $(2)/% | $$(SRC_TESTS_DATA_DIR)/$$($(1)_DATA_RUNTIME_DIR)
+	$$(ECHO) Copying $$(subst $$(LW_OPTIX)/,,$$<)
+	$$(COPY) $$< $$@
+endef
+
+# optix_test_copy_lw_ptx
+#
+# Generate rules to copy the ptx file created by existing build rules into
+# $(SRC_TESTS_PTX_DIR) with the appropriate name.
+#
+# Arguments:
+# $(1)
+#   The test case name, e.g. test_Accels.
+# $(2)
+#   The directory containing the .lw.ptx file built by existing pattern rules,
+#   e.g. $(LW_OPTIX_OUTPUTDIR)/src/AS/tests
+#
+define optix_test_copy_lw_ptx
+  $$(SRC_TESTS_PTX_DIR)/$(1)_generated_%.lw.ptx: $(2)/%.lw.ptx | $$(SRC_TESTS_PTX_DIR)
+	$$(COPY) $$< $$@
+endef
+
+# optix_test_dirs_for_files
+#
+# Return a unique list of directories corresponding to a list of files.
+# Trailing slashes on directories are removed.
+#
+optix_test_dirs_for_files = $(realpath $(sort $(dir $(1))))
+
+# This will hold all the test case exelwtables after every test makefile snippet has been included.
+optix_test_exelwtables =
+
+# optix_unit_test_common
+#
+# Return text that generates rules and targets for compiling a unit test.
+#
+# Arguments:
+# $(1)
+#   The name of the test case, e.g. for test_Foo.exe the test case name is test_Foo.
+#
+# $(2)
+#   Additional dependencies of the test, e.g. srcTests and optix_static for white box tests.
+#
+# $(3)
+#   Function to call for linking the exelwtable
+#
+# Input variables:
+#
+# $(1)_CFLAGS
+#   A list of compiler flags to be added to CFLAGS when compiling C++ sources.  Defaults to empty.
+#
+# $(1)_DEFINES
+#   A list of symbols to be added to LW_DEFINES when compiling C++ and LWCA sources.  Defaults to empty.
+#
+# $(1)_INCLUDES
+#   A list of include directories to be added to LW_INCLUDES when compiling C++ and LWCA sources.  Defaults to empty.
+#
+# $(1)_LFLAGS
+#   A list of additional linker flags to be used when linking the unit test.  Defaults to empty.
+#
+# $(1)_SOURCES
+#   A list of absolute paths to C++ source files to be compiled and linked into the test exelwtable.
+#
+# $(1)_LW_PTX_SOURCES
+#   A list of absolute paths to LWCA source files to be compiled to PTX for dynamically loading by the test.
+#   Defaults to empty.
+#
+# $(1)_COMMON_LW_PTX_SOURCES
+#   A list of file names (not paths) of LWCA source files in $(LW_OPTIX)/src/tests/lwca to be compiled to PTX
+#   for dynamically loading by the test.  Defaults to empty.
+#
+# $(1)_LW_PTX_ARCH
+#   The shader model architecture used for compiling the test case PTX files.  This defaults to the
+#   value 30 if left unspecified, e.g. sm_30
+#
+# $(1)_LW_PTX_FLAGS
+#   Any additional flags needed for $(LWCC) when compiling LW sources to PTX.  Defaults to empty.
+#
+# $(1)_BINARY_LW_PTX_SOURCES
+#   A list of absolute paths to LWCA source files to be compiled to PTX and embedded into the
+#   test exelwtable as NUL terminated binary data.
+#
+# $(1)_BINARY_FILES
+#   A list of absolute paths to files to be embedded into the test exelwtable as binary data.
+#
+# $(1)_DATA
+#   A list of absolute paths of data files needed for the test exelwtable.
+#
+# $(1)_DATA_RUNTIME_DIR
+#   The runtime data directory for the data files.  This defaults to the test case name, $(1).
+#
+# Targets:
+# test
+#   Builds all unit tests
+#
+# $(1)
+#   Builds only this test case
+#
+# Usage:
+#   test_Foo_SOURCES := foo.cpp bar.cpp
+#   test_Foo_LW_PTX_SOURCES := foo.lw bar.lw
+#   test_Foo_LW_PTX_ARCH := 50
+#   test_Foo_LW_PTX_FLAGS := -dc
+#   test_Foo_DATA := foo.dat bar.txt foo.ppm
+#   $(eval $(call optix_unit_test,test_Foo))
+#
+define optix_unit_test_common
+  # Common for linking optix statically and dynamically
+  # Provide defaults for some target specific variables:
+  # Target specific compiler flags
+  $(1)_CFLAGS ?=
+  # Target specific defines
+  $(1)_DEFINES ?=
+  # Target specific includes
+  $(1)_INCLUDES ?=
+  # Target specific link flags
+  $(1)_LFLAGS ?=
+  # Associated LW files to be compiled to PTX
+  $(1)_LW_PTX_SOURCES ?=
+  # Common srcTest LW files to be compiled to PTX
+  $(1)_COMMON_LW_PTX_SOURCES ?=
+  # PTX architecture for LW files
+  $(1)_LW_PTX_ARCH ?= 50
+  # Extra LWCC flags for LW files
+  $(1)_LW_PTX_FLAGS ?=
+  # Associated LW files to be compiled to PTX and embedded as binary data
+  $(1)_BINARY_LW_PTX_SOURCES ?=
+  # Associated files to be embedded directly as binary data
+  $(1)_BINARY_FILES ?=
+  # Associated data files
+  $(1)_DATA ?=
+  # Associated runtime directory for data files
+  $(1)_DATA_RUNTIME_DIR ?= $(1)
+  # Test sources depend on LWVM generated headers
+  $(1)_NEEDS_LWVM_HEADERS ?= 0
+  # Test exelwtable needs to be linked with LWVM libraries
+  $(1)_NEEDS_LWVM_LIBS ?= 0
+  # (Windows only) Resource files that need to be linked with the exelwtable.
+  $(1)_RESOURCES ?=
+  # The makefile that ilwoked this template.  The objects depend on this makefile.
+  $(1)_MAKEFILE ?= $$(call ILWOKING_MAKEFILE)
+  # The output dir for this test, derived from the directory of the makefile.
+  $(1)_OUTPUTDIR ?= $$(subst $$(realpath $$(LW_SOURCE)),$$(OUTPUTDIR),$$(patsubst %/,%,$$(dir $$($(1)_MAKEFILE))))
+
+  # Test case name is target that builds this test case exelwtable only.
+  .PHONY: $(1)
+
+  # Target that just compiles source files for this test case
+  .PHONY: compile-$(1)
+
+  # Compiling all tests means compiling this test
+  compile-test:: compile-$(1)
+
+  # Every test case target is a dependency of the main test target.
+  test:: $(1)
+
+  # List of C++ objects for this test case.
+  $(1)_OBJECTS := $$(call BUILD_OPTIX_TEST_OBJECT_LIST,$(1),$$($(1)_SOURCES))
+
+  # Test objects may depend on generated srcTests.h
+  $$($(1)_OBJECTS): | $(SRC_TESTS_BINARY_DIR)/srcTestConfig.h
+
+  # $(1)_EXE holds the path of the test exelwtable
+  $(1)_EXE := $$(OUTPUTDIR)/$(1)$$(EXESUFFIX)
+
+  # Test case target depends on the test case exelwtable
+  $(1): $$($(1)_EXE)
+
+  # Accumulate this test case exelwtable for sequential linking
+  optix_test_exelwtables += $$($(1)_EXE)
+
+  # The "private" keyword prevents variables from being applied to a target's
+  # prequisites. This keeps us from polluting the rest of the build with
+  # include directories and flags that should only be applied to this test.
+
+  # Test case object files link statically against optix, so don't allow DLL import
+  # Assume OPTIX_CFLAGS by default and add test case CFLAGS.
+  $$($(1)_OBJECTS): private CFLAGS += \
+    -DRTAPI= \
+    $$(OPTIX_CFLAGS) \
+    $$($(1)_CFLAGS)
+
+  # Test case object files need test case defines; assume OPTIX_DEFINES
+  $$($(1)_OBJECTS): private LW_DEFINES += $$(OPTIX_DEFINES) $$($(1)_DEFINES)
+
+  # Test case object files need global test includes and per-test case includes; assume OPTIX_INCLUDES
+  $$($(1)_OBJECTS): private LW_INCLUDES += \
+    $$(OPTIX_INCLUDES) \
+    $$(SRC_TESTS_INCLUDE_DIRS) \
+    $$($(1)_INCLUDES)
+
+  # Generate rules to copy PTX files built from LWCA source files for this test case
+  $$(foreach sourceDir,\
+    $$(call optix_test_dirs_for_files,$$($(1)_LW_PTX_SOURCES)),\
+    $$(eval $$(call optix_test_copy_lw_ptx,$(1),$$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$(sourceDir)))))
+
+  # "Object" files that are obtained from compiling LW to PTX.
+  $(1)_LW_PTX_OBJECTS = $$(patsubst $$(LW_SOURCE)/%,$$(OUTPUTDIR)/%,$$($(1)_LW_PTX_SOURCES:.lw=.lw.ptx))
+  $(1)_BINARY_LW_PTX_OBJECTS = $$(patsubst $$(LW_SOURCE)/%,$$(OUTPUTDIR)/%,$$($(1)_BINARY_LW_PTX_SOURCES:.lw=.lw.ptx))
+  $$(foreach f,$$($(1)_LW_PTX_SOURCES),$$(eval $$(call LW_OPTIX_PTX_FROM_SOURCE,$$(f),$$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$(f:.lw=.lw.ptx)))))
+
+  # "Object" files that are obtained from compiling common test LW to PTX.
+  # The source directory is optix/src/tests/lwca, but the destination directory is
+  # in $(OUTPUTDIR) relative to the makefile that expanded this template.
+  $(1)_COMMON_LW_PTX_OBJECTS = $$(addprefix $$($(1)_OUTPUTDIR)/,$$($(1)_COMMON_LW_PTX_SOURCES:.lw=.lw.ptx))
+  $$(foreach f,$$($(1)_COMMON_LW_PTX_SOURCES),$$(eval $$(call LW_OPTIX_PTX_FROM_SOURCE,$$(LW_SOURCE)/apps/optix/src/tests/lwca/$$(f),$$($(1)_OUTPUTDIR)/$$(f:.lw=.lw.ptx))))
+
+  # Generate rules to copy the PTX compiled from common LW sources to the runtime PTX dir
+  $$(foreach d,$$(patsubst %,$$($(1)_OUTPUTDIR),$$(firstword $$($(1)_COMMON_LW_PTX_SOURCES))),$$(eval $$(call optix_test_copy_lw_ptx,$(1),$$(d))))
+
+  # All PTX "objects" grouped together so they can share variable settings and build rules.
+  $(1)_ALL_LW_PTX_OBJECTS = $$($(1)_LW_PTX_OBJECTS) $$($(1)_BINARY_LW_PTX_OBJECTS) $$($(1)_COMMON_LW_PTX_OBJECTS)
+
+  ifeq ($$(LW_AUTO_DEPEND),1)
+    # Include generated dependency files.
+    $$(foreach f,$$($(1)_ALL_LW_PTX_OBJECTS),$$(eval $$(call INCLUDE_DEPFILE_RULE,$$(f))))
+  endif
+
+  # PTX objects are compiled for this architecture.
+  $$($(1)_ALL_LW_PTX_OBJECTS): DEFAULT_SM_VERSION = $$($(1)_LW_PTX_ARCH)
+
+  # PTX objects are compiled with these extra flags, defines and includes
+  $$($(1)_ALL_LW_PTX_OBJECTS): LWCC_FLAGS += -lineinfo $$($(1)_LW_PTX_FLAGS)
+  $$($(1)_ALL_LW_PTX_OBJECTS): LW_DEFINES += $$($(1)_DEFINES)
+  $$($(1)_ALL_LW_PTX_OBJECTS): LW_INCLUDES += $$($(1)_INCLUDES)
+
+  # Rebuild on Makefile changes
+  $$($(1)_OBJECTS) $$($(1)_ALL_LW_PTX_OBJECTS): $$($(1)_MAKEFILE)
+
+  # Runtime PTX files needed for this test case.  A generic rule copies them from PTX objects.
+  $(1)_LW_PTX_OUTPUTS := $$(addprefix $$(SRC_TESTS_PTX_DIR)/$(1)_generated_,$$(notdir $$($(1)_LW_PTX_SOURCES:.lw=.lw.ptx) $$($(1)_COMMON_LW_PTX_SOURCES:.lw=.lw.ptx)))
+
+  # Generated .lw to .ptx binary data source files for this test case.
+  $(1)_SOURCES += $$(call optix_binary_lw_ptx_source,$$($(1)_BINARY_LW_PTX_SOURCES))
+
+  # Test case objects include objects for generated .lw to .ptx data source files.
+  $(1)_OBJECTS += $$(call BUILD_OPTIX_TEST_OBJECT_LIST,$(1),$$(call optix_binary_lw_ptx_source,$$($(1)_BINARY_LW_PTX_SOURCES)))
+
+  # Generate rules for the .lw to .ptx embedded binary files.
+  $$(foreach f,$$($(1)_BINARY_LW_PTX_SOURCES),$$(call optix_test_binary_lw_ptx,$(1),$$(f)))
+  $$(foreach f,$$($(1)_BINARY_LW_PTX_SOURCES),$$(eval $$(call LW_OPTIX_PTX_FROM_SOURCE,$$(f),$$(subst $$(LW_SOURCE),$$(OUTPUTDIR),$$(f:.lw=.lw.ptx)))))
+
+  # Generated binary data source files for this test case.
+  $(1)_SOURCES += $$(call optix_binary_source,$$($(1)_BINARY_FILES))
+
+  # Test case objects include objects for generated binary data source files.
+  $(1)_OBJECTS += $$(call BUILD_OPTIX_TEST_OBJECT_LIST,$(1),$$(call optix_binary_source,$$($(1)_BINARY_FILES)))
+
+  # Generate rules for the embedded binary files.
+  $$(foreach f,$$($(1)_BINARY_FILES),$$(call optix_test_binary_file,$(1),$$(f)))
+
+  ifneq ($$($(1)_BINARY_FILES),)
+    $$($(1)_OBJECTS): | $$(foreach f,$$($(1)_BINARY_FILES),$$(call optix_binary_header,$$(f)))
+  endif
+  ifneq ($$($(1)_BINARY_LW_PTX_SOURCES),)
+    $$($(1)_OBJECTS): | $$(foreach f,$$($(1)_BINARY_LW_PTX_SOURCES),$$(call optix_binary_lw_ptx_header,$$(f)))
+  endif
+
+  # Generate rules to build test case object files from source files.
+  # Do this after we've added the generated binary sources to $(1)_SOURCES.
+  $$(foreach f,$$(sort $$($(1)_SOURCES)),$$(eval $$(call LW_OBJECT_FROM_SOURCE_RULE,$$(f),$$(call BUILD_OPTIX_TEST_OBJECT_LIST,$(1),$$(f)))))
+
+  # Test case exelwtable depends on the runtime PTX files.
+  $$($(1)_EXE): $$($(1)_LW_PTX_OUTPUTS)
+
+  # Generate rules to copy data files from distinct source directories
+  $$(foreach sourceDir,\
+    $$(call optix_test_dirs_for_files,$$($(1)_DATA)),\
+    $$(eval $$(call optix_copy_test_data,$(1),$$(sourceDir))))
+
+  # Associated runtime data files
+  $(1)_RUNTIME_DATA = $$(foreach f,$$($(1)_DATA),$$(SRC_TESTS_DATA_DIR)/$$($(1)_DATA_RUNTIME_DIR)/$$(notdir $$(f)))
+
+  # test-data target depends on runtime data files for this test case.
+  test-data: test-data_$(1)
+
+  # Target for the runtime data for this test case only
+  .PHONY: test-data_$(1)
+
+  # Test data for this test case depends on global test data + ptx files
+  test-data_$(1): test-global-data $$($(1)_RUNTIME_DATA)
+
+  # Test case depends on runtime data files for this test case.
+  $(1): test-data_$(1)
+
+  # Test case depends on test scripts (in particular, on test_single script).
+  $(1): test-scripts
+
+  # Test case might depend on generated LWVM headers.
+  ifeq ($$($(1)_NEEDS_LWVM_HEADERS),1)
+    $$($(1)_OBJECTS): | lwvm-build
+  endif
+
+  # Compile, but do not link, everything needed for this test case
+  compile-$(1): $(2) $$($(1)_OBJECTS) $$($(1)_ALL_LW_PTX_OBJECTS)
+
+  # Create rules to generate the test exelwtable
+  $$(eval $$(call $(3),$(1),$$($(1)_OBJECTS)))
+
+  # Target that runs this test case
+  .PHONY: run-$(1)
+
+  # Running a test case depends on the test case
+  run-$(1): $(1)
+	$(call run_unit_test,$(1))
+endef
+
+# optix_unit_test
+#
+# Do everything needed for a white box unit test.
+#
+define optix_unit_test
+  $(call optix_unit_test_common,$(1),optix_static srcTests,create_unit_test_exelwtable)
+endef
+
+# optix_blackbox_unit_test
+#
+# Do everything needed for a black box unit test, e.g. the sanity test.
+#
+define optix_blackbox_unit_test
+  $(call optix_unit_test_common,$(1),lwoptix srcTests,create_blackbox_unit_test_exelwtable)
+endef
+
+# Create an explicit "tests" target to avoid that typos of the "test" target
+# result in no action due to the existing "tests" directory.
+.PHONY: tests
+
+# Do not use $(error ...) here. It will cause the build to fail (which is
+# intended), but the message will not be shown (unclear why).
+tests::
+	@$(ECHO) "Error: There is no 'tests' target. Use the 'test' target instead."
+	intentionally_fail_here_due_to_wrong_target_name_tests
+
+# Helper to create VRL Packages.
+include $(LW_OPTIX)/make/optixVRLPackage.lwmk

@@ -1,0 +1,2350 @@
+#include <assert.h>
+#include <float.h>
+#include <math.h>
+#include <stdio.h>
+
+#include <algorithm>
+#include <iostream>
+#include <string>
+
+#include <lwda_runtime.h>
+
+#include <lwtensor.h>
+#include <lwtensor/internal/export.h>
+#include <lwtensor/internal/elementwisePrototype.h>
+#include <lwtensor/internal/operators.h>
+#include <lwtensor/internal/reduction.h>
+#include <lwtensor/internal/tensorContraction.h>
+#include <lwtensor/internal/candidateContainer.h>
+#include <lwtensor/internal/typesEx.h>
+#include <lwtensor/internal/context.h>
+#include <lwtensor/internal/candidateLwtlass.h>
+#include <lwtensor/internal/exceptions.h>
+#include <lwtensor/internal/utilEx.h>
+#include <lwtensor/internal/featuresUtils.h>
+#include <lwtensor/internal/heuristicsLwtlass.h>
+
+#include <lwtensor/internal/defines.h>
+#include <lwtensor/internal/lwblasLtHandles.h>
+
+namespace LWTENSOR_NAMESPACE
+{
+
+#ifdef LWTENSOR_ENABLE_LWTE
+    static ComputeEngine<2, ContractionDescriptorInternal> contractionEngineLwte(
+            { 
+              getContractionContainer_lwte_sm70_ssss(),
+              getContractionContainer_lwte_sm70_dddd()
+            }); 
+    const ComputeEngineBase<ContractionDescriptorInternal>* getContractionEngineLwte()
+    {
+        return &contractionEngineLwte;
+    }
+#endif
+    static lwtensorStatus_t lwtensorContractionInternal_L0(
+            const Context* handle,
+            const ContractionDescriptor *desc,
+            ContractionPlan *plan, 
+            const Contractiolwariant &find, const bool allowFallback, void* workspace, uint64_t workspaceSize,
+            const uint32_t workSizePreference, const int32_t partitionsK, bool forceHandled = false);
+
+template<typename T, typename U>
+static bool contains(const U& needle, const T& haystack)
+{
+    return std::find(haystack.begin(), haystack.end(), needle) != haystack.end();
+}
+
+template<typename R, typename U>
+static R lookup(const std::list<mode_type>& needle, const ModeMap<R>& haystack, U alternative)
+{
+    if (needle.empty())
+    {
+        return alternative;
+    }
+    auto ret = haystack.find(needle.front());
+    if (ret == haystack.end())
+    {
+        return alternative;
+    } else {
+        return ret->second;
+    }
+}
+
+template<typename R, typename U>
+static R lookup(const mode_type& needle, const ModeMap<R>& haystack, U alternative)
+{
+    if (needle == LWTENSOR_ILWALID_MODE)
+    {
+        return alternative;
+    }
+    auto ret = haystack.find(needle);
+    if (ret == haystack.end())
+    {
+        return alternative;
+    }
+    else
+    {
+        return ret->second;
+    }
+}
+
+void transposeSelect(lwblasOperation_t op, int a, int b, int* x, int* y)
+{
+    if (op == LWBLAS_OP_N)
+    {
+        *x = a;
+        *y = b;
+    }
+    else
+    {
+        *x = b;
+        *y = a;
+    }
+}
+
+template<typename T>
+void printList(const char* name, const std::list<T> &list)
+{
+    printf("%s", name);
+    for (auto elem : list) {
+        printf(", %d", elem);
+    }
+    printf("\n");
+}
+
+
+#if LWTENSOR_LWDA_VERSION_MAJOR >= 11
+/**
+ * \brief Attempts to plan the contraction using a lwblasLt invocation.
+ * Fails if the contraction is not a gemm or workspace is insufficient.
+ * \param[in,out] Results are written to plan.
+ */
+static lwtensorStatus_t lwtensorContractionInternal_L2_Gemm(
+                const Context* ctx, 
+                ContractionPlan &plan,
+                const int32_t kernel,
+                const ModeList &modeA,
+                const ModeList &modeB,
+                const ModeList &modeC,
+                const ModeList &modeM, // free modes
+                const ModeList &modeN, // free modes
+                const ModeList &modeK, // contracted modes
+                const ModeList &modeL, // looped/batched modes
+                const ExtentMap &extent,
+                const lwtensorOperator_t opA,
+                const StrideMap &strideA,
+                uint32_t alignmentRequirementA,
+                const lwtensorOperator_t opB,
+                const StrideMap &strideB,
+                uint32_t alignmentRequirementB,
+                const lwtensorOperator_t opC,
+                const StrideMap &strideC,
+                uint32_t alignmentRequirementC)
+{
+    if (! ctx->isLwblasEnabled())
+    {
+        return LWTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    const lwdaDataType_t &typeA = plan.gettParams_.typeA_;
+    const lwdaDataType_t &typeB = plan.gettParams_.typeB_; 
+    const lwdaDataType_t &typeC = plan.gettParams_.typeC_;
+    const lwtensorComputeType_t &typeCompute = plan.gettParams_.typeCompute_;
+    const auto typeScalar = getScalarType(typeC, typeCompute);
+
+    // we need to map all indices to an index for gemm
+    // in gemm, we have four possible indices: K, J, I
+    // and one "batched" index, which can either be L, J, I
+    // supported "shapes" are:
+    // lki,ljk->lij
+    if (opC != LWTENSOR_OP_IDENTITY) {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+    }
+
+    // Type check - BLAS does not support heteregeous ops
+    if (! (typeA == typeB && typeB == typeC))
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+    }
+
+    // Mode mapping check
+    mode_type mappedM = LWTENSOR_ILWALID_MODE;
+    mode_type mappedN = LWTENSOR_ILWALID_MODE;
+    mode_type mappedK = LWTENSOR_ILWALID_MODE;
+    mode_type mappedL = LWTENSOR_ILWALID_MODE;
+
+    // K mapping check
+    if (modeK.size() == 1)
+    {
+        mappedK = modeK.front();
+    }
+    else
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+    }
+
+    // L mapping check
+    if (modeL.size() == 1)
+    {
+        mappedL = modeL.front();
+        if ((! modeA.empty()) && modeA.front() == mappedL)
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+        if ((! modeB.empty()) && modeB.front() == mappedL)
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+        if ((! modeC.empty()) && modeC.front() == mappedL)
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+    }
+    else if (modeL.size() > 1)
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+    }
+
+    // M mapping check
+    if (modeM.size() == 1)
+    {
+        mappedM = modeM.front();
+    }
+    else if (modeM.size() == 2 && mappedL == LWTENSOR_ILWALID_MODE)
+    {
+        mode_type modes[2] = {modeM.front(), modeM.back()};
+        for (int mode = 0; mode < 2; mode++)
+        {
+            if ((! modeA.empty()) && modeA.front() == modes[mode])
+            {
+                continue;
+            }
+            if ((! modeB.empty()) && modeB.front() == modes[mode])
+            {
+                continue;
+            }
+            if ((! modeC.empty()) && modeC.front() == modes[mode])
+            {
+                continue;
+            }
+            mappedL = modes[mode];
+            mappedM = modes[1 - mode];
+        }
+        if (mappedM == LWTENSOR_ILWALID_MODE)
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+    }
+    else if (modeM.size() != 0)
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+    }
+
+    // N mapping check
+    if (modeN.size() == 1)
+    {
+        mappedN = modeN.front();
+    }
+    else if (modeN.size() == 2 && mappedL == LWTENSOR_ILWALID_MODE)
+    {
+        mode_type modes[2] = {modeN.front(), modeN.back()};
+        for (int mode = 0; mode < 2; mode++)
+        {
+            if ((! modeA.empty()) && modeA.front() == modes[mode])
+            {
+                continue;
+            }
+            if ((! modeB.empty()) && modeB.front() == modes[mode])
+            {
+                continue;
+            }
+            if ((! modeC.empty()) && modeC.front() == modes[mode])
+            {
+                continue;
+            }
+            mappedL = modes[mode];
+            mappedN = modes[1 - mode];
+        }
+        if (mappedN == LWTENSOR_ILWALID_MODE)
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+    }
+    else if (modeN.size() != 0)
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+    }
+
+    // Check that if there is an "M", it is first in C
+    // and contained in A
+    if (mappedM != LWTENSOR_ILWALID_MODE)
+    {
+        if (mappedM != modeC.front())
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+        if (! contains(mappedM, modeA))
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+    }
+    // Check that if there is an "N", it is contained in C
+    // and contained in B
+    if (mappedN != LWTENSOR_ILWALID_MODE)
+    {
+        if (! contains(mappedN, modeC))
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+        if (! contains(mappedN, modeB))
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+    }
+    if (! contains(mappedK, modeA))
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+    }
+    if (! contains(mappedK, modeB))
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+    }
+
+    StrideMap strideDensifiedC;
+    HANDLE_ERROR(initStride(extent, modeC, strideDensifiedC)); // compacted representation of C
+
+    int32_t extentL = 1;
+    int64_t bdA = 0, bdB = 0, bdC = 0, bdD = 0;
+    if (mappedL != LWTENSOR_ILWALID_MODE)
+    {
+        extentL = extent.at(mappedL);
+        auto found = strideA.find(mappedL);
+        if (found != strideA.end())
+        {
+            bdA = found->second;
+        }
+        found = strideB.find(mappedL);
+        if (found != strideB.end())
+        {
+            bdB = found->second;
+        }
+        found = strideC.find(mappedL);
+        if (found != strideC.end())
+        {
+            bdC = found->second;
+            bdD = strideDensifiedC.at(mappedL);
+        }
+    }
+
+    lwblasOperation_t transA = LWBLAS_OP_N, transB = LWBLAS_OP_N;
+    if (mappedK == modeA.front())
+    {
+        transA = LWBLAS_OP_T;
+    }
+    if (opA == LWTENSOR_OP_CONJ && transA == LWBLAS_OP_T) {
+        transA = LWBLAS_OP_C;
+    } else if (opA != LWTENSOR_OP_IDENTITY) {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+    }
+    if (mappedK != modeB.front())
+    {
+        transB = LWBLAS_OP_T;
+    }
+    if (opB == LWTENSOR_OP_CONJ && transB == LWBLAS_OP_T) {
+        transB = LWBLAS_OP_C;
+    } else if (opB != LWTENSOR_OP_IDENTITY) {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+    }
+
+    if (! ctx->isForcedCD() && ! plan.transposeC_)
+    {
+        int row = lookup(mappedM, extent, 1);
+        int col = lookup(mappedN, extent, 1);
+        plan.bufferSizeC_ = roundUp<decltype(plan.bufferSizeC_)>(col * row * extentL * getDataTypeSize(typeC), 128UL);
+        if (plan.bufferSizeA_ + plan.bufferSizeB_ + plan.bufferSizeC_ > plan.workspaceSize_)
+        {
+            plan.bufferSizeC_ = 0;
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+    }
+
+    if (! globalLwblasLtHandleIsInitialized[ctx->getDeviceId()])
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+    }
+
+    int rowA, colA, ldA;
+    int dummy;
+    transposeSelect(transA, lookup(mappedM, extent,  1), lookup(mappedK, extent, 1), &rowA, &colA);
+    transposeSelect(transA, lookup(mappedM, strideA, 1), lookup(mappedK, strideA, 1), &dummy, &ldA);
+
+    int rowB, colB, ldB;
+    transposeSelect(transB, lookup(mappedK, extent, 1),  lookup(mappedN, extent, 1), &rowB, &colB);
+    transposeSelect(transB, lookup(mappedK, strideB, 1), lookup(mappedN, strideB, 1), &dummy, &ldB);
+
+    const int rowC = lookup(mappedM, extent, 1);
+    const int colC = lookup(mappedN, extent, 1);
+    const int ldC = std::max(static_cast<stride_type>(1), lookup(mappedN, strideC, 1));
+    const int ldD = std::max(static_cast<stride_type>(1), lookup(mappedN, strideDensifiedC, 1));
+
+    HANDLE_ERROR(plan.initLwblasLt(extentL,
+            transA, rowA, colA, bdA, ldA, alignmentRequirementA,
+            transB, rowB, colB, bdB, ldB, alignmentRequirementB,
+                    rowC, colC, bdC, ldC, alignmentRequirementC,
+                                bdD, ldD,
+            ctx->getDeviceId(), ctx->getDeviceProp(), kernel));
+
+    // if C != D and not final transpose oclwrs,
+    // we need an elementwise copy from a temporary buffer
+    // as lwblasLt requires C == D
+    StrideMap strideX;
+    ModeList modeX;
+    const auto typeScalarGett = getScalarType(typeC, typeCompute);
+    constexpr lwtensorOperator_t identity = LWTENSOR_OP_IDENTITY;
+    constexpr lwtensorOperator_t add = LWTENSOR_OP_ADD;
+    if (! ctx->isForcedCD())
+    {
+        HANDLE_ERROR(lwtensorElementwiseInternal_L1(ctx, (void*)&dummy, typeC, strideDensifiedC, modeC, alignmentRequirementC,
+                                                NULL,          typeC, strideX, modeX, 0,
+                                                (void*)&dummy, typeC, strideC, modeC, alignmentRequirementC, alignmentRequirementC,
+                                                extent, identity, identity, identity, add, add,
+                                                typeScalarGett, &plan.blasElementwisePlan_));
+    }
+
+    plan.useBLAS_ = true;
+
+    RETURN_STATUS(LWTENSOR_STATUS_SUCCESS);
+}
+#endif // LWTENSOR_LWDA_VERSION_MAJOR >= 11
+
+
+lwtensorStatus_t checkStridesLwte(const ContractionDescriptorInternal &params)
+{
+    for(int i=0; i < params.nmodeM; ++i)
+    {
+        if (params.strideAm[i] > static_cast<int64_t>(std::numeric_limits<int>::max())) return LWTENSOR_STATUS_NOT_SUPPORTED;
+        if (params.strideCm[i] > static_cast<int64_t>(std::numeric_limits<int>::max())) return LWTENSOR_STATUS_NOT_SUPPORTED;
+    }
+    for(int i=0; i < params.nmodeN; ++i)
+    {
+        if (params.strideBn[i] > static_cast<int64_t>(std::numeric_limits<int>::max())) return LWTENSOR_STATUS_NOT_SUPPORTED;
+        if (params.strideCn[i] > static_cast<int64_t>(std::numeric_limits<int>::max())) return LWTENSOR_STATUS_NOT_SUPPORTED;
+    }
+    for(int i=0; i < params.nmodeK; ++i)
+    {
+        if (params.strideAk[i] > static_cast<int64_t>(std::numeric_limits<int>::max())) return LWTENSOR_STATUS_NOT_SUPPORTED;
+        if (params.strideBk[i] > static_cast<int64_t>(std::numeric_limits<int>::max())) return LWTENSOR_STATUS_NOT_SUPPORTED;
+    }
+    for(int i=0; i < params.nmodeL; ++i)
+    {
+        if (params.strideAl[i] > static_cast<int64_t>(std::numeric_limits<int>::max())) return LWTENSOR_STATUS_NOT_SUPPORTED;
+        if (params.strideBl[i] > static_cast<int64_t>(std::numeric_limits<int>::max())) return LWTENSOR_STATUS_NOT_SUPPORTED;
+        if (params.strideCl[i] > static_cast<int64_t>(std::numeric_limits<int>::max())) return LWTENSOR_STATUS_NOT_SUPPORTED;
+    }
+    return LWTENSOR_STATUS_SUCCESS;
+}
+
+/**
+  * This heuristic tries to determine a good split-k factor for the given probelm and candidate.
+  */
+int32_t chooseNumPartitions(const ContractionDescriptorInternal &params, const CandidateInfoLwtlass &candidateInfo, int numSMs)
+{
+    const int nCTAs = features::getNumThreadblocks(params, candidateInfo.threadblockN, candidateInfo.threadblockM);
+    const extent_type totalK = params.getTotalExtentK();
+
+    /*
+     * According to CUT-534, the optimal nCTAs seems to be <= candidateInfo.maxCTAsPerSM * numSMs
+     */
+
+    const int targetNumCTAs = std::min(2, candidateInfo.maxCTAsPerSM) * numSMs; // limit oclwpancy to reduce reduction overhead
+
+    if (nCTAs < numSMs)
+    {
+        const int minElementsPerThreadK = std::max(32, candidateInfo.threadblockK); // don't let the k-dim per thread get too low (to avoid overhead due to reduction)
+        const int numBlocksK = (totalK + minElementsPerThreadK - 1) / minElementsPerThreadK;
+        return std::min(numBlocksK, targetNumCTAs / nCTAs);
+    }
+    return 1;
+}
+
+/**
+  * \brief Initialize contraction descriptor and select contraction kernel approach.
+  * Selects between lwblasLt for gemm-shaped contractions and GETT for all other contractions.
+  * \param[out] plan
+  * \param[out] swapAB
+  */
+lwtensorStatus_t lwtensorContractionInternal_L2(
+                const Context* ctx, 
+                ContractionPlan &plan,
+                const size_t workspaceSize,
+                const int32_t kernel,
+                const lwdaDataType_t typeA,
+                const lwdaDataType_t typeB,
+                const lwdaDataType_t typeC,
+                const lwtensorComputeType_t typeCompute,
+                const ModeList &modeA,
+                const ModeList &modeB,
+                const ModeList &modeC,
+                const ModeList &modeM, // free modes
+                const ModeList &modeN, // free modes
+                const ModeList &modeK, // contracted modes
+                const ModeList &modeL, // looped/batched modes
+                const ExtentMap &extent,
+                const lwtensorOperator_t opA,
+                const StrideMap &strideA,
+                uint32_t alignmentRequirementA,
+                const lwtensorOperator_t opB,
+                const StrideMap &strideB,
+                uint32_t alignmentRequirementB,
+                const lwtensorOperator_t opC,
+                const StrideMap &strideC,
+                uint32_t alignmentRequirementC,
+                const bool stridedLoadsReqA,
+                const bool stridedLoadsReqB,
+                const bool contiguousModeIsBatchedA,
+                const bool contiguousModeIsBatchedB,
+                bool &swapAB,
+                const bool useLwTe = false)
+{
+    HANDLE_ERROR( plan.gettParams_.initContractionDescriptorInternal(
+                                            typeA, typeB, typeC, typeCompute, 
+                                            modeA, modeB,
+                                            modeM, modeN, modeK, modeL, extent,
+                                            opA, strideA, alignmentRequirementA, 
+                                            opB, strideB, alignmentRequirementB,
+                                            opC, strideC, alignmentRequirementC,
+                                            stridedLoadsReqA, stridedLoadsReqB,
+                                            contiguousModeIsBatchedA,
+                                            contiguousModeIsBatchedB,
+                                            swapAB));
+
+    plan.workspaceSize_ = workspaceSize;
+
+    if (useLwTe)
+    {
+#ifdef LWTENSOR_ENABLE_LWTE
+        int32_t candidateIdx;
+        int32_t containerIdx;
+        if (checkStridesLwte(plan.gettParams_) == LWTENSOR_STATUS_SUCCESS && contractionEngineLwte.getCandidate(ctx,
+                    plan.gettParams_,
+                    workspaceSize,
+                    kernel,
+                    candidateIdx, containerIdx) == LWTENSOR_STATUS_SUCCESS)
+        {
+            plan.useLwTe_ = true;
+            plan.candidateIdx_ = candidateIdx;
+            plan.containerIdx_ = containerIdx;
+            RETURN_STATUS(LWTENSOR_STATUS_SUCCESS);
+        }
+        else
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+#else
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+#endif
+
+    }
+
+    auto status = LWTENSOR_STATUS_NOT_SUPPORTED;
+    
+#if LWTENSOR_LWDA_VERSION_MAJOR >= 11
+    status = lwtensorContractionInternal_L2_Gemm(
+                ctx,
+                plan, kernel,
+                modeA, modeB, modeC, modeM, modeN, modeK, modeL, extent,
+                opA, strideA, alignmentRequirementA, opB, strideB, alignmentRequirementB,
+                opC, strideC, alignmentRequirementC);
+#else
+    (void)modeC; // surpress warning
+#endif // LWTENSOR_LWDA_VERSION_MAJOR >= 11
+
+
+    // Fallback to GETT if lwblasLt is not supported, all other errors should still
+    // be propageted
+    if (status != LWTENSOR_STATUS_SUCCESS)
+    {
+        plan.useBLAS_ = false;
+
+        int32_t candidateIdx;
+        int32_t containerIdx;
+        auto contractionEngineLwtlass = getContractionEngineLwtlass();
+        if (contractionEngineLwtlass->getCandidate(ctx,
+                    plan.gettParams_,
+                    workspaceSize,
+                    kernel,
+                    candidateIdx, containerIdx) == LWTENSOR_STATUS_SUCCESS)
+        {
+            plan.candidateIdx_ = candidateIdx;
+            plan.containerIdx_ = containerIdx;
+            const Candidate<ContractionDescriptorInternal> *candidate;
+            HANDLE_ERROR(contractionEngineLwtlass->getCandidatePtr(candidateIdx, containerIdx, candidate));
+
+            CandidateInfoLwtlass candidateInfo = reinterpret_cast<const
+                CandidateTyped<ContractionDescriptorInternal,
+                CandidateInfoLwtlass>*>(candidate)->getCandidateInfo();
+            if (plan.gettParams_.partitions_ == -1)
+            {
+                plan.gettParams_.partitions_ = chooseNumPartitions(plan.gettParams_,
+                                                candidateInfo,
+                                                ctx->getDeviceProp()->multiProcessorCount);
+            }
+            RETURN_STATUS(LWTENSOR_STATUS_SUCCESS);
+        }
+        else
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+    }
+    else
+    {
+        return status;
+    }
+}
+
+
+#if LWTENSOR_SECOND_STREAM
+lwdaEvent_t eventTmp;
+lwdaStream_t streamTmp;
+bool isInit = false;
+#endif
+
+lwtensorStatus_t ContractionPlan::operator() (Params &params) const
+{
+#if LWTENSOR_SECOND_STREAM
+    if (!isInit)
+    {
+        isInit = true;
+        lwdaEventCreate(&eventTmp);
+        lwdaStreamCreateWithPriority(&streamTmp, lwdaStreamNonBlocking, 1);
+    }
+#endif
+    const Context* ctx = params.ctx_;
+    const void* alpha = params.alpha_;
+    const void *A = params.A_;
+    const void *B = params.B_;
+    const void* beta = params.beta_;
+    const void *C = params.C_;
+    void *D = params.D_;
+    void* workspace = params.workspace_;
+    const uint64_t workspaceSize = params.workspaceSize_;
+    lwdaStream_t &stream = params.stream_;
+
+#ifdef LWTENSOR_EXPOSE_INTERNAL
+    char buffer[2048];
+    this->info(buffer, 2048);
+    LWTENSOR_LOG_API(ctx, 3, buffer);
+#endif
+
+    if (alpha == nullptr)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: alpha is nullptr.");
+    }
+    else if (A == nullptr)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: A is nullptr.");
+    }
+    else if (beta == nullptr)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: beta is nullptr.");
+    }
+    else if (B == nullptr)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: B is nullptr.");
+    }
+    else if (C == nullptr)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: C is nullptr.");
+    }
+    else if (D == nullptr)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: D is nullptr.");
+    }
+    else if( (this->workspaceSize_ > 0 && workspace == nullptr) || this->workspaceSize_ > workspaceSize)
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_INSUFFICIENT_WORKSPACE);
+    }
+    // Check alignment, in case it changed. We assume plan is the same (no check for strides)
+
+    // ensure that the workspace is properly algined
+    if (this->workspaceSize_ > 0 && ((uint64_t)workspace)% alignmentRequirement_ != 0)
+    {
+        workspace = ((char*)workspace) + alignmentRequirement_ - ((uint64_t)workspace) % alignmentRequirement_;
+    }
+
+    if( this->swapAB_ )
+    {
+        std::swap(A,B);
+    }
+
+    // dispatch to elementwise (to avoid NaN propergation)
+    if (isZero(alpha, typeScalar_))
+    {
+        return permutationExelwte(
+                ctx,
+            beta, C,
+                  D,
+            this->planForAlphaIsZero_, stream);
+    }
+
+    if (this->dispatchToTrinary_ == false && this->dispatchToReduction_ == false)
+    {
+        if ((reinterpret_cast<uint64_t>(A) & ((uint64_t)this->gettParams_.alignmentRequirementA_ - 1)) != 0) // A is not aligned
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Pointer to tensor A is not aligned.");
+        }
+        if ((reinterpret_cast<uint64_t>(B) & ((uint64_t)this->gettParams_.alignmentRequirementB_ - 1)) != 0) // B is not aligned
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Pointer to tensor B is not aligned.");
+        }
+        if ((reinterpret_cast<uint64_t>(C) & ((uint64_t)this->gettParams_.alignmentRequirementC_ - 1)) != 0) // C is not aligned
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Pointer to tensor C is not aligned.");
+        }
+        if ((reinterpret_cast<uint64_t>(D) & ((uint64_t)this->gettParams_.alignmentRequirementC_ - 1)) != 0) // D is not aligned
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Pointer to tensor D is not aligned.");
+        }
+    }
+
+    if( this->dispatchToTrinary_ )
+    {
+        const void* one = lwtensorGetOnePtr(this->typeScalar_);
+        return elementwiseTrinaryExelwte(
+            ctx,
+            alpha, A,
+            one,   B,
+            beta,  C,
+                   D,
+            this->transposePlanA_, stream);
+    }
+    else if( this->dispatchToReduction_ )
+    {
+        return tensorReductionDispatch(
+                ctx,
+                alpha, A, B,
+                beta, C, D, this->reductionParams_, workspace, this->workspaceSize_, stream,
+                true);
+    }
+
+    char* tmp = (char*) workspace;
+    assert((((uint64_t)tmp) & 128UL) == 0);
+
+    const void* A_t = A;
+    const void* B_t = B;
+          void* D_t = D;
+
+    if( !this->gettParams_.isInitialized() )
+    {
+        RETURN_STATUS(LWTENSOR_STATUS_INTERNAL_ERROR);
+    }
+
+    size_t totalWorkSpaceRequired = 0;
+
+    lwdaStream_t* streamB = &stream;
+
+    // Transpose A
+    if (this->transposeA_)
+    {
+#if LWTENSOR_SECOND_STREAM
+        streamB = &streamTmp; // move transpose of B into a different stream s.t. they can run conlwrrently
+#endif
+        A_t = (void*) tmp;
+        auto sizeA = this->bufferSizeA_;
+        assert((((uint64_t)A_t) & ((uint64_t)this->gettParams_.alignmentRequirementA_ - 1)) == 0);
+        tmp += sizeA;
+        totalWorkSpaceRequired += sizeA;
+        const auto* one = lwtensorGetOnePtr(this->gettParams_.typeA_);
+        HANDLE_ERROR( permutationExelwte(ctx, one, A, (void*)A_t, this->transposePlanA_, stream));
+    }
+
+    // Transpose B
+    if (this->transposeB_)
+    {
+        const auto* one = lwtensorGetOnePtr(this->gettParams_.typeB_);
+        B_t = (void*) tmp;
+        assert((((uint64_t)B_t) & ((uint64_t)this->gettParams_.alignmentRequirementB_ - 1)) == 0);
+        auto sizeB = this->bufferSizeB_;
+        tmp += sizeB;
+        totalWorkSpaceRequired += sizeB;
+        HANDLE_ERROR( permutationExelwte(ctx, one, B, (void*)B_t, this->transposePlanB_, *streamB));
+
+#if LWTENSOR_SECOND_STREAM
+        if (this->transposeA_)
+        {
+            // insert dependcy into user-provided stream
+            HANDLE_ERROR( lwdaEventRecord (eventTmp, *streamB));
+            HANDLE_ERROR( lwdaStreamWaitEvent(stream, eventTmp, 0) );
+        }
+#endif
+    }
+
+    const void* myBeta = beta;
+    bool blasNeedElementwise = this->useBLAS_ && (C != D);
+    if (this->transposeC_ || blasNeedElementwise)
+    {
+        myBeta = lwtensorGetZeroPtr(this->typeScalar_);
+        D_t = (void*) tmp;
+        assert((((uint64_t)D_t) & ((uint64_t)this->gettParams_.alignmentRequirementC_ - 1)) == 0);
+        auto sizeC = this->bufferSizeC_;
+        tmp += sizeC;
+        totalWorkSpaceRequired += sizeC;
+    }
+
+    //#define PRINTD(a, ...) printf("%s:%d: " a, __FILE__, __LINE__, __VA_ARGS__)
+    /* D_t = alpha * A_t * B_t'. */
+
+    if (workspaceSize < totalWorkSpaceRequired) {
+        RETURN_STATUS(LWTENSOR_STATUS_INTERNAL_ERROR);
+    }
+#if LWTENSOR_LWDA_VERSION_MAJOR >= 11
+    if (this->useBLAS_)
+    {
+        if( !lwblasLtIlwoke_.isInitialized() )
+        {
+            return ctx->logError(LWTENSOR_STATUS_LWDA_ERROR, "Plan was not correctly initialized.");
+        }
+        HANDLE_ERROR(lwblasLtIlwoke_.execute(globalLwblasLtHandles[ctx->getDeviceId()],
+                                    blasNeedElementwise, alpha,
+                                    A_t, B_t, myBeta, D_t, tmp, workspaceSize - totalWorkSpaceRequired, stream));
+    } else 
+#endif // LWTENSOR_LWDA_VERSION_MAJOR >= 11
+    if (this->useLwTe_)
+    {
+#ifdef LWTENSOR_ENABLE_LWTE
+        HANDLE_ERROR(contractionEngineLwte(ctx, this->gettParams_,
+                                 alpha, A_t,
+                                 nullptr, B_t,
+                                 myBeta,  C, D_t,
+                                 tmp, workspaceSize - totalWorkSpaceRequired, stream,
+                                 candidateIdx_, containerIdx_));
+#else
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+#endif
+    }
+    else
+    {
+        auto contractionEngineLwtlass = getContractionEngineLwtlass();
+        HANDLE_ERROR((*contractionEngineLwtlass)(ctx, this->gettParams_,
+                                             alpha, A_t,
+                                             nullptr, B_t,
+                                             myBeta,  C, D_t,
+                                             tmp, workspaceSize - totalWorkSpaceRequired,
+                                             stream,
+                                             candidateIdx_, containerIdx_));
+    }
+
+    // Transpose C
+    if (this->transposeC_)
+    {
+        assert(D_t != D);
+        const auto* one = lwtensorGetOnePtr(this->typeScalar_);
+        HANDLE_ERROR( elementwiseBinaryExelwte(
+            ctx,
+            one,  D_t,
+            beta, C, D,
+            this->transposePlanC_, stream) );
+    }
+    else if (blasNeedElementwise)
+    {
+        assert(D_t != D);
+        const auto* one = lwtensorGetOnePtr(this->typeScalar_);
+        HANDLE_ERROR( elementwiseBinaryExelwte(
+            ctx,
+            one,  D_t,
+            beta, C, D,
+            this->blasElementwisePlan_, stream) );
+    }
+    RETURN_STATUS(LWTENSOR_STATUS_SUCCESS);
+}
+
+/**
+  * This function implements an arbitrary tensor-tensor multiplication based an the
+  * Transpose-Transpose-GEMM-Transpose approach, which "flattens" the tensors into
+  * matrices (via transpositions) to cast the contraction as an ordinary GEMM.
+  *
+  * The rational for this approach is that one wants to take advantage of the fast GEMM
+  * implementation. At the same time it is critical to minimize the time that is spend in
+  * the transpositions as they account for pure overhead. Hence, we select a GEMM that
+  * requires the least amount of bytes to be moved.
+  */
+lwtensorStatus_t tensorContractionTTGTorTGETT(
+    const Context *ctx,
+    ContractionPlan &plan,
+    int32_t kernel,
+    const ContractionDynamicParams& tempDesc,
+    uint64_t workspaceSize,
+    const bool useTGETT)
+{
+    plan.transposeA_ = false;
+    plan.transposeB_ = false;
+    plan.transposeC_ = false;
+    plan.bufferSizeA_ = 0;
+    plan.bufferSizeB_ = 0;
+    plan.bufferSizeC_ = 0;
+    auto &planA = plan.transposePlanA_;
+    auto &planB = plan.transposePlanB_;
+    auto &planC = plan.transposePlanC_;
+
+    lwdaDataType_t typeA = tempDesc.typeA_;
+    lwdaDataType_t typeB = tempDesc.typeB_;
+    lwdaDataType_t typeC = tempDesc.typeC_;
+    auto typeCompute = tempDesc.typeCompute_;
+    const ExtentMap& extent  = tempDesc.extent_;
+    lwtensorOperator_t opA                                    = tempDesc.opA_;
+    const StrideMap& strideA = tempDesc.strideA_;
+    const ModeList& modeA                         = tempDesc.modeA_;
+    lwtensorOperator_t opB                                    = tempDesc.opB_;
+    const StrideMap& strideB = tempDesc.strideB_;
+    const ModeList& modeB                         = tempDesc.modeB_;
+    lwtensorOperator_t opC                                    = tempDesc.opC_;
+    const StrideMap& strideC = tempDesc.strideC_;
+    const ModeList& modeC                         = tempDesc.modeC_;
+
+    const uint32_t alignmentReqA = tempDesc.alignmentReqA_;
+    const uint32_t alignmentReqB = tempDesc.alignmentReqB_;
+    const uint32_t alignmentReqC = tempDesc.alignmentReqC_;
+
+    TTGTCandidate candidate(tempDesc, useTGETT, kernel % TTGTCandidate::kNumCandidates);
+    kernel /= TTGTCandidate::kNumCandidates;
+
+    plan.transposeA_ = candidate.transposeA_;
+    plan.transposeB_ = candidate.transposeB_;
+    plan.transposeC_ = candidate.transposeC_;
+
+    /** Compute the required workspace. */
+    uint64_t totalWorkSpaceRequired = candidate.getRequiredWorkspace();
+
+    /** Check if we have enough. */
+    if (totalWorkSpaceRequired > workspaceSize ) {
+        RETURN_STATUS(LWTENSOR_STATUS_INSUFFICIENT_WORKSPACE);
+    }
+
+    /** Print the candidate candidate. */
+//    candidate.print();
+
+    /** Get the operators. */
+    constexpr lwtensorOperator_t identity = LWTENSOR_OP_IDENTITY;
+    constexpr lwtensorOperator_t add = LWTENSOR_OP_ADD;
+
+    /** Empty stride and mode. */
+    const StrideMap *strideAp = &strideA;
+    const StrideMap *strideBp = &strideB;
+    const StrideMap *strideCp = &strideC;
+    StrideMap strideAtmp;
+    StrideMap strideBtmp;
+    StrideMap strideCtmp;
+    StrideMap strideX;
+    ModeList modeX;
+
+    const uint32_t alignmentReqWork = ContractionPlan::alignmentRequirement_;
+
+    /** Permute A to 1.0 * A_{M,K,L}. */
+    if (candidate.transposeA_)
+    {
+        plan.bufferSizeA_ = candidate.sizeA_;
+        double dummy;
+        HANDLE_ERROR(initStride(extent, candidate.modeA_, strideAtmp));
+        strideAp = &strideAtmp;
+        /* Leave vectorization info unset. */
+        HANDLE_ERROR(lwtensorElementwiseInternal_L1(ctx, (void*)&dummy, typeA, strideA, modeA, alignmentReqA,
+                                                    NULL, typeA, strideX, modeX, 0,
+                                                    NULL, typeA, strideAtmp, candidate.modeA_, alignmentReqWork, alignmentReqWork,
+                                                    extent, identity, identity, identity, add, add,
+                                                    typeA, &planA));
+    }
+
+    /** Permute B to 1.0 * B_{N,K,L}. */
+    if (candidate.transposeB_)
+    {
+        plan.bufferSizeB_ = candidate.sizeB_;
+        double dummy;
+        HANDLE_ERROR(initStride(extent, candidate.modeB_, strideBtmp));
+        strideBp = &strideBtmp;
+        /* Leave vectorization info unset. */
+        HANDLE_ERROR(lwtensorElementwiseInternal_L1(ctx, (void*)&dummy, typeB, strideB, modeB, alignmentReqA,
+                                                    NULL, typeB, strideX, modeX, 0,
+                                                    NULL, typeB, strideBtmp, candidate.modeB_, alignmentReqWork, alignmentReqWork,
+                                                    extent, identity, identity, identity, add, add,
+                                                    typeB, &planB));
+
+    }
+    /** Permute C_{M,N,L} to C. */
+    if (candidate.transposeC_)
+    {
+        plan.bufferSizeC_ = candidate.sizeC_;
+        HANDLE_ERROR(initStride(extent, candidate.modeC_, strideCtmp));
+        strideCp = &strideCtmp;
+    }
+
+    // TODO realize fusion with less copy
+    StrideMap strideA_(*strideAp);
+    StrideMap strideB_(*strideBp);
+    StrideMap strideC_(*strideCp);
+    ExtentMap extent_(extent);
+    ModeList modeA_(candidate.modeA_);
+    ModeList modeB_(candidate.modeB_);
+    ModeList modeC_(candidate.modeC_);
+    HANDLE_ERROR(fuseModes(modeA_, strideA_,
+                           modeB_, strideB_,
+                           modeC_, strideC_, extent_));
+    ModeList modeM_;
+    ModeList modeN_;
+    ModeList modeK_;
+    ModeList modeL_;
+    bool stridedLoadsA, stridedLoadsB, contiguousModeIsBatchedA, contiguousModeIsBatchedB;
+    HANDLE_ERROR(initModeOrderContraction(modeA_, modeB_, modeC_, extent_,
+                               modeM_, modeN_, modeK_, modeL_,
+                               stridedLoadsA, stridedLoadsB, contiguousModeIsBatchedA, contiguousModeIsBatchedB));
+
+//    printf("A: ");
+//    for( auto m : modeA_)
+//        printf("%c, ", m);
+//    printf("\nB: ");
+//    for( auto m : modeB_)
+//        printf("%c, ", m);
+//    printf("\nC: ");
+//    for( auto m : modeC_)
+//        printf("%c, ", m);
+//    printf("\n");
+
+    // if it looks like gemm
+    // plan it like a gemm
+    // otherwise
+
+    bool swapAB = plan.swapAB_;
+    /** Initialize the parameter by collecting all modes, sizes, and strides. */
+    HANDLE_ERROR(lwtensorContractionInternal_L2(ctx, plan, workspaceSize, kernel,
+                                                typeA, typeB, typeC, typeCompute, 
+                                                modeA_, modeB_, modeC_,
+                                                modeM_, modeN_, modeK_, modeL_, extent_,
+                                                opA, strideA_, alignmentReqA, 
+                                                opB, strideB_, alignmentReqB,
+                                                opC, strideC_, alignmentReqC,
+                                                stridedLoadsA, stridedLoadsB, contiguousModeIsBatchedA, contiguousModeIsBatchedB, swapAB));
+
+    // Transpose C
+    if (candidate.transposeC_)
+    {
+        double dummy;
+        const lwdaDataType_t typeScalarGett = getScalarType(typeC, typeCompute);
+        /* Leave vectorization info unset. */
+        HANDLE_ERROR(lwtensorElementwiseInternal_L1(ctx, (void*)&dummy,typeC, strideCtmp, candidate.modeC_, alignmentReqWork,
+                                                    NULL,         typeC, strideX, modeX, 0,
+                                                    (void*)&dummy,typeC, strideC, modeC, alignmentReqC, alignmentReqC,
+                                                    extent, identity, identity, identity, add, add,
+                                                    typeScalarGett, &planC));
+    }
+
+    plan.swapAB_ = swapAB;
+
+    /** Return with success. */
+    RETURN_STATUS(LWTENSOR_STATUS_SUCCESS);
+}
+
+lwtensorStatus_t tensorContractionTTGT(
+    const Context *ctx,
+    ContractionPlan &plan,
+    const int32_t kernel,
+    const ContractionDynamicParams& tempDesc,
+    uint64_t workspaceSize)
+{
+    return tensorContractionTTGTorTGETT(
+    ctx,
+    plan,
+    kernel,
+    tempDesc,
+    workspaceSize,
+    false);
+}
+
+lwtensorStatus_t tensorContractionTGETT(
+    const Context *ctx,
+    ContractionPlan &plan,
+    const int32_t kernel,
+    const ContractionDynamicParams& tempDesc,
+    uint64_t workspaceSize)
+{
+    return tensorContractionTTGTorTGETT(
+    ctx,
+    plan,
+    kernel,
+    tempDesc,
+    workspaceSize,
+    true);
+}
+
+/**
+  * chooses whether TTGT, or GETT
+  */
+lwtensorAlgo_t
+chooseAlgorithm(const Context* ctx, const ContractionDynamicParams& tempDesc, uint64_t workspaceSize, int32_t kernel)
+{
+
+    const ModeList& modeM                         = tempDesc.modeM_;
+    const ModeList& modeN                         = tempDesc.modeN_;
+    const ModeList& modeK                         = tempDesc.modeK_;
+    const ModeList& modeL                         = tempDesc.modeL_;
+    const ExtentMap& extent  = tempDesc.extent_;
+    const ModeList& modeA                         = tempDesc.modeA_;
+    const ModeList& modeB                         = tempDesc.modeB_;
+    const ModeList& modeC                         = tempDesc.modeC_;
+
+    TTGTCandidate ttgt(tempDesc, false, kernel);
+    const float totalExtentM = getTotalModeExtent(modeM, extent);
+    const float totalExtentN = getTotalModeExtent(modeN, extent);
+    const float totalExtentK = getTotalModeExtent(modeK, extent);
+    const float totalExtentL = getTotalModeExtent(modeL, extent);
+
+    const bool useComplex = isComplex(tempDesc.typeC_);
+    const float PEAK_FLOPS_ILW  = 1.0f / (getPeakGFlops(tempDesc.typeCompute_) * 1e9f); // GFLOPs/s
+    constexpr float PEAK_BW_ILW = 1.0f / (600.f * 1e9f);                       // GB/s
+    const float timeFlops = (((getFlopMultiplier(useComplex) * totalExtentM) * totalExtentN) * totalExtentK * totalExtentL) * PEAK_FLOPS_ILW;
+    const float timeData = (((totalExtentM * totalExtentN) + (totalExtentM * totalExtentK)
+                + (totalExtentN * totalExtentK)) * getDataTypeSize(tempDesc.typeC_) * totalExtentL * PEAK_BW_ILW);
+    // estimated time that the gemm (after permute) takes
+    const float timeGemm = max(timeFlops / 0.95f, timeData);
+
+    /*
+     * We try to estimate GETT's effciency:
+     */
+
+    // we estimate GETT's tilesize since we don't want to have a dep. on GETT's heuristic
+    extent_type extent2Dm = extent.at(modeM.front());
+    extent2Dm *= modeM.size() > 1 ? extent.at(*std::next(modeM.begin())) : 1;
+    extent_type extent2Dn = extent.at(modeN.front());
+    extent2Dn *= modeN.size() > 1 ? extent.at(*std::next(modeN.begin())) : 1;
+
+    constexpr int avgBlockingM = 64; // estimates for the blocking
+    constexpr int avgBlockingN = 64;
+
+    float utilizationGETT = 1.0f;
+    utilizationGETT *= features::getUtilization(extent2Dm, avgBlockingM);
+    utilizationGETT *= features::getUtilization(extent2Dn, avgBlockingN);
+    utilizationGETT *= features::getUtilization(extent.at(modeK.front()), 8);
+
+    /*
+     * roughly estimate number of CTAs to penalize in the case of large-k (since GETT doesn't offer it)
+     */
+    const float numSMs = ctx->getDeviceProp()->multiProcessorCount;
+    const float estimatedCTAs = totalExtentM/avgBlockingM * totalExtentN/avgBlockingN;
+    if (totalExtentK > 1000 && estimatedCTAs < numSMs)
+    {
+        utilizationGETT *= (estimatedCTAs / numSMs);
+    }
+
+    // Penalize strided A/B/C
+    const bool firstStrideAisContracted = std::find(modeK.begin(), modeK.end(), modeA.front()) != modeK.end();
+    const bool firstStrideBisContracted = std::find(modeK.begin(), modeK.end(), modeB.front()) != modeK.end();
+    const bool req3DTileAB = firstStrideAisContracted && firstStrideBisContracted && modeA.front() != modeB.front();
+    const bool req3DTileAC = !firstStrideAisContracted && modeA.front() != modeC.front();
+    // accesses to A are strided?
+    if (req3DTileAB || req3DTileAC ||
+        std::find(modeL.begin(), modeL.end(), modeA.front()) != modeL.end())
+    {
+        utilizationGETT *= 0.4f;
+    }
+    // accesses to B are strided?
+    if (std::find(modeL.begin(), modeL.end(), modeB.front()) != modeL.end())
+    {
+        utilizationGETT *= 0.4f;
+    }
+    // accesses to C are strided?
+    if (std::find(modeL.begin(), modeL.end(), modeC.front()) != modeL.end())
+    {
+        utilizationGETT *= 0.4f; // TODO scale with k
+    }
+    // estimated time that the gett call would take
+    const float timeGett = max(timeFlops * 1.25f, timeData) / utilizationGETT;
+
+    const bool isGEMVlike = totalExtentN <= 16;
+    const auto totalWorkSpaceRequiredTTGT = ttgt.getRequiredWorkspace();
+    if (totalWorkSpaceRequiredTTGT <= workspaceSize)
+    {
+        // see if TTGT is a suitable candidate
+        if (!ttgt.transposeC_ && !ttgt.transposeA_ && !ttgt.transposeB_) // no transpose required
+        {
+            return LWTENSOR_ALGO_TTGT;
+        }
+        if (isGEMVlike) // isGEMVlike
+            return LWTENSOR_ALGO_GETT;
+
+        const float timeTranspose = 2.0f * totalWorkSpaceRequiredTTGT * PEAK_BW_ILW;
+//        printf("estimate: %f (%f %f) %f\n",timeTranspose + timeGemm, timeTranspose, timeGemm , timeGett);
+        if (timeTranspose + timeGemm < timeGett) // choose TTGT if the est. time spend in tensor transpositions is neglectible
+        {
+            return LWTENSOR_ALGO_TTGT;
+        }
+    }
+
+    if (isGEMVlike) // isGEMVlike
+        return LWTENSOR_ALGO_GETT;
+
+    TTGTCandidate hybrid(tempDesc, true, kernel);
+
+    const auto totalWorkSpaceRequiredTGETT = hybrid.getRequiredWorkspace();
+    // see if TGETT is a suitable candidate
+    if (totalWorkSpaceRequiredTGETT <= workspaceSize )
+    {
+        const float timeTranspose = 2.0f * totalWorkSpaceRequiredTGETT * PEAK_BW_ILW;
+        if ((timeTranspose < 0.4f * timeGemm) || (totalExtentK <= 32 && req3DTileAC)
+            || req3DTileAB) // avoid the most nasty contractions
+        {
+            return LWTENSOR_ALGO_TGETT;
+        }
+    }
+
+    // Choose GETT
+    return LWTENSOR_ALGO_GETT;
+}
+
+/**
+  * Chooses the algorithm and calls the respective dispatcher.
+  */
+lwtensorStatus_t lwtensorContractionInternal_L1(
+    const Context* ctx, ContractionPlan& plan, 
+    const ContractionDynamicParams &tcParams, const Contractiolwariant& variant,
+    const bool allowFallback,
+    void* workspace, uint64_t workspaceSize,
+    const uint32_t workSizePreference)
+{
+#ifdef DEBUG
+    // precondition
+    HANDLE_ERROR(validateStride(strideA, modeA, extent));
+    HANDLE_ERROR(validateStride(strideB, modeB, extent));
+    HANDLE_ERROR(validateStride(strideC, modeC, extent));
+    assert(strideA.size() == modeA.size());
+    assert(strideB.size() == modeB.size());
+    assert(strideC.size() == modeC.size());
+#endif
+    const lwtensorOperator_t &opA = tcParams.opA_;
+    const lwdaDataType_t &typeA = tcParams.typeA_;
+    const StrideMap &strideA = tcParams.strideA_;
+    const ModeList &modeA = tcParams.modeA_;
+    const uint32_t &alignmentReqA = tcParams.alignmentReqA_;
+    const lwtensorOperator_t &opB = tcParams.opB_;
+    const lwdaDataType_t &typeB = tcParams.typeB_;
+    const StrideMap &strideB = tcParams.strideB_;
+    const ModeList &modeB = tcParams.modeB_;
+    const uint32_t &alignmentReqB = tcParams.alignmentReqB_;
+    const lwtensorOperator_t &opC = tcParams.opC_;
+    const lwdaDataType_t &typeC = tcParams.typeC_;
+    const StrideMap &strideC = tcParams.strideC_;
+    const ModeList &modeC = tcParams.modeC_;
+    const uint32_t &alignmentReqC = tcParams.alignmentReqC_;
+    const ExtentMap &extent = tcParams.extent_;
+    const lwtensorComputeType_t &typeCompute = tcParams.typeCompute_;
+    const auto &modeM = tcParams.modeM_;
+    const auto &modeN = tcParams.modeN_;
+    const auto &modeK = tcParams.modeK_;
+    const auto &modeL = tcParams.modeL_;
+    const auto &stridedLoadsA = tcParams.stridedLoadsA_;
+    const auto &stridedLoadsB = tcParams.stridedLoadsB_;
+    const bool contiguousModeIsBatchedA = tcParams.contiguousModeIsBatchedA_;
+    const bool contiguousModeIsBatchedB = tcParams.contiguousModeIsBatchedB_;
+
+    // TODO move to getWorkspace funciton after we have the internal rep
+    if (workSizePreference > 0)
+    {
+        if (workspace == nullptr)
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_ILWALID_VALUE);
+        }
+
+        // for GETT largeK and lwblasLt split-k
+        const auto workspaceLargeK = 16 * 1024 * 1024;
+
+        uint64_t &workspaceRequirement = *(uint64_t*) workspace;
+
+        if (workSizePreference == static_cast<uint32_t>(LWTENSOR_WORKSPACE_MAX))
+        {
+            TTGTCandidate ttgt(tcParams, false, variant.getKernel());
+            TTGTCandidate tgett(tcParams, true, variant.getKernel());
+            workspaceRequirement = workspaceLargeK
+                + std::max(ttgt.getRecommendedWorkspace(), tgett.getRecommendedWorkspace());
+        }
+        else if (workSizePreference == static_cast<uint32_t>(LWTENSOR_WORKSPACE_MIN))
+        {
+            workspaceRequirement = workspaceLargeK;
+        }
+        else
+        { // recommended
+            TTGTCandidate ttgt(tcParams, true, variant.getKernel());
+            workspaceRequirement = workspaceLargeK + ttgt.getRequiredWorkspace();
+        }
+        return LWTENSOR_STATUS_SUCCESS;
+    }
+
+    double dummy;
+    constexpr lwtensorOperator_t identity = LWTENSOR_OP_IDENTITY;
+    constexpr lwtensorOperator_t add = LWTENSOR_OP_ADD;
+    const auto typeScalarGett = getScalarType(typeC, typeCompute);
+    // Create plan for alpha == 0: D = beta * op(C);
+    HANDLE_ERROR(lwtensorElementwiseInternal_L1(
+                    ctx,
+                    (void*)&dummy, typeC, strideC, modeC, alignmentReqC,
+                    NULL,          typeC, strideC, modeC, 0, // not used
+                    (void*)&dummy, typeC, strideC, modeC, alignmentReqC, alignmentReqC,
+                    extent, opC, identity, identity, add, add,
+                    typeScalarGett, &plan.planForAlphaIsZero_));
+
+    /*
+     * Dispatch to element-wise
+     */
+    if (modeK.empty())
+    {
+        double dummy;
+        HANDLE_ERROR(lwtensorElementwiseInternal_L1(ctx, &dummy, typeA, strideA, modeA, alignmentReqA,
+                                                    &dummy, typeB, strideB, modeB, alignmentReqB,
+                                                    &dummy, typeC, strideC, modeC, alignmentReqC, alignmentReqC,
+                                                    extent, opA, opB, opC, LWTENSOR_OP_MUL,
+                                                    LWTENSOR_OP_ADD, typeScalarGett,
+                                                    &plan.transposePlanA_));
+        plan.dispatchToTrinary_ = true;
+        // TODO add artificial k-mode if NOT_SUPPORTED (once we moved the internal descr up)
+        RETURN_STATUS(LWTENSOR_STATUS_SUCCESS);
+    }
+    const auto totalM = getTotalModeExtent(modeM, extent);
+    const auto totalN = getTotalModeExtent(modeN, extent);
+    /* 
+     * Dispatch to reduction for GEMV-like and DOT-like tensor contractions
+     */
+    if (getTotalModeExtent(modeL, extent) <= 1 && (totalM == 1 || totalN == 1))
+    {
+        if (totalN == 1)
+        {
+            HANDLE_ERROR( plan.reductionParams_.init(ctx, typeA, typeB, typeC, typeCompute, opA, opB, opC, LWTENSOR_OP_MUL, LWTENSOR_OP_ADD,
+                                       modeA, modeB, modeC, strideA, strideB, strideC, extent));
+        }
+        else
+        {
+            plan.swapAB_ = !plan.swapAB_;
+            HANDLE_ERROR( plan.reductionParams_.init(ctx, typeA, typeB, typeC, typeCompute, opA, opB, opC, LWTENSOR_OP_MUL, LWTENSOR_OP_ADD,
+                                       modeB, modeA, modeC, strideB, strideA, strideC, extent));
+        }
+        double dummy;
+        auto ret = tensorReductionDispatch(
+                ctx,
+                &dummy, &dummy, &dummy,
+                &dummy, &dummy, &dummy, plan.reductionParams_, &dummy, workspaceSize,
+                nullptr, false);
+        if (ret == LWTENSOR_STATUS_SUCCESS)
+        {
+            plan.dispatchToReduction_ = true;
+            plan.workspaceSize_ = workspaceSize;
+            RETURN_STATUS(LWTENSOR_STATUS_SUCCESS);
+        }
+        else if (totalN != 1)
+        {
+            plan.swapAB_ = !plan.swapAB_; // undo previous swap
+        }
+    }
+
+    int32_t kernel = variant.getKernel();
+    lwtensorAlgo_t algo = variant.getAlgo();
+    if (variant.isDefaultAlgo())
+    {
+        algo = chooseAlgorithm(ctx, tcParams, workspaceSize, kernel);
+    }
+
+    bool triedTTGT = false;
+    /** Final internal representation of the plan */
+    if (algo == LWTENSOR_ALGO_TTGT)
+    {
+        auto err = tensorContractionTTGT(ctx, plan, kernel, tcParams, workspaceSize);
+        if (err == LWTENSOR_STATUS_SUCCESS || !allowFallback) return err;
+        triedTTGT = true;
+        kernel = Contractiolwariant::kDefaultKernel;
+        algo = LWTENSOR_ALGO_TGETT; // try TGETT as fallback
+    }
+
+    bool triedTGETT = false;
+    if (algo == LWTENSOR_ALGO_TGETT)
+    {
+        auto err = tensorContractionTGETT(ctx, plan, kernel, tcParams, workspaceSize);
+        if (err == LWTENSOR_STATUS_SUCCESS || !allowFallback) return err;
+        triedTGETT = true;
+        kernel = Contractiolwariant::kDefaultKernel;
+        algo = LWTENSOR_ALGO_GETT; // try GETT as fallback
+    }
+
+    plan.transposeA_ = false;
+    plan.transposeB_ = false;
+    plan.transposeC_ = false;
+
+    bool triedLwTe = false;
+    if (algo == LWTENSOR_ALGO_LWTE)
+    {
+        bool swapAB = plan.swapAB_;
+        auto err = lwtensorContractionInternal_L2(ctx, plan, workspaceSize, kernel,
+                                                typeA, typeB, typeC, typeCompute, 
+                                                modeA, modeB, modeC,
+                                                modeM, modeN, modeK, modeL, extent,
+                                                opA, strideA, alignmentReqA, 
+                                                opB, strideB, alignmentReqB,
+                                                opC, strideC, alignmentReqC,
+                                                stridedLoadsA, stridedLoadsB, contiguousModeIsBatchedA, contiguousModeIsBatchedB, swapAB, true);
+        if (err == LWTENSOR_STATUS_SUCCESS)
+        {
+            plan.swapAB_ = swapAB; // only change swapAB_ if we succeed
+            return err;
+        }
+        if (!allowFallback)
+        {
+            return err;
+        }
+        triedLwTe = true;
+    }
+
+    bool swapAB = plan.swapAB_;
+    /** Initialize the parameter by collecting all modes, sizes, and strides. */
+
+    auto status = lwtensorContractionInternal_L2(ctx, plan, workspaceSize, kernel,
+                                                typeA, typeB, typeC, typeCompute, 
+                                                modeA, modeB, modeC,
+                                                modeM, modeN, modeK, modeL, extent,
+                                                opA, strideA, alignmentReqA, 
+                                                opB, strideB, alignmentReqB,
+                                                opC, strideC, alignmentReqC,
+                                                stridedLoadsA, stridedLoadsB, contiguousModeIsBatchedA, contiguousModeIsBatchedB, swapAB);
+
+    if (status == LWTENSOR_STATUS_SUCCESS)
+    {
+        plan.swapAB_ = swapAB; // only change swapAB_ if we succeed
+    }
+    else if (allowFallback)
+    {
+        kernel = Contractiolwariant::kDefaultKernel;
+        // TTGT
+        if (!triedTTGT && tensorContractionTTGT(ctx, plan, kernel, tcParams, workspaceSize) == LWTENSOR_STATUS_SUCCESS)
+        {
+            return LWTENSOR_STATUS_SUCCESS;
+        }
+        // TGETT
+        if (!triedTGETT && tensorContractionTGETT(ctx, plan, kernel, tcParams, workspaceSize) == LWTENSOR_STATUS_SUCCESS)
+        {
+            return LWTENSOR_STATUS_SUCCESS;
+        }
+        plan.transposeA_ = false;
+        plan.transposeB_ = false;
+        plan.transposeC_ = false;
+        bool swapAB = plan.swapAB_;
+        if (!triedLwTe && lwtensorContractionInternal_L2(ctx, plan, workspaceSize, kernel,
+                                                typeA, typeB, typeC, typeCompute, 
+                                                modeA, modeB, modeC,
+                                                modeM, modeN, modeK, modeL, extent,
+                                                opA, strideA, alignmentReqA, 
+                                                opB, strideB, alignmentReqB,
+                                                opC, strideC, alignmentReqC,
+                                                stridedLoadsA, stridedLoadsB, contiguousModeIsBatchedA, contiguousModeIsBatchedB, swapAB,
+                                                true) == LWTENSOR_STATUS_SUCCESS)
+        {
+            plan.swapAB_ = swapAB; // only change swapAB_ if we succeed
+            return LWTENSOR_STATUS_SUCCESS;
+        }
+    }
+
+    RETURN_STATUS(status);
+}
+
+lwtensorStatus_t tcValidateInput(const Context *ctx,
+                                 const TensorDescriptor* descA, const mode_type* modeA,
+                                 const TensorDescriptor* descB, const mode_type* modeB,
+                                 const TensorDescriptor* descC, const mode_type* modeC,
+                                 const TensorDescriptor* descD, const mode_type* modeD,
+                                 lwtensorComputeType_t typeCompute, lwtensorAlgo_t algo,
+                                 bool isReduction)
+{
+
+    if( !isValidComputeType(typeCompute) )
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "typeCompute is invalid.");
+    }
+
+    if (descC != descD) {
+        return ctx->logError(LWTENSOR_STATUS_NOT_SUPPORTED,
+                           "Current limitation: descC and descD must be identical "
+                           "for now (please request this feature).");
+    }
+
+    if (modeC != modeD)
+    {
+        for(int i=0; i < descD->getNumModes(); ++i)
+        {
+            if (modeC[i] != modeD[i])
+            {
+                return ctx->logError(LWTENSOR_STATUS_NOT_SUPPORTED,
+                           "Current limitation: modeC and modeD must be identical "
+                           "for now (please request this feature).");
+            }
+        }
+    }
+
+    if (descA == nullptr)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: descA is nullptr.");
+    }
+    else if(! descA->isInitialized())
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: descA is not initialized.");
+    }
+    else if (modeA == nullptr && descA->getNumModes() > 0)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: modeA is nullptr.");
+    }
+    else if (descB == nullptr && !isReduction)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: descB is nullptr.");
+    }
+    else if(!isReduction && !descB->isInitialized())
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: descB is not initialized.");
+    }
+    else if (modeB == nullptr && !isReduction)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: modeB is nullptr.");
+    }
+    else if (descC == nullptr)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: descC is nullptr.");
+    }
+    else if(!descC->isInitialized())
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: descC is not initialized.");
+    }
+    else if (modeC == nullptr && descC->getNumModes() > 0)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: modeC is nullptr.");
+    }
+    else if (descD == nullptr)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: descD is nullptr.");
+    }
+    else if (modeD == nullptr && descD->getNumModes() > 0)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid argument: modeD is nullptr.");
+    }
+
+    if(algo < LWTENSOR_ALGO_LWTE)
+    {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Algorithm invalid.");
+    }
+
+    if (descA->isVectorized() || (descB && descB->isVectorized()) || descC->isVectorized())
+        return ctx->logError(LWTENSOR_STATUS_NOT_SUPPORTED, "Tensor contractions do not support ''vectorized'' tensors.");
+
+
+    RETURN_STATUS(LWTENSOR_STATUS_SUCCESS);
+}
+
+/**
+  * Colwerts problem into our internal representation
+  *   * Validates
+  *   * Merges modes
+  *   * Removes modes with extent 1
+  */
+static lwtensorStatus_t lwtensorContractionInternal_L0(
+    const Context* ctx,
+    const ContractionDescriptor *desc,
+          ContractionPlan *plan, 
+    const Contractiolwariant &variant, const bool allowFallback, void* workspace, uint64_t workspaceSize,
+    const uint32_t workSizePreference, const int32_t partitionsK, bool forceHandled)
+{
+    try
+    {
+        HANDLE_ERROR(lwdaGetLastError());
+
+        const auto &descA = desc->getDescA();
+        const auto &descB = desc->getDescB();
+        const auto &descC = desc->getDescC();
+        const auto &descD = desc->getDescC();
+        const auto &modeA = desc->getModeA();
+        const auto &modeB = desc->getModeB();
+        const auto &modeC = desc->getModeC();
+        const auto &modeD = desc->getModeC();
+
+        const auto typeCompute   = desc->getComputeType();
+        const bool isTF32ComputeType = typeCompute == LWTENSOR_COMPUTE_TF32;
+        lwtensorContractionDescriptor_t alternativeDescMem;
+        ContractionDescriptor *alternativeDesc = reinterpret_cast<ContractionDescriptor*>(&alternativeDescMem);
+        bool hasTF32Kernel = descC->getDataType() == LWDA_C_32F || descC->getDataType() == LWDA_R_32F || descC->getDataType() == LWDA_R_64F;
+        bool isDouble = descC->getDataType() == LWDA_R_64F || descC->getDataType() == LWDA_C_64F;
+        // forces tf32 even for *lower* compute types
+        if (ctx->isTF32ForceEnabled() && ! isTF32ComputeType && ! forceHandled && hasTF32Kernel)
+        {
+            lwtensorComputeType_t altComputeType = LWTENSOR_COMPUTE_TF32;
+            alternativeDesc->initContractionDescriptor(ctx, descA, modeA, desc->getAlignmentA(),
+                                                       descB, modeB, desc->getAlignmentB(),
+                                                       descC, modeC, desc->getAlignmentC(),
+                                                       descD, modeD, desc->getAlignmentD(),
+                                                       altComputeType);
+            auto err = lwtensorContractionInternal_L0(ctx, alternativeDesc, plan, variant,
+                    allowFallback, workspace, workspaceSize, workSizePreference,
+                    partitionsK, true);
+            if (err == LWTENSOR_STATUS_SUCCESS) return err;
+            if (err != LWTENSOR_STATUS_NOT_SUPPORTED) HANDLE_ERROR(err);
+            // fall through to original implementation
+        }
+        else if (ctx->isTF32ForceDisabled() && isTF32ComputeType && ! forceHandled && hasTF32Kernel)
+        {
+            lwtensorComputeType_t altComputeType = isDouble ? LWTENSOR_COMPUTE_64F : LWTENSOR_COMPUTE_32F;
+            alternativeDesc->initContractionDescriptor(ctx, descA, modeA, desc->getAlignmentA(),
+                                                       descB, modeB, desc->getAlignmentB(),
+                                                       descC, modeC, desc->getAlignmentC(),
+                                                       descD, modeD, desc->getAlignmentD(),
+                                                       altComputeType);
+            return lwtensorContractionInternal_L0(ctx, alternativeDesc, plan, variant,
+                    allowFallback, workspace, workspaceSize, workSizePreference,
+                    partitionsK, true);
+        }
+
+        const lwdaDataType_t typeScalar = getScalarType(descC->getDataType(), typeCompute);
+        plan->init(typeScalar, partitionsK);
+
+        if(variant.getAlgo() < LWTENSOR_ALGO_LWTE)
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Invalid algorithm.");
+        }
+
+        /*
+         * Colwert from external to internal representation.
+         */
+        ContractionDynamicParams tcParams( desc, plan->swapAB_); // sort modes (w.r.t. strides) and fuses modes
+        return lwtensorContractionInternal_L1(ctx, *plan,
+                                              tcParams, variant, allowFallback,
+                                              workspace, workspaceSize, workSizePreference);
+    }
+    catch (std::exception& e)
+    {
+        std::cerr << e.what() << std::endl;
+        if( NotSupported *ns = dynamic_cast<NotSupported*>(&e) )
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+        RETURN_STATUS(LWTENSOR_STATUS_INTERNAL_ERROR);
+    }
+}
+
+bool heuristicLargeK(const ModeList& modeM, const ModeList& modeN,
+                     const ModeList& modeK, const ModeList& modeL,
+                     const ExtentMap& extent)
+{
+    if (modeL.size() == 0) {
+        const auto totalExtentM = getTotalModeExtent(modeM, extent);
+        const auto totalExtentN = getTotalModeExtent(modeN, extent);
+        const auto totalExtentK = getTotalModeExtent(modeK, extent);
+        if (totalExtentK > 512 && 25 * std::max(totalExtentM, totalExtentN) < totalExtentK) {
+            // printf( "Here useLargeK M %d N %d K %d\n", totalExtentM, totalExtentN, totalExtentK ); fflush( stdout );
+            return true;
+        }
+    }
+    return false;
+}
+} // end LWTENSOR_NAMESPACE namespace
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t lwtensorGetAlignmentRequirement(const lwtensorHandle_t* handle,
+                                                 const void* ptr,
+                                                 const lwtensorTensorDescriptor_t *desc_,
+                                                 uint32_t *alignmentRequirement)
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    try
+    {
+        auto ctx = reinterpret_cast<const Context*>(handle);
+        if (ctx == nullptr || !ctx->isInitialized())
+        {
+            return handleError(LWTENSOR_STATUS_NOT_INITIALIZED, "Handle must be initialized.");
+        }
+
+        const TensorDescriptor* desc = (TensorDescriptor*) desc_;
+        if( ptr == nullptr || desc == nullptr || alignmentRequirement == nullptr )
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Parameters must be allocated.");
+        }
+
+        const lwdaDataType_t dataType = desc->getDataType();
+        const uint64_t typeSize = getDataTypeSize(dataType);
+        const uint64_t ptrAddr  = reinterpret_cast<uint64_t>(ptr);
+        uint64_t vectorWidth    = getVectorization(dataType); // in elements
+
+        while(vectorWidth > 1)
+        {
+            if( (ptrAddr &(vectorWidth * typeSize - 1)) == 0 ) // ptr is aligned
+            {
+                *alignmentRequirement = vectorWidth * typeSize;
+                return LWTENSOR_STATUS_SUCCESS;
+            }
+
+            vectorWidth /= 2;
+        }
+
+        *alignmentRequirement = typeSize;
+        return LWTENSOR_STATUS_SUCCESS;
+    }
+    catch (const std::exception & e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t
+lwtensorInitContractionDescriptor(const lwtensorHandle_t* handle, lwtensorContractionDescriptor_t *desc,
+                                  const lwtensorTensorDescriptor_t* descA, const int32_t modeA[], const uint32_t alignmentRequirementA,
+                                  const lwtensorTensorDescriptor_t* descB, const int32_t modeB[], const uint32_t alignmentRequirementB,
+                                  const lwtensorTensorDescriptor_t* descC, const int32_t modeC[], const uint32_t alignmentRequirementC,
+                                  const lwtensorTensorDescriptor_t* descD, const int32_t modeD[], const uint32_t alignmentRequirementD,
+                                  lwtensorComputeType_t minimumComputeType)
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    try
+    {
+        auto ctx = reinterpret_cast<const Context*>(handle);
+        if (ctx == nullptr || !ctx->isInitialized())
+            return handleError(LWTENSOR_STATUS_NOT_INITIALIZED, "Handle must be initialized.");
+
+        // Cast descriptors to internal representation
+        auto descInternal = reinterpret_cast<ContractionDescriptor *>(desc);
+
+        if(descInternal == nullptr)
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Contraction descriptor must be allocated.");
+        }
+        descInternal->unsetInitialized();
+
+        const auto descInternalA = reinterpret_cast<const TensorDescriptor *>(descA);
+        const auto descInternalB = reinterpret_cast<const TensorDescriptor *>(descB);
+        const auto descInternalC = reinterpret_cast<const TensorDescriptor *>(descC);
+        const auto descInternalD = reinterpret_cast<const TensorDescriptor *>(descD);
+
+        if (descInternalA == nullptr || !descInternalA->isInitialized() ||
+            descInternalB == nullptr || !descInternalB->isInitialized() ||
+            descInternalC == nullptr || !descInternalC->isInitialized() ||
+            descInternalD == nullptr || !descInternalD->isInitialized())
+        {
+            RETURN_STATUS(ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "All tensor descriptors must be initialized."));
+        }
+
+        minimumComputeType = normalizeComputeType(minimumComputeType); // necessary due to deprecated values
+
+        return descInternal->initContractionDescriptor(ctx,
+                                                       descInternalA, modeA, alignmentRequirementA,
+                                                       descInternalB, modeB, alignmentRequirementB,
+                                                       descInternalC, modeC, alignmentRequirementC,
+                                                       descInternalD, modeD, alignmentRequirementD,
+                                                       minimumComputeType);
+    }
+    catch (std::exception& e)
+    {
+        std::cerr << e.what() << std::endl;
+        if( NotSupported *ns = dynamic_cast<NotSupported*>(&e) )
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+        RETURN_STATUS(LWTENSOR_STATUS_INTERNAL_ERROR);
+    }
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t
+lwtensorInitContractionFind(const lwtensorHandle_t* handle,
+                            lwtensorContractionFind_t* find_,
+                            const lwtensorAlgo_t algo)
+{
+    using LWTENSOR_NAMESPACE::ContractionFind;
+    using LWTENSOR_NAMESPACE::Context;
+    using LWTENSOR_NAMESPACE::handleError;
+    try
+    {
+        auto ctx = reinterpret_cast<const Context*>(handle);
+        if (ctx == nullptr || !ctx->isInitialized())
+            return handleError(LWTENSOR_STATUS_NOT_INITIALIZED, "Handle must be initialized.");
+
+        ContractionFind * const find = reinterpret_cast<ContractionFind*>(find_);
+        if ( find == nullptr )
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Contraction find must be allocated.");
+        }
+        find->unsetInitialized();
+
+        return find->init(algo);
+    }
+    catch (const std::exception & e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+extern "C" EXPORT_INTERNAL_SYMBOL
+lwtensorStatus_t
+lwtensorContractionFindSetKernel(const lwtensorHandle_t* handle,
+                                 lwtensorContractionFind_t* const find_,
+                                 int kernel)
+{
+    using LWTENSOR_NAMESPACE::ContractionFind;
+    using LWTENSOR_NAMESPACE::Context;
+    using LWTENSOR_NAMESPACE::handleError;
+    try
+    {
+        auto ctx = reinterpret_cast<const Context*>(handle);
+        if (ctx == nullptr || !ctx->isInitialized())
+            return handleError(LWTENSOR_STATUS_NOT_INITIALIZED, "Handle must be initialized.");
+
+        ContractionFind * const find = reinterpret_cast<ContractionFind*>(find_);
+        if ( find == nullptr )
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Contraction find must be allocated.");
+        }
+
+        return find->setKernel(kernel);
+    }
+    catch (const std::exception & e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t
+lwtensorContractionGetWorkspace(const lwtensorHandle_t* handle,
+                                const lwtensorContractionDescriptor_t* desc,
+                                const lwtensorContractionFind_t* find,
+                                const lwtensorWorksizePreference_t pref,
+                                uint64_t *workspaceSize)
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    try
+    {
+        auto ctx = reinterpret_cast<const Context*>(handle);
+        if (ctx == nullptr || !ctx->isInitialized())
+            return handleError(LWTENSOR_STATUS_NOT_INITIALIZED, "Handle must be initialized.");
+
+        auto descInternal = reinterpret_cast<const ContractionDescriptor*>(desc);
+        if( descInternal == nullptr || !descInternal->isInitialized())
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Contraction descriptor must be initialized.");
+        }
+
+        auto findInternal = reinterpret_cast<const ContractionFind*>(find);
+        if( findInternal == nullptr || !findInternal->isInitialized())
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Contraction find must be initialized.");
+        }
+
+        if (workspaceSize == nullptr) {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Workspace size must be allocated.");
+        }
+        *workspaceSize = 0;
+
+        const uint32_t workSizePreference = static_cast<uint32_t>(pref);
+
+        const auto contractiolwariant = findInternal->getContractiolwariant();
+
+        ContractionPlan plan;
+
+        const bool allowFallback = contractiolwariant.isDefaultAlgo();
+
+        auto ret = lwtensorContractionInternal_L0(ctx, descInternal, &plan,
+                                              contractiolwariant, allowFallback,
+                                              workspaceSize, 0, workSizePreference, -1);
+        return ret;
+    }
+    catch (const std::exception & e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t
+lwtensorInitContractionPlan(const lwtensorHandle_t* handle,
+                            lwtensorContractionPlan_t* plan,
+                            const lwtensorContractionDescriptor_t* desc,
+                            const lwtensorContractionFind_t* find,
+                            const uint64_t workspaceSize)
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    try
+    {
+        auto ctx = reinterpret_cast<const Context*>(handle);
+        if(ctx == nullptr || !ctx->isInitialized())
+        {
+            return handleError(LWTENSOR_STATUS_NOT_INITIALIZED, "Handle must be initialized.");
+        }
+
+        auto planInternal = reinterpret_cast<ContractionPlan*>(plan);
+        if( planInternal == nullptr )
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Contraction plan must be allocated.");
+        }
+        planInternal->unsetInitialized();
+
+        auto descInternal = reinterpret_cast<const ContractionDescriptor*>(desc);
+        if( descInternal == nullptr || !descInternal->isInitialized() )
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Contraction descriptor must be initialized.");
+        }
+
+        auto findInternal = reinterpret_cast<const ContractionFind*>(find);
+        if( findInternal == nullptr || !findInternal->isInitialized())
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Contraction find must be initialized.");
+        }
+
+        auto contractiolwariant = findInternal->getContractiolwariant();
+        const int32_t partitionsK = findInternal->getPartitionsK();
+
+        LWTENSOR_LOG_API(ctx, 1, reproduceCommand(descInternal->getDescA(), descInternal->getModeA(), descInternal->getAlignmentA(),
+                                                  descInternal->getDescB(), descInternal->getModeB(), descInternal->getAlignmentB(),
+                                                  descInternal->getDescC(), descInternal->getModeC(), descInternal->getAlignmentC(),
+                                                  descInternal->getComputeType(),
+                                                  contractiolwariant.getAlgo(),
+                                                  workspaceSize,
+                                                  partitionsK,
+                                                  LWTENSOR_ROUTINE_TC));
+
+        const bool hasValidPlanCache = ctx->hasValidPlanCache();
+        const bool usePlanCache = hasValidPlanCache && contractiolwariant.isCacheable();
+        const lwtensorAlgo_t originalAlgo = contractiolwariant.getAlgo();
+        const uint32_t maxAlgoCount = findInternal->getIncrementalCount();
+        const lwtensorAutotuneMode_t autotuneMode = findInternal->getAutotuneMode();
+        uint32_t algoCount = 0;
+        bool cacheHit = false;
+        using Key = typename ContractionPlanCache::Key;
+        using Value = typename ContractionPlanCache::Value;
+        Key key;
+        Value value;
+
+        // lookup plan cache
+        if (usePlanCache)
+        {
+            if (findInternal->getCacheMode() == LWTENSOR_CACHE_MODE_PEDANTIC) // TODO support other modes
+            {
+                auto cache = ctx->getCache();
+
+                key = descInternal->getHash(workspaceSize, autotuneMode);
+
+                cacheHit = cache->get(key, value, algoCount);
+                if (cacheHit)
+                {
+                    if ((autotuneMode == LWTENSOR_AUTOTUNE_NONE) ||
+                         algoCount >= maxAlgoCount) // only utilize cached entry if we've already explored enough algorithms
+                    {
+                        *planInternal = std::move(value.first);
+                        LWTENSOR_LOG_API(ctx, 2, "Cache HIT - return plan\n");
+                        if (partitionsK != -1)
+                        {
+                            planInternal->gettParams_.partitions_ = partitionsK;
+                        }
+                        return LWTENSOR_STATUS_SUCCESS;
+                    }
+                    else
+                    {
+                        LWTENSOR_LOG_API(ctx, 2, "Cache HIT - explore more candidates (inc.  autotuning)\n");
+                    }
+                }
+                else
+                {
+                    LWTENSOR_LOG_API(ctx, 2, "Cache MISS\n");
+                }
+            }
+            if (autotuneMode == LWTENSOR_AUTOTUNE_INCREMENTAL)
+            {
+                // determine algo and sub-algo (i.e., kernel) from the current algo-count
+                contractiolwariant.setFromRank(originalAlgo, algoCount);
+            }
+        }
+
+        // allow a fallback to a differnt algorithm iff the original lwtensorAlgo_t was set to LWTENSOR_ALGO_DEFAULT
+        const bool allowFallback = originalAlgo == LWTENSOR_ALGO_DEFAULT;
+
+        auto status = lwtensorContractionInternal_L0(ctx, descInternal, planInternal,
+                contractiolwariant, allowFallback, nullptr, workspaceSize, 0, partitionsK);
+
+        if(status == LWTENSOR_STATUS_SUCCESS)
+        {
+            planInternal->setInitialized();
+
+#ifdef LWTENSOR_SPLIT_K_SWEEP
+        int targetCTAs = partitionsK; // WARNING: Missuse of the partitions arguemnt
+//        if (getelw("LWTENSOR_TARGET_CTAS") != nullptr)
+//            targetCTAs = atoi(getelw("LWTENSOR_TARGET_CTAS"));
+            if (targetCTAs != -1)
+            {
+                planInternal->gettParams_.partitions_ = 1;
+
+                const Candidate<ContractionDescriptorInternal> *candidate = nullptr;
+                auto contractionEngineLwtlass = getContractionEngineLwtlass();
+                HANDLE_ERROR(contractionEngineLwtlass->getCandidatePtr(planInternal->candidateIdx_, planInternal->containerIdx_, candidate));
+
+                auto myCandidate = reinterpret_cast<const CandidateTyped<ContractionDescriptorInternal, CandidateInfoLwtlass>*>(candidate);
+                CandidateInfoLwtlass candidateInfo = myCandidate->getCandidateInfo();
+
+                int nCTAs = myCandidate->getNumThreadblocks((void*)planInternal);
+                const extent_type totalK = planInternal->gettParams_.getTotalExtentK();
+                size_t nK = (totalK + candidateInfo.threadblockK - 1) / candidateInfo.threadblockK;
+
+                int partitions = static_cast<int>(std::max(1.0f, std::min(1.0f * nK, ((float)targetCTAs-1) / nCTAs)));
+                planInternal->gettParams_.partitions_ = partitions;
+                int nCTAsBefore = myCandidate->getNumThreadblocks(planInternal);
+
+                partitions = static_cast<int>(std::max(1.0f, std::min(1.0f * nK, ((float)targetCTAs) / nCTAs)));
+                planInternal->gettParams_.partitions_ = partitions;
+                int nCTAsAfter = myCandidate->getNumThreadblocks(planInternal);
+
+                if (nCTAsBefore == nCTAsAfter && targetCTAs != 40) // we start to evaluate at 40
+                {
+                    return LWTENSOR_STATUS_NOT_SUPPORTED; // skip this targetCTA value since we've tested it already
+                }
+            }
+#endif
+
+            // insert plan into cache with infinite time (to keep track of the last-used algo)
+            if (usePlanCache && planInternal->canBeCached() &&
+                ((autotuneMode == LWTENSOR_AUTOTUNE_INCREMENTAL) ||
+                 (autotuneMode == LWTENSOR_AUTOTUNE_NONE)))
+            {
+                planInternal->setRequiresMeasurement(
+                        autotuneMode == LWTENSOR_AUTOTUNE_INCREMENTAL &&
+                        algoCount < maxAlgoCount);
+                if (findInternal->getCacheMode() == LWTENSOR_CACHE_MODE_PEDANTIC) // TODO support other modes
+                {
+                    planInternal->setKey(key);
+
+                    auto cache = ctx->getCache();
+                    const float infinite = std::numeric_limits<float>::max();
+
+                    if (cacheHit)
+                    {
+                        cache->incrementAlgoCount(key);
+                    }
+                    else
+                    {
+                        cache->put(key,
+                            std::pair<ContractionPlan,float>(*planInternal,infinite),
+                            algoCount + 1); // increment algo count
+                    }
+                }
+            }
+
+            return status;
+        }
+        else if (status == LWTENSOR_STATUS_NOT_SUPPORTED && hasValidPlanCache &&
+                (autotuneMode == LWTENSOR_AUTOTUNE_INCREMENTAL))
+        {
+            // This branch can be reached if the requested algo is not valid (e.g., if we
+            // don't have so many applicable candidates)
+            if (findInternal->getCacheMode() == LWTENSOR_CACHE_MODE_PEDANTIC) // TODO support other modes
+            {
+                if (cacheHit)
+                {
+                    auto cache = ctx->getCache();
+                    cache->incrementAlgoCount(key); // we still have to increment, since it might be that some algo is not applicable, while the next algo is
+                    // return cached plan
+                    *planInternal = std::move(value.first);
+                    return LWTENSOR_STATUS_SUCCESS;
+                }
+            }
+        }
+        return status;
+    }
+    catch (const std::exception & e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+extern "C" EXPORT_INTERNAL_SYMBOL
+lwtensorStatus_t
+lwtensorContractionPlanInfo(const lwtensorHandle_t* handle,
+                                     const lwtensorContractionPlan_t* plan,
+                                     char* dst, int sz)
+{
+    using namespace LWTENSOR_NAMESPACE;
+    auto ctx = reinterpret_cast<const Context*>(handle);
+    if(ctx == nullptr || !ctx->isInitialized()) {
+        RETURN_STATUS(LWTENSOR_STATUS_NOT_INITIALIZED);
+    }
+    auto planInternal = reinterpret_cast<const ContractionPlan*>(plan);        
+    if(planInternal == nullptr || planInternal->isInitialized() == false) {
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Plan is not initialized.");
+    } 
+    planInternal->info(dst, sz);
+    RETURN_STATUS(LWTENSOR_STATUS_SUCCESS);
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t
+lwtensorContraction(const lwtensorHandle_t* handle,
+                    const lwtensorContractionPlan_t* plan,
+                    const void* alpha, const void* A, const void* B,
+                    const void* beta,  const void* C,       void* D,
+                    void *workspace, const uint64_t workspaceSize, lwdaStream_t stream)
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    try
+    {
+        auto ctx = reinterpret_cast<const Context*>(handle);
+        if(ctx == nullptr || !ctx->isInitialized()) {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_INITIALIZED);
+        }
+
+        auto planInternal = reinterpret_cast<const ContractionPlan*>(plan);        
+        if (planInternal == nullptr || planInternal->isInitialized() == false) {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Plan is not initialized.");
+        }
+
+        ContractionPlan::Params params(ctx,
+                               alpha, A, B,
+                               beta,  C, D,
+                               workspace, workspaceSize, stream);
+
+        if (ctx->hasValidPlanCache())
+        {
+            // Look for completed events and update cache
+            auto cache = ctx->getCache();
+            return cache->measureAndUpdate(planInternal, params);
+        }else{
+            return (*planInternal)(params);
+        }
+    }
+    catch (const std::exception & e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t lwtensorHandleAttachPlanCachelines(lwtensorHandle_t* handle,
+                                             lwtensorPlanCacheline_t cachelines_[],
+                                             const uint32_t numCachelines)
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    try
+    {
+        auto ctx = reinterpret_cast<Context*>(handle);
+        if(ctx == nullptr ) {
+            RETURN_STATUS(LWTENSOR_STATUS_ILWALID_VALUE);
+        }
+        if( !ctx->isInitialized()) {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_INITIALIZED);
+        }
+
+        auto cachelines = reinterpret_cast<Context::PlanCacheline*>(cachelines_);
+        return ctx->attachPlanCachelines(cachelines, numCachelines);
+    }
+    catch (const std::exception & e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t lwtensorHandleWriteCacheToFile(const lwtensorHandle_t* handle,
+                                                const char filename[])
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    try
+    {
+        auto ctx = reinterpret_cast<const Context*>(handle);
+        if (ctx == nullptr)
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_ILWALID_VALUE);
+        }
+        if( !ctx->isInitialized())
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_INITIALIZED);
+        }
+        return ctx->writeCacheToFile(filename);
+    }
+    catch (const std::exception & e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t lwtensorHandleReadCacheFromFile(lwtensorHandle_t* handle,
+                                                 const char filename[],
+                                                 uint32_t *numCachelinesRead)
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    try
+    {
+        auto ctx = reinterpret_cast<Context*>(handle);
+        if (ctx == nullptr)
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_ILWALID_VALUE);
+        }
+        if( !ctx->isInitialized())
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_INITIALIZED);
+        }
+        return ctx->readCacheFromFile(filename, *numCachelinesRead);
+    }
+    catch (const std::exception & e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t lwtensorHandleDetachPlanCachelines(lwtensorHandle_t* handle)
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    try
+    {
+        auto ctx = reinterpret_cast<Context*>(handle);
+        if (ctx == nullptr)
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_ILWALID_VALUE);
+        }
+        if( !ctx->isInitialized())
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_INITIALIZED);
+        }
+        return ctx->detachPlanCachelines();
+    }
+    catch (const std::exception & e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t lwtensorContractionDescriptorSetAttribute(
+        const lwtensorHandle_t* handle,
+        lwtensorContractionDescriptor_t* desc,
+        lwtensorContractionDescriptorAttributes_t attr,
+        const void *buf,
+        size_t sizeInBytes)
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    try
+    {
+        auto ctx = reinterpret_cast<const Context*>(handle);
+        if (ctx == nullptr)
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_ILWALID_VALUE);
+        }
+        if (!ctx->isInitialized())
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_INITIALIZED);
+        }
+
+        auto descInternal = reinterpret_cast<ContractionDescriptor *>(desc);
+        if (descInternal == nullptr || !descInternal->isInitialized())
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "ContractionDescriptor is not initialized.");
+        }
+        if (buf == nullptr )
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Provided buffer is nullptr.");
+        }
+        if (attr == LWTENSOR_CONTRACTION_DESCRIPTOR_TAG)
+        {
+            if (sizeInBytes < sizeof(uint32_t))
+            {
+                return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "sizeInBytes too small for provided attribute.");
+            }
+            descInternal->setTag(*reinterpret_cast<const uint32_t*>(buf));
+            return LWTENSOR_STATUS_SUCCESS;
+        }
+        else
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_SUPPORTED);
+        }
+    }
+    catch (const std::exception & e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+extern "C" EXPORT_SYMBOL
+lwtensorStatus_t lwtensorContractionFindSetAttribute(
+        const lwtensorHandle_t* handle,
+        lwtensorContractionFind_t* find_,
+        lwtensorContractionFindAttributes_t attr,
+        const void *buf,
+        size_t sizeInBytes)
+{
+    using namespace LWTENSOR_NAMESPACE;
+
+    try
+    {
+        auto ctx = reinterpret_cast<const Context*>(handle);
+        if (ctx == nullptr )
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_ILWALID_VALUE);
+        }
+        if (!ctx->isInitialized())
+        {
+            RETURN_STATUS(LWTENSOR_STATUS_NOT_INITIALIZED);
+        }
+        ContractionFind* const find = reinterpret_cast<ContractionFind*>(find_);
+        if (find == nullptr || !find->isInitialized())
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "ContractionFind is not initialized.");
+        }
+        if (buf == nullptr )
+        {
+            return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "Provided buffer is nullptr.");
+        }
+        if (attr == LWTENSOR_CONTRACTION_FIND_CACHE_MODE)
+        {
+            if (sizeInBytes < sizeof(lwtensorCacheMode_t))
+            {
+                return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "sizeInBytes too small for provided attribute.");
+            }
+            const lwtensorCacheMode_t cacheMode = *reinterpret_cast<const lwtensorCacheMode_t*>(buf);
+            return find->setCacheMode(cacheMode);
+        }
+        else if( attr == LWTENSOR_CONTRACTION_FIND_AUTOTUNE_MODE )
+        {
+            if( sizeInBytes < sizeof(lwtensorAutotuneMode_t))
+            {
+                return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "sizeInBytes too small for provided attribute.");
+            }
+            const lwtensorAutotuneMode_t autotuneMode = *reinterpret_cast<const lwtensorAutotuneMode_t*>(buf);
+            return find->setAutotuneMode(autotuneMode);
+        }
+        else if( attr == LWTENSOR_CONTRACTION_FIND_INCREMENTAL_COUNT )
+        {
+            if( sizeInBytes < sizeof(uint32_t))
+            {
+                return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "sizeInBytes too small for provided attribute.");
+            }
+            const auto incCount = *reinterpret_cast<const uint32_t*>(buf);
+            return find->setIncrementalCount(incCount);
+        }
+        else if( attr == LWTENSOR_CONTRACTION_FIND_SPLITK_NUM)
+        {
+            if( sizeInBytes < sizeof(int32_t))
+            {
+                return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "sizeInBytes too small for provided attribute.");
+            }
+            const auto numPartitions = *reinterpret_cast<const int32_t*>(buf);
+            return find->setPartitionsK(numPartitions);
+        }
+        return ctx->logError(LWTENSOR_STATUS_ILWALID_VALUE, "lwtensorContractionFindAttribute_t is invalid.");
+    }
+    catch (const std::exception & e)
+    {
+        return LWTENSOR_NAMESPACE::handleException(e);
+    }
+}
+
+

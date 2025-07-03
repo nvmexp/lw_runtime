@@ -1,0 +1,40 @@
+lwntest_dyn = LwnProcessDynamicLinkRule
+{
+    SourceFiles = List(
+        ${LwnTestCommon.SrcFiles}
+    );
+
+    SdkDynamicLinkLibraryNames = List(
+        ${LwnBaseDynamicLinkLibraryNames},
+        "opengl",
+        "lwn-etc1",
+    );
+
+    LibraryNames = List(
+        ${LwnBasicLibraryNames},
+        "libnn_gll",
+    );
+
+    PreprocessorMacros = List(
+        ${LwnBasePreprocessorMacros},
+        "WIN_INTERFACE_LWSTOM",
+    );
+
+    Name = "lwntest_dyn";
+
+    # closure that determines if a configuration is supported
+    IsSupported = config => And(
+      config.HasKeyValue("os", "horizon"),
+      Or (
+          config.HasKeyValue("hardware", "jetsontk2"),
+          config.HasKeyValue("soc", "cheetah-x1"),
+      )
+    );
+
+    IncludeDirectories = List(
+        ${LwnBaseIncludePaths},
+        f"include",
+        f"elw",
+        HosRoot.Combine("gpu/drv/drivers/lwn/liblwn-etc1"),
+    );
+}

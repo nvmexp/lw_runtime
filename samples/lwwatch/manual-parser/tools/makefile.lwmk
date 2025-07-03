@@ -1,0 +1,56 @@
+##############################################################################
+
+include $(LW_SOURCE)/drivers/common/build/lwCommon.lwmk
+
+
+##############################################################################
+# string to prepend in unix builds when exelwting rules in this gmake instance
+##############################################################################
+
+LW_MODULE_LOGGING_NAME = "drf-lookup"
+
+
+##############################################################################
+# extra CFLAGS/warnings
+##############################################################################
+
+CFLAGS += -Wall
+CFLAGS += -Wno-multichar
+CFLAGS += -Wno-unused
+CFLAGS += -Wno-write-strings
+
+# disable -Wcast-qual
+LW_CAST_QUAL_WARNING =
+
+# enable -Werror
+LW_WARNINGS_AS_ERRORS = 1
+
+_libdrf_dir = $(LW_SOURCE)/apps/lwwatch/manual-parser/libdrf-lwpu
+
+LW_INCLUDES += $(_libdrf_dir)
+
+include $(_libdrf_dir)/drf.lwmk
+
+##############################################################################
+# source files to build into drf-lookup
+##############################################################################
+
+SOURCES += drf_lookup.c
+SOURCES += drf_util.c
+
+##############################################################################
+# link drf-lookup
+##############################################################################
+
+DRF_LOOKUP = $(OUTPUTDIR)/drf-lookup
+
+build: $(DRF_LOOKUP)
+
+$(DRF_LOOKUP): $(OBJECTS)
+	$(call quiet_cmd,LINK) $(OBJECTS) -o $@ $(LDFLAGS) $(BIN_LDFLAGS)
+
+##############################################################################
+# include definitions of build rules
+##############################################################################
+
+include $(LW_SOURCE)/drivers/common/build/lwCommonRules.lwmk

@@ -1,0 +1,25 @@
+ps_4_0
+dcl_input_siv linear noperspective v0.xy, position
+dcl_output o0.xyzw
+dcl_constantbuffer cb0[1].xyzw, immediateIndexed
+dcl_constantbuffer cb1[4].xyzw, immediateIndexed
+dcl_resource t0, texturelwbe, (float, float, float, float)
+dcl_sampler s0, mode_comparison
+dcl_temps 3 
+mul r0.x, v0.x, cb0[0].z
+mul r0.y, r0.x, l(0.50000000)
+mul r1.xyz, r0.yyyy, cb1[1].xyzx
+mul r2.xyz, r0.yyyy, cb1[2].xyzx
+mad r0.y, -r0.x, l(0.50000000), l(1.00000000)
+mad r1.xyz, cb1[0].xyzx, r0.yyyy, r1.xyzx
+mad r2.xyz, cb1[3].xyzx, r0.yyyy, r2.xyzx
+mul r0.y, v0.y, -cb0[0].w
+mad r0.z, -r0.y, l(0.50000000), l(1.00000000)
+mul r0.y, r0.y, l(0.50000000)
+mul r2.xyz, r2.xyzx, r0.yyyy
+mad r0.x, r0.x, l(0.50000000), r0.y
+mad r1.xyz, r1.xyzx, r0.zzzz, r2.xyzx
+div r0.x, r0.x, l(2.00000000)
+sample_c_lz r0.x, r1.xyzx, t0.xxxx, s0, r0.x
+mov o0.xyzw, r0.xxxx
+ret

@@ -1,0 +1,184 @@
+This is a description of how to use lwwatch-config. If you are already familiar
+with CHIPCONFIG, then the procedure is just the same without options for MISSING,
+FLAGS, LIKE, USED_BY. For those who aren't aware of CHIPCONFIG read on..........
+
+##########################################################################
+ Adding a new HAL function                                               #
+##########################################################################
+
+To add a new hal function, you need the following details abt the function:
+1. Function name
+2. Return Type
+3. Is Stub Needed
+    3.1 If yes, what will it return
+    3.2 Use default stub_body or explicity specify
+4. Argument List
+5. Hal Wiring: what GPUs will run which version of the hal function
+6. Which "engine" shoud this function fall under
+
+Once you have all the 6 items above, follow these steps:
+
+1. In the corresponding engine's .def file (say fifo.def) add the following
+entry
+function name will be prefixed with the engine name
+
+def files are present in lwwatch/config/haldefs/
+
+    FOO_BAR => {
+    
+        DESCRIPTION   => "get contents of foo bar???",
+                # used to generate comments in generated code
+
+        INTERFACE_TAG => "fifoFooBAR",
+                # this will be the function name instead of the default
+                # fifoFooBar. This entry is optional
+
+        RETURN_TYPE   => LwU32,
+                # the hal interface return type is 'LwU32'
+                # Could also have any typedef or void.
+
+
+        ARGUMENTS     => "LwU32 data, ChanDesc_t *chan_desc",
+                # argument list for the interface.
+                # Argument names are optional and will be added for you for
+                # any generated _STUB if missing.
+
+
+        STUB_BODY     => "chan_desc->value = 0;",
+                # optional *body* of stub routine.   rarely needed.
+                # lwwatch-config will generate the stub routine and include
+                # this value as the body preceeding the generated 'return'
+                # statement.
+                # See rmconfig wiki for how to do multi-line STUB_BODY.
+
+
+        STUB_RETURNS  => ZERO,
+                # What a generated stub will return.
+                # 'ZERO' means it will return 0.
+                # Not needed if RETURN_TYPE is void.
+                #
+                # Can have any expression here, but the following are
+                # specially handled:
+                #
+                #   ERROR       returns:  LW_ERROR
+                #   OK          returns:  LW_OK
+                #   TRUE
+                #   FALSE
+                #   ZERO        returns:  (returnType) 0
+                #   ONE         returns:  (returnType) 1
+                #   NEG1        returns:  (returnType) -1
+                #   void        returns:  
+                #
+                # When possible, lwwatch-config will sanity check 'STUB_RETURNS'
+                # value against 'RETURN_TYPE' to ensure you don't have a stub
+                # with a return type of 'LwU32' returning a BOOL  for example.
+                #
+                # In addition to the above, a value of 'CUSTOM' allows for a
+                # hand-crafted _STUB routine:
+                #
+                # CUSTOM   no STUB generated, developer provides engFoo_STUB()
+                #
+        _G84          => [ G84, G92, ],
+                # use fifoFooBar_G84() for gpus G84 and G92
+
+        _G86          => [ G86, G96, G98, ],
+                # use fifoFooBar_G86() for gpus G86, G96, G98
+
+        _G94          => [ G94, ],
+        _GT200        => [ GT200, ],
+        _GT206        => [ dGT206, iGT206, MCP77, iGT209, MCP79, ],
+        _GT212        => [ GT21X, ],
+                # use fifoFooBar_GT212() for *all* GT21X gpus
+
+        _GF100        => [ GF1XX, ],
+                # use fifoFooBar_GF1XX() for *all* GF1XX gpus
+
+        _v02_00       => [ GF1XX, ],
+                # use fifoFooBar_v02_00() for *all* GF1XX gpus
+
+        _STUB         => [ pre_TESLA, ],
+                # use generated stub fifoFooBar_STUB() for all pre-TESLA gpus.
+                # Equivalent to:
+                #       _STUB     => [ LW1X, LW2X, LW3X, LW4X, ],
+                #
+                # If _STUB entry is omitted, lwwatch-config will automatically
+                # assign _STUB to all unassigned gpus (requires lwwatch-config
+                # option '--halgen-auto-stub')
+                
+
+        _LW04_DEFAULT => [ pre_G8X, ],
+                # All pre-G8X gpus will *default* to using fifoFooBar_LW04()
+                # if no other entry is specified.
+                # Typically not used as it's better to be explicit...
+
+    },
+ 
+Expressing GPUs in haldef files:
+
+    Any gpu name from lwwatch/config/Gpus.pm may be used.
+    GPU aliases (also defined in Gpus.pm) may also be used, eg:
+
+        GT206    -- alias for dGT206
+        TESLA    -- alias for: G8X, G9X, GT20X, GT21X
+        FERMI    -- alias for: GF1XX
+
+    A gpu can be *removed* from a list using:
+
+        TESLA, '-GT200', FERMI,
+
+    The '-GT200' (or equivalent '!GT200') will cause just that single gpu to
+    be removed from the list.  Since the list is processed left-to-right, if a
+    gpu is mentioned again after being removed, it will be restored.  So
+
+        TESLA, '-GT200', TESLA, FERMI,
+
+    is equivalent to simply:
+
+        TESLA, FERMI,
+        
+    since GT200 is restored by TESLA.
+
+    Can also use gpu-families or gpu-aliases.   Example:
+
+        ALL, '-TESLA',
+
+    is all non-TESLA gpus.
+
+
+2. Once the function is added, go ahead and define you functions in the
+corresponding engine's source files
+
+##########################################################################
+ Special Cases and PROFILES                                              #
+##########################################################################
+
+In the even of the engine's def file not being present 
+the procedure is slightly different 
+
+1. Create the enginename.def file in the haldefs directory, format similar to 
+other .def files
+
+2. Add the function as explained before
+
+3. Add the name of the newly added engine in the following files:
+
+Haldefs.mk
+lwwatch-config.pl
+Engines.pm
+
+Also, please note that if this engine and its functions need to be disabled 
+for specific OS, say LINUX, there is a profile option in lwwatch-config.cfg.
+Add this engine name to the list of disabled engines for that profile.
+
+Same holds true for disabling GPUs
+
+If a profile doesn't exist for the platform, create a new profile as others
+You can have you're own list of "disabled engines and gpus" and pass it on
+within the configure definition of the profile 
+Also modify the makefile of only the concerned platform to pass on the 
+LWWATCHCFG_PROFILE variable with the newly added profile value. This will
+be used while running lwwatch-config.pl for the --profile option.
+Default profile is: 'default' which has ALL engines and chips enabled
+
+For further details, refer the Presentation on lwwatch config.
+

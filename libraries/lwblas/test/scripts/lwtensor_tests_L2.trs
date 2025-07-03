@@ -1,0 +1,43 @@
+# lwtensor test suite configuration.
+{ 
+  "name"        : "lwtensor Test Suite",
+  "version"     : "2",
+  "extrapath"   : [
+                    "{TR_INSTALL_DIR}/lwca/bin",
+                    "{TR_INSTALL_DIR}/liblwtensor/bin",
+                    { "filter" : { "os" : "Windows" }},
+                    "{TR_INSTALL_DIR}/lwca/lib64"
+                  ],
+  "owner"       : "pspringer@lwpu.com",
+  "elw"         : [ 
+                    "LWTENSOR_DVS_OUTPUT=1"
+                  ],
+  "cwd"         : "{TR_INSTALL_DIR}/liblwtensor",
+  "timeout"     : "54000",
+  "testtimeout" : "18000",
+  "librarypath" : [ 
+                    "{TR_INSTALL_DIR}/lwca/lib64",
+                    "{TR_INSTALL_DIR}/liblwtensor/lib"
+                  ],
+  "tests"       : [
+                    # L2 coverage
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorElementwiseL2.sh" },
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL2.sh" },
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorReductionL2.sh" },
+                    
+                    # L3 coverage
+                    { "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL3.sh" },
+
+                    # LWIDIA_TF32_OVERRIDE - Bug 200697015
+                    { "filter": { "gpu": "Ampere", "os": "Linux" } },
+                    { "name": "ContractionL2 TF32 Enabled", "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL2.sh", "elw" : [ "LWIDIA_TF32_OVERRIDE=1" ] },
+                    { "name": "ContractionL3 TF32 Enabled", "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL3.sh", "elw" : [ "LWIDIA_TF32_OVERRIDE=1" ] },
+                    { "filter": { "os": "Linux" } },
+                    { "name": "ContractionL2 TF32 Disabled", "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL2.sh", "elw" : [ "LWIDIA_TF32_OVERRIDE=0" ] },
+                    { "name": "ContractionL3 TF32 Disabled", "exe" : "lwtensorTest -showFailureOnly -file ./test/lwtensorContractionL3.sh", "elw" : [ "LWIDIA_TF32_OVERRIDE=0" ] },
+
+                    # OS Filtered
+                    { "filter": { "os": "Linux" } },
+                    { "filter": { "os": "Windows" } }
+                  ]       
+}

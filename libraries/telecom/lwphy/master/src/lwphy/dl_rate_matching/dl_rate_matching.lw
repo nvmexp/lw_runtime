@@ -1,0 +1,525 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+#include "lwphy.h"
+#include "lwphy_internal.h"
+#include <vector>
+#include <iostream>
+
+#include "dl_rate_matching.lwh"
+#include "descrambling.hpp" // for POLY_* masks etc.
+#include "descrambling.lwh"
+#include "crc.hpp"
+
+#include "GOLD_2_COALESCED_P_LUT.h"
+#include "GOLD_1_SEQ_LUT.h"
+using namespace lwphy_i;
+using namespace crc;
+using namespace descrambling; // for POLY_ etc.
+
+typedef struct dl_rateMatchingElw {
+    uint32_t num_layers;
+    uint32_t num_TBs;  // number of transport blocks (TBs)
+    uint32_t CMax;     // max number of codeblocks per TB, across all num_TBs TBs
+    uint32_t EMax;    // max size of Er across all CBs of all num_TBs TBs
+    size_t input_buffer_size; // in bits
+    size_t output_buffer_size; // in bits
+    bool enable_scrambling;
+    bool enable_layer_mapping;
+
+    // The arrays below all have num_TBs length.
+    uint32_t * d_k0_array; // Could also be computed: requires rv, bg_num, Ncb, Zc
+    uint32_t * d_TB_start_offset_array; // offset in bits w.r.t first TB . Assumes TBs and CBs are allocated sequentially w/o gaps or any filler bits for alignment.
+
+    // The array below has num_TBs * CMax elements. Overprovisioned.
+    uint32_t * d_Er_array; // Er_TB0_CB0, Er_TB0_CB1, ..., Er_TB1_CB0, .....
+
+    struct PerTbParams * cfg_workspace;  // num_TBs elements
+
+} dl_rateMatchingElw;
+
+
+size_t lwphyDlRateMatchingWorkspaceSize(int num_TBs, int max_codeblocks_per_TB) {
+    return num_TBs * sizeof(PerTbParams) + num_TBs * sizeof(uint32_t) * (2 + max_codeblocks_per_TB);
+}
+
+
+lwphyStatus_t lwphyDlRateMatchingLoadParams(dl_rateMatchingElw ** elwHandle, uint32_t num_TBs, PerTbParams kernel_params[],
+		                uint32_t * Emax, uint32_t * Cmax, uint32_t num_layers,
+		                uint32_t enable_scrambling, uint32_t enable_layer_mapping,
+                                uint32_t * config_workspace, size_t allocated_workspace_size,
+                                uint32_t * h_workspace,
+                                lwdaStream_t strm) {
+
+    if (num_TBs < 1) {
+        fprintf(stderr, "Number of TBs %d cannot be < 1.", num_TBs);
+        return LWPHY_STATUS_ILWALID_ARGUMENT;
+    }
+
+    if (enable_scrambling > 1) {
+        fprintf(stderr, "enable_scrambling should be 0 or 1.");
+        return LWPHY_STATUS_ILWALID_ARGUMENT;
+    }
+
+    if (enable_layer_mapping > 1) {
+        fprintf(stderr, "enable_layer_mapping should be 0 or 1.");
+        return LWPHY_STATUS_ILWALID_ARGUMENT;
+    }
+
+    dl_rateMatchingElw * elw = new dl_rateMatchingElw();
+
+    elw->num_TBs = num_TBs;
+    elw->num_layers = num_layers;
+    elw->enable_scrambling = (enable_scrambling == 1);
+    elw->enable_layer_mapping = (enable_layer_mapping == 1);
+
+    elw->cfg_workspace = (PerTbParams *)config_workspace;
+
+    elw->d_k0_array = config_workspace + div_round_up<uint32_t>(sizeof(PerTbParams) * num_TBs, sizeof(uint32_t));
+    elw->d_TB_start_offset_array = elw->d_k0_array + num_TBs;
+    elw->d_Er_array = elw->d_TB_start_offset_array + num_TBs;
+
+    // Compute max number of code blocks across all num_TBs transport blocks.
+    // Needed for allocation of Er array.
+    uint32_t c_max = 0;
+    uint32_t n_max = 0;
+    for (int i = 0; i < num_TBs; i++) {
+        c_max = max(c_max, kernel_params[i].num_CBs);
+        n_max = max(n_max, kernel_params[i].N);
+    }
+    elw->CMax = c_max;
+    *Cmax = c_max;
+
+    if (allocated_workspace_size < lwphyDlRateMatchingWorkspaceSize(num_TBs, c_max)) {
+        fprintf(stderr, "Rate Matching Error! Insufficient workspace size.");
+        return LWPHY_STATUS_ILWALID_ARGUMENT;
+    }
+
+    // Compute Er per CB per TB, EMax (for mem. allocations), and k0.
+    // Note h_workspace is overprovisioned pinned host memory of (2 + max supported CBs per TB) * max supported TBs
+    uint32_t*  h_Er_array = h_workspace;
+    uint32_t*  h_k0_array = h_Er_array + (c_max * num_TBs);
+    uint32_t*  h_TB_start_offset_array = h_k0_array + num_TBs;
+
+    uint32_t er_max = 0;
+
+    for (int i = 0; i < num_TBs; i++) {
+        compute_rate_matching_length(&(h_Er_array[i * c_max]), kernel_params[i].num_CBs,
+			             kernel_params[i].Qm, kernel_params[i].Nl, kernel_params[i].G, er_max);
+        h_k0_array[i] = compute_k0(kernel_params[i].rv, kernel_params[i].bg, kernel_params[i].N,
+			kernel_params[i].Zc);
+        h_TB_start_offset_array[i] = i * c_max * n_max; //to support different TB configs
+    }
+    elw->output_buffer_size = c_max * er_max * num_TBs; //overprovisioned; each Er starts at a word boundary; each Er starts at a word boundary
+    elw->input_buffer_size = h_TB_start_offset_array[num_TBs-1] + kernel_params[num_TBs-1].num_CBs * kernel_params[num_TBs-1].N;
+    elw->EMax = er_max;
+    *Emax = er_max;
+
+    // Mem copies.
+    // Note: some of these config params could be computed much earlier in the pipeline or in the controller (it'd be useful to know when)
+    // Also, it could be that these are already resident in device memory.
+    size_t num_bytes = num_TBs * sizeof(uint32_t);
+    LWDA_CHECK(lwdaMemcpyAsync(elw->d_Er_array, h_Er_array, elw->CMax * num_bytes, lwdaMemcpyHostToDevice, strm));
+    LWDA_CHECK(lwdaMemcpyAsync(elw->d_k0_array, h_k0_array, num_bytes, lwdaMemcpyHostToDevice, strm));
+    LWDA_CHECK(lwdaMemcpyAsync(elw->d_TB_start_offset_array, h_TB_start_offset_array, num_bytes, lwdaMemcpyHostToDevice, strm));
+
+    LWDA_CHECK(lwdaMemcpyAsync(elw->cfg_workspace, kernel_params, num_TBs * sizeof(PerTbParams), lwdaMemcpyHostToDevice, strm));
+
+    *elwHandle = elw;
+    return LWPHY_STATUS_SUCCESS;
+}
+
+// Could potentially make the update from within loadParams, but it would involve allocating host memory.
+lwphyStatus_t lwphyCopyErValuesToHost(dl_rateMatchingElw **elwHandle, uint32_t * Er, int Cmax, int num_TBs, lwdaStream_t strm) {
+    if ((Cmax != elwHandle[0]->CMax) || (num_TBs != elwHandle[0]->num_TBs)) {
+        return LWPHY_STATUS_ILWALID_ARGUMENT;
+    }
+
+    LWDA_CHECK(lwdaMemcpyAsync(Er, elwHandle[0]->d_Er_array, Cmax * num_TBs * sizeof(uint32_t), lwdaMemcpyDeviceToHost, strm));
+    return LWPHY_STATUS_SUCCESS;
+}
+
+// Copying gold32 from rate_matching unit. Same code duplicated in descrambling too.
+// Compute 32 bits of the Gold sequence starting from bit n//32
+__device__ inline uint32_t gold32(uint32_t seed2, uint32_t n) {
+    uint32_t prod2;
+
+    uint32_t state2 = __brev(seed2) >> 1; // reverse 31 bits
+    state2 = polyMulHigh31(state2, POLY_2);
+    prod2 = mulModPoly31_Coalesced(state2,
+                                   &GOLD_2_COALESCED_P_LUT[(n) / WORD_SIZE],
+                                   GOLD_2_COALESCED_P_LUT_OFFSET,
+                                   POLY_2);
+
+    uint32_t fstate2 = galois31LFSRWord(prod2, POLY_2_GMASK, 31);
+
+    uint32_t output2 = fibonacciLFSR2_1bit(fstate2);
+
+    return GOLD_1_SEQ_LUT[n / WORD_SIZE] ^ output2;
+}
+
+
+
+/* Kernel that processes num_TBs transport blocks: rate_matching, scrambling and layer_mapping */
+__global__ void dl_rate_matching(const uint32_t* __restrict__ ldpc_encoder_output,
+                                 uint32_t* rate_matching_output,
+                                 const uint32_t num_TBs,
+                                 const uint32_t* __restrict__ Er_array,
+                                 const uint32_t* __restrict__ k0_array,
+                                 const uint32_t* __restrict__ TB_start_offset_array,
+                                 bool enable_scrambling,
+                                 bool enable_layer_mapping,
+                                 const uint32_t emax_uints,
+                                 const uint32_t cmax,
+                                 const uint32_t emax,
+                                 const uint32_t num_layers,
+                                 const PerTbParams* __restrict__ cfg_workspace) {
+
+    uint32_t TB_id = blockIdx.y;
+    uint32_t CB_id = blockIdx.x;
+
+    const int ELEMENT_SIZE = 32; // sizeof(uint32_t) * 8; // in bits
+    const int ELEMENT_BITS = 5; // log2(ELEMENT_SIZE)
+    const int ELEMENT_MASK = ELEMENT_SIZE - 1;
+
+    const PerTbParams * TB_params = &cfg_workspace[TB_id];
+
+    uint32_t TB_start = TB_start_offset_array[TB_id]; //w.r.t ldpc_encoder_output
+    uint32_t CB_start_input = TB_start + CB_id * TB_params->N; // in bits
+    uint32_t Qm_val = TB_params->Qm;
+    int Er = Er_array[TB_id * cmax + CB_id];
+    uint32_t F_val = TB_params->F;
+    int k0 = k0_array[TB_id];
+    int Kd =  TB_params->K - (2 * TB_params->Zc) - F_val;
+    CB_start_input = CB_start_input >> ELEMENT_BITS;
+    uint32_t G_start = TB_id * cmax * emax; // start of TB in output buffer in bits
+    uint32_t rv = TB_params->rv;
+    uint32_t cinit_val = 0;
+    uint32_t Nl_val = TB_params->Nl;
+
+    int rounded_Er_elements = emax_uints;
+    int EdivQm_bits = Er / Qm_val;
+
+    const uint32_t * this_TB_layers_array =  &TB_params->layer_map_array[0];
+
+    /* dynamic shared memory organized as follows:
+       - The first rounded_Er_elements (if no layer mapping) or MAX_DL_LAYERS_PER_TB * rounded_Er_element (layer mapping)
+         are used to minimize the overhead of atomicOr operations
+       - The following rounded_Er_elements + 1 (if scrambling) are used to keep track of the scrambling sequence values.*/
+    extern __shared__ uint32_t dl_rm_shmem[];
+
+    const int scale = (enable_layer_mapping) ? MAX_DL_LAYERS_PER_TB : 1;
+    uint32_t * CB_scrambling_vals = (uint32_t*)&dl_rm_shmem[rounded_Er_elements * scale];
+
+    if (CB_id < TB_params->num_CBs) { // Ensure code block exists for TB_id TB.
+
+        uint32_t CB_start_output = G_start + CB_id * emax; // in bits
+        CB_start_output = CB_start_output >> ELEMENT_BITS;
+        uint32_t gold32_CB_start_output = 0; // CB start (rate-matched within a TB)
+
+        if (enable_scrambling) {
+
+            int lwrrent_Er = Er_array[TB_id * cmax + CB_id];
+            if (lwrrent_Er == Er_array[TB_id * cmax]) { //before the split point
+                gold32_CB_start_output = CB_id * lwrrent_Er;
+            } else { // after the split
+                gold32_CB_start_output = TB_params->G - ((TB_params->num_CBs - CB_id) * lwrrent_Er);
+            }
+            cinit_val = TB_params->cinit;
+        }
+
+        for (int i = threadIdx.x; i <= rounded_Er_elements; i += blockDim.x) {
+           if (i != rounded_Er_elements) {
+               if (!enable_layer_mapping) {
+	           dl_rm_shmem[i] = 0;
+               } else {
+                   for (int j = 0; j < MAX_DL_LAYERS_PER_TB; j++) {
+                       dl_rm_shmem[i * MAX_DL_LAYERS_PER_TB + j] = 0;
+                   }
+	       }
+           }
+
+	   if (enable_scrambling) {
+	       // Heads up: if 2nd gold32 argument isn't divisible by 32, the gold32 returns the sequence 2nd_arg // 32. Offset it in tmp_final_index below.
+	       // For the same reason, CB_scrambling_vals needs to have (rounded_Er_elements + 1) elements
+	       CB_scrambling_vals[i] = gold32(cinit_val, gold32_CB_start_output + (ELEMENT_SIZE * i));
+	   }
+
+        }
+        __syncthreads();
+
+        // Each thread block is working on a CB. Each thread on Er/(32 * blkDimX) distinct elements
+        for (int i = threadIdx.x; i < rounded_Er_elements; i += blockDim.x) {
+
+            int index = i << ELEMENT_BITS;
+            int read_index = (index + k0);
+            if ((rv == 3) && (read_index >= TB_params->N)) {
+		read_index -= TB_params->N;
+            }
+            uint32_t element_read = ldpc_encoder_output[CB_start_input + (read_index >> ELEMENT_BITS)];
+
+            int EdivQm_block_id = index / EdivQm_bits;
+            int EdivQm_bit_id = index - (EdivQm_bits * EdivQm_block_id);
+
+            for (int bit_id = 0; bit_id < ELEMENT_SIZE; bit_id++) {
+
+                if (index < Er) {
+
+                    // Bit selection
+                    int new_bit_index = bit_id;
+                    if ((rv <= 1) && (read_index >= Kd)) {
+                        read_index = index + k0 + F_val;
+                        element_read = ldpc_encoder_output[CB_start_input + (read_index >> ELEMENT_BITS)]; // not optimal
+                        new_bit_index = read_index & ELEMENT_MASK;
+                    }
+                    uint32_t bit_read = (element_read >> new_bit_index);
+
+                    // Bit interleaving
+                    int final_index = (EdivQm_bit_id * Qm_val) + EdivQm_block_id; // bit_index within Er block.
+
+                    if (enable_scrambling) {
+                        int tmp_final_index = final_index + (gold32_CB_start_output & ELEMENT_MASK); // offset it by # bits off
+                        int CB_scrambling_index =  tmp_final_index >> ELEMENT_BITS; // index within shmem CB_scrambling_vals block
+                        int CB_scrambling_bit = tmp_final_index & ELEMENT_MASK;
+
+                        uint32_t scrambling_val = CB_scrambling_vals[CB_scrambling_index];
+                        uint32_t scrambling_bit = (scrambling_val >> CB_scrambling_bit);
+                        bit_read = bit_read ^ scrambling_bit; // bit not masked - will do so later
+                    }
+                    uint32_t layered_bit_read = bit_read;
+
+                    bit_read = (bit_read & 0x1ULL) <<  (final_index & ELEMENT_MASK);
+                    if (!enable_layer_mapping) {
+                        atomicOr(&dl_rm_shmem[(final_index >> ELEMENT_BITS)], bit_read);
+		    } else { // if layer mapping enabled
+                       uint32_t tmp_layer = EdivQm_bit_id % Nl_val; // Don't care about actual layer value at this point.
+                       int index_in_layer = (EdivQm_bit_id / Nl_val)*Qm_val + EdivQm_block_id; // in bits
+                       int final_layer_index = tmp_layer * emax + index_in_layer;
+                       layered_bit_read = (layered_bit_read & 0x1ULL) << (final_layer_index & ELEMENT_MASK);
+
+                       atomicOr(&dl_rm_shmem[(final_layer_index >> ELEMENT_BITS)], layered_bit_read);
+                    }
+                }
+                read_index += 1;
+                index += 1;
+                if (EdivQm_bit_id == EdivQm_bits - 1) {
+                    EdivQm_bit_id = 0;
+                    EdivQm_block_id += 1;
+                } else {
+                    EdivQm_bit_id += 1;
+                }
+            }
+        }
+
+        __syncthreads();
+        if (!enable_layer_mapping) {
+            for (int i = threadIdx.x; i < rounded_Er_elements; i+= blockDim.x) {
+                rate_matching_output[CB_start_output + i] = dl_rm_shmem[i];
+            }
+        } else {
+            int elements_per_layer = (rounded_Er_elements + Nl_val - 1)/ Nl_val;  //element here is uint32_t
+            for (int i = threadIdx.x; i < elements_per_layer * Nl_val; i+= blockDim.x) {
+                int layer = i / elements_per_layer;
+                uint32_t lwrrent_layer = this_TB_layers_array[layer];
+                int layer_mapped_index = (cmax * lwrrent_layer + CB_id) * rounded_Er_elements + (i % elements_per_layer);
+                rate_matching_output[layer_mapped_index] = dl_rm_shmem[layer * emax_uints +  (i % elements_per_layer)];
+            }
+        }
+    }
+}
+
+
+/** @brief: Launch rate matching + scrambling + layer mapping kernel.
+ *          Assumes loadParams has been called beforehand, so elw is properly configured.
+ *  @param[in] elw: config environment.
+ *  @param[in] d_rate_matching_input: LDPC encoder's output; device buffer, previously allocated.
+ *  @param[in, out] d_rate_matching_output: Kernel's generated output; device pointer, preallocated,
+ *                                          differrent size if layer mapping enabled
+ *  @param[in] strm: lwca stream for kernel launch
+ */
+void lwphyDlRateMatching(dl_rateMatchingElw * elw,
+                         const uint32_t * d_rate_matching_input,
+                         uint32_t * d_rate_matching_output,
+                         lwdaStream_t strm) {
+
+    // d_rate_matching_input will point to an array organized as follows.
+    //  _________ ____________ ______________ ___________ ________________
+    // |  TB 0   |  TB 1      |      TB 2    |  ...      | TB (num_TBs-1) |
+    // | ________|____________|______________|___________|________________|
+    //
+    //  where each TBi contains different number of code blocks C of size N.
+    //  Code block size is the same across all CBs in a TB but can vary across TBs.
+    //  Start of ith TB needs to be computed sequentially (i.e., w.r.t (i-1) TB)
+
+    dim3 num_thread_blocks(elw->CMax, elw->num_TBs);
+
+    // Dynamic shared memory: selected_bits (if no layer_mapping), CB_layers, CB_scrambling_vals
+    uint32_t rounded_emax = div_round_up<uint32_t>(elw->EMax, 32);
+    size_t scrambling_shmem_elements = (elw->enable_scrambling) ? rounded_emax + 1: 0;
+    size_t layer_mapping_shmem_elements = (elw->enable_layer_mapping) ? rounded_emax * MAX_DL_LAYERS_PER_TB : rounded_emax;
+    size_t shmem_size = (scrambling_shmem_elements + layer_mapping_shmem_elements) * sizeof(uint32_t);
+
+    extern __shared__ uint32_t dl_rm_shmem[];
+
+    const uint32_t threads = 288; // 128
+    //std::cout << "Launching Kernel w/ " << elw->CMax << ", Emax " << elw->num_TBs << " and shmem_size (bytes) " << shmem_size << std::endl;
+
+    dl_rate_matching<<<num_thread_blocks, threads, shmem_size, strm>>>(d_rate_matching_input,
+                       d_rate_matching_output,
+                       elw->num_TBs,
+                       elw->d_Er_array,
+                       elw->d_k0_array,
+                       elw->d_TB_start_offset_array,
+                       elw->enable_scrambling,
+                       elw->enable_layer_mapping,
+                       rounded_emax,
+                       elw->CMax,
+                       elw->EMax,
+                       elw->num_layers,
+                       elw->cfg_workspace);
+
+    lwdaError_t lwda_error = lwdaGetLastError();
+    if (lwda_error != lwdaSuccess) {
+        std::cerr << "LWCA Error " << lwdaGetErrorString(lwda_error) << std::endl;
+    }
+
+}
+
+void lwphyDlRateMatchingCleanUp(dl_rateMatchingElw** dl_rateMatchingElw) {
+    delete(*dl_rateMatchingElw);
+}
+
+
+//Restructuring needed for modulation.
+__global__ void restructure_rate_matching_output(const uint32_t* __restrict__ orig_rm_output,
+                                 uint32_t* new_rm_output,
+                                 const uint32_t num_TBs,
+                                 const uint32_t* __restrict__ Er_array,
+                                 const uint32_t cmax,
+                                 const uint32_t emax,
+                                 const struct PerTbParams * workspace) {
+
+    uint32_t layer_id = blockIdx.y;
+    uint32_t CB_id = blockIdx.x;
+
+    // Identify the TB this layer contains. Reminder: only one TB can map to a given layer.
+    __shared__ int shmem_TB_id;
+
+    for (int i = threadIdx.x; i < num_TBs * MAX_DL_LAYERS_PER_TB; i += blockDim.x) {
+        int TB = i / MAX_DL_LAYERS_PER_TB;
+        int layer_cnt = i % MAX_DL_LAYERS_PER_TB;
+        if (layer_cnt < workspace[TB].Nl) {
+           int actual_layer = workspace[TB].layer_map_array[layer_cnt];
+           if (actual_layer == (int) layer_id) {
+               shmem_TB_id = TB; // only one thread per block will update this, as it depends on TB_id and only one TB maps per layer.
+           }
+        }
+    }
+
+    __syncthreads();
+
+    int TB_id = shmem_TB_id;
+    if (CB_id >= workspace[TB_id].num_CBs) return;
+
+    int emax_elements = emax / 32; //emax is divisible by 32
+    int num_layers = workspace[TB_id].Nl;
+    int num_CBs = workspace[TB_id].num_CBs;
+    uint32_t lwrrent_bits_per_layer = workspace[TB_id].G / num_layers;
+    uint32_t max_bits_per_layer = 0;
+    for (int i = 0; i < num_TBs; i++) { //TODO compute once
+        uint32_t tmp_bits_per_layer = workspace[i].G / workspace[i].Nl;
+        if (tmp_bits_per_layer > max_bits_per_layer) {
+            max_bits_per_layer = tmp_bits_per_layer;
+        }
+    }
+    uint32_t padded_bits_per_layer = div_round_up<uint32_t>(max_bits_per_layer, 32) * 32; //Have each layer in the restructured output start at uint32_t aligned boundary
+
+    // Update starting offset in bits for current CB; this is a global offset, not layer specific.
+    uint32_t restructure_rm_shmem = layer_id * padded_bits_per_layer; //Use max padded bits per layer
+    int CB_Er = Er_array[TB_id * cmax + CB_id];
+    int per_layer_Er = (CB_Er / num_layers); // in bits
+    if (CB_Er == Er_array[TB_id * cmax]) { // CB before the split point
+        restructure_rm_shmem += (CB_id * per_layer_Er);
+    } else { // CB after the split point
+        restructure_rm_shmem += (lwrrent_bits_per_layer - ((num_CBs - CB_id) * per_layer_Er));
+    }
+
+    uint32_t * output_addr = (&new_rm_output[0]);
+    const uint32_t * input_addr = (uint32_t*)&orig_rm_output[(layer_id * cmax + CB_id) * emax_elements];
+
+    //Each CB will need to populate the bit range: [output_start_offset_in_bits, output_end_offset_in_bits)
+    uint32_t output_start_offset_in_bits = restructure_rm_shmem;
+    uint32_t output_start_offset_in_elements = (output_start_offset_in_bits / 32);
+    uint32_t tmp_rem = (output_start_offset_in_bits % 32);
+    uint32_t start_rem = (tmp_rem == 0) ? 0 : 32 - tmp_rem;
+
+    uint32_t output_end_offset_in_bits = (CB_id != (num_CBs - 1)) ? (restructure_rm_shmem + per_layer_Er) : ((layer_id + 1) * padded_bits_per_layer);
+    uint32_t output_end_offset_in_elements = output_end_offset_in_bits / 32;
+    uint32_t end_rem = (output_end_offset_in_bits % 32);
+
+    //Each thread will process an uint32_t element
+    if (end_rem != 0) output_end_offset_in_elements += 1;
+    int elements = output_end_offset_in_elements - output_start_offset_in_elements;
+
+    for (int element = threadIdx.x; element < elements; element += blockDim.x) { //uint32_t elements for a CB
+        uint32_t read_val = 0;
+
+        if ((element == (elements - 1)) && (end_rem != 0)) {
+            if (start_rem != 0) {
+                // Partially update last element of this CB and first of next one
+                read_val = (input_addr[element - 1] >> start_rem);
+                read_val |= ((input_addr[element] & ((1 << start_rem)-1)) << tmp_rem);
+                read_val = (read_val & ((1 << end_rem) -1));
+            } else {
+                read_val = input_addr[element];
+            }
+
+            // Include partial update of next element, to avoid atomicOr
+            uint32_t output_index = layer_id * cmax + (CB_id + 1);
+            if (CB_id == (cmax - 1)) {
+                output_index = (layer_id == (gridDim.y - 1)) ? 0 : (layer_id + 1) * cmax;
+            }
+            if (output_index != 0) {
+                const uint32_t * next_CB_input_addr = (uint32_t*)&orig_rm_output[output_index * emax_elements];
+                read_val |= ((next_CB_input_addr[0] & ((1 << (32 - end_rem))-1)) << end_rem);
+            }
+            output_addr[output_start_offset_in_elements + element] = read_val;
+
+        } else if ((element != 0) || (start_rem == 0)) {
+            if (start_rem != 0) {
+                read_val = (input_addr[element - 1] >> start_rem);
+                read_val |= ((input_addr[element] & ((1 << start_rem)-1)) << tmp_rem);
+            } else {
+                read_val = input_addr[element];
+            }
+            output_addr[output_start_offset_in_elements + element] = read_val;
+        }
+    }
+}
+
+
+void lwphyRestructureRmOutput(dl_rateMatchingElw * elw,
+                              const uint32_t * orig_d_rate_matching_output,
+                              uint32_t * new_d_rate_matching_output,
+                              uint32_t cmax, uint32_t emax,
+                              lwdaStream_t strm) {
+
+    const uint32_t threads = 256;
+    dim3 num_thread_blocks(cmax, elw->num_layers); // elw->num_layers is total # layers across all TBs.
+
+    restructure_rate_matching_output<<<num_thread_blocks, threads, 0, strm>>>(orig_d_rate_matching_output,
+        new_d_rate_matching_output, elw->num_TBs, elw->d_Er_array, cmax, emax, elw->cfg_workspace);
+
+    lwdaError_t lwda_error = lwdaGetLastError();
+    if (lwda_error != lwdaSuccess) {
+        std::cerr << "LWCA Error " << lwdaGetErrorString(lwda_error) << std::endl;
+    }
+
+}

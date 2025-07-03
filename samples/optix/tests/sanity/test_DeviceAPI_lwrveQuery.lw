@@ -1,0 +1,103 @@
+//
+//  Copyright (c) 2020 LWPU Corporation.  All rights reserved.
+//
+//  LWPU Corporation and its licensors retain all intellectual property and proprietary
+//  rights in and to this software, related documentation and any modifications thereto.
+//  Any use, reproduction, disclosure or distribution of this software and related
+//  documentation without an express license agreement from LWPU Corporation is strictly
+//  prohibited.
+//
+//  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+//  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+//  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+//  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+//  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+//  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+//  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+//  SUCH DAMAGES
+//
+
+#ifdef OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE
+#define OPTIX_OPTIONAL_FEATURE_TEST_CALL_COVERAGE_HAS_PARAMS
+#endif  // OPTIX_OPTIONAL_TEST_CALL_COVERAGE
+
+#include "test_DeviceAPI_lwrveQuery.h"
+
+extern "C" {
+__constant__ Params params;
+}
+
+#include <optix.h>
+
+__device__ void traceRay()
+{
+    float3 direction;
+
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_MISS )
+        direction = make_float3( 0.f, 0.f, -1.f );
+    else
+        direction = make_float3( 0.f, 0.f, 1.f );
+
+    float3              origin         = make_float3( 0.0f, 0.0f, -1.f );
+    float               tmin           = 0.1f;
+    float               tmax           = 1e16f;
+    float               rayTime        = 0.0f;
+    OptixVisibilityMask visibilityMask = 255;
+    OptixRayFlags       rayFlags       = OPTIX_RAY_FLAG_NONE;
+    unsigned int        SBToffset      = 0;
+    unsigned int        SBTstride      = 0;
+    unsigned int        missSBTIndex   = 0;
+
+    optixTrace( params.gasHandle, origin, direction, tmin, tmax, rayTime, visibilityMask, rayFlags, SBToffset, SBTstride, missSBTIndex );
+}
+
+static __forceinline__ __device__ void callOptixFunction()
+{
+    switch( params.optixFunction )
+    {
+        case OPTIX_FUNCTION_OPTIX_GET_LINEAR_LWRVE_VERTEX_DATA:
+            optixGetLinearLwrveVertexData( params.gasHandle, 0, 0, 0.f, params.dataOut );
+            break;
+        case OPTIX_FUNCTION_OPTIX_GET_QUADRATIC_BSPLINE_VERTEX_DATA:
+            optixGetQuadraticBSplineVertexData( params.gasHandle, 0, 0, 0.f, params.dataOut );
+            break;
+        case OPTIX_FUNCTION_OPTIX_GET_LWBIC_BSPLINE_VERTEX_DATA:
+            optixGetLwbicBSplineVertexData( params.gasHandle, 0, 0, 0.0f, params.dataOut );
+            break;
+    }
+}
+
+extern "C" __global__ void __raygen__()
+{
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_RAYGEN )
+        callOptixFunction();
+    /* else if( params.optixProgramType == OPTIX_PROGRAM_TYPE_EXCEPTION ) */
+    /* TODO : Add call to optixThrowException once user exception issue is resolved */
+    else
+        traceRay();
+
+}
+
+extern "C" __global__ void __anyhit__()
+{
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_ANYHIT )
+        callOptixFunction();
+}
+
+extern "C" __global__ void __closesthit__()
+{
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_CLOSESTHIT )
+        callOptixFunction();
+}
+
+extern "C" __global__ void __miss__()
+{
+    if( params.optixProgramType == OPTIX_PROGRAM_TYPE_MISS )
+        callOptixFunction();
+}
+
+extern "C" __global__ void __exception__()
+{
+    // TODO : implement this test once user exception issue is resolved.
+}

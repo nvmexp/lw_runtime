@@ -1,0 +1,72 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+ifndef LWCFG_INITIALIZED
+  $(error Include this makefile only when LWCFG_INITIALIZED)
+endif
+
+# Force this directory to be created since we're going to generate source into it
+LW_DIRS_TO_CREATE += $(OUTPUTDIR)/_test_Exports
+
+# Generated file containing exported symbol data for test
+EXPORTED_SYMBOLS_CPP := $(OUTPUTDIR)/_test_Exports/ExportedSymbols.cpp
+
+# Contents of $(EXPORTED_SYMBOLS_CPP)
+#
+# Write out a std::vector initialized with character string literals.
+#
+# Arguments:
+# $(1)      File name of shared object, e.g. liblwoptix.so.1
+# $(2)      List of exported symbols
+#
+define EXPORTED_SYMBOLS_CPP_CONTENTS
+#include <c-api/tests/ExportedSymbols.h>
+
+const char* const g_libraryFileName = "$(1)";
+
+const std::vector<const char*> g_exportedSymbols =
+{
+    $(subst $(SPACE),$(comma)$(_newline)   $(SPACE),$(addprefix ",$(addsuffix ",$(strip $(2)))))
+};
+endef
+
+$(EXPORTED_SYMBOLS_CPP): $(LWOPTIX_EXPORTED_SYMBOL_FILE) | $(OUTPUTDIR)/_test_Exports
+	$(info Generating $(subst $(OUTPUTDIR)/,,$(@)))
+	$(eval $(call SET_LWOPTIX_EXPORTED_SYMBOLS))
+	$(file >$(@),$(call EXPORTED_SYMBOLS_CPP_CONTENTS,$(LWOPTIX_FILENAME),$(LWOPTIX_EXPORTED_SYMBOLS)))
+
+test_Exports_SOURCES = \
+  $(LW_OPTIX)/src/c-api/tests/test_Exports.cpp \
+  $(EXPORTED_SYMBOLS_CPP)
+$(eval $(call optix_unit_test,test_Exports))
+
+# Running this test requires lwoptix be built.
+run-test_Exports: lwoptix
+
+ifeq ($(LW_TARGET_OS_FAMILY),Unix)
+  # Verify that symbols that prevent dlclose from unloading lwoptix
+  # are not present in the resulting shared library.  Test that symbols
+  # marked as unique are not hidden.
+  .PHONY: run-test-unique-symbols
+
+  run-test-unique-symbols: lwoptix
+	$(ECHO) Testing for unique symbols in $(LWOPTIX_FILENAME)
+	$(READELF) -Ws $(OUTPUTDIR)/$(LWOPTIX_FILENAME) | $(SED) -n '/UNIQUE/{ p; q1 }'
+endif

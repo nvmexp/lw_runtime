@@ -1,0 +1,65 @@
+##############################################################################
+# //sw/tools/sdk/gmock/1.7.0/makefile.lwmk
+##############################################################################
+
+#Define LW_SOURCE for local compilation.
+
+include $(LW_SOURCE)/common/build/lwCommon.lwmk
+
+##############################################################################
+### Validate Build Parameters
+##############################################################################
+ifeq ($(findstring $(LW_TARGET_OS),"win8 win7 Linux"),)
+  $(error This build only supports Linux, win7, and win8 target OSes)
+endif
+
+ifeq ($(findstring $(LW_TARGET_ARCH),"x86 amd64"),)
+  $(error This build only supports x86 and amd64 architecture targets)
+endif
+
+ifeq ($(findstring $(LW_BUILD_TYPE),"debug release"),)
+  $(error This build only supports debug or release build types)
+endif
+
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+
+ifeq ($(LW_MSVC110),1)
+  # https://code.google.com/p/googletest/issues/detail?id=412 
+  LW_DEFINES        += _VARIADIC_MAX=10 
+endif
+
+  LW_DEFINES += WIN32
+  LW_DEFINES += _CRT_SELWRE_NO_WARNINGS
+
+  CFLAGS += -X                         # Ignore standard include directories
+  CFLAGS += -Oi                        # use intrinsic funcs (in both optimized and non-opt builds) otherwise we'd require C runtime functions like outp()
+  CFLAGS += -GR-                       # disable run-time type information
+  CFLAGS += -EHs-c-                    # disable exception handling
+  CFLAGS += -Zp8                       # Pack structures on 8 byte boundaries
+  CFLAGS += -TP                        # All source files to be treated as CPP, enforcing stronger type checking and warnings
+  CFLAGS += -Fo$(OUTPUTDIR_ABSOLUTE)/
+  CFLAGS += -Fd"$(OUTPUTDIR)/"
+  CFLAGS += -c
+  CFLAGS += -EHa
+
+# warning C4996: 'std::tr1': warning STL4002:
+# The non-Standard std::tr1 namespace and TR1-only machinery are deprecated and will be REMOVED.
+ifeq ($(LW_MSVC141u5),1)
+  CFLAGS += /D_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING
+endif
+
+endif # Windows
+
+LW_INCLUDES += ./fused-src/
+
+GMOCK_GTEST_SOURCES := ./fused-src/gmock-gtest-all.cc
+
+SOURCES := $(GMOCK_GTEST_SOURCES)
+
+ifeq ($(LW_TARGET_OS_FAMILY),Windows)
+  LIBTARGET := gtest.lib
+else
+  LIBTARGET := gtest.a
+endif
+
+include $(LW_SOURCE)/common/build/lwCommonRules.lwmk

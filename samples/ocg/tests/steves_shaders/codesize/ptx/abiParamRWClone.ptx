@@ -1,0 +1,32 @@
+.version 3.1
+.target sm_20
+
+.func (.reg .f32 x) myfunc (.reg .f32 y, .reg .f32 z)
+{
+    add.f32 x, y, z;
+    ret;
+}
+
+.global .f32 x;
+
+.entry main
+{
+   .param .f32 t, u;
+   .reg .f32 r, s;
+ 
+   ld.global.f32 r, [x];  
+   add.f32 r, r, 4.0;
+   st.param.f32 [t], r;
+   sqrt.approx.f32  r, 5.0;
+   st.param.f32 [t], 3.0;
+   st.param.f32 [u], r;
+
+   call (t), myfunc, (t, u);
+   sqrt.approx.f32 s, 4.8;
+   ld.param.f32 r, [t];
+
+   add.f32  r, r, s;
+   st.global.f32 [x], r;
+   exit;
+}
+

@@ -1,0 +1,70 @@
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 texcoord: TexCoord;
+};
+
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+}
+
+cbuffer controlBuf
+{
+	float g_sldIntensity;
+}
+
+Texture2D txDiffuse;
+Texture2D txDepth;
+
+SamplerState samLinear;
+SamplerState samLinearWrap;
+
+// This should move to a centralized file but not appropriate to make that change now.
+#ifndef LW_COMMON
+#define LW_COMMON
+
+#define CAPTURE_STATE_NOT_STARTED		0
+#define CAPTURE_STATE_REGULAR			1
+#define CAPTURE_STATE_REGULARSTEREO		2
+#define CAPTURE_STATE_HIGHRES			3
+#define CAPTURE_STATE_360				4
+#define CAPTURE_STATE_360STEREO			5
+
+#endif
+
+float4 PS_RedMonochrome( VSOut frag ): SV_Target
+{
+	float4 color = txDiffuse.Sample(samLinear, frag.texcoord);
+	float depth = txDepth.Sample(samLinear, frag.texcoord).r;
+	
+#define USE_MANUAL_DELTA	0
+#define CALC_LOCAL_NORMAL	1
+	
+#if (USE_MANUAL_DELTA != 0)
+	int txDepthSizeX, txDepthSizeY;
+	txDepth.GetDimensions(txDepthSizeX, txDepthSizeY);
+	
+	const float2 texelSize = float2(1.0 / (float)txDepthSizeX, 1.0 / (float)txDepthSizeY);
+	float4 depth_left = txDepth.Sample(samLinear, frag.texcoord - float2(texelSize.x, 0.0f));
+	float4 depth_bottom = txDepth.Sample(samLinear, frag.texcoord - float2(0.0f, texelSize.y));
+	float depth_ddx = depth - depth_left;
+	float depth_ddy = depth - depth_bottom;
+#else
+	float depth_ddx = ddx(depth);
+	float depth_ddy = ddy(depth);
+#endif
+	
+	float4 outColor = color;
+#if (CALC_LOCAL_NORMAL != 0)
+	float3 localNormal = normalize( float3(depth_ddx, depth_ddy, 0.0f) );
+	outColor = float4(localNormal * 0.5 + 0.5, 1.0);
+#else
+	const float derivativeOutScale = 100000.0;
+	outColor = float4(derivativeOutScale * depth_ddx, derivativeOutScale * depth_ddy, 0.0f, 1.0);
+#endif
+	
+	return float4(lerp(color, outColor, g_sldIntensity));
+}

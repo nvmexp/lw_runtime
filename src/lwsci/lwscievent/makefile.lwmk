@@ -1,0 +1,43 @@
+
+##############################################################################
+# Copyright (c) 2019, LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+##############################################################################
+
+##############################################################################
+# drivers/lwsci/lwsciipc/makefile.lwmk
+##############################################################################
+
+OUTPUTDIR_COMMON = $(OUTPUTDIR)
+
+include $(LW_SOURCE)/drivers/lwsci/lwscievent/lwscievent.lwmk
+
+##############################################################################
+# link liblwsciipc.so
+##############################################################################
+
+LIBLWSCIEVENT_SONAME = liblwscievent.so.1
+LIBLWSCIEVENT_NAME = liblwscievent.so
+LIBLWSCIEVENT = $(OUTPUTDIR)/$(LIBLWSCIEVENT_SONAME)
+
+LW_SUPPORTS_SEPARATE_DEBUG_INFO = 1
+LIBLWSCIEVENT_LD_TARGET = $(OUTPUTDIR)/$(LIBLWSCIEVENT_NAME).unstripped
+LIBLWSCIEVENT_DEBUG_INFO = $(OUTPUTDIR)/$(LIBLWSCIEVENT_NAME).debug
+$(eval $(call LW_DEBUG_INFO_CMD,$(LIBLWSCIEVENT_LD_TARGET),$(LIBLWSCIEVENT),$(LIBLWSCIEVENT_DEBUG_INFO)))
+
+build: $(LIBLWSCIEVENT)
+
+$(LIBLWSCIEVENT_LD_TARGET): $(LINK_OBJECTS) $(LWSCIEVENT_LINKER_SCRIPT) $(DSO_STUBS)
+	$(call quiet_cmd,LINK) -o $@ $(LINK_OBJECTS) \
+	      -Wl,--version-script=$(LWSCIEVENT_LINKER_SCRIPT) \
+	      -Wl,-soname,$(LIBLWSCIEVENT_SONAME) \
+	      $(LINK_LDFLAGS) \
+	      $(LINK_DSO_LDFLAGS) \
+	      $(DSO_STUBS)
+	$(call quiet_cmd,POST_LINK) $(LWSCIEVENT_EXPORTS)
+	$(call SYMLINK) $(LIBLWSCIEVENT_SONAME) $(OUTPUTDIR)/$(LIBLWSCIEVENT_NAME)

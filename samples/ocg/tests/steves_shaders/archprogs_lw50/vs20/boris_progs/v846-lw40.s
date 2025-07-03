@@ -1,0 +1,16 @@
+vs_1_1
+dcl_position0 v0
+dcl_texcoord0 v7
+dp4 r0.x, v0, c[42]
+dp4 r0.y, v0, c[43]
+dp4 r0.z, v0, c[44]
+mov r0.w, c[0].y
+dp4 r1.x, r0, c[8]
+dp4 r1.y, r0, c[9]
+dp4 r1.z, r0, c[10]
+dp4 r1.w, r0, c[11]
+mov oPos, r1
+mad oFog, -r1.z, c[16].w, c[16].x
+dp4 oT0.x, v7, c[90]
+dp4 oT0.y, v7, c[91]
+mov oD0, c[38]

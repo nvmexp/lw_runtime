@@ -1,0 +1,754 @@
+# -*- mode: perl; -*-
+
+# CLK Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $clkHal = [
+
+    # per-GPU defaults for CLK engine for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+
+        GET_CLOCKS => [
+
+            DESCRIPTION   => "get clks",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+            STUB_BODY     => << '__CODE__',
+                    dprintf("This extension is not supported starting GH100, please use 'clkread' instead!!");
+__CODE__
+
+            _GF100        => [ dMAXWELL_thru_dPASCAL, ], 
+            _GV100        => [ dVOLTA_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        GET_GPU_CLOCKS => [
+
+            DESCRIPTION   => "get GPU clks",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ERROR,
+
+            _T124         => [ T234_and_later, ],
+            _STUB         => [ ALL, -T234_and_later, ],
+        ],
+
+        GET_SPPLL_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get freq of sppll 0/1",
+            RETURN_TYPE   => LwS32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_DISPCLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get dispclk freq",
+            RETURN_TYPE   => LwS32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        # LW_PHOST_SYS_CLKSRC - Missing on Pascal and Volta
+        # HOSTCLK moved to NAFLL Turing+
+        GET_HOST_CLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get Host Clk freq",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GF117        => [ dMAXWELL, ],
+            _TU102        => [ dTURING_thru_dADA, ],
+            _STUB         => [ dPASCAL, dVOLTA, dHOPPER_and_later, ],
+        ],
+
+        GET_GPC2_CLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get Gpc2 Clk freq",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_thru_dPASCAL, ],
+            _GV100        => [ dVOLTA_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        GET_GPU_CACHE2_CLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get Ltc2 Clk freq",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        GET_XBAR2_CLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get XBAR2 Clk freq",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_thru_dPASCAL, ],
+            _GV100        => [ dVOLTA_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        GET_SYS2_CLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get Sys2 Clk freq",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_thru_dPASCAL, ],
+            _GV100        => [ dVOLTA_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        GET_M_CLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get Dram Clk freq",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_thru_dPASCAL, ],
+            _GV100        => [ dVOLTA_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        GET_HUB2_CLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get Hub2 Clk freq",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        GET_LEG_CLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get Legacy Clk freq",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_UTILS_CLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get Utils Clk freq",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        GET_PWR_CLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get Pwr Clk freq",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        GET_MSD_CLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get Msd/Lwd Clk freq",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GK104        => [ dMAXWELL_thru_dPASCAL, ],
+            _GV100        => [ dVOLTA_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        GET_V_CLK_FREQ_K_HZ => [
+
+            DESCRIPTION   => "get V Clk freq",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        COUNTER_FREQUENCY => [
+
+            DESCRIPTION   => "computes frequency based on clock counters",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 clkSel, char *clkDomainName",
+
+            _GF100        => [ dMAXWELL, dPASCAL, ],
+            _GV100        => [ dVOLTA, ],
+            _TU102        => [ dTURING_and_later, ],
+        ],
+
+        COUNTER_FREQ_NCSYSPLL_INFO => [
+
+            DESCRIPTION   => "Returns NCSYSPLL clk cntr regs and clk src list",
+            RETURN_TYPE   => "CLK_COUNTER_INFO*",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => NULL,
+
+            _GF100        => [ ],
+            _GK104        => [ dMAXWELL, ],
+            _GP100        => [ dPASCAL_and_later, ],
+        ],
+
+        COUNTER_FREQ_NCLTCPLL_INFO => [
+
+            DESCRIPTION   => "Returns NCLTCPLL clk cntr regs and clk src list",
+            RETURN_TYPE   => "CLK_COUNTER_INFO*",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => NULL,
+
+            _GF100        => [ ],
+            _GF117        => [ dMAXWELL_and_later, ],
+        ],
+
+        COUNTER_FREQ_NCLTCCLK_INFO => [
+
+            DESCRIPTION   => "Returns NCLTCCLK clk cntr regs and clk src list",
+            RETURN_TYPE   => "CLK_COUNTER_INFO*",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => NULL,
+
+            _GF100        => [ ],
+            _GF117        => [ dMAXWELL, ],
+            _GP100        => [ dPASCAL_and_later, ],
+        ],
+
+        COUNTER_FREQ_UCAST_NCGPCCLK_INFO => [
+
+            DESCRIPTION   => "Returns unicast NCGPCCLK clk cntr regs and clk src list",
+            RETURN_TYPE   => "CLK_COUNTER_INFO*",
+            ARGUMENTS     => "LwU32 Idx",
+            STUB_RETURNS  => NULL,
+
+            _GP100        => [ dPASCAL_and_later, ],
+            _STUB         => [ pre_dPASCAL, ],
+        ],
+
+        COUNTER_FREQ_BCAST_NCGPCCLK_INFO => [
+
+            DESCRIPTION   => "Returns broadcast NCGPCCLK clk cntr regs and clk src list",
+            RETURN_TYPE   => "CLK_COUNTER_INFO*",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => NULL,
+
+            _GF100        => [ dMAXWELL, ],
+            _GP100        => [ dPASCAL_and_later, ],
+        ],
+
+        COUNTER_FREQ_NCOSMORE_INFO => [
+
+            DESCRIPTION   => "Returns NCOSMORE clk cntr regs and clk src list",
+            RETURN_TYPE   => "CLK_COUNTER_INFO*",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => NULL,
+
+            _GF100        => [ ],
+            _GF117        => [ ],
+            _GK104        => [ dMAXWELL_and_later, ],
+        ],
+
+        COUNTER_FREQ_NCDISP_INFO => [
+
+            DESCRIPTION   => "Returns NCDISP clk cntr regs and clk src list",
+            RETURN_TYPE   => "CLK_COUNTER_INFO*",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => NULL,
+
+            _GF100        => [ ],
+            _GF117        => [ dMAXWELL, ],
+            _GP100        => [ dPASCAL_and_later, ],
+        ],
+
+        COUNTER_FREQ_VCLKS_INFO => [
+
+            DESCRIPTION   => "Returns VLCKS clk cntr regs and clk src list",
+            RETURN_TYPE   => "CLK_COUNTER_INFO*",
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => NULL,
+
+            _GF117        => [ dMAXWELL_and_later, ],
+        ],
+
+        RESET_CNTR => [
+
+            DESCRIPTION   => "Reset clock counter",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32 srcReg, LwU32 cfgReg, LwU32 clkDomain, LwU32 tgtClkSrcDef",
+            STUB_RETURNS  => ERROR,
+
+            _GF100        => [ dMAXWELL, ],
+            _GP100        => [ dPASCAL, ],
+            _GV100        => [ dVOLTA, ],
+            _TU102        => [ dTURING_and_later, ],
+        ],
+
+        ENABLE_CNTR => [
+
+            DESCRIPTION   => "Enable clock counter",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32 srcReg, LwU32 cfgReg, LwU32 clkDomain, LwU32 tgtClkSrcDef, LwU32 clockInput",
+            STUB_RETURNS  => ERROR,
+
+            _GF100        => [ dMAXWELL, ],
+            _GP100        => [ dPASCAL, ],
+            _GV100        => [ dVOLTA, ],
+            _TU102        => [ dTURING, ],
+            _GA100        => [ dAMPERE_and_later, ],
+        ],
+
+        GET_PEX_PAD_SOURCE => [
+
+            DESCRIPTION   => "Get PEX PAD Source",
+            RETURN_TYPE   => "LwU32",
+            ARGUMENTS     => "LwU32 cfgReg",
+            STUB_RETURNS  => 27000,
+
+            _GA100        => [ dAMPERE_and_later, ],
+            _STUB         => [ pre_dAMPERE]
+        ],
+
+        GET_FR_CNTR_INFO => [
+
+            DESCRIPTION   => "Fetch the FR clock counter data",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "CLK_FR_COUNTER_SRC_INFO** ppClkFrCntrSrcInfo, CLK_FR_COUNTER_REG_INFO** ppClkFrCntrRegInfo, LwU32* pNumCntrsToRead",
+            STUB_RETURNS  => ERROR,
+
+            _GV100        => [ dVOLTA, ],
+            _TU102        => [ dTURING, ],
+            _GA100        => [ GA100, TEGRA_DGPU_AMPERE, TEGRA_DGPU_ADA, ],
+            _GA102        => [ GA102, GA102F, ],
+            _GA103        => [ GA103, ],
+            _GA104        => [ GA104, ],
+            _GA106        => [ GA106, ],
+            _GA107        => [ GA107, ],
+            _AD102        => [ ADA, -TEGRA_DGPU_ADA, ],
+            _GH100        => [ dHOPPER_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, ],
+        ],
+
+        SET_SOURCE_CNTR => [
+
+            DESCRIPTION   => "Fetch the FR clock counter data",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "LwU32 clkDomain, LwU32 srcIdx",
+            STUB_RETURNS  => ERROR,
+
+            _TU102        => [ TU102, ],
+            _TU104        => [ TU104, ],
+            _TU106        => [ TU106, ],
+            _TU116        => [ TU116, ],
+            _TU117        => [ TU117, ],
+            _GA100        => [ GA100, ],
+            _GA102        => [ GA102, GH202, GA102F, ],
+            _GA103        => [ GA103, ],
+            _GA104        => [ GA104, ],
+            _GA106        => [ GA106, ],
+            _GA107        => [ GA107, ],
+            _AD102        => [ AD102, ],
+            _GH100        => [ GH100, ],
+            _STUB         => [ ALL, -TURING, -AMPERE, -AD102, -GH100, -GH202, TEGRA_DGPU_AMPERE, TEGRA_DGPU_ADA, ],
+        ],
+
+        READ_FR_COUNTER => [
+
+            DESCRIPTION   => "Read free-running clock counters",
+            RETURN_TYPE   => "LW_STATUS",
+            ARGUMENTS     => "CLK_FR_COUNTER_REG_INFO* pClkFrCntrRegInfo, LwU32 clkDomain, LwU32 tgtClkSrcDef",
+            STUB_RETURNS  => ERROR,
+
+            _GV100        => [ dVOLTA, ],
+            _TU102        => [ dTURING_and_later, ],
+            _STUB         => [ ALL, -dVOLTA_and_later, ],
+        ],
+
+        GET_OSM1_SELECTION => [
+
+            DESCRIPTION   => "finds the onesrc1 selection",
+            INTERFACE_TAG => "clkGetOSM1Selection",    # "OSM" instead of "Osm"
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 oneSrcRegVal, CLKSRCWHICH* pClkSrc",
+
+            _GK104        => [ dMAXWELL_and_later, ],
+            _STUB         => [ ],
+        ],
+
+        GET_INPUT_SEL_REG => [
+
+            DESCRIPTION   => "Gets input selection reg given the clk namemapindex.",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 clkMapIndex, LwU32* pReg",
+
+            _GK104        => [ GM10X, ],
+            _GM200        => [ GM20X, dPASCAL, ],
+            _GV100        => [ dVOLTA_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+        ],
+
+        GET_DIVIDER_REG_OFFSET => [
+
+            DESCRIPTION   => "Gets the DIV reg offset given the clk namemapindex.",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 clkMapIndex, LwU32* pReg",
+
+            LIKE_INTERFACE => GET_INPUT_SEL_REG,
+        ],
+
+        IS_DERIVATIVE_CLK => [
+
+            DESCRIPTION   => "return if a clock is a derivative clk",
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => "LwU32 clkMapIndex",
+            STUB_RETURNS  => FALSE,
+
+            _GF100        => [ ],
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_CLK_SRC_FREQ_K_HZ => [
+
+            DESCRIPTION   => "Returns the freq of the supplied clk src",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "CLKSRCWHICH",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_thru_dADA, ],
+            _T124         => [ tAMPERE_and_later, ],
+            _STUB         => [ dHOPPER_and_later, ]
+        ],
+
+        GET_PLLS => [
+
+            DESCRIPTION   => "dump selected pll values",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_CLOCK_REGS => [
+
+            DESCRIPTION   => "dump all clock registers",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_POWER_GATE_REGS => [
+
+            DESCRIPTION   => "dump all power gate registers",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_CPU_CLUSTER_INFO => [
+
+            DESCRIPTION   => "dump all cpu cluster related registers",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        GET_PLL_REGS => [
+
+            DESCRIPTION   => "dump all pll registers",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "void",
+
+            _STUB         => [ dMAXWELL_and_later, ],
+        ],
+
+        MEASURE_HOST_CLK_WAR => [
+
+            DESCRIPTION   => "Measure real frequency of Host clock using perfmon counters",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32*",
+            INTERFACE_TAG => "clkMeasureHostClkWAR",  # instead of clkMeasureHostClkWar
+            STUB_RETURNS  => ERROR,
+
+            _STUB         => [ dMAXWELL_and_later, CHEETAH, ],
+       ],
+
+       READ_REF_SWITCH_MISC => [
+
+            DESCRIPTION   => "reads ref_clk misc source muxing",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32, CLKSRCWHICH*",
+            STUB_RETURNS  => ERROR,
+
+            _GF100        => [ FERMI, ],
+            _STUB         => [ dMAXWELL_and_later, CHEETAH, ],
+       ],
+
+       READ_ALT_SWITCH_MISC => [
+
+            DESCRIPTION   => "reads alt_clk misc source muxing",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32, CLKSRCWHICH*",
+            STUB_RETURNS  => ERROR,
+
+            LIKE_INTERFACE => READ_REF_SWITCH_MISC,
+       ],
+
+       GET_M_CLK_SRC_MODE => [
+
+            DESCRIPTION   => "Reads the mclk src mode",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32, LwU32*",
+            STUB_RETURNS  => ERROR,
+
+            _GF117        => [ dMAXWELL_and_later, -GV100, -G00X, ],
+            _STUB         => [ GV100, G00X, ],
+       ],
+
+       IS_MPLL_DIV_BY_2_USED => [
+
+            DESCRIPTION   => "Returns true if the _SEL_DIVBY2 bit is set in MPLL",
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _GF117        => [ dMAXWELL_thru_dPASCAL, ],
+            _GV100        => [ dVOLTA_and_later, ],
+       ],
+
+       GET_PLL_SPREAD_PARAMS => [
+
+            DESCRIPTION   => "Read the Spread Params for a given PLL",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32, void*",
+
+            _GK104        => [ GM10X, ],
+            _GM200        => [ GM20X_thru_PASCAL, ],
+            _GV100        => [ GV10X_and_later, ],
+       ],
+
+       GET_PL_VALUE => [
+
+            DESCRIPTION   => "Get the corresponding PL value for the provided register",
+            RETURN_TYPE   => LW_STATUS,
+            INTERFACE_TAG => "clkGetPLValue",    # "PL" instead of "Pl"
+            ARGUMENTS     => "LwU32*",
+            STUB_RETURNS  => LW_OK,
+
+            _T124         => [ tAMPERE_and_later, ],
+            _STUB         => [ ALL, -tAMPERE_and_later, ],
+        ],
+
+       READ_REF_CLOCK_SRC => [
+            DESCRIPTION   => "Provides the clk src of PLL in VCO",
+            RETURN_TYPE   => CLKSRCWHICH,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ GM10X, ],
+            _T124         => [ tAMPERE_and_later, ],
+            _GM200        => [ GM20X_thru_dPASCAL, ],
+            _GV100        => [ dVOLTA_and_later, ],
+      ],
+
+       READ_ALT_CLOCK_SRC => [
+            DESCRIPTION   => "Provides the clk src in alpath",
+            RETURN_TYPE   => CLKSRCWHICH,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_thru_dPASCAL, ],
+            _T124         => [ tAMPERE_and_later, ],
+            _GV100        => [ dVOLTA_and_later, ],
+      ],
+
+       READ_ALT_SRC_DIV => [
+            DESCRIPTION   => "FP divider value in the ALT path",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32, CLKSRCWHICH",
+            INTERFACE_TAG => "clkReadAltSrcDIV",  # instead of clkReadAltSrcDiv
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_and_later, ],
+      ],
+
+      READ_CRYSTAL_FREQ_K_HZ => [
+            DESCRIPTION   => "Reads back the Cyrstal/Oscillator Frequency in KHz",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "void",
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ dMAXWELL_and_later, ],
+            _T124         => [ tAMPERE_and_later, ],
+      ],
+
+      READ_SYS_CORE_REG_OFFSET => [
+            DESCRIPTION   => "To do generic read of the CFG and COEFF registers of the PLLs",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 PLLorClockIndex, LwU32 *pCfgPLLRegOffset,LwU32 *pCoeffPLLRegOffset, LwU32 *pDivRegoffset",
+
+            _GK104        => [ GM10X, ],
+            _GM200        => [ GM20X_thru_PASCAL, ],
+            _GV100        => [ VOLTA_thru_dADA, ],
+            _STUB         => [ dHOPPER_and_later, ],
+      ],
+
+      READ_SYS_CORE_REG_OFFSET_GPC => [
+            DESCRIPTION   => "To do generic read of the CFG and COEFF registers of the PLLs for GPC in specific",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 *pCfgPLLRegOffset, LwU32 *pCoeffPLLRegOffset, LwU32 *pDivRegoffset",
+
+            _GF100        => [ MAXWELL, ],
+            _GP100        => [ PASCAL, ],
+            _STUB         => [ VOLTA_and_later, ],
+      ],
+
+      NAFLL_LUT_READ => [
+            DESCRIPTION   => "Reads the programmed LUT value for a given NAFLL ID",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 nafllId, LwU32 tempIdx",
+
+            _GV100        => [ dVOLTA_thru_dTURING, ],
+            _GA100        => [ dAMPERE, ],
+            _AD102        => [ dADA, ],
+            _GH100        => [ dHOPPER_and_later, -G00X, ],
+            _STUB         => [ pre_VOLTA, G00X, ],
+      ],
+
+      NAFLL_LUT_POLL => [
+            DESCRIPTION   => "Poll check for given NAFLL LUT register address",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 addr, LwU32 mask, LwU32 value, LwU32 delayUs",
+
+            _GA100        => [ dAMPERE_and_later, -G00X, ],
+            _STUB         => [ pre_AMPERE, G00X, ],
+      ],
+
+      NAFLL_GET_NAFLL_IDX => [
+            DESCRIPTION   => "Maps a given NAFLL ID to the index in the NAFLL map table",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32 nafllId",
+            STUB_RETURNS  => ZERO,
+
+            _GV100        => [ dVOLTA_thru_dTURING, ],
+            _GA100        => [ GA100, ],
+            _GA102        => [ dAMPERE, -GA100, ],
+            _AD102        => [ dADA, ],
+            _GH100        => [ dHOPPER_and_later, ],
+            _STUB         => [ pre_VOLTA, ],
+      ],
+
+      GET_NAFLL_FREQ_KHZ => [
+            DESCRIPTION   => "Read back NAFLL frequency for a given NAFLL ID",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32 nafllId",
+            INTERFACE_TAG => "clkGetNafllFreqKHz",  # instead of clkGetNafllFreqKhz
+            STUB_RETURNS  => ZERO,
+
+            _GV100        => [ dVOLTA_thru_dTURING, ],
+            _GA100        => [ GA100, ],
+            _GA102        => [ dAMPERE, -GA100, ],
+            _AD102        => [ dADA, ],
+            _STUB         => [ pre_VOLTA, dHOPPER_and_later, ],
+      ],
+
+      IS_CLOCK_DRIVEN_FROM_BYPASS => [
+            DESCRIPTION   => "To determine if a given clock output is being driven by a PLL",
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => "LwU32",
+            INTERFACE_TAG => "clkIsClockDrivenfromBYPASS",  # instead of clkIsClockDrivenFromBypass
+            STUB_RETURNS  => FALSE,
+
+            _GK104        => [ GM10X, ],
+            _GM200        => [ GM20X_thru_dADA, -GV100, ],
+            _GV100        => [ GV100, ],
+            _STUB         => [ dHOPPER_and_later, ],
+      ],
+
+      READ_REF_SRC_DIV => [
+            DESCRIPTION   => "Read the divider value for the linear divider that sits before the PLL Block inside the OSM",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => "LwU32, CLKSRCWHICH",
+            INTERFACE_TAG => "clkReadRefSrcDIV",  # instead of clkReadRefSrcDiv
+            STUB_RETURNS  => ZERO,
+
+            _GF100        => [ GM10X, ],
+            _GM200        => [ GM20X_thru_PASCAL, ],
+            _GV100        => [ GV10X_and_later, ],
+      ],
+
+      IS_VPLL_ENABLED => [
+            DESCRIPTION   => "To detemine if a given VPLL is enabled",
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => "LwU32",
+            INTERFACE_TAG => "clkIsVPLLEnabled",  # instead of clkIsVpllEnabled
+            STUB_RETURNS  => FALSE,
+
+            _GF100        => [ dMAXWELL_thru_dPASCAL, -DISPLAYLESS, -CHEETAH, ],
+            _GV100        => [ dVOLTA_and_later, -DISPLAYLESS, -CHEETAH, ],
+            _STUB         => [ DISPLAYLESS, ],
+      ],
+
+      ADJUST_MCLK_SCALING_FACTOR => [
+            DESCRIPTION   => "This is to adjust the scaling factor of MCLK freq, depanding upon memory type on diffrent chips",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LwU32 *",
+
+            _TU102        => [ dTuring, GA10X, -GA100, AD10X, ],
+            _GA100        => [ GA100, GH100, ],
+            _STUB         => [ ALL, -dTURING, -GA10X, -AD10X, -GH100, ],
+      ],
+      
+      GET_FREQ_SRC_ARRAY => [
+            DESCRIPTION   => "Get the Schematic DAG for a given chip",
+            RETURN_TYPE   => "ClkFreqSrc **",
+            ARGUMENTS     => "",
+            STUB_RETURNS  => NULL,
+
+            _GH100        => [ GH100, G000, ],
+            _STUB         => [ ALL, -GH100, -G000, ],
+
+      ],
+      
+    ],   # HAL interfaces
+
+];
+
+
+# return a reference to the Hal definition
+return $clkHal;

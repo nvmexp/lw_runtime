@@ -1,0 +1,97 @@
+# File should be included in main lwcm/makefile.lwmk
+
+include $(LWVS_DIR)/libs/yaml-0.3.0/yaml.lwmk
+
+##############################################################################
+# define SOURCES
+##############################################################################
+LWRRENT_DIR := dcgmi
+
+LOCAL_SOURCES :=
+LOCAL_SOURCES += main_dcgmi.cpp
+LOCAL_SOURCES += dcgmi_common.cpp
+LOCAL_SOURCES += CommandLineParser.cpp
+LOCAL_SOURCES += Config.cpp
+LOCAL_SOURCES += Group.cpp
+LOCAL_SOURCES += FieldGroup.cpp
+LOCAL_SOURCES += Query.cpp
+LOCAL_SOURCES += Policy.cpp
+LOCAL_SOURCES += Health.cpp
+LOCAL_SOURCES += Introspect.cpp
+LOCAL_SOURCES += DcgmiTest.cpp
+LOCAL_SOURCES += Diag.cpp
+LOCAL_SOURCES += ProcessStats.cpp
+LOCAL_SOURCES += Topo.cpp
+LOCAL_SOURCES += ../modules/vgpu/Vgpu.cpp
+LOCAL_SOURCES += Command.cpp
+LOCAL_SOURCES += CommandOutputController.cpp
+LOCAL_SOURCES += Lwlink.cpp
+LOCAL_SOURCES += DeviceMonitor.cpp
+LOCAL_SOURCES += DcgmiOutput.cpp
+LOCAL_SOURCES += Module.cpp
+LOCAL_SOURCES += DcgmiProfile.cpp
+LOCAL_SOURCES += ../lwvs/libs/jsoncpp-0.10.6/src/jsoncpp.cpp
+LOCAL_SOURCES += ../modules/diag/DcgmDiagCommon.cpp
+
+LOCAL_SOURCES := $(addprefix $(LWRRENT_DIR)/,$(LOCAL_SOURCES))
+
+LOCAL_OBJECTS := $(call BUILD_OBJECT_LIST,$(LOCAL_SOURCES))
+LOCAL_OBJECTS += $(yaml_TARGET)
+
+LWMLCOMMON_DIR = $(LW_SOURCE)/apps/lwml/common
+
+##############################################################################
+# define LOCAL_CFLAGS
+##############################################################################
+
+LOCAL_INCLUDES := $(LWRRENT_DIR)
+LOCAL_INCLUDES += .
+LOCAL_INCLUDES += $(DCGM_DIR)/common
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/tclap
+LOCAL_INCLUDES += $(DCGM_DIR)/libs
+LOCAL_INCLUDES += $(LWMLCOMMON_DIR)
+LOCAL_INCLUDES += $(LWVS_DIR)/libs/yaml-0.3.0/include
+LOCAL_INCLUDES += $(OUTPUTDIR)
+LOCAL_INCLUDES += $(LW_SOURCE)/sdk/lwpu/inc
+LOCAL_INCLUDES += $(DCGM_DIR)/dcgmlib/src
+LOCAL_INCLUDES += $(DCGM_DIR)/common/transport
+LOCAL_INCLUDES += $(DCGM_DIR)/common/protobuf
+LOCAL_INCLUDES += $(DCGM_DIR)/libs/protobuf-2.6.0/include/
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/vgpu/
+LOCAL_INCLUDES += $(DCGM_DIR)/modules/diag/
+LOCAL_INCLUDES += $(LWML_DIR)
+LOCAL_INCLUDES += $(LWVS_DIR)/libs/jsoncpp-0.10.6/include
+LOCAL_INCLUDES += $(LWVS_DIR)/include
+
+# Do not modify CFLAGS because it will be global
+LOCAL_CFLAGS := $(DCGM_GLOBAL_CFLAGS)
+LOCAL_CFLAGS += $(addprefix -I,$(LOCAL_INCLUDES))
+
+##############################################################################
+# define LOCAL_LDFLAGS
+##############################################################################
+
+LOCAL_LDFLAGS := $(DCGM_GLOBAL_LDFLAGS)
+LOCAL_LDFLAGS += $(COMMON_LDFLAGS)
+LOCAL_LDFLAGS += -L$(OUTPUTDIR) -ldcgm -lstdc++ -lgcc_s -lyaml-cpp
+
+##############################################################################
+# build
+##############################################################################
+
+dcgmi_TARGET  := $(OUTPUTDIR)/dcgmi$(BINSUFFIX)
+dcgmi_OBJECTS := $(LOCAL_OBJECTS)
+dcgmi_CFLAGS  := $(LOCAL_CFLAGS)
+dcgmi_LDFLAGS := $(LOCAL_LDFLAGS)
+dcgmi_DEPENDS := $(dcgm_TARGET)
+
+build: $(dcgmi_TARGET)
+dcgmbuildsyncpoint:: $(dcgmi_TARGET)
+$(eval $(call MAKE_EXELWTABLE,dcgmi))
+build: $(dcgmi_TARGET).guardwords
+
+#################################################################################
+# End of nested lwmk
+#################################################################################
+ALL_LWML_SOURCES += $(LOCAL_SOURCES)

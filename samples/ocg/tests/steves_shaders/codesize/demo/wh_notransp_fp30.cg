@@ -1,0 +1,115 @@
+// wh_notransp_fp30.cg
+//
+//   Originally: ?? instructions - ?? passes
+//   Lwrrently:  34 instructions - 29 passes - 3 R-regs, 1 H-4regs
+//   Optimal:    ?? instructions - ?? passes
+
+//---------------------------------------
+//
+//---------------------------------------
+struct f2fConnector : fragment2framebuffer  
+{
+  float4 COL : COLOR;
+};
+
+
+//---------------------------------------
+//
+// result.y = diffuse
+// result.z = spelwlar
+//
+//---------------------------------------
+float4 lighting( float3 normal, float3 light_angle, float3 light_half_angle, float spelwlar_exponent ) 
+{
+  float4 result;
+  result = lit( dot( normal, light_angle ), dot( normal, light_half_angle ), spelwlar_exponent );
+
+  return result;
+}
+
+
+//---------------------------------------
+//
+// result.y = diffuse*shadow*mask
+// result.z = spelwlar*shadow*mask
+//
+//---------------------------------------
+float4 lighting_shadowmap(float3 N, float3 L, float3 H, float Exp, float SxM) 
+{
+	float4 R = lit( dot(N,L), dot(N,H), Exp );
+	R.yz = R.yz * SxM;
+	
+	return R;
+}
+
+
+
+//---------------------------------------
+//
+//---------------------------------------
+float3 scale_bumpmap( float3 bumpvec, float bumpscale ) 
+{
+  float3 fixedvec = 2.0 * bumpvec - float3( 1.0, 1.0, 1.0 );
+  fixedvec.xy = fixedvec.xy * bumpscale;
+  fixedvec = normalize( fixedvec );
+
+  return fixedvec;
+}
+
+
+//-----------------------------------------------------------
+//-----------------------------------------------------------
+//-----------------------------------------------------------
+//-----------------------------------------------------------
+
+
+
+
+struct v2fConnector : vertex2fragment  
+{
+  float2 lightmap				: TEX0;
+  float2 colnew					: TEX1;
+  float3 spotLight0TanDir		: TEX2;	// spot dir  
+  float3 spotLight0Talwec		: TEX3;	// light to vertex
+  float3 spotLight0TanHalfAngle	: TEX4;	// light-eye half angle
+  float4 winCoord_depthtarget	: TEX5; // shadow mapping texcoord
+  
+};
+
+
+f2fConnector main(v2fConnector v2f,
+	     uniform texobj2D lightmap,
+	     uniform texobj2D colnew,
+		 uniform sampler2D spotmask,		     
+	     uniform sampler2D depthtarget)
+	     
+{
+  f2fConnector f2f; 
+  float4 Diff1		= f4tex2D(lightmap, v2f.lightmap);
+  float4 C			= f4tex2D(colnew, v2f.colnew);
+  
+  float3 Ldir		= v2f.spotLight0TanDir;
+  float3 L			= v2f.spotLight0Talwec;
+  float3 H			= v2f.spotLight0TanHalfAngle;
+  float3 N			= float3(0,0,1); 
+  
+  float  S			= f1texcompare2D(depthtarget, v2f.winCoord_depthtarget); 
+  float  Mask		= f1tex2Dproj( spotmask, v2f.winCoord_depthtarget.xyz);    
+  
+  float4 LightColor		= float4(1, 0.97, 0.10, 0);
+  float4 SpotSpecColor	= float4(1, 0.85, 0, 0); 
+  float  SpecExp		= 50;  
+  
+  float supermask = dot( -Ldir, L );
+  supermask = min(1,supermask);
+  supermask = max(0,supermask);
+  
+  float4 Lighting_spot  = lighting_shadowmap( N, L, H, SpecExp, S*Mask);  
+  float4 Diff0			= LightColor * Lighting_spot.yyyy * supermask.xxxx;
+
+  f2f.COL = Diff0 * C + Diff1 * C;
+  //f2f.COL = dot(N,L).xxxx;
+  
+   
+  return f2f;
+}

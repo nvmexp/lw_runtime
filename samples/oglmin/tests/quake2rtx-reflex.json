@@ -1,0 +1,80 @@
+[
+  {
+    "Type": "Control",
+    "OutputDirectory": "Initialization",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryList": [ "Vulkan-SDK\\1.2.148.0" ],
+    "TestDefinitions": [
+      {
+        "Command": "SetVulkanExplicitLayers",
+        "Arguments": "[Netapp]\\Vulkan-SDK\\1.2.148.0"
+      },
+      {
+        "Command": "ModeSet.exe",
+        "Arguments": "-d 0 -w 1920 -h 1080 -b 32"
+      },
+      {
+        "Command": "swak.exe",
+        "Arguments": "-c:head;q -o:[OutputDirectory]\\swak-display.txt"
+      },
+      {
+        "Command": "Verify",
+        "Arguments": "[OutputDirectory]\\swak-display.txt:1920x1080x32"
+      },
+      {
+        "Command": "LockToRatedTdp.exe",
+        "Arguments": "-l"
+      },
+      {
+        "Command": "swak.exe",
+        "Arguments": "-c:gpuclk;pstate;q -o:[OutputDirectory]\\swak-clocks.txt"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "OGL_LOAD_MONITOR_OUTPUT_LOGGING_FLAGS=FRAME_OVERLAP"
+      },
+      {
+        "Comment": "Place load monitor file in output directory of Q2RTX runs",
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "PS_FILE_PATH=[RootOutputDirectory]\\Quake2RTX-Reflex"
+      }
+    ]
+  },
+  {
+    "Type": "Quake2RTX",
+    "SessionName": "Quake2RTX",
+    "TestCase": "Quake2RTX-Reflex",
+    "OutputDirectory": "Quake2RTX-Reflex",
+    "Netapp": "\\\\netapp-nc03\\ogl",
+    "DirectoryLookup": {
+      "Q2RTX": "[Netapp]\\Quake2RTX\\q2rtx-reflex",
+      "ImageMagick": "[Netapp]\\ImageMagick"
+    },
+    "Version": "Reflex",
+    "Server": "hqlwoglsql01:8211",
+    "LoadMonitor": "FrameOverlap",
+    "TestDefinitions": [
+      {
+        "Name": "Reflex_Boss2_1920x1080"
+      }
+    ],
+    "CompressedFile": "[Q2RTX]\\q2rtx_reflex.7z",
+    "ApplicationPath": "[RuntimeDirectory]\\q2rtx_reflex.exe",
+    "Arguments": "+exec reflex.cfg +set logfile 3 +timedemo 1 +demo boss2.dm2 +wait 8000 +quit"
+  },
+  {
+    "Type": "Control",
+    "OutputDirectory": "Restore",
+    "TestDefinitions": [
+      {
+        "Command": "LockToRatedTdp.exe",
+        "Arguments": "-u"
+      },
+      {
+        "Command": "[bin]\\d3dreg.exe",
+        "Arguments": "-dOGL_LOAD_MONITOR_OUTPUT_LOGGING_FLAGS"
+      }
+    ]
+  }
+]
+

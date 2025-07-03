@@ -1,0 +1,133 @@
+################################### tell Emacs this is a -*- makefile-gmake -*-
+#
+# Copyright (c) 2018-2022, LWPU CORPORATION.  All Rights Reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+###############################################################################
+
+ifdef LW_COMPONENT_FLAG_SHARED_LIBRARY_SECTION
+
+include $(LW_BUILD_START_COMPONENT)
+
+LW_COMPONENT_NAME                  := lwsciipc
+LW_COMPONENT_OWN_INTERFACE_DIR     := .
+
+LWSCI_PATH = $(LW_SOURCE)/gpu/drv/drivers/lwsci
+
+########################################
+#   LINUX OS
+########################################
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_LINUX),1)
+LW_COMPONENT_SOURCES               := \
+	src/lwsciipc.c \
+	src/lwsciipc_os_linux.c \
+	src/lwsciipc_ivc.c \
+	src/lwsciipc_ipc_linux.c \
+	src/lwsciipc_c2c.c \
+	src/lwsciipc_os_error.c \
+	ivclib/sivc.c
+
+# use mutex for all APIs (make them thread-safe)
+LW_COMPONENT_CFLAGS += -DLWSCIIPC_USE_MUTEX
+
+LW_COMPONENT_INCLUDES += \
+	./inc \
+	./inc-linux \
+	$(LWSCI_PATH)/lwsciipc/ivclib/
+
+LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += pthread rt dl
+
+ifeq ($(LW_BUILD_CONFIGURATION_IS_SAFETY),0)
+LW_COMPONENT_CFLAGS += -DIVC_EVENTLIB
+endif
+
+endif
+
+########################################
+# DESKTOP
+########################################
+ifeq ($(LW_BUILD_CONFIGURATION_LINUX_USERSPACE_IS_DESKTOP),1)
+LW_COMPONENT_INCLUDES += \
+        $(LW_SOURCE)/gpu/drv/drivers/unix/allocator/include
+endif
+
+########################################
+#   QNX OS
+########################################
+
+ifeq ($(LW_BUILD_CONFIGURATION_OS_IS_QNX),1)
+LW_COMPONENT_SOURCES               := \
+	src/lwsciipc.c \
+	src/lwsciipc_ivc.c \
+	src/lwsciipc_ipc.c \
+	src/lwsciipc_os_qnx.c \
+	src/lwsciipc_os_error.c
+
+# use mutex for all APIs (make them thread-safe)
+LW_COMPONENT_CFLAGS += -DLWSCIIPC_USE_MUTEX
+
+ifeq ($(LW_BUILD_CONFIGURATION_IS_DEBUG),1)
+LW_COMPONENT_CFLAGS += -DLWSCIIPC_DEBUG
+# SLOG2_INFO(5), SLOG2_DEBUG1(6), SLOG2_DEBUG2(7)
+LW_COMPONENT_CFLAGS += -DVERBOSE_LEVEL=6
+#LW_COMPONENT_CFLAGS += -DLWSCIIPC_DEBUG_RW
+endif
+
+ifeq ($(LW_BUILD_CONFIGURATION_IS_SAFETY),1)
+# enable flag when endpoint support of iolauncher is ready
+LW_COMPONENT_CFLAGS += -DUSE_IOLAUNCHER_FOR_SELWRITY
+else
+# C2C is QM level
+LW_COMPONENT_SOURCES += src/lwsciipc_c2c.c
+LW_COMPONENT_CFLAGS += -DIVC_EVENTLIB
+endif
+
+LW_COMPONENT_NEEDED_INTERFACE_DIRS := \
+	$(LW_SOURCE)/ivclib/ivc \
+	$(LW_SOURCE)/core/utils/lwos/qnx/s3
+
+# TODO: remove lwivc folder
+# lwsciipc_ivc.c needs the IVC resource manager's devctl interface definition
+LW_COMPONENT_INCLUDES += \
+	./inc \
+	$(LW_SOURCE)/core/include \
+	$(LW_SOURCE)/qnx/src/resmgrs/lwivc \
+	$(LW_SOURCE)/qnx/src/resmgrs/lwsciipc \
+	$(LW_SOURCE)/qnx/src/tools/lwsciipc_init \
+	$(LW_SOURCE)/qnx/src/libs/include \
+	$(LW_SOURCE)/embedded/libs/lwsyslibs/lwdtcommon/include
+
+# uncomment to enable func instrumentation
+#LW_COMPONENT_CODE_GENERATION := profile
+ifeq ($(LW_COMPONENT_CODE_GENERATION), profile)
+LW_COMPONENT_SOURCES               += \
+    $(LW_SOURCE)/qnx/src/libs/tracer/tracer.c
+
+LW_COMPONENT_INCLUDES              += \
+    $(LW_SOURCE)/qnx/src/libs/tracer
+
+LW_COMPONENT_SYSTEM_SHARED_LIBRARIES += slog2
+
+LW_COMPONENT_CFLAGS += -DLW_IS_TRACER_ENABLED
+endif
+
+endif
+
+ifdef LW_BUILD_CONFIGURATION_IS_VCAST
+LW_COMPONENT_SOURCES += src/lwsciipc_vectorcast_dummy.c
+endif
+
+include $(LW_BUILD_SHARED_LIBRARY)
+
+endif
+
+# Local Variables:
+# indent-tabs-mode: t
+# tab-width: 8
+# End:

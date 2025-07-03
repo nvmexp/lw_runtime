@@ -1,0 +1,65 @@
+.version 3.1
+.target sm_20
+
+/*
+ * Tests ISAD->VABSDIFF coversion for Maxwell (Bug 989118)
+ * Each pair of sad/vabsdiff instructions, should generate equivalent vabsdiff instructions,
+ * when compiled with -arch=sm_50
+ *
+ */
+
+.entry main (
+    .param .s32 param_addr,
+    .param .u32 param_us1,
+    .param .u32 param_us2,
+    .param .u32 param_us3,
+    .param .s32 param_ss1,
+    .param .s32 param_ss2,
+    .param .s32 param_ss3)
+{
+    .reg   .s32 addr;
+    .reg   .u32  ud, us1, us2, us3;
+    .reg   .s32  sd, ss1, ss2, ss3;
+   
+    ld.param.s32  addr, [param_addr];
+    ld.param.u32  us1, [param_us1];
+    ld.param.u32  us2, [param_us2];
+    ld.param.u32  us3, [param_us3];
+    ld.param.u32  ss1, [param_ss1];
+    ld.param.u32  ss2, [param_ss2];
+    ld.param.u32  ss3, [param_ss3];
+
+    /* tests unsigned */
+    sad.u32 ud, us1, us2, us3;
+    st.global.u32  [addr], ud;
+    bar.sync 0;
+    vabsdiff.u32.u32.u32.add ud, us1, us2, us3;
+    st.global.u32  [addr], ud;
+    bar.sync 0;
+
+    /* tests signed */
+    sad.s32 sd, ss1,ss2,ss3;
+    st.global.s32  [addr], sd;
+    bar.sync 0;
+    vabsdiff.s32.s32.s32.add sd, ss1, ss2, ss3;
+    st.global.s32  [addr], sd;
+    bar.sync 0;
+
+    /* tests mixture of immediates/registers */
+    sad.u32 ud, us1, 4294967200, 1000;
+    st.global.u32  [addr], ud;
+    bar.sync 0;
+    vabsdiff.u32.u32.u32.add ud, us1, 4294967200, 1000;
+    st.global.u32  [addr], ud;
+    bar.sync 0;
+
+    /* another permuation of immediates/registers */
+    sad.u32 ud, 4294967200, us2, 1000;
+    st.global.u32  [addr], ud;
+    bar.sync 0;
+    vabsdiff.u32.u32.u32.add ud, 4294967200, us2, 1000;
+    st.global.u32  [addr], ud;
+    bar.sync 0;
+
+    exit;
+}

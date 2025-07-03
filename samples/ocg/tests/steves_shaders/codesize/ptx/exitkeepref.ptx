@@ -1,0 +1,40 @@
+.version 3.1
+.target sm_35
+.reg .u32 %limit;
+.reg .u32 %obuf; 
+	
+.func bump_obuf
+{
+    .reg .pred      p;
+	
+    add.u32         %obuf, %obuf, 4;
+    setp.u32.ge     p, %obuf, %limit;
+
+@p  exit.keeprefcount;
+        
+    ret;
+}
+
+.entry ptxtest
+{
+        
+    add.u32         %limit, %obuf, 24;
+
+    st.global.u32   [%obuf    ], 0x1;
+    call            bump_obuf;
+    st.global.u32   [%obuf    ], 0x2;
+    call            bump_obuf;
+    st.global.u32   [%obuf    ], 0x3;
+    call            bump_obuf;
+    st.global.u32   [%obuf    ], 0x4;
+    call            bump_obuf;
+    st.global.u32   [%obuf    ], 0x5;
+    call            bump_obuf;
+    st.global.u32   [%obuf    ], 0x6;
+    call            bump_obuf;
+    st.global.u32   [%obuf    ], 0x7;
+    call            bump_obuf;
+    st.global.u32   [%obuf    ], 0x8;
+
+    ret;
+}

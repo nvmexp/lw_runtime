@@ -1,0 +1,191 @@
+/*
+ * Copyright (c) 2020, LWPU CORPORATION. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *  * Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  * Neither the name of LWPU CORPORATION nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROLWREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+
+#include "resampleMotionAabb.h"
+#include <vector_functions.h>
+#include <vector_types.h>
+#include <optix_types.h>
+#include <exp/accel/motion/resampleMotionAabb.hpp>
+
+
+namespace optix_exp {
+namespace motion {
+
+struct ResampleRegularAabbsKernelParams
+{
+    const unsigned int geometryPrimCount;
+    const Aabb*        geometryAabbs;
+    const unsigned int geometryMotionSteps;
+    const float        geometryTimeBegin;
+    const float        geometryTimeEnd;
+    Aabb*              buildAabbs;
+    const unsigned int buildMotionSteps;
+    const float        buildTimeBegin;
+    const float        buildTimeEnd;
+};
+
+struct ResampleAabbsKernelParams
+{
+    const size_t            motionAabbsCount;
+    const MotionAabbDevice* motionAabbs;
+    const Aabb*             inputAabbs;
+    const float*            inputTimes;
+    Aabb*                   buildAabbs;
+    const unsigned int      buildMotionSteps;
+    const float             buildTimeBegin;
+    const float             buildTimeEnd;
+};
+
+//////////////////////////////////////////////////////////////////////////
+// actual lwca kernels
+//////////////////////////////////////////////////////////////////////////
+__global__ void kernel_resample_regular_geometry_aabbs( const ResampleRegularAabbsKernelParams p )
+{
+    const unsigned int id = threadIdx.x + blockDim.x * ( threadIdx.y + blockDim.y * ( blockIdx.x + gridDim.x * blockIdx.y ) );
+    if( id >= p.geometryPrimCount )
+        return;
+
+    ResampleAabbs params = {p.geometryTimeBegin, p.geometryTimeEnd,
+                            &p.geometryAabbs[id * p.geometryMotionSteps],
+                            p.geometryMotionSteps,
+                            0,
+                            &p.buildAabbs[id * p.buildMotionSteps],
+                            p.buildMotionSteps,
+                            p.buildTimeBegin,
+                            p.buildTimeEnd};
+    resample_aabbs<true>( params );
+}
+
+__global__ void kernel_resample_aabbs( const ResampleAabbsKernelParams p )
+{
+    const unsigned int id = threadIdx.x + blockDim.x * ( threadIdx.y + blockDim.y * ( blockIdx.x + gridDim.x * blockIdx.y ) );
+    if( id >= p.motionAabbsCount )
+        return;
+
+    const MotionAabbDevice& maabb = p.motionAabbs[id];
+    if( maabb.keyCount == 0 )
+    {
+        for( size_t k = 0; k < p.buildMotionSteps; ++k )
+            ilwalidate( p.buildAabbs[id * p.buildMotionSteps + k] );
+    }
+    else if( maabb.keyCount == 1 )
+    {
+        for( size_t k = 0; k < p.buildMotionSteps; ++k )
+            p.buildAabbs[id * p.buildMotionSteps + k] = p.inputAabbs[maabb.aabbBufferOffset];
+    }
+    else if( maabb.timesRegularDistribution )
+    {
+        ResampleAabbs params = {maabb.timeBegin,
+                                maabb.timeEnd,
+                                &p.inputAabbs[maabb.aabbBufferOffset],
+                                maabb.keyCount,
+                                &p.inputTimes[maabb.timesBufferOffset],
+                                &p.buildAabbs[id * p.buildMotionSteps],
+                                p.buildMotionSteps,
+                                p.buildTimeBegin,
+                                p.buildTimeEnd};
+        resample_aabbs<true>( params );
+    }
+    else
+    {
+        ResampleAabbs params = {maabb.timeBegin,
+                                maabb.timeEnd,
+                                &p.inputAabbs[maabb.aabbBufferOffset],
+                                maabb.keyCount,
+                                &p.inputTimes[maabb.timesBufferOffset],
+                                &p.buildAabbs[id * p.buildMotionSteps],
+                                p.buildMotionSteps,
+                                p.buildTimeBegin,
+                                p.buildTimeEnd};
+        resample_aabbs<false>( params );
+    }
+
+    return;
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Trampoline functions to call lwca kernels
+//////////////////////////////////////////////////////////////////////////
+
+#define WARPS_PER_BLOCK 4
+// This is just a helper function used to compute grid and block.
+void calcKernelDims( int numThreads, dim3& blockDim, dim3& gridDim )
+{
+    blockDim = dim3( 32, WARPS_PER_BLOCK );
+    gridDim = dim3( ( numThreads <= 0 ) ? 1 : ( ( numThreads - 1 ) / ( blockDim.x * blockDim.y * blockDim.z ) + 1 ) );
+    while( gridDim.x > 0xffff )
+    {
+        gridDim.x = ( gridDim.x + 1 ) >> 1;
+        gridDim.y <<= 1;
+    }
+}
+
+void resampleMotionAabbsWithRegularDistributionDevice( void*              stream,
+                                                       const unsigned int geometryPrimCount,
+                                                       const Aabb*        geometryAabbs,
+                                                       const unsigned int geometryMotionSteps,
+                                                       const float        geometryTimeBegin,
+                                                       const float        geometryTimeEnd,
+                                                       Aabb*              buildAabbs,
+                                                       const unsigned int buildMotionSteps,
+                                                       const float        buildTimeBegin,
+                                                       const float        buildTimeEnd )
+{
+    dim3 grid, block;
+    calcKernelDims( geometryPrimCount, block, grid );
+
+    ResampleRegularAabbsKernelParams p = {geometryPrimCount, geometryAabbs,   geometryMotionSteps,
+                                          geometryTimeBegin, geometryTimeEnd, buildAabbs,
+                                          buildMotionSteps,  buildTimeBegin,  buildTimeEnd};
+
+    lwdaStream_t lwdaStream = (lwdaStream_t)stream;
+    kernel_resample_regular_geometry_aabbs<<<grid, block, 0, lwdaStream>>>( p );
+}
+
+void resampleMotionAabbsDevice( const size_t            motionAabbsCount,
+                                const MotionAabbDevice* motionAabbs,
+                                const Aabb*             inputAabbs,
+                                const float*            inputTimes,
+                                Aabb*                   buildAabbs,
+                                const unsigned int      buildMotionSteps,
+                                const float             buildTimeBegin,
+                                const float             buildTimeEnd )
+{
+    dim3 grid, block;
+    calcKernelDims( motionAabbsCount, block, grid );
+
+    ResampleAabbsKernelParams p = {motionAabbsCount, motionAabbs,
+                                   inputAabbs,       inputTimes,
+                                   buildAabbs,       buildMotionSteps, buildTimeBegin, buildTimeEnd};
+
+    kernel_resample_aabbs<<<grid, block>>>( p );
+}
+
+}  // namespace motion
+}  // namespace optix_exp

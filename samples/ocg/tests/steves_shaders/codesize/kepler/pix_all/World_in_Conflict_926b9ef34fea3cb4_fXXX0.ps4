@@ -1,0 +1,42 @@
+ps_4_0
+dcl_input_ps_siv v0.xy, position, linear noperspective
+dcl_input_ps v1.x, linear
+dcl_input_ps v1.yz, linear
+dcl_input_ps v2.xyzw, linear
+dcl_input_ps v3.xyz, linear
+dcl_input_ps v4.xy, linear
+dcl_input_ps v5.xyzw, linear
+dcl_input_ps v6.w, linear
+dcl_output o0.xyzw
+dcl_constantbuffer cb0[18].xyzw, immediateindexed
+dcl_resource t0, texture2d, (float, float, float, float)
+dcl_sampler s0, mode_default
+dcl_resource t1, texture2d, (float, float, float, float)
+dcl_sampler s1, mode_default
+dcl_resource t4, texture2d, (float, float, float, float)
+dcl_temps 2 
+sample r0.xyzw, v1.yzyy, t0.xyzw, s0
+mul r0.w, r0.w, v2.w
+ftoi r1.xy, v0.xyxx
+mov r1.zw, l(0, 0, 0, 0)
+ld r1.xyzw, r1.xyzw, t4.xyzw
+mul r1.y, l(10000.00000000), cb0[4].x
+add r1.x, r1.x, -v6.w
+mul_sat r1.x, r1.y, r1.x
+mul r0.w, r0.w, r1.x
+mov_sat r1.x, r0.w
+lt r1.x, r1.x, cb0[16].w
+if_nz r1.x
+discard_sat l(0xffffffff)
+endif 
+sample r1.xyzw, v4.xyxx, t1.xyzw, s1
+dp3 r0.x, v5.xyzx, r0.xyzx
+dp3 r0.y, v3.xyzx, r1.xyzx
+add r0.x, r0.x, r0.y
+mul r0.x, r0.x, v5.w
+mad r0.xyz, r0.xxxx, cb0[1].xyzx, cb0[2].xyzx
+mov_sat r1.x, v1.x
+mad r0.xyz, v2.xyzx, r0.xyzx, -cb0[17].xyzx
+mad o0.xyz, r1.xxxx, r0.xyzx, cb0[17].xyzx
+mov o0.w, r0.w
+ret 

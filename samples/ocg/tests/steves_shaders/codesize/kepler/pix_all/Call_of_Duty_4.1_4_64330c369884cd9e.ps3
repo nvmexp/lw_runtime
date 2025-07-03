@@ -1,0 +1,70 @@
+ps_3_0
+
+def c1, 0.50000000, 0.02343750, 0.00000000, 0.00000000 ; 0x3f000000 0x3cc00000 0x000000 0x000000
+def c2, 1.00000000, 3.70000005, 0.60000002, 0.00075000 ; 0x3f800000 0x406ccccd 0x3f19999a 0x3a449ba6
+def c3, 0.00390625, 0.00000000, 4.00000000, 64.00000000 ; 0x3b800000 0x000000 0x40800000 0x42800000
+defi i0, 3, 0, 0, 0
+dcl_color0 v0.a
+dcl_texcoord0 v1.rg
+dcl_texcoord2 v2
+dcl_lwbe s1
+dcl_2d s4
+mul r0.xy, c1.x, v1
+texld r0, r0, s4
+add r0.x, -r0.x, c1.x
+nrm_pp r1.xyz, v2
+mul r0.xy, r0.x, r1
+mad r0.xy, r0, c1.y, v1
+mov r0.zw, r0.xyxy
+mov r1.w, c1.w
+mov r2.x, c2.x
+rep i0
+texld r3, r0.zwzw, s4
+mad r1.w, r3.x, r2.x, r1.w
+mul r0.zw, r0, c2.y
+mul r2.x, r2.x, c2.z
+endrep
+add r0, r0.xyxy, c3.xyyx
+mov r2.xy, r0
+mov r2.z, c1.w
+mov r2.w, c2.x
+rep i0
+texld r3, r2, s4
+mad r2.z, r3.x, r2.w, r2.z
+mul r2.xyw, r2, c2.yyz
+endrep
+mov r0.xy, r0.zwzw
+mov r2.x, c1.w
+mov r2.y, c2.x
+rep i0
+texld r3, r0, s4
+mad r2.x, r3.x, r2.y, r2.x
+mul r0.xy, r0, c2.y
+mul r2.y, r2.y, c2.z
+endrep
+add_pp r0.xy, -r1.w, r2.zxzw
+mov r0.z, c2.x
+nrm_pp r2.xyz, r0
+dp3 r0.x, r1, r2
+add r0.y, r0.x, r0.x
+mad_pp r1.xyz, r2, -r0.y, r1
+abs_pp r1.w, r1.z
+texld_pp r3, r1.xyw, s1
+mul_pp r0.yzw, r3.w, r3.xxyz
+mul_sat_pp r0.yzw, r0, c3.z
+mad_pp r0.yzw, c6.xxyz, -r2.z, r0
+add_pp r0.x, -r0_abs.x, c2.x
+pow_pp r1.w, r0.x, c5.z
+lrp_sat r0.x, r1.w, c5.y, c5.x
+dp3 r1.x, r1, c17
+add r1.x, r1.x, c2.w
+max r2.x, r1.x, c1.w
+mul_pp r1.xyz, r2.z, c6
+mad_pp r0.yzw, r0.x, r0, r1.xxyz
+mul r0.x, r0.x, r2.x
+pow r1.x, r0.x, c3.w
+mul r1.xyz, r1.x, c18
+mad_pp r0.xyz, r1, c5.w, r0.yzw
+add r0.xyz, r0, -c0
+mad oC0.xyz, v2.w, r0, c0
+mov oC0.w, v0.w

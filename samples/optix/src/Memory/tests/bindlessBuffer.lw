@@ -1,0 +1,48 @@
+#include <optix_world.h>
+
+rtBuffer<int, 1> output;
+rtDeclareVariable( int, bufferId, , );
+
+RT_PROGRAM void loadFromBufferId()
+{
+    output[0] = rtBufferId<int, 1>( bufferId )[0];
+}
+
+RT_PROGRAM void loadTwiceFromBufferId()
+{
+    output[0] = rtBufferId<int, 1>( bufferId )[0];
+    output[1] = rtBufferId<int, 1>( bufferId )[1];
+}
+
+rtBuffer<rtBufferId<int, 1>, 1> bufferOfBuffers;
+
+RT_PROGRAM void loadFromBufferOfBuffers()
+{
+    output[0] = bufferOfBuffers[0][0];
+}
+
+rtDeclareVariable( int, constantVariable, , );
+RT_PROGRAM void storeToBufferId()
+{
+    rtBufferId<int, 1> buffer = rtBufferId<int, 1>( bufferId );
+    buffer[0] = constantVariable;
+}
+
+RT_PROGRAM void storeTwiceToBufferId()
+{
+    rtBufferId<int, 1> buffer = rtBufferId<int, 1>( bufferId );
+    buffer[0] = constantVariable;
+    buffer[1] = constantVariable + 1;
+}
+
+RT_PROGRAM void storeToBufferIdFromBufferOfBuffers()
+{
+    rtBufferId<int, 1> buffer = bufferOfBuffers[0];
+    buffer[0] = constantVariable;
+}
+
+RT_PROGRAM void getSize()
+{
+    rtBufferId<int, 1> buffer = rtBufferId<int, 1>( bufferId );
+    output[0] = buffer.size();
+}

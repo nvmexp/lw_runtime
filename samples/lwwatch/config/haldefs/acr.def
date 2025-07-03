@@ -1,0 +1,174 @@
+# -*- mode: perl; -*-
+
+# ACR Hal interface definitions
+# For a brief introduction to file format, see README in this directory.
+
+my $acrHal = [
+
+    # per-GPU defaults for ACR for all interfaces below
+    DEFAULTS => [
+        # optional defaults for gpus not specifically setup by an interface
+        _STUB       => [ CHEETAH, ],
+    ],
+
+    # HAL Interfaces
+    # ********************************************************************************
+    HAL_INTERFACES => [
+
+        IS_SUPPORTED => [
+
+            DESCRIPTION   => "Determine if ACR is supported on this GPU",
+            RETURN_TYPE   =>  BOOL,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => FALSE,
+
+            _GM20X        => [ GM20X_thru_TURING, ],
+            _GA100        => [ AMPERE_and_later, ],
+            _STUB         => [ pre_dMAXWELL, GM10X, ],
+        ],
+
+        LSF_STATUS => [
+
+            DESCRIPTION   => "Print Falcon priv level, if engine is enabled",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GM20X        => [ GM20X_and_later, ],
+            _STUB         => [ pre_dMAXWELL, GM10X, ],
+        ],
+
+        GET_REGION_INFO => [
+
+            DESCRIPTION   => "Get ACR region info",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GM20X        => [ GM20X_thru_VOLTA, CHEETAH ],
+            _TU10X        => [ TU10X_and_later, ],
+            _STUB         => [ pre_dMAXWELL, GM10X, ],
+        ],
+
+        REGION_STATUS => [
+
+            DESCRIPTION   => "L0 Sanity testing - Verify if write is possible through NS client",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GM20X        => [ GM20X_thru_GP100, ],
+            _GP10X        => [ dPascal_thru_VOLTA, -GP100, CHEETAH, ],
+            _TU10X        => [ TU10X_and_later, ],
+            _STUB         => [ pre_dMAXWELL, GM10X, ],
+        ],
+
+        DMEM_PROTECTION => [
+
+            DESCRIPTION   => "Verify DMEM protection",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => LSF_STATUS,
+        ],
+
+        IMEM_PROTECTION => [
+
+            DESCRIPTION   => "Verify IMEM protection",
+            RETURN_TYPE   =>  LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => LSF_STATUS,
+        ],
+
+        GET_MULTIPLE_WPR_INFO => [
+            DESCRIPTION   => "Get Multiple WPR region info",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _TU10X        => [ TURING_and_later, ],
+            _STUB         => [ pre_TURING, ],
+        ],
+
+        VERIFY_MULTIPLE_WPR_STATUS => [
+            DESCRIPTION   => "Verify multiple wpr regions configuration",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => GET_MULTIPLE_WPR_INFO,
+        ],
+
+        GET_SHARED_WPR_STATUS => [
+            DESCRIPTION   => "Verify configuration of shared sub wpr regions",
+            RETURN_TYPE   => LW_STATUS,
+            ARGUMENTS     => "LwU32",
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            LIKE_INTERFACE => GET_MULTIPLE_WPR_INFO,
+        ],
+
+        GET_FALCON_PROP => [
+            DESCRIPTION   => "Get falcon prop",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LSFALCPROP *, LwU32, LwU32",
+
+            _GM20X        => [ GM20X_thru_GP100, USED_BY_GP10X, ],
+            _GP10X        => [ GP10X, -GP100, USED_BY_GV100, ],
+            _GV100        => [ dVOLTA, ],
+            _TU10X        => [ dTURING, ],
+            _GA100        => [ dAMPERE_and_later, ],
+            _STUB         => [ pre_dMAXWELL, GM10X, ],
+        ],
+
+        IS_SEC2_FALCON_ENABLED => [
+            DESCRIPTION   => "Check if SEC2 falcon is enabled",
+            RETURN_TYPE   => LwBool,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => LW_FALSE,
+
+            _GA100        => [ GA100, GH100, ],
+            _GA10X        => [ GA102, GA103, GA104, GA106, GA107, GH202, ],
+            _STUB         => [ ALL, -GA100, -GH100, -GA102, -GA103, -GA104, -GA106, -GA107, -GH202, ],
+        ],
+
+        GET_DPU_CFGA_SIZE => [
+            DESCRIPTION   => "Get DPU falcon CFGA",
+            RETURN_TYPE   => LwU32,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => LW_ERR_NOT_SUPPORTED,
+
+            _GA100        => [ GA100, ],
+            _GA10X        => [ GA102, GA103, GA104, GA106, GA107, AD10X, GH100, GH202, ],
+            _STUB         => [ ALL, -GA100, -GA102, -GA103, -GA104, -GA106, -GA107, -AD10X, -GH100, -GH202, ],
+        ],
+
+        GET_LWENC2_FALCON_PROP => [
+            DESCRIPTION   => "Get Lwenc2 falcon prop",
+            RETURN_TYPE   => void,
+            ARGUMENTS     => "LSFALCPROP *",
+
+            _GP100        => [ GP100, GV100, ],
+            _STUB         => [ ALL, -GP100, -GV100, ],
+        ],
+
+        IS_FMODEL => [
+            DESCRIPTION   => "Check if we are running on simulation fmodel",
+            RETURN_TYPE   => BOOL,
+            ARGUMENTS     => void,
+            STUB_RETURNS  => FALSE,
+
+            _GM20X        => [ GM20X_thru_TURING, ],
+            _GA10X        => [ AMPERE_and_later, ],
+            _STUB         => [ pre_dMAXWELL, GM10X, ],
+        ],
+
+    ],   # HAL interfaces
+
+];
+
+# return a reference to the Hal definition
+return $acrHal;

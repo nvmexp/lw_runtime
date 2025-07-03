@@ -1,0 +1,518 @@
+/* * Copyright (c) 2020, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ */
+
+//#define LWPHY_DEBUG 1
+
+#include "ldpc.hpp"
+#include "ldpc_load_store.lwh"
+#include <cooperative_groups.h>
+
+namespace cg = cooperative_groups;
+
+////////////////////////////////////////////////////////////////////////
+// ldpc
+namespace ldpc
+{
+
+template <int remainder>
+inline __device__ uint32_t funnel_shifted_bits(const int       shift,
+                                               const int       num_tdbv,
+                                               const int       tdbv_id,
+                                               const int       in_offset,
+                                               const uint32_t* in)
+{
+    bool      compense  = (tdbv_id * 32 + shift) >= (num_tdbv * 32);
+    const int new_shift = shift + compense * (32 - remainder);
+    int       lid       = (tdbv_id + new_shift / 32) % num_tdbv;
+    int       hid       = (lid + 1) % num_tdbv;
+    lid += in_offset;
+    hid += in_offset;
+    uint32_t remaining_shift = new_shift % 32;
+    if(hid % num_tdbv == 0)
+    {
+        return __funnelshift_r(in[lid], ((in[hid] >> (32 - remainder))) | (in[hid + 1] << (remainder)), remaining_shift);
+    }
+    else
+    {
+        return __funnelshift_r(in[lid], in[hid], remaining_shift);
+    }
+}
+
+template <>
+inline __device__ uint32_t funnel_shifted_bits<0>(const int       shift,
+                                                  const int       num_tdbv,
+                                                  const int       tdbv_id,
+                                                  const int       in_offset,
+                                                  const uint32_t* in)
+{
+    int lid = (tdbv_id + shift / 32) % num_tdbv;
+    int hid = (lid + 1) % num_tdbv;
+    lid += in_offset;
+    hid += in_offset;
+    uint32_t remaining_shift = shift % 32;
+    return __funnelshift_r(in[lid], in[hid], remaining_shift);
+}
+
+template <int Z>
+inline __device__ uint32_t cirlwlar_shifted_bits(const int       shift,
+                                               const int       tdbv_id,
+                                               const int       in_offset,
+                                               const uint32_t* in)
+{
+  int id = tdbv_id + in_offset;
+  uint32_t bits = in[id];
+
+  uint32_t l_mask = (1 << (Z - shift)) - 1;
+  uint32_t h_mask = ((1 << Z) - 1) ^ l_mask;
+
+  uint32_t lsb = (bits >> shift) & l_mask;
+  uint32_t msb = bits << (Z - shift) & h_mask;
+  return msb | lsb;
+}
+
+
+// TODO: negative shift is not possible both in funnel_shifted_bits and
+// cirlwlar_shifted_bits even if the compiler complains about it.
+// The warning will be gone after the refactoring.
+template <typename DType, int remainder>
+inline __device__ DType rotated_bits(const int       shift,
+                                     const int       num_tdbv,
+                                     const int       tdbv_id,
+                                     const int       in_offset,
+                                     const uint32_t* in)
+{
+    if(remainder >= 0)
+      return funnel_shifted_bits<remainder>(shift, num_tdbv, tdbv_id, in_offset, in);
+    else
+      return cirlwlar_shifted_bits<-remainder>(shift, tdbv_id, in_offset, in);
+}
+
+template <typename DType, int row_base, bool aclwmulated, int remainder, int tile_size, typename Block>
+inline __device__ void block_multiply_in_bit(const int       BG,
+                                             const int       Z,
+                                             const int       num_tdbv,
+                                             const int       col_base,
+                                             const int       col_end,
+                                             const uint32_t* in,
+                                             uint32_t*       out,
+                                             Block&          block,
+                                             const int       num_rows)
+{
+    cg::thread_block_tile<tile_size> tile      = cg::tiled_partition<tile_size>(block);
+    const int                        lane_id   = tile.thread_rank();
+    const int                        tile_id   = block.thread_rank() / tile.size();
+    const int                        num_tiles = block.size() / tile.size();
+
+    for(int row = tile_id + row_base; row < num_rows; row += num_tiles)
+    {
+        // Each warp is in charge of different Z-sized data
+        bg1_CN_row_shift_info_t CNShift(row, Z);
+        for(int tdbv_id = lane_id; tdbv_id < num_tdbv; tdbv_id += tile.size())
+        {
+            uint32_t val = 0;
+            for(int cid = 0; cid < CNShift.row_degree; cid++)
+            {
+                const int col = CNShift.column_values[cid];
+                if(col >= col_base && col < col_end)
+                {
+                    val ^= rotated_bits<DType, remainder>(CNShift.shift_values[cid],
+                                                          num_tdbv,
+                                                          tdbv_id,
+                                                          (col - col_base) * num_tdbv,
+                                                          in);
+                }
+            }
+            int d_idx  = tdbv_id + row * num_tdbv;
+            out[d_idx] = aclwmulated ? out[d_idx] ^ val : val;
+        }
+    }
+    block.sync();
+}
+
+////////////////////////////////////////////////////////////////////////
+// ldpc_encode_in_bit_kernel()
+template <typename DType, int remainder, int tile_size>
+__global__ void ldpc_encode_in_bit_kernel(int               iLS,
+                                          const LDPC_config config,
+                                          char              Htype,
+                                          bool              puncture,
+                                          int               num_rows,
+                                          LDPC_output_t     input,
+                                          LDPC_output_t     output)
+{
+    constexpr size_t  elem_size = sizeof(DType) * 8;
+    const int         num_tdbv  = (config.Z / elem_size + int(config.Z % elem_size != 0));
+    extern __shared__ DType sbuf[];
+    DType*                  info_vec = sbuf;
+    DType*                  d_or_m   = sbuf + num_tdbv * config.Kb;
+
+    cg::thread_block block = cg::this_thread_block();
+
+    int K_in_word = input.layout().dimensions[0];
+    int C_in_word = input.layout().dimensions[1];
+    // Each thread block processes different code blocks
+    for(int c = blockIdx.x; c < C_in_word; c += gridDim.x)
+    {
+        // Step 1. Load a code block segment into the on-chip SMEM
+        load_from_gmem_to_smem<DType, remainder>(config.Z,
+                                                 input,
+                                                 info_vec,
+                                                 c,
+                                                 K_in_word,
+                                                 block);
+
+        block_multiply_in_bit<DType, 0, false, remainder, tile_size>(config.BG,
+                                                                     config.Z,
+                                                                     num_tdbv,
+                                                                     0,
+                                                                     config.Kb,
+                                                                     info_vec,
+                                                                     d_or_m,
+                                                                     block,
+                                                                     num_rows);
+
+        // Step 3. solve equations for main parity bits
+        if(threadIdx.x < num_tdbv)
+        {
+            DType d_temp[3];
+            int   tdbv_id = threadIdx.x;
+            for(int i = 0; i < 3; i++)
+            {
+                d_temp[i] = d_or_m[tdbv_id + i * num_tdbv];
+            }
+            d_or_m[tdbv_id] ^= d_temp[1];
+            d_or_m[tdbv_id] ^= d_temp[2];
+            d_or_m[tdbv_id] ^= d_or_m[tdbv_id + 3 * num_tdbv]; // m1
+            if(Htype == 1)
+            {
+                DType m_shifted                = rotated_bits<DType, remainder>(1,
+                                                                 num_tdbv,
+                                                                 tdbv_id,
+                                                                 0,
+                                                                 d_or_m);
+                d_or_m[tdbv_id + 1 * num_tdbv] = d_temp[0] ^ m_shifted;                                        // m2
+                d_or_m[tdbv_id + 2 * num_tdbv] = d_temp[1] ^ d_or_m[tdbv_id + 1 * num_tdbv];                   // m3
+                d_or_m[tdbv_id + 3 * num_tdbv] = d_temp[2] ^ d_or_m[tdbv_id] ^ d_or_m[tdbv_id + 2 * num_tdbv]; // m4
+            }
+            else if(Htype == 2)
+            {
+                int shift = 105 % config.Z;
+                if(shift > 0)
+                {
+                    DType m_shifted = rotated_bits<DType, remainder>(config.Z - shift,
+                                                                     num_tdbv,
+                                                                     tdbv_id,
+                                                                     0,
+                                                                     d_or_m);
+                    d_or_m[tdbv_id] = m_shifted; // m1
+                }
+                d_or_m[tdbv_id + 1 * num_tdbv] = d_temp[0] ^ d_or_m[tdbv_id];                      // m2
+                d_or_m[tdbv_id + 3 * num_tdbv] = d_or_m[tdbv_id + 3 * num_tdbv] ^ d_or_m[tdbv_id]; // m4
+                d_or_m[tdbv_id + 2 * num_tdbv] = d_temp[2] ^ d_or_m[tdbv_id + 3 * num_tdbv];       // m3
+            }
+            else if(Htype == 3)
+            {
+                DType m_shifted                = rotated_bits<DType, remainder>(1,
+                                                                 num_tdbv,
+                                                                 tdbv_id,
+                                                                 0,
+                                                                 d_or_m);
+                d_or_m[tdbv_id + 1 * num_tdbv] = d_temp[0] ^ m_shifted;                                        // m2
+                d_or_m[tdbv_id + 2 * num_tdbv] = d_temp[1] ^ d_or_m[tdbv_id] ^ d_or_m[tdbv_id + 1 * num_tdbv]; // m3
+                d_or_m[tdbv_id + 3 * num_tdbv] = d_temp[2] ^ d_or_m[tdbv_id + 2 * num_tdbv];                   // m4
+            }
+            else
+            {
+                DType m_shifted                = rotated_bits<DType, remainder>(config.Z - 1,
+                                                                 num_tdbv,
+                                                                 tdbv_id,
+                                                                 0,
+                                                                 d_or_m);
+                d_or_m[tdbv_id]                = m_shifted;                                        // m1
+                d_or_m[tdbv_id + 1 * num_tdbv] = d_temp[0] ^ d_or_m[tdbv_id];                      // m2
+                d_or_m[tdbv_id + 2 * num_tdbv] = d_temp[1] ^ d_or_m[tdbv_id + 1 * num_tdbv];       // m3
+                d_or_m[tdbv_id + 3 * num_tdbv] = d_or_m[tdbv_id + 3 * num_tdbv] ^ d_or_m[tdbv_id]; // m4
+            }
+        }
+
+        block.sync();
+
+        // Step 4. block multiply to get other parity bits
+        block_multiply_in_bit<DType, 4, true, remainder, tile_size>(config.BG,
+                                                                    config.Z,
+                                                                    num_tdbv,
+                                                                    config.Kb,
+                                                                    config.Kb + 4,
+                                                                    d_or_m,
+                                                                    d_or_m,
+                                                                    block,
+                                                                    num_rows);
+
+        int punctured_nodes = puncture ? LWPHY_LDPC_NUM_PUNCTURED_NODES : 0;
+        int N_in_word = ((config.Kb + num_rows - punctured_nodes) * config.Z) / 32; // LDPC's per CB size in uint32_t elements
+
+        // Step 5. Store the resulting code block segment from the on-chip SMEM to GMEM
+        store_from_smem_to_gmem<DType, remainder>(config.Z,
+                                                  num_tdbv,
+                                                  output,
+                                                  sbuf,
+                                                  c,
+                                                  N_in_word,
+                                                  puncture,
+                                                  block);
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// get_H_type()
+char get_H_type(int BG, int iLS)
+{
+    char H_type[2][8] =
+        {
+            {3, 3, 3, 3, 3, 3, 2, 3},
+            {4, 4, 4, 1, 4, 4, 4, 1}};
+    return H_type[BG - 1][iLS];
+}
+
+////////////////////////////////////////////////////////////////////////
+// get_encode_cta_size()
+int get_encode_cta_size(int Z)
+{
+    return 256;
+}
+
+////////////////////////////////////////////////////////////////////////
+// encode()
+lwphyStatus_t encode(tensor_pair&      in_pair,
+                     tensor_pair&      out_pair,
+                     const LDPC_config config,
+                     bool              puncture,
+                     int               max_parity_nodes,
+                     int               rv,
+                     lwdaStream_t      strm)
+{
+    lwphyStatus_t s = LWPHY_STATUS_SUCCESS;
+
+    const tensor_desc& inDesc = in_pair.first.get();
+
+    const tensor_desc& outDesc = out_pair.first.get();
+
+    if(outDesc.layout().rank() != 2 || inDesc.layout().rank() != 2)
+    {
+        return LWPHY_STATUS_UNSUPPORTED_RANK;
+    }
+
+    if(inDesc.type() != LWPHY_BIT || outDesc.type() != LWPHY_BIT)
+    {
+        return LWPHY_STATUS_UNSUPPORTED_TYPE;
+    }
+
+    if(config.BG < 1 || config.BG > 2)
+    {
+        return LWPHY_STATUS_UNSUPPORTED_CONFIG;
+    }
+
+    int iLS = set_from_Z(config.Z);
+
+    if(iLS == -1)
+    {
+        return LWPHY_STATUS_UNSUPPORTED_CONFIG;
+    }
+
+    /* If the optimize_nrows flag is set, the LDPC encoder will compute a subset of parity nodes (max_parity_nodes).
+       This optimization is only valid for redundancy version 0.
+       Setting max_parity_nodes to 0, when calling the encode function, will compute all parity nodes.
+    */
+    int orig_num_rows = (config.BG == 1) ? LWPHY_LDPC_MAX_BG1_PARITY_NODES : LWPHY_LDPC_MAX_BG2_PARITY_NODES;
+    bool optimize_nrows = ((rv == 0) && (max_parity_nodes != 0) && (max_parity_nodes < orig_num_rows));
+
+    const int num_rows = (optimize_nrows) ? max_parity_nodes : orig_num_rows;
+    const int smem_num_rows = (optimize_nrows) ? (num_rows + LWPHY_LDPC_NUM_PUNCTURED_NODES) : num_rows;
+
+    char H_type = get_H_type(config.BG, iLS);
+
+    tensor_layout_any inWordLayout = word_layout_from_bit_layout(inDesc.layout());
+    LDPC_output_t     input(in_pair.second,
+                        LDPC_output_t::layout_t(inWordLayout.dimensions.begin(),
+                                                inWordLayout.strides.begin() + 1));
+
+    tensor_layout_any outWordLayout = word_layout_from_bit_layout(outDesc.layout());
+    LDPC_output_t     output(out_pair.second,
+                         LDPC_output_t::layout_t(outWordLayout.dimensions.begin(),
+                                                 outWordLayout.strides.begin() + 1));
+
+    int  C_in_word = input.layout().dimensions[1];
+    dim3 blocks(C_in_word, 1, 1);
+    dim3 block_size(get_encode_cta_size(config.Z), 1, 1);
+
+    if(config.Z >= 32)
+    {
+        size_t smem_size = (config.Z / 32 + int(config.Z % 32 != 0)) * (config.Kb + smem_num_rows) * sizeof(int);
+
+        switch(config.Z % 32)
+        {
+        case 0: // 32 64 96 128 192 224 256 288 320 352 384
+            if(config.Z <= 256)
+                ldpc_encode_in_bit_kernel<uint32_t, 0, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                   config,
+                                                                                                   H_type,
+                                                                                                   puncture,
+                                                                                                   num_rows,
+                                                                                                   input,
+                                                                                                   output);
+            else
+            {
+                ldpc_encode_in_bit_kernel<uint32_t, 0, 16><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                    config,
+                                                                                                    H_type,
+                                                                                                    puncture,
+                                                                                                    num_rows,
+                                                                                                    input,
+                                                                                                    output);
+            }
+            break;
+        case 4: // 36
+            ldpc_encode_in_bit_kernel<uint32_t, 4, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                               config,
+                                                                                               H_type,
+                                                                                               puncture,
+                                                                                               num_rows,
+                                                                                               input,
+                                                                                               output);
+            break;
+        case 8: // 40 72 104
+            ldpc_encode_in_bit_kernel<uint32_t, 8, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                               config,
+                                                                                               H_type,
+                                                                                               puncture,
+                                                                                               num_rows,
+                                                                                               input,
+                                                                                               output);
+            break;
+        case 12: // 44
+            ldpc_encode_in_bit_kernel<uint32_t, 12, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                config,
+                                                                                                H_type,
+                                                                                                puncture,
+                                                                                                num_rows,
+                                                                                                input,
+                                                                                                output);
+            break;
+        case 16: // 48 80 112 144 176 208 240
+            ldpc_encode_in_bit_kernel<uint32_t, 16, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                config,
+                                                                                                H_type,
+                                                                                                puncture,
+                                                                                                num_rows,
+                                                                                                input,
+                                                                                                output);
+            break;
+        case 20: // 52
+            ldpc_encode_in_bit_kernel<uint32_t, 20, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                config,
+                                                                                                H_type,
+                                                                                                puncture,
+                                                                                                num_rows,
+                                                                                                input,
+                                                                                                output);
+            break;
+        case 24: // 56 88 120
+            ldpc_encode_in_bit_kernel<uint32_t, 24, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                config,
+                                                                                                H_type,
+                                                                                                puncture,
+                                                                                                num_rows,
+                                                                                                input,
+                                                                                                output);
+            break;
+        default:
+            return LWPHY_STATUS_UNSUPPORTED_CONFIG;
+        }
+    }
+    else
+    {
+        if(config.Z >= 18)
+        {
+            size_t smem_size = (config.Kb + num_rows) * sizeof(int);
+            switch(config.Z)
+            {
+                case 30:
+                  ldpc_encode_in_bit_kernel<uint32_t, -30, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                      config,
+                                                                                                      H_type,
+                                                                                                      puncture,
+                                                                                                      num_rows,
+                                                                                                      input,
+                                                                                                      output);
+                    break;
+                case 28:
+                  ldpc_encode_in_bit_kernel<uint32_t, -28, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                      config,
+                                                                                                      H_type,
+                                                                                                      puncture,
+                                                                                                      num_rows,
+                                                                                                      input,
+                                                                                                      output);
+                    break;
+                case 26:
+                  ldpc_encode_in_bit_kernel<uint32_t, -26, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                      config,
+                                                                                                      H_type,
+                                                                                                      puncture,
+                                                                                                      num_rows,
+                                                                                                      input,
+                                                                                                      output);
+                    break;
+                case 24:
+                  ldpc_encode_in_bit_kernel<uint32_t, -24, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                      config,
+                                                                                                      H_type,
+                                                                                                      puncture,
+                                                                                                      num_rows,
+                                                                                                      input,
+                                                                                                      output);
+                    break;
+                case 22:
+                  ldpc_encode_in_bit_kernel<uint32_t, -22, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                      config,
+                                                                                                      H_type,
+                                                                                                      puncture,
+                                                                                                      num_rows,
+                                                                                                      input,
+                                                                                                      output);
+                    break;
+                case 20:
+                  ldpc_encode_in_bit_kernel<uint32_t, -20, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                      config,
+                                                                                                      H_type,
+                                                                                                      puncture,
+                                                                                                      num_rows,
+                                                                                                      input,
+                                                                                                      output);
+                    break;
+                case 18:
+                  ldpc_encode_in_bit_kernel<uint32_t, -18, 8><<<blocks, block_size, smem_size, strm>>>(iLS,
+                                                                                                      config,
+                                                                                                      H_type,
+                                                                                                      puncture,
+                                                                                                      num_rows,
+                                                                                                      input,
+                                                                                                      output);
+                    break;
+            }
+        }
+        else {
+          return LWPHY_STATUS_UNSUPPORTED_CONFIG;
+        }
+    }
+
+    return s;
+}
+
+} // namespace ldpc

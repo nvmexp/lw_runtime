@@ -1,0 +1,184 @@
+#
+#  Copyright (c) 2018 LWPU Corporation.  All rights reserved.
+#
+#  LWPU Corporation and its licensors retain all intellectual property and proprietary
+#  rights in and to this software, related documentation and any modifications thereto.
+#  Any use, reproduction, disclosure or distribution of this software and related
+#  documentation without an express license agreement from LWPU Corporation is strictly
+#  prohibited.
+#
+#  TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED *AS IS*
+#  AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS OR IMPLIED,
+#  INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+#  PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS BE LIABLE FOR ANY
+#  SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT
+#  LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
+#  BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS) ARISING OUT OF THE USE OF OR
+#  INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS BEEN ADVISED OF THE POSSIBILITY OF
+#  SUCH DAMAGES
+#
+
+# Templates for resource scripts.
+CMAKE_CONFIGURED_FILES += $(LW_OPTIX)/include/private/optix_rc.h.in
+CMAKE_CONFIGURED_FILES += $(LW_OPTIX)/src/lwoptix.rc.in
+
+# The compiled resource to only be linked into lwoptix and not into anything linked to optix_static.
+# NOTE: This has to be lwoptix.res, regardless of the setting of DRIVER_BASE_NAME, in order for
+# the pattern matching rule for compiling resource files to work and the configure file mechanism
+# from the template lwoptix.rc.in above.
+LWOPTIX_RESOURCE = $(OUTPUTDIR)/src/lwoptix.res
+
+# The compiled resource script depends on a generated header in optix-include.
+$(LWOPTIX_RESOURCE): $(OUTPUTDIR)/optix-include/optix_rc.h
+$(LWOPTIX_RESOURCE): RCFLAGS += /I $(OUTPUTDIR)/optix-include
+
+# Make sure we have a resource compiler
+ifeq ($(wildcard $(dir $(RC))rc.exe),)
+  ifneq ($(wildcard $(LW_WDKSDK_BIN)/x86/rc.exe),)
+    # Use the x86 exelwtable from the WDK SDK
+    RC := $(LW_WDKSDK_BIN)/x86/rc
+  else
+    # Fall back to resource compiler from WinSDK 7.0a
+    RC := $(LW_TOOLS)/sdk/WinSDK/7.0a/Bin/RC.Exe
+  endif
+endif
+ifeq ($(wildcard $(dir $(RC))rc.exe),)
+  $(error Cannot find resource compiler $(RC))
+endif
+
+# Make compiled resources from generated resource scripts
+$(OUTPUTDIR)/%.res: $(OUTPUTDIR)/%.rc $(LWMK_VERSION_STAMP)
+	@$(ECHO) Resource Compiling: [$<]
+	$(RC) $(strip -Fo$(@) $(patsubst -Fo%,,$(RCFLAGS))) $(shell $(FULLPATH) $<)
+
+# Used in src/lwoptix.rc.in resource script template.
+output_name := $(BASE_NAME)
+
+# Make RC run quieter.
+RCFLAGS += -nologo
+
+# LWOPTIX_LFLAGS are link flags just for the lwoptix DLL
+LWOPTIX_LFLAGS = \
+  -map:$(OUTPUTDIR)/$(DRIVER_BASE_NAME).map \
+  -out:$(OUTPUTDIR)/$(LWOPTIX_FILENAME) \
+  -dll
+OPTIX_LFLAGS += /NODEFAULTLIB:libcmt.lib
+
+LW_MSVC80SP1 = 1
+LW_MSVC80_OR_GREATER = 1
+
+ifneq ($(LW_SELWRITY),0)
+  LW_CFG_ARCH_SUFFIX := _amd64
+endif
+
+# TODO: Is this needed for OptiX?
+# Libraries required to enable/disable DWM for directamodel drivers
+ifdef LW_DIRECTAMODEL
+  LWOPTIX_LFLAGS += dwmapi.lib
+endif
+
+ifeq ($(USE_WINCPRT), 1)
+  # Add libcpmt.lib/msvcprt.lib
+  OPTIX_LFLAGS += $(LW_WINCPRT_LFLAGS)
+endif
+
+# enable dead-code elimination linker flag for release build
+ifeq ($(LW_BUILD_TYPE),release)
+  OPTIX_LFLAGS += /OPT:REF
+else
+  # in debug/develop mode explicitly do not eliminate dead code and do not merge identical functions
+  OPTIX_LFLAGS += /OPT:NOREF /OPT:NOICF
+endif
+
+# Use the DLL def file
+LWOPTIX_LFLAGS += /def:$(OUTPUTDIR)/$(DRIVER_BASE_NAME).def
+
+LWOPTIX_LFLAGS += $(OUTPUTDIR)/Corelib.lib
+
+# Contents of the DLL def file
+define LWOPTIX_DEF_CONTENTS
+NAME $(LWOPTIX_FILENAME)
+EXPORTS
+$(foreach f,$(1),$(f)$(_newline))
+endef
+
+OPTIX_DEF_FILE = $(OUTPUTDIR)/$(DRIVER_BASE_NAME).def
+
+# Build the DLL def file for the exported symbols
+$(OPTIX_DEF_FILE): $(LWOPTIX_EXPORTED_SYMBOL_FILE)
+	$(info Creating DLL definition $(subst $(OUTPUTDIR)/,,$(@)))
+	$(eval $(call SET_LWOPTIX_EXPORTED_SYMBOLS))
+	$(file >$(@),$(call LWOPTIX_DEF_CONTENTS,$(LWOPTIX_EXPORTED_SYMBOLS)))
+
+$(OUTPUTDIR)/$(LWOPTIX_FILENAME:.dll=.lib): $(OUTPUTDIR)/$(LWOPTIX_FILENAME)
+
+$(OUTPUTDIR)/$(LWOPTIX_FILENAME): $(OPTIX_DEF_FILE) $(OPTIX_RESOURCES) $(LWOPTIX_RESOURCE) $(ALL_OBJECTS) $(LWVM_LIBRARIES) $(OUTPUTDIR)/Corelib.lib
+	@$(ECHO) Updating Optix library $(LWOPTIX_FILENAME)
+	$(file >$(OUTPUTDIR)/linkParameters.txt,$(strip $(LFLAGS) $(OPTIX_LFLAGS) $(LWOPTIX_LFLAGS)) $(LWVM_LIBRARIES) $(ALL_OBJECTS) $(OPTIX_RESOURCES) $(LWOPTIX_RESOURCE) )
+	$(call call_linker_print_params_on_verbose,$(OUTPUTDIR)/linkParameters.txt)
+	$(call_linker)
+	$(call LW_RAD_DLL_ENCRYPTION,$@)
+	$(call LW_CHECK_GUARDWORDS_CMD,$@)
+ifneq ($(LW_SELWRITY),0)
+	-$(RM) $(OUTPUTDIR)/$(LWOPTIX_FILENAME)_
+	$(MOVE) $(OUTPUTDIR)/$(LWOPTIX_FILENAME) $(OUTPUTDIR)/$(LWOPTIX_FILENAME)_
+	copy /b $(subst /,\, $(LW_SOURCE)/drivers/build_tools/$(DRIVER_BASE_NAME)_selwre$(LW_SELWRITY)$(LW_CFG_ARCH_SUFFIX).cfg + top/$(OUTPUTDIR)/g_lwSelwrityBytecodeReplacement.cfg  $(OUTPUTDIR)/generated_selwrity.cfg)
+	$(LW_SOURCE)/drivers/build_tools/$(LW_SELWRITY_POSTPROC) $(OUTPUTDIR)/$(LWOPTIX_FILENAME)_ $(OUTPUTDIR)/generated_selwrity.cfg
+endif
+
+# Accumulate a list of everything we need for the lwoptix target
+target_final_outputs ?= ""
+
+# magically source-index the pdb file when required
+$(eval $(call source_index_pdb,$(LWOPTIX_FILENAME)))
+
+$(LW_INSTALL_DIR)/$(LWOPTIX_FILENAME): $(OUTPUTDIR)/$(LWOPTIX_FILENAME)
+	$(standard_install)
+
+$(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).pdb: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).pdb
+	$(standard_install)
+
+$(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).map: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).map
+	$(standard_install)
+
+$(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).bsc: $(OUTPUTDIR)/$(DRIVER_BASE_NAME).bsc
+	$(standard_install)
+
+# .map and .pdb files are built as side-effects of the DLL build.  Use empty
+# rules with dependencies on the .dll file.  The empty rules need to have a
+# recipe (an empty "@") to colwince "make" that the map/pdb files were rebuilt
+# when evaluating the rules to copy to $(LW_SYMBOL_DIR).
+$(OUTPUTDIR)/$(DRIVER_BASE_NAME).map: $(OUTPUTDIR)/$(LWOPTIX_FILENAME) ; @
+$(OUTPUTDIR)/$(DRIVER_BASE_NAME).pdb: $(OUTPUTDIR)/$(LWOPTIX_FILENAME) ; @
+$(OUTPUTDIR)/$(DRIVER_BASE_NAME).bsc: $(OUTPUTDIR)/$(LWOPTIX_FILENAME) ; @
+
+target_final_outputs += $(OUTPUTDIR)/$(LWOPTIX_FILENAME)
+
+$(OUTPUTDIR)/$(DRIVER_BASE_NAME).bsc $(OUTPUTDIR)/$(DRIVER_BASE_NAME).pdb $(OUTPUTDIR)/$(DRIVER_BASE_NAME).map: $(OUTPUTDIR)/$(LWOPTIX_FILENAME)
+
+ifeq ($(LW_GEN_BSC),1)
+  LW_BSC_FILE := $(OUTPUTDIR)/$(DRIVER_BASE_NAME).bsc
+  target_final_outputs += $(LW_BSC_FILE)
+endif
+
+ifeq ($(LW_DO_INSTALL),1)
+  target_final_outputs += $(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).map
+  target_final_outputs += $(LW_INSTALL_DIR)/$(LWOPTIX_FILENAME)
+  ifeq ($(LW_GEN_PDB),1)
+    target_final_outputs += $(LW_SYMBOL_DIR)/$(DRIVER_BASE_NAME).pdb
+  endif
+  ifeq ($(LW_GEN_BSC),1)
+    target_final_outputs += $(LW_INSTALL_DIR)/$(DRIVER_BASE_NAME).bsc
+  endif
+endif
+
+lwoptix: $(target_final_outputs)
+
+# On Windows validate shared library version resource
+run-build-tests: run-test-lwoptix-version
+
+.PHONY: run-test-lwoptix-version
+
+run-test-lwoptix-version: $(OUTPUTDIR)/$(LWOPTIX_FILENAME)
+	$(ECHO) Checking $(LWOPTIX_FILENAME) version
+	cscript //nologo $(LW_OPTIX)/make/verifyFileVersion.js $(OUTPUTDIR)/$(LWOPTIX_FILENAME) $(OPTIX_VERSION_MAJOR).$(OPTIX_VERSION_MINOR).$(OPTIX_VERSION_MICRO).0

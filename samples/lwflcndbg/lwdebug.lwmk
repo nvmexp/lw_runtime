@@ -1,0 +1,115 @@
+###############################################################################
+# apps/lwwatch/lwdebug/lwdebug.lwmk - LwDebug makefile fragment for LwWatch
+#
+# Since there are several builds of LwWatch, this makefile fragment sets up
+# the common environment needed to include the library makefile fragment -
+# namely, the protobuf sources and the components to build into the library.
+#
+# The rules listed at the top of drivers/common/lwdebug/lwdebug.lwmk still
+# apply here, since this file includes that one.
+#
+# This should also be included only after the common LwWatch sources have
+# been included from sources.mk and added to SOURCES, so it can properly
+# filter out the unnecessary lwwatch sources that can cause conflicts with
+# LwDebug.
+###############################################################################
+
+###############################################################################
+# filter out the sources that will be replaced by LwDebug
+###############################################################################
+
+_zlib_sources   := adler32.c
+_zlib_sources   += compress.c
+_zlib_sources   += crc32.c
+_zlib_sources   += deflate.c
+_zlib_sources   += gzio.c
+_zlib_sources   += infback.c
+_zlib_sources   += inffast.c
+_zlib_sources   += inflate.c
+_zlib_sources   += inftrees.c
+_zlib_sources   += ioapi.c
+_zlib_sources   += iowin32.c
+_zlib_sources   += mztools.c
+_zlib_sources   += trees.c
+_zlib_sources   += uncompr.c
+_zlib_sources   += unzip.c
+_zlib_sources   += zip.c
+_zlib_sources   += zutil.c
+
+_lwwatch_dir    := $(LW_SOURCE)/apps/lwwatch
+_lwdebug_filter += $(addprefix $(_lwwatch_dir)/, $(_zlib_sources))
+SOURCES := $(filter-out $(_lwdebug_filter), $(SOURCES))
+
+###############################################################################
+# add the protobuf sources
+###############################################################################
+UMD_PROTO_DIR := $(LW_SOURCE)/drivers/common/inc/protobuf
+
+# Add protobuf dependency definitions
+include $(LW_SOURCE)/drivers/resman/interface/lwrm-protobuf.lwmk
+LW_PROTOBUF_OUTPUTDIR = $(OUTPUTDIR)
+include $(UMD_PROTO_DIR)/deps.mk
+
+VPATH :=
+VPATH += $(UMD_PROTO_DIR)
+
+PROTOC_INCLUDES += -I$(UMD_PROTO_DIR)
+
+# UMD protoc sources
+PROTOC_SOURCES += example.proto
+PROTOC_SOURCES += stdhdr.proto
+PROTOC_SOURCES += umd_lwdump.proto
+PROTOC_SOURCES += umd_all_dcl.proto
+
+ALL_PB_CFILES  := $(call BUILD_PROTOC_C_LIST, $(PROTOC_SOURCES))
+ALL_PB_HFILES  := $(call BUILD_PROTOC_H_LIST, $(PROTOC_SOURCES))
+PROTOC_OBJECTS := $(call BUILD_OBJECT_LIST, $(ALL_PB_CFILES))
+
+LW_GENERATED_HEADERS += $(ALL_PB_HFILES)
+
+SOURCES += $(ALL_PB_CFILES)
+
+NEEDS_LWDEBUG_SUPPORT :=
+NEEDS_LWDEBUG_SUPPORT += dumpSession.c
+NEEDS_LWDEBUG_SUPPORT += exts.c
+NEEDS_LWDEBUG_SUPPORT += help.c
+NEEDS_LWDEBUG_SUPPORT += lwdump.c
+NEEDS_LWDEBUG_SUPPORT += lwdumpWin.cpp
+NEEDS_LWDEBUG_SUPPORT += os.c
+NEEDS_LWDEBUG_SUPPORT += unix/common.c
+NEEDS_LWDEBUG_SUPPORT += unix/common/input.c
+
+##############################################################################
+# Files that need protobuf defines
+##############################################################################
+
+NEEDS_PRB_DEFINES := $(ALL_PB_CFILES)
+NEEDS_PRB_DEFINES += $(NEEDS_LWDEBUG_SUPPORT)
+
+PRB_DEFINES += PRB_ENUM_NAMES
+PRB_DEFINES += PRB_FIELD_NAMES
+PRB_DEFINES += PRB_FIELD_DEFAULTS
+PRB_DEFINES += PRB_MESSAGE_NAMES
+PRB_DEFINES += PRB_METHOD_NAMES
+PRB_DEFINES += PRB_SERVICE_NAMES
+
+$(call BUILD_OBJECT_LIST, $(NEEDS_PRB_DEFINES)): \
+    LW_INCLUDES += $(LW_SOURCE)/drivers/common/inc
+$(call BUILD_OBJECT_LIST, $(NEEDS_PRB_DEFINES)): LW_DEFINES += $(PRB_DEFINES)
+
+##############################################################################
+# add any defines for the files that need LwDebug support
+##############################################################################
+
+$(call BUILD_OBJECT_LIST, $(NEEDS_LWDEBUG_SUPPORT)): \
+    LW_DEFINES += LWDEBUG_SUPPORTED
+
+##############################################################################
+# include the LwDebug fragment to add the required sources
+##############################################################################
+
+# We don't need RMAPI or lwdCm_* functions
+LWDEBUG_INCLUDE_CAPTURE  := false
+LWDEBUG_INCLUDE_ZIP		 := true
+LWDEBUG_INCLUDE_PROTOBUF := true
+include $(LW_SOURCE)/drivers/common/lwdebug/lwdebug.lwmk

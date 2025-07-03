@@ -1,0 +1,69 @@
+// Copyright LWPU Corporation 2014
+// TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THIS SOFTWARE IS PROVIDED
+// *AS IS* AND LWPU AND ITS SUPPLIERS DISCLAIM ALL WARRANTIES, EITHER EXPRESS
+// OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF MERCHANTABILITY
+// AND FITNESS FOR A PARTICULAR PURPOSE.  IN NO EVENT SHALL LWPU OR ITS SUPPLIERS
+// BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+// WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS,
+// BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PELWNIARY LOSS)
+// ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE, EVEN IF LWPU HAS
+// BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES
+
+#include "TreeTopTrimmerKernels.hpp"
+#include "../common/SharedKernelFunctions.hpp"
+
+using namespace prodlib::bvhtools;
+
+//------------------------------------------------------------------------
+
+static __global__ __launch_bounds__(TRIM_TOPMOST_NODES_WARPS_PER_BLOCK * 32, TRIM_TOPMOST_NODES_BLOCKS_PER_SM)
+void TrimTopmostNodes(TrimTopmostNodesParams p)
+{
+  Range nodeRange  = *p.nodeRange;
+  BvhNode* nodes = p.ioNodes + nodeRange.start;
+
+  int idx = threadIdx.x + 32 * (threadIdx.y + TRIM_TOPMOST_NODES_WARPS_PER_BLOCK * (blockIdx.x + gridDim.x * blockIdx.y));
+  if (idx >= nodeRange.span())
+    return;
+
+  if( nodes[idx].c1num == BVHNODE_NOT_IN_USE ) 
+    return;
+
+  int L = computeNodeDepth( p.nodeParents, idx );
+  int lwtoffLevel = *p.lwtoffLevel;
+
+  if( L <= lwtoffLevel )
+  {
+    BvhNode& n = nodes[idx];
+    BvhHalfNode* hn  = (BvhHalfNode*)&n;
+
+    // Store exposed treelet roots immediately above cutoff level,
+    // and any leaves above the cutoff level.
+    // BL: Not very efficient. Consider warp-wide atomics + shfl
+
+    if ((L == lwtoffLevel || n.c0num > 0) && isHalfNodeValid(hn[0]))
+    {
+      int pos = atomicAdd(&p.ioTrimmedRange->end, 1);
+      storeTrimmedHalfNode( p.outTrimmed, hn[0], pos );
+    }
+
+    if ((L == lwtoffLevel || n.c1num > 0) && isHalfNodeValid(hn[1]))
+    {
+      int pos = atomicAdd(&p.ioTrimmedRange->end, 1);
+      storeTrimmedHalfNode( p.outTrimmed, hn[1], pos );
+    }
+
+    nodes[idx].c1num = BVHNODE_NOT_IN_USE;
+  }
+}
+
+//------------------------------------------------------------------------
+
+bool prodlib::bvhtools::launchTrimTopmostNodes(dim3 gridDim, dim3 blockDim, lwdaStream_t stream, const TrimTopmostNodesParams& p)
+{
+    if (lwdaFuncSetCacheConfig(TrimTopmostNodes, lwdaFuncCachePreferL1) != lwdaSuccess) return false;
+    TrimTopmostNodes<<<gridDim, blockDim, 0, stream>>>(p);
+    return true;
+}
+
+//------------------------------------------------------------------------

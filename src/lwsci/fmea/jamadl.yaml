@@ -1,0 +1,84 @@
+#
+# Copyright (c) 2021 LWPU CORPORATION.  All rights reserved.
+#
+# LWPU CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from LWPU CORPORATION is strictly prohibited.
+#
+# ----------------------------------------------------------------------------
+#
+# This YAML file is an example on how to configure the lwarch-jamadl -tool
+# for downloading a single Jama project into a JSON file suitable for
+# cross-referencing with the rest of the lwarch -tools.
+#
+# Example usage (from root of this repository):
+#   scripts/lwarch-jamadl --cfg examples/arch/jamadl.yaml download
+#
+# ----------------------------------------------------------------------------
+# Mapping for server configurations
+servers:
+  lwpu:
+    # Destination file where the server-specific items (such as type
+    # definitions) will be stored.
+    dest_file: jama/srv_lwidia_lwstreams.json
+
+    # Base URL of the Jama instance
+    url: https://lwpu.jamacloud.com/
+
+    # URL of the REST API for this Jama instance
+    api_url: https://lwpu.jamacloud.com/rest/v1/
+
+    # API and Global IDs will be colwerted to unique traceability keys using
+    # this string as a prefix. With multiple servers the key has to be unique
+    # between the servers since the API IDs might otherwise conflict.
+    api_key_prefix: LWSTREAMS52_JAMA_
+
+    # This is the default server to use if project does not define "server".
+    default: true
+
+    auth:
+      # If the environment variables are not defined, ~/.netrc is used instead
+      client_id_elw: JAMA_ID
+      client_secret_elw: JAMA_SECRET
+      oauth_token_url: https://lwpu.jamacloud.com/rest/oauth/token
+
+    # Filter e.g. some itemtypes or picklists out of the server data due to
+    # containing protected words.
+    filters:
+      - itemtypes:  # Just some examples
+          - 89006
+          - SR
+          - regex: "^PS[A-Z]+$"
+      - picklists:
+          - 89892  # LWS-Platform Configuration
+          - 90120  # UJAM-SOCs
+          - 92454  # SM attributes
+          - 93139  # Diagnostic attributes
+          - 89275  # CheetAh function list
+          - 93106  # CheetAh part list
+
+# The list of projects to download, expectation is that there is exactly one
+# JSON -file per project.
+projects:
+  - name: "lwstreams"
+    server: lwpu
+    api_id: 22182
+    dest_file: jama/lwstreams_import.json
+    # Example of excluding some itemtypes that are not interesting for
+    # local traceability. This reduces the size of the exported file.
+    exclude_itemtypes:
+      - CREQ
+      - SHR
+      - FEATRE
+      - UC
+      - TC
+      - BUG
+      - CR
+      - STY
+      - EP
+      - US
+      - TSTPL
+      - PFR
+      - FSC

@@ -1,0 +1,235 @@
+struct VSOut
+{
+    float4 position : SV_Position;
+    float2 texcoord: TexCoord;
+};
+
+cbuffer globalParams
+{
+	float2 screenSize;
+	float elapsedTime;
+	int captureState;
+	float4 tileUV;
+}
+
+cbuffer controlBuf
+{
+	float g_splitPositionSlider;
+	float g_rotationSlider;
+	float g_widthSlider;
+	float g_hueSlider;
+	bool g_gradientToggle;
+	bool g_sideBySideToggle;
+	float g_imageScaleSlider;
+}
+
+Texture2D texColorProcessed;
+Texture2D texColorRAW;
+
+SamplerState samLinear;
+SamplerState samPointWrap;
+
+// This should move to a centralized file but not appropriate to make that change now.
+#ifndef LW_COMMON
+#define LW_COMMON
+
+#define CAPTURE_STATE_NOT_STARTED		0
+#define CAPTURE_STATE_REGULAR			1
+#define CAPTURE_STATE_REGULARSTEREO		2
+#define CAPTURE_STATE_HIGHRES			3
+#define CAPTURE_STATE_360				4
+#define CAPTURE_STATE_360STEREO			5
+
+#define SCREEN_ASPECT					(screenSize.x/screenSize.y)
+
+#endif
+
+float2 ColwertToSuperResolution(float2 uv)
+{
+	return ((tileUV.zw - tileUV.xy) * uv + tileUV.xy);
+}
+
+float4 sampleTexture_Border(Texture2D tex, SamplerState sampState, float2 texCoords, float4 borderColor)
+{
+	if (texCoords.x < 0.0 || texCoords.x > 1.0 || texCoords.y < 0.0 || texCoords.y > 1.0)
+	{
+		return borderColor;
+	}
+	else
+	{
+		return tex.Sample(sampState, texCoords);
+	}
+}
+
+float2x2 GetRotationMatrix(float degreesRotation)
+{
+	float tsAngle = radians(degreesRotation);
+	float2x2 tsMat = float2x2(cos(tsAngle),-sin(tsAngle),sin(tsAngle),cos(tsAngle));
+	return tsMat;
+}
+
+float2 PanAndScaleUV(float2 uv, float2 pan, float scale, float2 center, float2 imageOffset)
+{
+	float2 uvb = uv + pan;
+	uvb = uvb - center;
+	uvb = uvb / scale;
+	uvb.x = uvb.x + (center.x);
+	uvb.y = uvb.y + (center.y);
+	uvb = uvb + imageOffset/scale;
+	return uvb;
+}
+
+float2 GetImageOffset(float2x2 imageCenterRotationMat, float splitPositionOffset)
+{
+	float2 imageOffset = float2(0.0,0.0);
+	if (g_sideBySideToggle)
+	{
+		imageOffset = float2((splitPositionOffset/2.0),0.0);
+	}
+	imageOffset = mul(imageOffset, imageCenterRotationMat);
+	imageOffset.y = -imageOffset.y;
+	return imageOffset;
+}
+
+float4 PS_Splitscreen( VSOut frag ): SV_Target
+{
+	float2 uv = frag.texcoord;
+	float4 color;
+	
+	if(captureState != CAPTURE_STATE_360 // This filter makes no sense in 360
+		&& captureState != CAPTURE_STATE_360STEREO // This filter makes no sense in 360
+		&& !(captureState == CAPTURE_STATE_HIGHRES && g_sideBySideToggle == true)) // Side By Side Mode makes no sense in a Super Res capture.
+	{
+		float zoom = g_imageScaleSlider;
+		if (captureState == CAPTURE_STATE_HIGHRES) // Cannot zoom in a high res capture.
+		{
+			zoom = 1.0;
+		}
+		
+		float splitPositionScalar = 1.0;
+		if (g_sideBySideToggle) splitPositionScalar = 0.0;
+		
+		float splitPosition = g_splitPositionSlider * splitPositionScalar + 0.5*(1.0-splitPositionScalar);
+		
+        float2x2 tsMat = GetRotationMatrix(floor(g_rotationSlider+0.5));
+		
+		uv = ColwertToSuperResolution(uv);
+		
+		uv.x = uv.x - 0.5;
+		uv.y = uv.y - 0.5;
+		uv.y = uv.y/SCREEN_ASPECT;
+        uv = mul(uv, tsMat);
+		uv.y = uv.y*SCREEN_ASPECT;
+		uv.x = uv.x + 0.5;
+		uv.y = uv.y + 0.5;
+		
+		////////////////////////////////////////////////
+		// Callwlate Hue
+		////////////////////////////////////////////////
+		float4 hueColor;
+		if (g_hueSlider < 0.01)
+		{
+			hueColor = float4(0.0,0.0,0.0,1.0);
+		}
+		else if (g_hueSlider > 0.99)
+		{
+			hueColor = float4(1.0,1.0,1.0,1.0);
+		}
+		else
+		{
+			float hue = frac(g_hueSlider + 0.3333);
+			hueColor = saturate(float4(abs(hue * 6.0 - 3.0) - 1.0,2.0 - abs(hue * 6.0 - 2.0), 2.0 - abs(hue * 6.0 - 4.0), 1));
+		}
+		////////////////////////////////////////////////
+		
+		////////////////////////////////////////////////
+		// Callwlate Image UVs
+		////////////////////////////////////////////////
+		// Callwlate image center rotation angle
+		float imageCenterRotation = g_rotationSlider;
+		{
+			float closestMultiple = floor(imageCenterRotation/90.0+0.5) * 90.0;
+			float fractionAwayFromMultiple = (imageCenterRotation-closestMultiple)/90.0;
+			float scaleFactor = fractionAwayFromMultiple/0.5;
+			scaleFactor = pow(scaleFactor,5);
+			scaleFactor = pow(scaleFactor,5);
+			imageCenterRotation = closestMultiple + (scaleFactor*0.5)*90.0;
+		}
+        float2x2 imageCenterRotationMat = GetRotationMatrix(floor(imageCenterRotation+0.5));
+		
+        float2 rawImageOffset = GetImageOffset(imageCenterRotationMat, (1.0-splitPosition));
+        float2 processedImageOffset = GetImageOffset(imageCenterRotationMat, (-splitPosition));
+		
+		float2 panOffset = float2(0.0,0.0);
+		if (g_sideBySideToggle)
+		{
+			panOffset = float2((0.5-g_splitPositionSlider)/2.88,0.0);
+			panOffset = mul(panOffset, imageCenterRotationMat);
+			panOffset.y = -panOffset.y;
+		}
+		
+		float2 rawImageUV = PanAndScaleUV(frag.texcoord, panOffset, zoom, float2(0.5,0.5), rawImageOffset);
+		float2 processedImageUV = PanAndScaleUV(frag.texcoord, panOffset, zoom, float2(0.5,0.5), processedImageOffset);
+		
+		float4 rawColor = sampleTexture_Border(texColorRAW, samLinear, rawImageUV, hueColor);
+		float4 processedColor = sampleTexture_Border(texColorProcessed, samLinear, processedImageUV, hueColor);
+		////////////////////////////////////////////////
+		
+		////////////////////////////////////////////////
+		// Callwlate Divider Width
+		////////////////////////////////////////////////
+		float dividerWidth = g_widthSlider*0.01;
+		if (g_gradientToggle)
+		{
+			if (g_sideBySideToggle)
+			{
+				dividerWidth = (dividerWidth)+0.007;
+			}
+			else
+			{
+				dividerWidth = (dividerWidth*51.0)+0.007;
+			}
+		}
+		////////////////////////////////////////////////
+		
+		////////////////////////////////////////////////
+		// Callwlate Borders
+		////////////////////////////////////////////////
+		float oobDividerWidth = dividerWidth/zoom;
+		if (g_gradientToggle) oobDividerWidth = 0.0; 
+		bool rawOutOfImage = (rawImageUV.x < -oobDividerWidth || rawImageUV.x > 1.0+oobDividerWidth || rawImageUV.y < -oobDividerWidth*SCREEN_ASPECT || rawImageUV.y > 1.0+oobDividerWidth*SCREEN_ASPECT);
+		bool processedOutOfImage = (processedImageUV.x < -oobDividerWidth || processedImageUV.x > 1.0+oobDividerWidth || processedImageUV.y < -oobDividerWidth*SCREEN_ASPECT || processedImageUV.y > 1.0+oobDividerWidth*SCREEN_ASPECT);
+		if (rawOutOfImage) rawColor = processedColor;
+		if (processedOutOfImage) processedColor = rawColor;
+		
+		if (dividerWidth > 0.0 && abs(uv.x-splitPosition) < dividerWidth/2.0 && !rawOutOfImage && !processedOutOfImage)
+		{
+			float leftCoord = splitPosition-(dividerWidth/2.0);
+			float distFromLeftCoord = uv.x - leftCoord;
+			float fractionalDistFromLeft = distFromLeftCoord/dividerWidth;
+
+			if (g_gradientToggle) // Gradient Divider
+			{			
+				color = lerp(rawColor, processedColor, fractionalDistFromLeft);
+			}
+			else // Solid Line Divider
+			{
+				color = hueColor;
+			}
+		}
+		else if (uv.x < splitPosition)
+		{
+			color = rawColor;
+		}
+		else
+		{
+			color = processedColor;
+		}
+	}
+	else
+	{
+		color = texColorProcessed.Sample(samLinear, frag.texcoord);
+	}
+	
+	return color;
+}

@@ -1,0 +1,138 @@
+/*
+ * LWIDIA_COPYRIGHT_BEGIN
+ *
+ * Copyright (c) 2016-2021, LWPU CORPORATION.  All rights reserved.
+ *
+ * LWPU CORPORATION and its licensors retain all intellectual property
+ * and proprietary rights in and to this software, related documentation
+ * and any modifications thereto.  Any use, reproduction, disclosure or
+ * distribution of this software and related documentation without an express
+ * license agreement from LWPU CORPORATION is strictly prohibited.
+ *
+ * LWIDIA_COPYRIGHT_END
+ */
+
+// ASSUMPTION:  arch X implements features of arch Y if X >= Y,
+// so higher arch is always better.
+// If this assumption ever breaks, will need way to express that.
+
+#ifdef DO_CODEGENERATORS
+#ifdef LWRTC_DEFINES
+#define DefineProfile(arch,class) \
+	getArchNum(arch)
+
+#else
+#define DefineProfile(arch,class) \
+	mapDefine(textGenerators,       "sm_" #arch,  sm_##arch##TextGen);       \
+	mapDefine(codeGenerators,       "sm_" #arch,  sm_##arch##CodeGen);       \
+	mapDefine(ldparamsGenerators,   "sm_" #arch,  sm_##arch##LdParamsGen);   \
+	mapDefine(ptxArchEnums,         "sm_" #arch, &sm_##arch##ptxArch);       \
+	mapDefine(getFatPointFuncts,    "sm_" #arch,  sm_##arch##FatPointCount); \
+	mapDefine(computeMaxRRegFuncts, "sm_" #arch,  sm_##arch##ComputeMaxRReg)
+
+#endif
+
+#define CanCompile(target,source)
+#define CanRun(target,source)
+#define CanLink(target,source)
+#define RegFileSize(arch,v)
+#define RegFileSizePerCta(arch,v)
+#define RegAllolwnit(arch,v)
+#define RegAlignment(arch,v)
+#define MaxCtaPerSM(arch,v)
+#define MaxWarps(arch,v)
+#define WarpSize(arch,v)
+#define WarpAlign(arch,v)
+#define MaxRegsPerThread(arch,v)
+#define MinRegsPerThread(arch,v)
+#define SameRegInfo(arch1,arch2)
+
+#define DefineSASSProfile(arch)
+#define SetFirstInternalMerlwry(arch)
+#define SetFirstMerlwry(arch)
+#define SetNoMerlwrySupport(arch)
+
+#else
+
+// can compile virtual arch to real
+#define CanCompile(target,source) \
+	setInsert(profile_compute_##source->implementsProfile,profile_sm_##target)
+// can implement virtual on real 
+#define CanImplement(target,source) \
+	setInsert(profile_sm_##source->implementsProfile,profile_compute_##target)
+
+// can run source arch on target
+#define CanRun(target,source) \
+	setInsert(profile_sm_##source->runsProfile,profile_sm_##target)
+
+// can link source arch to target
+#define CanLink(target,source) \
+	setInsert(profile_sm_##source->linksProfile,profile_sm_##target)
+
+#define DefineLTOProfile(arch,class) \
+	gpuFeaturesProfile profile_lto_##arch = createProfile_v2(1, 1, "lto_" #arch, "compute_" #arch, NULL, "-D__LWDA_ARCH__=" #arch "0", "lto_" #arch); \
+	profile_lto_##arch->minimalVirtual = profile_compute_##arch; \
+	mapDefine(infoTable, "lto_" #arch, profile_lto_##arch)
+
+#define DefineProfile(arch,class) \
+	gpuFeaturesProfile profile_sm_##arch      = createProfile(0, "sm_" #arch,      "sm_" #arch,      #class, "-D__LWDA_ARCH__=" #arch "0", "sm_" #arch     );  \
+	gpuFeaturesProfile profile_compute_##arch = createProfile(1, "compute_" #arch, "compute_" #arch, #class, "-D__LWDA_ARCH__=" #arch "0", "compute_" #arch);  \
+	profile_sm_##arch->minimalVirtual      = profile_compute_##arch; \
+	profile_compute_##arch->minimalVirtual = profile_compute_##arch; \
+	mapDefine(infoTable, "sm_" #arch,      profile_sm_##arch     ); \
+	mapDefine(infoTable, "compute_" #arch, profile_compute_##arch); \
+        DefineLTOProfile(arch,class); \
+        CanCompile     (arch,arch ); \
+        CanImplement   (arch,arch ); \
+	CanLink(arch,arch); \
+	CanRun (arch,arch)
+
+// RegFileSize is in bytes
+#define RegFileSize(arch,v)       profile_sm_##arch->regFileSize = v
+#define RegFileSizePerCta(arch,v) profile_sm_##arch->regFileSizePerCTA = v
+#define RegAllolwnit(arch,v)      profile_sm_##arch->regAllolwnit = v
+#define RegAlignment(arch,v)      profile_sm_##arch->regAlignment = v
+#define MaxCtaPerSM(arch,v)       profile_sm_##arch->maxCtaPerSM = v
+#define MaxWarps(arch,v)          profile_sm_##arch->maxWarps = v
+#define WarpSize(arch,v)          profile_sm_##arch->warpSize = v
+#define WarpAlign(arch,v)         profile_sm_##arch->warpAlign = v
+#define MaxRegsPerThread(arch,v)  profile_sm_##arch->maxRegsPerThread = v
+#define MinRegsPerThread(arch,v)  profile_sm_##arch->minRegsPerThread = v
+
+// arch2 has same values as arch1
+#define SameProfileRegInfo(arch1,arch2) \
+    arch1->regFileSize       = arch2->regFileSize;       \
+    arch1->regFileSizePerCTA = arch2->regFileSizePerCTA; \
+    arch1->regAllolwnit      = arch2->regAllolwnit;      \
+    arch1->regAlignment      = arch2->regAlignment;      \
+    arch1->maxCtaPerSM       = arch2->maxCtaPerSM;       \
+    arch1->maxWarps          = arch2->maxWarps;          \
+    arch1->warpSize          = arch2->warpSize;          \
+    arch1->warpAlign         = arch2->warpAlign;         \
+    arch1->maxRegsPerThread  = arch2->maxRegsPerThread;  \
+    arch1->minRegsPerThread  = arch2->minRegsPerThread
+
+#define SameRegInfo(arch1,arch2) SameProfileRegInfo(profile_sm_##arch1, profile_sm_##arch2)
+
+#if LWCFG(GLOBAL_ARCH_HOPPER) && LWCFG(GLOBAL_FEATURE_COMPUTE_COMPILER_INTERNAL)
+
+#define DefineSASSProfile(arch) \
+    gpuFeaturesProfile profile_sass_##arch = createProfile_v2(0, 0, "sass_" #arch, "sass_" #arch, NULL, "-D__LWDA_ARCH__=" #arch "0", "sass_" #arch); \
+    profile_sass_##arch->minimalVirtual = profile_compute_##arch;     \
+    SameProfileRegInfo(profile_sass_##arch, profile_sm_##arch);       \
+    profile_sm_##arch->isMerlwry               = True;                \
+    profile_sass_##arch->isMerlwry             = False;               \
+    mapDefine(infoTable, "sass_" #arch, profile_sass_##arch)
+
+#define SetFirstInternalMerlwry(arch)   gpuSetFirstInternalMerlwrySMNumber(arch)
+#define SetFirstMerlwry(arch)           gpuSetFirstMerlwrySMNumber(arch)
+#define SetNoMerlwrySupport(arch)       (profile_sm_##arch)->noMerlwrySupport = True
+
+#else
+#define DefineSASSProfile(arch)
+#define SetFirstInternalMerlwry(arch)
+#define SetFirstMerlwry(arch)
+#define SetNoMerlwrySupport(arch)
+#endif
+
+#endif
